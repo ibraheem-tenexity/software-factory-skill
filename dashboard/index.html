@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Software Factory — live agents</title>
+  <style>
+    :root { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { margin: 0; background: #0b0e14; color: #d6deeb; }
+    header { padding: 16px 20px; border-bottom: 1px solid #1c2230; }
+    h1 { font-size: 15px; margin: 0; color: #7fdbca; }
+    .cfg { font-size: 12px; color: #5f7e97; margin-top: 4px; }
+    .summary { display: flex; gap: 20px; padding: 16px 20px; flex-wrap: wrap; }
+    .stat { font-size: 12px; color: #5f7e97; }
+    .stat b { display: block; font-size: 22px; color: #d6deeb; }
+    .stat.warn b { color: #ef5350; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { text-align: left; padding: 8px 20px; border-bottom: 1px solid #161b27; }
+    th { color: #5f7e97; font-weight: normal; position: sticky; top: 0; background: #0b0e14; }
+    .running { color: #ffcb6b; } .done { color: #c3e88d; }
+    .no_op, .failed { color: #ef5350; } .blocked { color: #f78c6c; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SOFTWARE FACTORY · live agents</h1>
+    <div class="cfg" id="cfg">configure ?url=&lt;supabase-url&gt;&amp;key=&lt;anon-key&gt;&amp;run=&lt;run_id&gt;</div>
+  </header>
+  <div class="summary" id="summary"></div>
+  <table>
+    <thead><tr><th>agent</th><th>ticket</th><th>role</th><th>status</th><th>outcome</th><th>$</th><th>PR</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <script type="module">
+    import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+    const q = new URLSearchParams(location.search);
+    const URL_ = q.get("url"), KEY = q.get("key"), RUN = q.get("run");
+    if (!URL_ || !KEY) { document.getElementById("cfg").textContent = "missing ?url= and ?key="; throw new Error("config"); }
+    document.getElementById("cfg").textContent = RUN ? `run ${RUN}` : "all runs";
+
+    const sb = createClient(URL_, KEY);
+    const agents = new Map();  // agent_id -> reduced state
+
+    function reduce(ev) {
+      const a = agents.get(ev.agent_id) || { agent_id: ev.agent_id, status: "running" };
+      if (ev.event === "spawn") Object.assign(a, { ticket_id: ev.ticket_id, role: ev.role, status: "running" });
+      if (ev.event === "record") Object.assign(a, {
+        outcome: ev.outcome, cost_usd: ev.cost_usd, pr: ev.pr,
+        status: ev.outcome === "real_diff" ? "done" : ev.outcome === "blocked" ? "blocked" : "failed",
+      });
+      agents.set(ev.agent_id, a);
+    }
+
+    function render() {
+      const all = [...agents.values()];
+      const n = (f) => all.filter(f).length;
+      const cost = all.reduce((s, a) => s + (a.cost_usd || 0), 0);
+      const finished = all.filter(a => a.outcome);
+      const noOpRate = finished.length ? n(a => a.outcome === "no_op") / finished.length : 0;
+      document.getElementById("summary").innerHTML = `
+        <div class="stat"><b>${all.length}</b>spawned</div>
+        <div class="stat"><b>${n(a => a.status === "running")}</b>running</div>
+        <div class="stat"><b>${n(a => a.status === "done")}</b>done</div>
+        <div class="stat ${noOpRate > 0.3 ? "warn" : ""}"><b>${(noOpRate * 100).toFixed(0)}%</b>no-op rate</div>
+        <div class="stat"><b>$${cost.toFixed(2)}</b>spent</div>`;
+      document.getElementById("rows").innerHTML = all.map(a => `
+        <tr><td>${a.agent_id}</td><td>${a.ticket_id ?? ""}</td><td>${a.role ?? ""}</td>
+        <td class="${a.status}">${a.status}</td><td class="${a.outcome ?? ""}">${a.outcome ?? ""}</td>
+        <td>${a.cost_usd != null ? "$" + Number(a.cost_usd).toFixed(2) : ""}</td><td>${a.pr ?? ""}</td></tr>`).join("");
+    }
+
+    let query = sb.from("agent_events").select("*").order("inserted_at");
+    if (RUN) query = query.eq("run_id", RUN);
+    const { data } = await query;
+    (data || []).forEach(reduce); render();
+
+    sb.channel("agents")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "agent_events" }, (p) => {
+        if (!RUN || p.new.run_id === RUN) { reduce(p.new); render(); }
+      }).subscribe();
+  </script>
+</body>
+</html>
