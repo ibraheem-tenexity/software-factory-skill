@@ -6,6 +6,7 @@ Runner / HTTP getter / sleeper are injectable so the logic is testable offline.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 import urllib.request
@@ -24,17 +25,34 @@ def _real_runner(args: list[str]) -> RunResult:
     return RunResult(stdout=proc.stdout, returncode=proc.returncode)
 
 
-# Each target maps a source dir to the provider command that ships it.
-_COMMANDS: dict[str, Callable[[str], list[str]]] = {
-    "vercel": lambda dir: ["vercel", "deploy", "--cwd", dir, "--prod", "--yes"],
-    "railway": lambda dir: ["railway", "up", "--ci", "--service", dir],
-}
+_TARGETS = ("vercel", "railway")
+
+
+def _parse_url(text: str) -> str:
+    """Pull a public URL from CLI output; accept a bare domain and add https://."""
+    m = re.search(r"https?://[^\s]+", text)
+    if m:
+        return m.group(0).rstrip("/")
+    m = re.search(r"[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:railway\.app|vercel\.app|up\.railway\.app)", text)
+    if m:
+        return "https://" + m.group(0)
+    raise RuntimeError(f"could not parse a deployed URL from: {text!r}")
 
 
 def deploy(target: str, dir: str, run: Callable[[list[str]], RunResult] = _real_runner) -> str:
-    if target not in _COMMANDS:
-        raise ValueError(f"unknown deploy target {target!r}; expected one of {sorted(_COMMANDS)}")
-    return run(_COMMANDS[target](dir)).stdout.strip()
+    """Ship `dir` to the target and return its public URL.
+
+    The provider auth (e.g. RAILWAY_TOKEN) is read from the process environment by the CLI —
+    the orchestrator/console injects it there; it is never passed on the command line.
+    """
+    if target not in _TARGETS:
+        raise ValueError(f"unknown deploy target {target!r}; expected one of {list(_TARGETS)}")
+    if target == "vercel":
+        # `vercel deploy --prod` prints the deployment URL on stdout.
+        return _parse_url(run(["vercel", "deploy", "--cwd", dir, "--prod", "--yes"]).stdout)
+    # railway: `up` ships the dir, then `domain` ensures + prints the public domain.
+    run(["railway", "up", "--ci", dir])
+    return _parse_url(run(["railway", "domain"]).stdout)
 
 
 def _http_status(url: str) -> int:

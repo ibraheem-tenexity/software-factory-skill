@@ -20,9 +20,29 @@ def test_deploy_vercel_returns_deployed_url():
     assert url == "https://guestbook.vercel.app"
 
 
-def test_deploy_railway_returns_deployed_url():
-    url = deploy("railway", "api", run=runner_for("https://api.up.railway.app"))
+def test_deploy_railway_runs_up_then_domain_and_returns_the_public_url():
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args[:2] == ["railway", "domain"]:
+            # `railway domain` prints the generated public domain
+            return RunResult(stdout="https://api.up.railway.app\n", returncode=0)
+        return RunResult(stdout="Indexed\nUploaded\nBuild started\n", returncode=0)
+
+    url = deploy("railway", "api", run=run)
     assert url == "https://api.up.railway.app"
+    assert calls[0][:2] == ["railway", "up"]      # deploy first
+    assert ["railway", "domain"] in [c[:2] for c in calls]  # then get the URL
+
+
+def test_railway_domain_url_parsed_even_without_scheme():
+    def run(args):
+        if args[:2] == ["railway", "domain"]:
+            return RunResult(stdout="Your service is live at api.up.railway.app\n", returncode=0)
+        return RunResult(stdout="", returncode=0)
+
+    assert deploy("railway", "api", run=run) == "https://api.up.railway.app"
 
 
 def test_unknown_target_is_rejected():

@@ -50,8 +50,9 @@ provision → tickets → build → deploy → test  ──pass──▶ teardow
 > reshaping the spine. Do **not** scaffold those phases until their slice is being built.
 
 ### provision
-- Verify every surface has its creds **before** running (gh auth, Vercel/Railway/Supabase
-  tokens, ruflo MCP reachable). A missing cred is a **hard block**, recorded — not a guess.
+- Verify every surface has its creds **before** running: `creds.check_all(target, env)` returns
+  the failing checks (gh auth, Railway token accepted, etc.). **Any failure is a hard block** for
+  that surface — recorded, never guessed or hard-coded around. (ruflo MCP reachability checked too.)
 - `GitHub.create_repo(name)`; seed `RunState`; set `Budget(100)`. Seed ruflo with the app
   description.
 - `workspace.create(runs_dir, run_id)` — an **isolated, disposable** dir at
@@ -75,8 +76,10 @@ provision → tickets → build → deploy → test  ──pass──▶ teardow
 - *(If telemetry is wired — see Optional below — record each agent's spawn + result.)*
 
 ### deploy (= publish)
-- `deploy("vercel", "web")` and/or `deploy("railway", "api")`; wire Supabase. Secrets flow
-  through the sanctioned store, never hard-coded.
+- `deploy("railway", "web")` (runs `railway up` then returns the public domain) and/or
+  `deploy("vercel", "web")`; wire Supabase. The provider token (e.g. `RAILWAY_TOKEN`) is read
+  from the **environment** by the CLI — injected by the host, never on the command line, never
+  hard-coded.
 - `healthy(url)` must return True before advancing — a deploy that doesn't serve is not done.
 - **Publishing moves the work to durable surfaces** (the merged GitHub repo + the live URL); the
   workspace is no longer the source of record after this point.
@@ -116,7 +119,8 @@ provision → tickets → build → deploy → test  ──pass──▶ teardow
 | Resume across ticks | `runstate.RunState.load(id, store)` / `.save()` |
 | Tickets with enforced done | `tickets.TicketStore` — `create_ticket`, `claim`, `mark_done` |
 | Repo / PR / merge-on-green | `repo.GitHub` — `create_repo`, `open_pr`, `merge_if_green` |
-| Deploy + prove live | `deploy.deploy(...)`, `deploy.healthy(url)` |
+| Verify creds (hard-block early) | `creds.check_all(target, env)` → failing `CredCheck`s |
+| Deploy + prove live | `deploy.deploy(target, dir)` (token via env), `deploy.healthy(url)` |
 | Done verdict + bug list | `gate.happy_flow_passed(result)`, `gate.bugs_from(result)` |
 | Isolated workspace (mk/rm) | `workspace.create(runs_dir, run_id)`, `workspace.destroy(path, runs_dir)` |
 
