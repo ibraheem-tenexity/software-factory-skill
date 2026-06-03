@@ -130,6 +130,23 @@ def test_empty_credentials_are_ignored(tmp_path):
     assert "RAILWAY_TOKEN" not in launcher.env
 
 
+def test_status_reports_workspace_lifecycle(tmp_path):
+    from software_factory import workspace
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="guestbook"))
+    # not created yet by the (faked) skill -> pending
+    assert c.status(run_id)["workspace"] == "pending"
+
+    ws = workspace.create(str(tmp_path), run_id)   # skill provisions it
+    assert c.status(run_id)["workspace"] == "active"
+
+    # terminal + torn down -> cleaned
+    st = c._load_state(run_id); st.phase = "done"; st.deploy_url = "https://x"; st.save()
+    workspace.destroy(ws, runs_dir=str(tmp_path))
+    assert c.status(run_id)["workspace"] == "cleaned"
+
+
 def test_evidence_verifies_the_run_was_really_built_by_the_skill(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)

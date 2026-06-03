@@ -38,9 +38,11 @@ Each tick: `RunState.load(run_id)` → do the current phase → `state.save()` �
 phase advances only when its **done-gate** passes.
 
 ```
-provision → tickets → build → deploy → test  ──pass──▶ DONE
-                ▲                          │
-                └──────── fix-loop ────────┘  (bug found: fix → redeploy → re-test)
+provision → tickets → build → deploy → test  ──pass──▶ teardown → DONE
+   (mk ws)      ▲                        │              (rm ws, keep proof)
+               └────────── fix-loop ─────┘   (bug: fix → redeploy → re-test)
+
+   any terminal state (done / budget cutoff / hard block) → teardown
 ```
 
 > First slice (this version): one trivial app, one ticket. The phases below are written so
@@ -52,7 +54,11 @@ provision → tickets → build → deploy → test  ──pass──▶ DONE
   tokens, ruflo MCP reachable). A missing cred is a **hard block**, recorded — not a guess.
 - `GitHub.create_repo(name)`; seed `RunState`; set `Budget(100)`. Seed ruflo with the app
   description.
-- **Gate:** repo writable, brain reachable, budget set.
+- `workspace.create(runs_dir, run_id)` — an **isolated, disposable** dir at
+  `<runs_dir>/<run_id>/workspace/`. Clone the fresh repo into it; every build agent runs with
+  this as its cwd. Run state, tickets, and telemetry live at the run **base** (one level up),
+  not in the workspace — so teardown never touches the proof.
+- **Gate:** repo writable, brain reachable, budget set, workspace created.
 
 ### tickets
 - Write the ticket(s) to the local store: `TicketStore.create_ticket(title, acceptance, dod,
@@ -60,29 +66,34 @@ provision → tickets → build → deploy → test  ──pass──▶ DONE
 - **Gate:** at least one open ticket exists with acceptance criteria.
 
 ### build
-- For each open ticket in the current wave: `claim`, then **before dispatching** call
-  `AgentRegistry.spawn(agent_id, run_id, ticket_id, "build", model)` — so the agent count is
-  always real. Spawn a Claude build agent that **pulls** context from ruflo (do not inject a
-  dump), implements, and opens a PR.
-- **On the agent's result** call `AgentRegistry.record(agent_id, outcome, usage, cost, pr,
-  diff_lines)` with the real per-call usage. An empty turn → `outcome="no_op"`.
+- For each open ticket in the current wave: `claim`, then spawn a Claude build agent that
+  **pulls** context from ruflo (do not inject a dump), implements, and opens a PR.
 - Merge only via `GitHub.merge_if_green(pr, diff_lines)` — it refuses red checks and empty
   diffs. Then `TicketStore.mark_done(pr, diff_lines)` — which refuses a hollow close.
 - **A no-op agent turn (empty diff) is a retry/escalate signal, never a completion.**
 - **Gate:** ticket DoD met, real diff, PR merged; `budget.remaining() > 0`.
+- *(If telemetry is wired — see Optional below — record each agent's spawn + result.)*
 
-### deploy
+### deploy (= publish)
 - `deploy("vercel", "web")` and/or `deploy("railway", "api")`; wire Supabase. Secrets flow
   through the sanctioned store, never hard-coded.
 - `healthy(url)` must return True before advancing — a deploy that doesn't serve is not done.
+- **Publishing moves the work to durable surfaces** (the merged GitHub repo + the live URL); the
+  workspace is no longer the source of record after this point.
 - **Gate:** surfaces live; `healthy()` True; public URL recorded in run state.
 
 ### test (the gate)
 - Drive the deployed URL through the primary journey with the Playwright MCP. Pass the
   structured result to `gate.happy_flow_passed(result)`.
-- Green → **DONE.** Red → `gate.bugs_from(result)` → spawn a fix agent per bug (`spawn`/
-  `record` each, same as build) → redeploy → re-test. Loop, bounded by attempt caps and the
-  budget.
+- Green → **DONE.** Red → `gate.bugs_from(result)` → spawn a fix agent per bug → redeploy →
+  re-test. Loop, bounded by attempt caps and the budget.
+
+### teardown (on every terminal state)
+- The instant the run is terminal — **done, budget cutoff, or hard block** — and after the
+  `deploy_url` + evidence are recorded, call `workspace.destroy(workspace, runs_dir)`.
+- Destroy is safety-gated: it refuses any path without our sentinel or outside `runs_dir`, so it
+  can only ever remove a workspace this run created. Proof artifacts at the base survive.
+- **Gate:** workspace removed; run state, tickets, telemetry, and the URL still intact.
 
 ## Guardrails (every tick)
 
@@ -107,22 +118,25 @@ provision → tickets → build → deploy → test  ──pass──▶ DONE
 | Repo / PR / merge-on-green | `repo.GitHub` — `create_repo`, `open_pr`, `merge_if_green` |
 | Deploy + prove live | `deploy.deploy(...)`, `deploy.healthy(url)` |
 | Done verdict + bug list | `gate.happy_flow_passed(result)`, `gate.bugs_from(result)` |
-| Count agents + performance | `agents.AgentRegistry` — `spawn`, `record`, `counts`, `no_op_rate`, `cost_by_ticket` |
-| Push live progress to dashboard | `sinks.sink_from_env()` → pass into `AgentRegistry(sink=...)` |
+| Isolated workspace (mk/rm) | `workspace.create(runs_dir, run_id)`, `workspace.destroy(path, runs_dir)` |
 
-## Visibility & proof of run
+These modules are the whole skill. It runs with nothing else.
 
-Every agent the orchestrator spawns is recorded in `AgentRegistry` (SQLite) and pushed to the
-optional external dashboard via the sink. This is not decoration — it is the **evidence the
-skill actually ran**:
+## Optional: telemetry & proof (demo/product layer)
 
-- **At provision**, stamp run state with `skill="software-factory"`, the skill version, and
-  the app description. This marker + the phase transitions in `runstate` are the run's receipt.
-- **Per agent**, the `spawn`→`record` pair (with real tokens, cost, outcome, PR, diff) is a
-  tamper-evident trail: you can reconcile `AgentRegistry` total cost against `Budget.spent()`,
-  and every `done` ticket back to a merged PR with a non-empty diff.
-- A run that produced a deployed URL but has **no agent records, no phase log, and no merged
-  PRs is a fabrication** — the artifacts must corroborate the outcome, or it isn't done.
+The skill works bare. **If** a host (the operator console) wants live visibility and a
+tamper-evident receipt, it wires in the telemetry layer — the orchestrator then records to it,
+but the skill never requires it:
+
+- Pass an `agents.AgentRegistry` (optionally with `sinks.sink_from_env()` for the live
+  dashboard). Per agent, call `spawn` before dispatch and `record(outcome, usage, cost, pr,
+  diff_lines)` on the result — a no-op turn records `outcome="no_op"`.
+- `runstate` is always stamped at **provision** with `skill`/`skill_version`/`description` — that
+  marker is plain run metadata (no harness dependency) and stays part of the core run.
+- With telemetry on, `evidence.verify_evidence` reconciles the receipt: skill stamped, agents
+  recorded, recorded cost ≤ `Budget.spent()`, every `done` ticket tracing to a merged PR with a
+  non-empty diff, and no deployed URL without completed work. A URL with none of that is a
+  fabrication.
 
 ## Common mistakes
 

@@ -105,8 +105,10 @@
     async function poll() {
       if (!runId) return;
       const s = await (await fetch("/api/runs/" + runId)).json();
-      const rail = s.byo_railway ? " · railway: your key 🔑" : (s.creds_provided||[]).length ? "" : "";
-      $("phase").innerHTML = "phase: <b>" + s.phase + "</b>" + (s.done ? " ✓" : "") + rail;
+      const rail = s.byo_railway ? " · railway: your key 🔑" : "";
+      const wsIcon = { active: "📂 workspace", cleaned: "🧹 workspace cleaned", pending: "" };
+      const ws = s.workspace && wsIcon[s.workspace] ? " · " + wsIcon[s.workspace] : "";
+      $("phase").innerHTML = "phase: <b>" + s.phase + "</b>" + (s.done ? " ✓" : "") + rail + ws;
       const a = s.agents || {};
       const warn = (s.no_op_rate || 0) > 0.3 ? "warn" : "";
       $("stats").innerHTML = `

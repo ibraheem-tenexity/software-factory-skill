@@ -106,6 +106,12 @@ class Console:
         self._launch(argv, env)
         return run_id
 
+    def _workspace_state(self, run_id: str, phase: str) -> str:
+        ws = os.path.join(self._paths(run_id)["base"], "workspace")
+        if os.path.isdir(ws):
+            return "active"
+        return "cleaned" if phase in ("done", "blocked", "stopped") else "pending"
+
     def status(self, run_id: str) -> dict:
         state = self._load_state(run_id)
         reg = AgentRegistry(self._paths(run_id)["agents_db"])
@@ -121,6 +127,7 @@ class Console:
             "spent_usd": state.spent_usd,
             "creds_provided": state.creds_provided,  # names only, never values
             "byo_railway": "RAILWAY_TOKEN" in (state.creds_provided or []),
+            "workspace": self._workspace_state(run_id, state.phase),
             "agents": reg.counts(run_id),
             "no_op_rate": reg.no_op_rate(run_id),
         }
