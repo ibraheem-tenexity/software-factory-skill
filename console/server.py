@@ -70,5 +70,8 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8765"))
-    print(f"software-factory console on http://localhost:{port}  (runs in {os.path.abspath(RUNS_DIR)})")
-    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+    # Loopback only: the console + the BYO creds form are for local single-user use, never
+    # exposed on the network. Override with SF_BIND=0.0.0.0 if you really mean to.
+    host = os.environ.get("SF_BIND", "127.0.0.1")
+    print(f"software-factory console on http://{host}:{port}  (runs in {os.path.abspath(RUNS_DIR)})")
+    ThreadingHTTPServer((host, port), Handler).serve_forever()
