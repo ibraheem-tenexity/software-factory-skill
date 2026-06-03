@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Software Factory — console</title>
+  <style>
+    :root { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { margin: 0; background: #0b0e14; color: #d6deeb; display: flex; min-height: 100vh; }
+    .pane { flex: 1; padding: 24px 28px; }
+    .left { border-right: 1px solid #1c2230; max-width: 460px; }
+    h1 { font-size: 15px; color: #7fdbca; margin: 0 0 18px; }
+    label { display: block; font-size: 12px; color: #5f7e97; margin: 14px 0 5px; }
+    textarea, input, select { width: 100%; box-sizing: border-box; background: #0e1320; color: #d6deeb;
+      border: 1px solid #1c2230; border-radius: 6px; padding: 9px; font: inherit; font-size: 13px; }
+    textarea { min-height: 90px; resize: vertical; }
+    .row { display: flex; gap: 12px; } .row > div { flex: 1; }
+    button { margin-top: 18px; width: 100%; padding: 11px; border: 0; border-radius: 6px;
+      background: #7fdbca; color: #0b0e14; font: inherit; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    .phase { font-size: 12px; color: #5f7e97; margin-bottom: 14px; }
+    .phase b { color: #ffcb6b; }
+    .stats { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 18px; }
+    .stat { font-size: 12px; color: #5f7e97; } .stat b { display: block; font-size: 20px; color: #d6deeb; }
+    .stat.warn b { color: #ef5350; }
+    .url { margin: 16px 0; padding: 14px; background: #0e1320; border: 1px solid #22c55e44; border-radius: 8px; }
+    .url a { color: #c3e88d; font-size: 15px; word-break: break-all; }
+    pre { background: #0e1320; border: 1px solid #1c2230; border-radius: 8px; padding: 14px;
+      font-size: 11px; overflow: auto; white-space: pre-wrap; }
+    .ok { color: #c3e88d; } .bad { color: #ef5350; }
+    .muted { color: #5f7e97; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="pane left">
+    <h1>SOFTWARE FACTORY · console</h1>
+    <label>What should we build?</label>
+    <textarea id="description" placeholder="A guestbook web app: visitors leave a name and see the list."></textarea>
+    <label>Context / data (optional)</label>
+    <textarea id="context" placeholder="Branding, sample data, constraints…"></textarea>
+    <div class="row">
+      <div><label>Budget (USD)</label><input id="budget" type="number" value="100" /></div>
+      <div><label>Deploy target</label>
+        <select id="target"><option value="railway">railway</option><option value="vercel">vercel</option></select>
+      </div>
+    </div>
+    <button id="go">Build &amp; deploy</button>
+    <p class="muted" id="note"></p>
+  </div>
+
+  <div class="pane">
+    <div class="phase" id="phase">Idle — submit a build to begin.</div>
+    <div class="stats" id="stats"></div>
+    <div id="urlbox"></div>
+    <div id="proof"></div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let timer = null, runId = null;
+
+    $("go").onclick = async () => {
+      $("go").disabled = true;
+      $("proof").innerHTML = ""; $("urlbox").innerHTML = "";
+      const res = await fetch("/api/runs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          description: $("description").value, context: $("context").value,
+          budget: Number($("budget").value), target: $("target").value,
+        }),
+      });
+      runId = (await res.json()).run_id;
+      $("note").textContent = "run " + runId + " launched (headless claude).";
+      if (timer) clearInterval(timer);
+      poll(); timer = setInterval(poll, 2500);
+    };
+
+    async function poll() {
+      if (!runId) return;
+      const s = await (await fetch("/api/runs/" + runId)).json();
+      $("phase").innerHTML = "phase: <b>" + s.phase + "</b>" + (s.done ? " ✓" : "");
+      const a = s.agents || {};
+      const warn = (s.no_op_rate || 0) > 0.3 ? "warn" : "";
+      $("stats").innerHTML = `
+        <div class="stat"><b>${a.spawned||0}</b>agents</div>
+        <div class="stat"><b>${a.running||0}</b>running</div>
+        <div class="stat"><b>${a.done||0}</b>done</div>
+        <div class="stat ${warn}"><b>${Math.round((s.no_op_rate||0)*100)}%</b>no-op</div>
+        <div class="stat"><b>$${(s.spent_usd||0).toFixed(2)}</b>spent</div>`;
+      if (s.done && s.deploy_url) {
+        clearInterval(timer); $("go").disabled = false;
+        $("urlbox").innerHTML = `<div class="url">🚀 deployed: <a href="${s.deploy_url}" target="_blank">${s.deploy_url}</a></div>`;
+        showProof();
+      } else if (s.phase === "blocked" || s.phase === "stopped") {
+        clearInterval(timer); $("go").disabled = false; showProof();
+      }
+    }
+
+    async function showProof() {
+      const e = await (await fetch("/api/runs/" + runId + "/evidence")).json();
+      const badge = e.verified
+        ? '<span class="ok">✓ VERIFIED — skill usage corroborated by artifacts</span>'
+        : '<span class="bad">✗ NOT verified</span>';
+      const reasons = e.reasons.length ? "\n\nreasons:\n - " + e.reasons.join("\n - ") : "";
+      $("proof").innerHTML = `<p>proof of run: ${badge}</p><pre>${JSON.stringify(e.bundle, null, 2)}${reasons}</pre>`;
+    }
+  </script>
+</body>
+</html>

@@ -70,6 +70,16 @@ def test_state_survives_reopening_the_db(tmp_path):
     assert [t.id for t in TicketStore(db).open_tickets(wave=1)] == [tid]
 
 
+def test_done_tickets_returns_only_closed_ones_with_their_pr(tmp_path):
+    ts = fresh(tmp_path)
+    a = ts.create_ticket("done one", acceptance="a", dod="d", wave=1)
+    ts.create_ticket("still open", acceptance="a", dod="d", wave=1)
+    ts.mark_done(a, pr=7, diff_lines=120)
+    done = ts.done_tickets()
+    assert [t.id for t in done] == [a]
+    assert done[0].pr == 7 and done[0].diff_lines == 120
+
+
 def test_render_markdown_view_lists_tickets_and_status(tmp_path):
     ts = fresh(tmp_path)
     ts.create_ticket("Guestbook form", acceptance="submit shows name", dod="green", wave=1)

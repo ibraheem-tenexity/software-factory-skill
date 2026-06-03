@@ -39,7 +39,10 @@ class JsonFileStore:
             json.dump(data, f, indent=2)
 
 
-_PERSISTED = {"run_id", "phase", "spent_usd", "repo_url", "deploy_url"}
+_PERSISTED = {
+    "run_id", "phase", "spent_usd", "repo_url", "deploy_url",
+    "skill", "skill_version", "description", "deploy_target",
+}
 
 
 @dataclass
@@ -49,6 +52,11 @@ class RunState:
     spent_usd: float = 0.0
     repo_url: Optional[str] = None
     deploy_url: Optional[str] = None
+    # Proof marker — stamped at provision so the run carries a receipt of which skill drove it.
+    skill: Optional[str] = None
+    skill_version: Optional[str] = None
+    description: Optional[str] = None
+    deploy_target: Optional[str] = None
     _store: Optional[Store] = field(default=None, repr=False, compare=False)
 
     @classmethod

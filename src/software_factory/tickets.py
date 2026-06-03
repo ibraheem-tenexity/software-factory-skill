@@ -86,6 +86,12 @@ class TicketStore:
         ).fetchall()
         return [Ticket(**dict(r)) for r in rows]
 
+    def done_tickets(self) -> list[Ticket]:
+        rows = self._conn.execute(
+            "SELECT * FROM tickets WHERE status = 'done' ORDER BY id"
+        ).fetchall()
+        return [Ticket(**dict(r)) for r in rows]
+
     def render_markdown(self) -> str:
         rows = self._conn.execute("SELECT * FROM tickets ORDER BY wave, id").fetchall()
         lines = ["# Tickets", "", "| # | wave | status | title | acceptance |", "|---|---|---|---|---|"]
