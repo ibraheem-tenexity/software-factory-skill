@@ -41,7 +41,7 @@ class JsonFileStore:
 
 _PERSISTED = {
     "run_id", "phase", "spent_usd", "repo_url", "deploy_url",
-    "skill", "skill_version", "description", "deploy_target",
+    "skill", "skill_version", "description", "deploy_target", "creds_provided",
 }
 
 
@@ -57,6 +57,7 @@ class RunState:
     skill_version: Optional[str] = None
     description: Optional[str] = None
     deploy_target: Optional[str] = None
+    creds_provided: list = field(default_factory=list)  # cred NAMES only, never values
     _store: Optional[Store] = field(default=None, repr=False, compare=False)
 
     @classmethod

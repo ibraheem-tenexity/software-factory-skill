@@ -44,6 +44,21 @@
         <select id="target"><option value="railway">railway</option><option value="vercel">vercel</option></select>
       </div>
     </div>
+
+    <label>Railway</label>
+    <select id="railwayMode">
+      <option value="managed">Managed (use the platform's Railway)</option>
+      <option value="byo">Bring your own Railway</option>
+    </select>
+    <div id="byo" style="display:none">
+      <label>Railway API token</label>
+      <input id="railwayToken" type="password" autocomplete="off" placeholder="rwt_…" />
+      <label>Railway project ID (optional)</label>
+      <input id="railwayProject" type="text" autocomplete="off" placeholder="project uuid" />
+      <p class="muted" id="secnote">🔒 Sent once to launch this run, injected into the build's
+        environment, and never stored, logged, or shown again. Cleared from this page on submit.</p>
+    </div>
+
     <button id="go">Build &amp; deploy</button>
     <p class="muted" id="note"></p>
   </div>
@@ -59,16 +74,28 @@
     const $ = (id) => document.getElementById(id);
     let timer = null, runId = null;
 
+    $("railwayMode").onchange = (e) => {
+      $("byo").style.display = e.target.value === "byo" ? "block" : "none";
+    };
+
     $("go").onclick = async () => {
       $("go").disabled = true;
       $("proof").innerHTML = ""; $("urlbox").innerHTML = "";
+      const byo = $("railwayMode").value === "byo";
+      const payload = {
+        description: $("description").value, context: $("context").value,
+        budget: Number($("budget").value), target: $("target").value,
+      };
+      if (byo) {
+        payload.railway_token = $("railwayToken").value;
+        payload.railway_project_id = $("railwayProject").value;
+      }
       const res = await fetch("/api/runs", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          description: $("description").value, context: $("context").value,
-          budget: Number($("budget").value), target: $("target").value,
-        }),
+        body: JSON.stringify(payload),
       });
+      // wipe the secret from the page the instant it's submitted
+      $("railwayToken").value = ""; $("railwayProject").value = "";
       runId = (await res.json()).run_id;
       $("note").textContent = "run " + runId + " launched (headless claude).";
       if (timer) clearInterval(timer);
@@ -78,7 +105,8 @@
     async function poll() {
       if (!runId) return;
       const s = await (await fetch("/api/runs/" + runId)).json();
-      $("phase").innerHTML = "phase: <b>" + s.phase + "</b>" + (s.done ? " ✓" : "");
+      const rail = s.byo_railway ? " · railway: your key 🔑" : (s.creds_provided||[]).length ? "" : "";
+      $("phase").innerHTML = "phase: <b>" + s.phase + "</b>" + (s.done ? " ✓" : "") + rail;
       const a = s.agents || {};
       const warn = (s.no_op_rate || 0) > 0.3 ? "warn" : "";
       $("stats").innerHTML = `

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .agents import AgentRegistry
@@ -27,6 +27,9 @@ class RunRequest:
     context: str = ""
     budget: float = 100.0
     target: str = "railway"
+    # Secret env (e.g. {"RAILWAY_TOKEN": "..."}) for a bring-your-own run. Injected into the
+    # headless child's environment only — never persisted, never put on the command line.
+    credentials: dict = field(default_factory=dict)
 
 
 def run_paths(runs_dir: str, run_id: str) -> dict:
@@ -53,17 +56,18 @@ def make_prompt(req: RunRequest, run_id: str, runs_dir: str) -> str:
     )
 
 
-def _default_launch(argv: list[str]) -> Any:
+def _default_launch(argv: list[str], env: dict) -> Any:
     import subprocess
 
-    return subprocess.Popen(argv)
+    # Secrets ride in the child's environment, not argv (argv shows up in `ps` / logs).
+    return subprocess.Popen(argv, env={**os.environ, **env})
 
 
 class Console:
     def __init__(
         self,
         runs_dir: str,
-        launch: Callable[[list[str]], Any] = _default_launch,
+        launch: Callable[[list[str], dict], Any] = _default_launch,
         new_id: Callable[[], str] = lambda: "run-" + uuid.uuid4().hex[:8],
     ):
         self._runs_dir = runs_dir
@@ -85,10 +89,13 @@ class Console:
         # Stamp the proof marker at launch — the receipt of which skill is driving this run.
         # The teeth (that real work happened) live in verify_evidence, not here.
         state = self._load_state(run_id)
+        # Secrets are kept out of run state entirely; we persist only the NAMES provided.
+        env = {k: v for k, v in (req.credentials or {}).items() if v}
         state.skill = "software-factory"
         state.skill_version = SKILL_VERSION
         state.description = req.description
         state.deploy_target = req.target
+        state.creds_provided = sorted(env.keys())
         state.save()
 
         argv = [
@@ -96,7 +103,7 @@ class Console:
             "--permission-mode", "bypassPermissions",
             "--output-format", "stream-json", "--verbose",
         ]
-        self._launch(argv)
+        self._launch(argv, env)
         return run_id
 
     def status(self, run_id: str) -> dict:
@@ -112,6 +119,8 @@ class Console:
             "done": state.phase == "done",
             "deploy_url": state.deploy_url,
             "spent_usd": state.spent_usd,
+            "creds_provided": state.creds_provided,  # names only, never values
+            "byo_railway": "RAILWAY_TOKEN" in (state.creds_provided or []),
             "agents": reg.counts(run_id),
             "no_op_rate": reg.no_op_rate(run_id),
         }

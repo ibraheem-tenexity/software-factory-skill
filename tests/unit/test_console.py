@@ -13,9 +13,11 @@ from software_factory.budget import Usage
 class FakeLauncher:
     def __init__(self):
         self.argv = None
+        self.env = None
 
-    def __call__(self, argv):
+    def __call__(self, argv, env=None):
         self.argv = argv
+        self.env = env or {}
         return {"pid": 1234}
 
 
@@ -79,6 +81,53 @@ def test_status_reflects_agents_phase_and_deployed_url(tmp_path):
     assert st["deploy_url"] == "https://guestbook.up.railway.app"
     assert st["agents"]["spawned"] == 1
     assert st["agents"]["done"] == 1
+
+
+SECRET = "rwt_super_secret_token_value_123"
+
+
+def test_byo_railway_token_is_passed_as_env_not_in_prompt_or_argv(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    c.start_run(RunRequest(description="guestbook", target="railway",
+                           credentials={"RAILWAY_TOKEN": SECRET}))
+    # injected into the child env...
+    assert launcher.env["RAILWAY_TOKEN"] == SECRET
+    # ...and NOWHERE in the command line (argv is logged / visible in process lists)
+    assert all(SECRET not in str(a) for a in launcher.argv)
+
+
+def test_credentials_are_never_written_to_disk(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="guestbook", target="railway",
+                                    credentials={"RAILWAY_TOKEN": SECRET}))
+    # scan every file under the runs dir — the token value must not appear anywhere
+    import os
+    for root, _, files in os.walk(str(tmp_path)):
+        for fn in files:
+            with open(os.path.join(root, fn), "rb") as f:
+                assert SECRET.encode() not in f.read(), f"secret leaked into {fn}"
+    # but the run records WHICH creds were provided (names only) for the live view
+    assert "RAILWAY_TOKEN" in c.status(run_id)["creds_provided"]
+
+
+def test_status_and_evidence_never_expose_secret_values(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="guestbook", target="railway",
+                                    credentials={"RAILWAY_TOKEN": SECRET}))
+    import json
+    assert SECRET not in json.dumps(c.status(run_id))
+    assert SECRET not in json.dumps(c.evidence(run_id))
+
+
+def test_empty_credentials_are_ignored(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="guestbook", credentials={"RAILWAY_TOKEN": ""}))
+    assert c.status(run_id)["creds_provided"] == []
+    assert "RAILWAY_TOKEN" not in launcher.env
 
 
 def test_evidence_verifies_the_run_was_really_built_by_the_skill(tmp_path):

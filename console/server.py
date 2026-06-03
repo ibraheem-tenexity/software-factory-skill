@@ -47,11 +47,19 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/runs":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length) or b"{}")
+            # Bring-your-own creds: map the form fields to secret env. These are passed to
+            # console.start_run, which injects them into the child env and NEVER persists them.
+            creds = {}
+            if body.get("railway_token"):
+                creds["RAILWAY_TOKEN"] = body["railway_token"]
+            if body.get("railway_project_id"):
+                creds["RAILWAY_PROJECT_ID"] = body["railway_project_id"]
             req = RunRequest(
                 description=body.get("description", ""),
                 context=body.get("context", ""),
                 budget=float(body.get("budget", 100)),
                 target=body.get("target", "railway"),
+                credentials=creds,
             )
             return self._send(200, {"run_id": console.start_run(req)})
         return self._send(404, {"error": "not found"})
