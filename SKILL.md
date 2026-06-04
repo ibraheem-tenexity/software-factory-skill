@@ -43,11 +43,17 @@ Each tick: `RunState.load(run_id)` → do the current phase → `state.save()` �
 phase advances only when its **done-gate** (a *mechanical* check, not a human) passes.
 
 ```
-extract → provision → research → architect → wait-for-deps → tickets → build → deploy → test ──pass──▶ teardown → DONE
- (read     (mk ws)     (PRD)      (arch+svg)   (infra ready)              ▲                  │           (rm ws, keep proof)
-  input)                                                                 └──── fix-loop ────┘   (bug: fix → redeploy → re-test)
+First Pipeline: 
+extract → provision → research (several Agents doing there work → architect → wait-for-deps -> DONE
+ (read     (mk ws)     (PRD)      (arch+svg)   (infra ready)              
+  input)                                                                 
 
    any terminal state (done / budget cutoff / hard block) → teardown
+
+SECOND PIPELINE: 
+→tickets → build → deploy → test ──pass──▶ teardown → DONE
+          ▲                  │           (rm ws, keep proof)
+          └──── fix-loop ────┘   (bug: fix → redeploy → re-test)
 ```
 
 Every phase emits `phase {name, status}` on entry/exit. Done-gates are automated — the run
