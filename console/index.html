@@ -4,200 +4,261 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Software Factory — console</title>
-  <!-- Cytoscape render core ported from ~/graph_viz: fcose base + continuous cola overlap-avoidance -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- frontend-design: distinctive type (NOT Inter) — Fraunces display, Public Sans body, JetBrains Mono data -->
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <!-- render core ported from ~/graph_viz: fcose base + continuous cola -->
   <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
   <script src="https://unpkg.com/layout-base@2.0.1/layout-base.js"></script>
   <script src="https://unpkg.com/cose-base@2.2.0/cose-base.js"></script>
   <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
   <script src="https://unpkg.com/webcola@3.4.0/WebCola/cola.min.js"></script>
   <script src="https://unpkg.com/cytoscape-cola@2.5.1/cytoscape-cola.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
   <style>
-    :root { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    body { margin: 0; background: #0b0e14; color: #d6deeb; display: flex; height: 100vh; overflow: hidden; }
-    .pane { padding: 20px 24px; box-sizing: border-box; }
-    .left { width: 410px; flex: none; border-right: 1px solid #1c2230; overflow-y: auto; }
-    .right { flex: 1; display: flex; flex-direction: column; padding: 0; position: relative; }
-    h1 { font-size: 15px; color: #7fdbca; margin: 0 0 14px; }
-    label { display: block; font-size: 12px; color: #5f7e97; margin: 12px 0 5px; }
-    textarea, input, select { width: 100%; box-sizing: border-box; background: #0e1320; color: #d6deeb;
-      border: 1px solid #1c2230; border-radius: 6px; padding: 9px; font: inherit; font-size: 13px; }
-    textarea { min-height: 76px; resize: vertical; }
-    .row { display: flex; gap: 12px; } .row > div { flex: 1; }
-    button { margin-top: 14px; width: 100%; padding: 11px; border: 0; border-radius: 6px;
-      background: #7fdbca; color: #0b0e14; font: inherit; font-weight: 600; cursor: pointer; }
-    button:disabled { opacity: .5; } .muted { color: #5f7e97; font-size: 12px; }
-    .topbar { display: flex; align-items: center; gap: 16px; padding: 13px 20px; border-bottom: 1px solid #1c2230; flex-wrap: wrap; }
-    .topbar select { width: auto; min-width: 260px; }
-    .stat { font-size: 12px; color: #5f7e97; } .stat b { color: #d6deeb; } .stat.cost b { color: #c3e88d; }
-    #cy { flex: 1; }
-    .legend { padding: 6px 20px; font-size: 11px; color: #5f7e97; border-top: 1px solid #161b27; }
-    .legend span { margin-right: 13px; white-space: nowrap; }
-    #inspect { position: absolute; right: 0; top: 49px; bottom: 0; width: 360px; background: #0e1320e6;
-      backdrop-filter: blur(4px); border-left: 1px solid #1c2230; padding: 16px; overflow: auto;
-      transform: translateX(100%); transition: transform .15s; }
-    #inspect.open { transform: none; }
-    #inspect h3 { color: #7fdbca; font-size: 14px; margin: 0 0 4px; } #inspect .x { float: right; cursor: pointer; color: #5f7e97; }
-    #inspect pre { white-space: pre-wrap; font-size: 11px; background: #0b0e14; border: 1px solid #1c2230; border-radius: 6px; padding: 10px; max-height: 55vh; overflow: auto; }
-    #inspect svg { max-width: 100%; background: #fff; border-radius: 6px; }
-    .bad { color: #ef5350; } .gate-btn { background: #f78c6c; }
+    /* Tenexity refined-professional tokens (ported from ~/graph_viz/styles.css) */
+    :root {
+      --primary: #002b5c; --primary-fg: #fff; --gold: #b18e04;
+      --bg: #f6f7f9; --card: #ffffff; --fg: #0f1729; --muted: #f1f3f7; --muted-fg: #5c6577;
+      --border: #e2e6ed; --input: #d0d5dd; --success: #059669; --amber: #d97706; --destructive: #dc2626;
+      --teal: #0891b2; --purple: #7c3aed; --blue: #4a8fd4;
+      --radius: 7px; --shadow-sm: 0 1px 3px rgb(0 0 0 / .06), 0 1px 2px -1px rgb(0 0 0 / .04);
+      --shadow-md: 0 6px 18px -6px rgb(15 23 41 / .14);
+      --display: 'Fraunces', Georgia, serif; --sans: 'Public Sans', system-ui, sans-serif; --mono: 'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; }
+    body, html { margin: 0; height: 100%; }
+    body { font-family: var(--sans); background: var(--bg); color: var(--fg); font-size: 14px; -webkit-font-smoothing: antialiased; }
+    .app { display: flex; flex-direction: column; height: 100vh; }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .rise { animation: rise .5s cubic-bezier(.2,.7,.2,1) both; }
+
+    /* Toolbar */
+    .toolbar { display: flex; align-items: center; gap: 1rem; padding: .55rem 1.1rem; min-height: 56px;
+      background: var(--card); border-bottom: 1px solid var(--border); box-shadow: var(--shadow-sm); z-index: 30; flex-wrap: wrap; }
+    .brand { display: inline-flex; align-items: center; gap: .55rem; font-family: var(--display); font-weight: 700;
+      font-size: 1.18rem; letter-spacing: -.02em; color: var(--primary); }
+    .brand::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--gold);
+      box-shadow: 0 0 0 4px rgb(177 142 4 / .16); }
+    .brand small { font-family: var(--sans); font-weight: 500; font-size: .68rem; color: var(--muted-fg); letter-spacing: .12em; text-transform: uppercase; }
+    .toolbar select { height: 34px; max-width: 320px; border: 1px solid var(--input); border-radius: var(--radius);
+      background: var(--card); color: var(--fg); font: 500 .8rem var(--mono); padding: 0 .55rem; cursor: pointer; }
+    .spacer { flex: 1; }
+    .pill { font-family: var(--mono); font-size: .78rem; color: var(--muted-fg); }
+    .pill b { color: var(--fg); } .pill.cost b { color: var(--success); }
+
+    .main { display: flex; flex: 1; min-height: 0; }
+    /* Build form (left) */
+    .build { width: 360px; flex: none; border-right: 1px solid var(--border); background: var(--card); padding: 1.1rem; overflow-y: auto; }
+    .build h2 { font-family: var(--display); font-weight: 600; font-size: 1.05rem; margin: 0 0 .2rem; letter-spacing: -.01em; }
+    .build p.sub { color: var(--muted-fg); font-size: .76rem; margin: 0 0 1rem; }
+    label { display: block; font-size: .72rem; font-weight: 600; color: var(--muted-fg); text-transform: uppercase; letter-spacing: .04em; margin: .85rem 0 .35rem; }
+    textarea, input, .build select { width: 100%; border: 1px solid var(--input); border-radius: var(--radius); background: var(--card);
+      color: var(--fg); font: .85rem var(--sans); padding: .55rem .6rem; }
+    textarea { min-height: 74px; resize: vertical; } input:focus, textarea:focus, select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgb(0 43 92 / .12); }
+    .row { display: flex; gap: .7rem; } .row > div { flex: 1; }
+    .go { margin-top: 1.1rem; width: 100%; padding: .7rem; border: 0; border-radius: var(--radius); background: var(--primary);
+      color: var(--primary-fg); font: 600 .9rem var(--sans); cursor: pointer; transition: filter .15s; }
+    .go:hover { filter: brightness(1.12); } .go:disabled { opacity: .5; }
+    .hint { color: var(--muted-fg); font-size: .72rem; margin-top: .5rem; }
+
+    /* Canvas — dotted blueprint backdrop + grain */
+    .canvas-area { flex: 1; position: relative; background-color: var(--bg);
+      background-image: radial-gradient(circle, #d6dde8 1.1px, transparent 1.1px); background-size: 24px 24px; }
+    .canvas-area::after { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .035;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+    #cy { position: absolute; inset: 0 0 150px 0; }
+
+    /* Live activity feed (bottom strip) */
+    .activity { position: absolute; left: 0; right: 0; bottom: 0; height: 150px; background: rgb(255 255 255 / .94);
+      backdrop-filter: blur(6px); border-top: 1px solid var(--border); box-shadow: 0 -6px 18px -10px rgb(15 23 41 / .12);
+      display: flex; flex-direction: column; }
+    .activity .head { display: flex; align-items: center; gap: .5rem; padding: .35rem .8rem; border-bottom: 1px solid var(--border);
+      font-size: .68rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted-fg); }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); animation: pulse 1.3s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 rgb(5 150 105 / .5); } 50% { opacity: .5; box-shadow: 0 0 0 5px rgb(5 150 105 / 0); } }
+    .live-dot.idle { background: #b9c0cc; animation: none; }
+    .activity .feed { flex: 1; overflow-y: auto; padding: .4rem .8rem; font: .74rem/1.5 var(--mono); }
+    .activity .feed div { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .a-tool { color: var(--primary); } .a-text { color: var(--fg); } .a-phase { color: var(--blue); font-weight: 600; }
+    .a-art { color: var(--purple); } .a-block { color: var(--destructive); }
+
+    /* Inspect sidebar */
+    .sidebar { width: 372px; flex: none; border-left: 1px solid var(--border); background: var(--card); overflow-y: auto; padding: 1.1rem; display: none; }
+    .sidebar.open { display: block; }
+    .kind-badge { display: inline-block; font: 700 .6rem var(--sans); letter-spacing: .08em; text-transform: uppercase;
+      color: var(--primary); background: #e9eef6; border-radius: 999px; padding: .18rem .55rem; }
+    .chip { display: inline-block; font: 600 .66rem var(--mono); border-radius: 999px; padding: .12rem .5rem; }
+    .chip.ok { color: var(--success); background: #e6f5ec; } .chip.warn { color: var(--amber); background: #fef3e2; }
+    .chip.bad { color: var(--destructive); background: #fbe9e9; }
+    .sidebar h3 { font-family: var(--display); font-size: 1.1rem; font-weight: 600; margin: .5rem 0 .1rem; }
+    .sidebar .close { float: right; cursor: pointer; color: var(--muted-fg); border: 0; background: none; font-size: 1rem; }
+    .markdown { font-size: .82rem; line-height: 1.55; overflow-wrap: anywhere; }
+    .markdown h1 { font-size: 1rem; } .markdown h2 { font-size: .9rem; } .markdown h3 { font-size: .82rem; }
+    .markdown code { font-family: var(--mono); font-size: .74rem; background: var(--muted); padding: .05rem .3rem; border-radius: 4px; }
+    .markdown pre { background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius); padding: .55rem; overflow-x: auto; }
+    .markdown a { color: var(--primary); } .markdown table { border-collapse: collapse; width: 100%; font-size: .74rem; }
+    .markdown th, .markdown td { border: 1px solid var(--border); padding: .3rem .45rem; }
+    .gate-go { background: var(--gold); color: #1c1402; border: 0; border-radius: var(--radius); padding: .5rem .9rem; font: 600 .82rem var(--sans); cursor: pointer; }
+    .legend { padding: .35rem 1.1rem; font: .68rem var(--mono); color: var(--muted-fg); border-top: 1px solid var(--border); background: var(--card); }
+    .legend span { margin-right: 1rem; } .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: .25rem; vertical-align: middle; }
   </style>
 </head>
 <body>
-  <div class="pane left">
-    <h1>SOFTWARE FACTORY · console</h1>
-    <label>What should we build? (a customer solution)</label>
-    <textarea id="description" placeholder="One line, or paste detailed context / an email."></textarea>
-    <label>Context / data (optional)</label>
-    <textarea id="context" placeholder="Domain, constraints, sample data…"></textarea>
-    <label>…or upload context files (txt / pdf / docx)</label>
-    <input id="files" type="file" multiple accept=".txt,.md,.pdf,.docx" />
-    <p class="muted" id="filenote"></p>
-    <div class="row">
-      <div><label>Budget (USD)</label><input id="budget" type="number" value="100" /></div>
-      <div><label>Deploy target</label>
-        <select id="target"><option value="railway">railway</option><option value="vercel">vercel</option></select>
-      </div>
-    </div>
-    <label>Railway</label>
-    <select id="railwayMode"><option value="managed">Managed</option><option value="byo">Bring your own</option></select>
-    <div id="byo" style="display:none">
-      <label>Railway API token</label>
-      <input id="railwayToken" type="password" autocomplete="off" placeholder="rwt_…" />
-      <p class="muted">🔒 Injected into the run env, never stored.</p>
-    </div>
-    <button id="go">Build &amp; deploy</button>
-    <p class="muted" id="note"></p>
-  </div>
-
-  <div class="pane right">
-    <div class="topbar">
-      <label style="margin:0">Run</label>
+  <div class="app">
+    <header class="toolbar rise">
+      <span class="brand">Software Factory <small>console</small></span>
       <select id="runs"></select>
-      <span class="stat" id="phase">—</span>
-      <span class="stat cost" id="cost"></span>
+      <span class="pill" id="phase">—</span>
+      <span class="spacer"></span>
+      <span class="pill cost" id="cost"></span>
+    </header>
+    <div class="main">
+      <aside class="build rise" style="animation-delay:.05s">
+        <h2>Build a customer solution</h2>
+        <p class="sub">One line or detailed context. The factory researches, writes a PRD &amp; architecture, then builds &amp; deploys.</p>
+        <label>What should we build?</label>
+        <textarea id="description" placeholder="A guestbook… or paste an email / SOW."></textarea>
+        <label>Context (optional)</label>
+        <textarea id="context" placeholder="Domain, constraints, sample data…"></textarea>
+        <label>…or upload files (txt / pdf / docx)</label>
+        <input id="files" type="file" multiple accept=".txt,.md,.pdf,.docx" />
+        <p class="hint" id="filenote"></p>
+        <div class="row">
+          <div><label>Budget $</label><input id="budget" type="number" value="100" /></div>
+          <div><label>Target</label><select id="target"><option value="railway">railway</option><option value="vercel">vercel</option></select></div>
+        </div>
+        <label>Railway</label>
+        <select id="railwayMode"><option value="managed">Managed</option><option value="byo">Bring your own</option></select>
+        <div id="byo" style="display:none">
+          <label>Railway API token</label>
+          <input id="railwayToken" type="password" autocomplete="off" placeholder="rwt_…" />
+          <p class="hint">🔒 Injected into the run env, never stored.</p>
+        </div>
+        <button class="go" id="go">Build &amp; deploy</button>
+        <p class="hint" id="note"></p>
+      </aside>
+
+      <div class="canvas-area rise" style="animation-delay:.1s">
+        <div id="cy"></div>
+        <div class="activity">
+          <div class="head"><span class="live-dot idle" id="livedot"></span> <span id="activity-title">live activity</span></div>
+          <div class="feed" id="feed"></div>
+        </div>
+      </div>
+
+      <aside class="sidebar" id="inspect"></aside>
     </div>
-    <div id="cy"></div>
     <div class="legend">
-      <span style="color:#7fdbca">● orchestrator</span><span style="color:#82aaff">● phase</span>
-      <span style="color:#ffcb6b">● active/agent</span><span style="color:#c3e88d">● done/artifact</span>
-      <span style="color:#ef5350">● blocker / missing artifact</span><span style="color:#f78c6c">◆ gate</span>
+      <span><i class="dot" style="background:#002b5c"></i>orchestrator</span>
+      <span><i class="dot" style="background:#4a8fd4"></i>phase</span>
+      <span><i class="dot" style="background:#d97706"></i>active/agent</span>
+      <span><i class="dot" style="background:#7c3aed"></i>artifact</span>
+      <span><i class="dot" style="background:#dc2626"></i>blocker / missing</span>
+      <span><i class="dot" style="background:#0891b2"></i>gate</span>
     </div>
-    <div id="inspect"></div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
     let cy = null, runId = null, timer = null, cola = null, laidOut = false;
 
-    // ---- palette + styles (ported technique from ~/graph_viz/cytoscapeStyles.ts) ----
     function nodeColor(ele) {
       const k = ele.data("kind"), s = ele.data("status");
-      if (k === "orchestrator") return "#7fdbca";
-      if (k === "phase") return s === "done" ? "#c3e88d" : s === "active" ? "#ffcb6b" : "#3b4a63";
-      if (k === "agent") return s === "done" ? "#c3e88d" : (s === "no_op" || s === "failed") ? "#ef5350" : "#ffcb6b";
-      if (k === "artifact") return s === "missing" ? "#ef5350" : "#c3e88d";
-      if (k === "blocker") return "#ef5350";
-      if (k === "gate") return "#f78c6c";
+      if (k === "orchestrator") return "#002b5c";
+      if (k === "phase") return s === "done" ? "#059669" : s === "active" ? "#d97706" : "#aeb6c4";
+      if (k === "agent") return s === "done" ? "#059669" : (s === "no_op" || s === "failed") ? "#dc2626" : "#d97706";
+      if (k === "artifact") return s === "missing" ? "#dc2626" : "#7c3aed";
+      if (k === "blocker") return "#dc2626";
+      if (k === "gate") return "#0891b2";
       return "#9aa0a6";
     }
     const STYLE = [
-      { selector: "node", style: {
-        "background-color": nodeColor, label: "data(label)", "font-size": 9, "font-weight": 500,
-        "text-valign": "bottom", "text-margin-y": 3, color: "#d6deeb",
-        "text-outline-width": 2, "text-outline-color": "#0b0e14",
-        "text-wrap": "ellipsis", "text-max-width": "110px", "min-zoomed-font-size": 8,
-        "border-width": 1.5, "border-color": "#0b0e14", width: 26, height: 26 } },
-      { selector: 'node[kind="orchestrator"]', style: { width: 50, height: 50, "font-size": 12 } },
-      { selector: 'node[kind="phase"]', style: { shape: "round-rectangle", width: 78, height: 28 } },
+      { selector: "node", style: { "background-color": nodeColor, label: "data(label)", "font-family": "JetBrains Mono, monospace",
+        "font-size": 9, "text-valign": "bottom", "text-margin-y": 4, color: "#0f1729", "text-outline-width": 2,
+        "text-outline-color": "#f6f7f9", "text-wrap": "ellipsis", "text-max-width": "110px", "min-zoomed-font-size": 8,
+        "border-width": 1.5, "border-color": "#fff", width: 26, height: 26 } },
+      { selector: 'node[kind="orchestrator"]', style: { width: 50, height: 50, "font-size": 11, "font-weight": 700 } },
+      { selector: 'node[kind="phase"]', style: { shape: "round-rectangle", width: 82, height: 30 } },
       { selector: 'node[kind="gate"]', style: { shape: "diamond", width: 38, height: 38 } },
       { selector: 'node[kind="blocker"]', style: { shape: "octagon" } },
-      { selector: 'node[kind="artifact"][status="missing"]', style: { "border-width": 2, "border-color": "#ef5350" } },
-      { selector: "edge", style: { width: 1.3, "line-color": "#2a3550", "target-arrow-color": "#2a3550",
+      { selector: 'node[kind="artifact"][status="missing"]', style: { "border-width": 2.5, "border-color": "#dc2626" } },
+      { selector: "edge", style: { width: 1.2, "line-color": "#cbd2dd", "target-arrow-color": "#cbd2dd",
         "target-arrow-shape": "triangle", "arrow-scale": 0.8, "curve-style": "bezier" } },
-      { selector: ".active-run", style: { "border-width": 4, "border-color": "#34a853" } },
     ];
-    // ---- layout configs (ported from ~/graph_viz/layout.ts) ----
-    const FCOSE = { name: "fcose", quality: "default", animate: false, randomize: true,
-      nodeRepulsion: 20000, idealEdgeLength: 150, edgeElasticity: 0.45, gravity: 0.22,
-      nodeSeparation: 140, numIter: 2500, packComponents: true, padding: 40 };
-    const COLA = { name: "cola", animate: true, infinite: true, fit: false, randomize: false,
-      avoidOverlap: true, nodeSpacing: 30, edgeLength: 150, unconstrIter: 0, userConstIter: 0,
-      allConstIter: 40, handleDisconnected: true, centerGraph: false };
-    const haveFcose = typeof window.cytoscapeFcose !== "undefined";
-    const haveCola = typeof window.cytoscapeCola !== "undefined";
+    const FCOSE = { name: "fcose", quality: "default", animate: false, randomize: true, nodeRepulsion: 20000,
+      idealEdgeLength: 150, edgeElasticity: 0.45, gravity: 0.22, nodeSeparation: 140, numIter: 2500, packComponents: true, padding: 50 };
+    const COLA = { name: "cola", animate: true, infinite: true, fit: false, randomize: false, avoidOverlap: true,
+      nodeSpacing: 32, edgeLength: 150, unconstrIter: 0, userConstIter: 0, allConstIter: 40, handleDisconnected: true, centerGraph: false };
+    const haveFcose = typeof window.cytoscapeFcose !== "undefined", haveCola = typeof window.cytoscapeCola !== "undefined";
     if (haveFcose) cytoscape.use(window.cytoscapeFcose);
     if (haveCola) cytoscape.use(window.cytoscapeCola);
 
     function initCy() {
-      cy = cytoscape({ container: $("cy"), style: STYLE, wheelSensitivity: 0.2,
-        minZoom: 0.2, maxZoom: 2.5 });
+      cy = cytoscape({ container: $("cy"), style: STYLE, wheelSensitivity: 0.2, minZoom: 0.2, maxZoom: 2.5 });
       cy.on("tap", "node", (ev) => inspect(ev.target.data()));
       cy.on("tap", (ev) => { if (ev.target === cy) $("inspect").classList.remove("open"); });
     }
-
-    // ---- diff/applyGraphUpdate (ported concept): survivors keep positions; only new nodes laid out ----
     function applyGraph(g) {
       const els = [...g.nodes, ...g.edges];
-      const want = new Set(els.map((e) => e.data.id || e.data.source + "->" + e.data.target));
+      const want = new Set(els.filter((e) => e.data.id).map((e) => e.data.id));
       let structural = false;
-      // remove gone
-      cy.elements().forEach((el) => { if (!want.has(el.id() || "")) { /* edges have generated ids */ } });
       cy.nodes().forEach((n) => { if (!want.has(n.id())) { n.remove(); structural = true; } });
-      // add/update
       const center = cy.getElementById("orchestrator");
-      const pos = center.nonempty() ? center.position() : { x: 300, y: 300 };
+      const pos = center.nonempty() ? center.position() : { x: 360, y: 260 };
       els.forEach((e) => {
-        const id = e.data.id;
-        if (e.data.source) {  // edge
-          const eid = e.data.source + "->" + e.data.target;
-          if (!cy.getElementById(eid).nonempty())
-            cy.add({ group: "edges", data: { id: eid, source: e.data.source, target: e.data.target } });
-          return;
-        }
-        const ex = cy.getElementById(id);
-        if (ex.nonempty()) { ex.data(e.data); }                              // survivor: update data in place
-        else { cy.add({ group: "nodes", data: e.data, position: { x: pos.x + (Math.random() - .5) * 60, y: pos.y + (Math.random() - .5) * 60 } }); structural = true; }
+        if (e.data.source) { const eid = e.data.source + "->" + e.data.target;
+          if (!cy.getElementById(eid).nonempty()) cy.add({ group: "edges", data: { id: eid, source: e.data.source, target: e.data.target } }); return; }
+        const ex = cy.getElementById(e.data.id);
+        if (ex.nonempty()) ex.data(e.data);
+        else { cy.add({ group: "nodes", data: e.data, position: { x: pos.x + (Math.random() - .5) * 80, y: pos.y + (Math.random() - .5) * 80 } }); structural = true; }
       });
       cy.style().update();
-      if (!laidOut && cy.nodes().length) {
-        cy.layout(haveFcose ? FCOSE : { name: "cose", animate: false }).run();
-        laidOut = true; startCola();
-      } else if (structural) {
-        startCola();   // re-run constraint-only cola to absorb new nodes without reshuffling
-      }
+      if (!laidOut && cy.nodes().length) { cy.layout(haveFcose ? FCOSE : { name: "cose", animate: false }).run(); laidOut = true; startCola(); }
+      else if (structural) startCola();
     }
-    function startCola() {
-      if (!haveCola) return;
-      if (cola) cola.stop();
-      cola = cy.layout(COLA); cola.run();
-    }
+    function startCola() { if (!haveCola) return; if (cola) cola.stop(); cola = cy.layout(COLA); cola.run(); }
 
     async function inspect(d) {
       const box = $("inspect");
-      let html = `<span class="x" onclick="document.getElementById('inspect').classList.remove('open')">✕</span>`;
-      html += `<h3>${d.label || d.id}</h3><p class="muted">${d.kind}${d.status ? " · " + d.status : ""}</p>`;
+      let h = `<button class="close" onclick="document.getElementById('inspect').classList.remove('open')">✕</button>`;
+      h += `<span class="kind-badge">${d.kind}</span>`;
+      h += `<h3>${d.label || d.id}</h3>`;
+      if (d.status) h += `<p><span class="chip ${d.status === 'missing' || d.status === 'no_op' || d.status === 'failed' || d.status === 'open' ? 'bad' : d.status === 'active' || d.status === 'running' ? 'warn' : 'ok'}">${d.status}</span></p>`;
       if (d.kind === "artifact") {
-        if (d.status === "missing") html += `<p class="bad">⚠ This artifact was announced but the file does not exist — hollow. Not real progress.</p>`;
-        else {
-          const a = await (await fetch(`/api/runs/${runId}/artifact?path=${encodeURIComponent(d.path)}`)).json();
-          html += (d.path && d.path.endsWith(".svg") && a.content) ? `<div>${a.content}</div>`
-                : `<pre>${(a.content || a.error || "").replace(/</g, "&lt;")}</pre>`;
-        }
-      } else if (d.kind === "blocker") {
-        html += `<pre>blocks: ${d.blocks || "?"}\n\n${d.label}</pre>`;
-      } else if (d.kind === "gate") {
-        html += `<button class="gate-btn" onclick="continueRun('${d.gate}')">Continue ▶</button>`;
-      } else if (d.kind === "agent") {
-        html += `<pre>subagent: ${d.label}\nstatus: ${d.status}</pre>`;
-      } else if (d.kind === "orchestrator") {
-        html += `<pre>phase: ${d.status}</pre>`;
-      }
-      box.innerHTML = html; box.classList.add("open");
+        if (d.status === "missing") h += `<p class="chip bad" style="display:block;padding:.5rem">⚠ announced but the file does not exist — hollow, not real progress.</p>`;
+        else { const a = await (await fetch(`/api/runs/${runId}/artifact?path=${encodeURIComponent(d.path)}`)).json();
+          h += (d.path && d.path.endsWith(".svg") && a.content) ? `<div>${a.content}</div>` : `<div class="markdown">${marked.parse(a.content || a.error || "")}</div>`; }
+      } else if (d.kind === "blocker") { h += `<div class="markdown"><p><b>blocks:</b> ${d.blocks || "?"}</p><p>${d.label}</p></div>`; }
+      else if (d.kind === "gate") { h += `<p class="hint">Run paused for review.</p><button class="gate-go" onclick="continueRun('${d.gate}')">Continue ▶</button>`; }
+      else if (d.kind === "agent") { h += `<div class="markdown"><p>subagent · ${d.status}</p></div>`; }
+      box.innerHTML = h; box.classList.add("open");
     }
-    window.continueRun = async (gate) => {
-      await fetch(`/api/runs/${runId}/continue`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gate }) });
-      $("inspect").classList.remove("open"); poll();
-    };
+    window.continueRun = async (gate) => { await fetch(`/api/runs/${runId}/continue`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gate }) }); $("inspect").classList.remove("open"); poll(); };
+
+    // ---- live activity feed: tail /log (claude stream) + /events into human-readable lines ----
+    function renderActivity(logText, events, done) {
+      const lines = [];
+      for (const e of (events || [])) {
+        if (e.type === "phase") lines.push(['a-phase', `▸ phase: ${(e.payload || {}).name || ""}`]);
+        else if (e.type === "artifact") lines.push(['a-art', `✦ artifact: ${(e.payload || {}).title || ""}`]);
+        else if (e.type === "blocker") lines.push(['a-block', `⛔ blocker: ${(e.payload || {}).what || ""}`]);
+        else if (e.type === "done") lines.push(['a-phase', `✓ done`]);
+      }
+      for (const raw of (logText || "").split("\n")) {
+        const s = raw.trim(); if (!s.startsWith("{")) continue;
+        let ev; try { ev = JSON.parse(s); } catch { continue; }
+        for (const c of ((ev.message || {}).content || [])) {
+          if (c.type === "text" && (c.text || "").trim()) lines.push(['a-text', "💬 " + c.text.slice(0, 200)]);
+          else if (c.type === "tool_use") lines.push(['a-tool', "🔧 " + c.name + " " + JSON.stringify(c.input || {}).slice(0, 120)]);
+        }
+      }
+      $("feed").innerHTML = lines.slice(-60).map(([cls, t]) => `<div class="${cls}">${t.replace(/</g, "&lt;")}</div>`).join("");
+      $("feed").scrollTop = $("feed").scrollHeight;
+      $("livedot").className = "live-dot" + (done ? " idle" : "");
+      $("activity-title").textContent = done ? "run finished" : "live activity";
+    }
 
     async function loadRuns(select) {
       const { runs } = await (await fetch("/api/runs")).json();
@@ -210,8 +271,7 @@
       attach(sel.value);
     }
     $("runs").onchange = (e) => attach(e.target.value);
-    function attach(id) { runId = id; localStorage.setItem("sf_run", id); laidOut = false; cy.elements().remove(); if (timer) clearInterval(timer); poll(); timer = setInterval(poll, 2500); }
-
+    function attach(id) { runId = id; localStorage.setItem("sf_run", id); laidOut = false; cy.elements().remove(); if (timer) clearInterval(timer); poll(); timer = setInterval(poll, 2000); }
     $("railwayMode").onchange = (e) => { $("byo").style.display = e.target.value === "byo" ? "block" : "none"; };
     function readFileB64(f) { return new Promise((res) => { const r = new FileReader(); r.onload = () => res({ name: f.name, content_b64: String(r.result).split(",")[1] }); r.readAsDataURL(f); }); }
     $("go").onclick = async () => {
@@ -223,21 +283,22 @@
       if (byo) p.railway_token = $("railwayToken").value;
       const res = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
       $("railwayToken").value = "";
-      const id = (await res.json()).run_id;
-      $("note").textContent = "run " + id + " launched.";
-      $("go").disabled = false; await loadRuns(id);
+      const id = (await res.json()).run_id; $("note").textContent = "run " + id + " launched."; $("go").disabled = false; await loadRuns(id);
     };
-
     async function poll() {
       if (!runId || !cy) return;
-      let s, g;
-      try { s = await (await fetch(`/api/runs/${runId}`)).json(); g = await (await fetch(`/api/runs/${runId}/graph`)).json(); }
-      catch { return; }
-      $("phase").innerHTML = "phase: <b>" + s.phase + "</b>" + (s.done ? " ✓" : "");
+      let s, g, log = "", evs = [];
+      try {
+        s = await (await fetch(`/api/runs/${runId}`)).json();
+        g = await (await fetch(`/api/runs/${runId}/graph`)).json();
+        log = (await (await fetch(`/api/runs/${runId}/log`)).json()).log || "";
+        evs = (await (await fetch(`/api/runs/${runId}/events`)).json()).events || [];
+      } catch { return; }
+      $("phase").innerHTML = "phase <b>" + s.phase + "</b>" + (s.done ? " ✓" : "");
       $("cost").innerHTML = "spent <b>$" + (s.spent_usd || 0).toFixed(4) + "</b>";
       applyGraph(g);
+      renderActivity(log, evs, s.done || ["stopped", "blocked"].includes(s.phase));
     }
-
     initCy(); loadRuns();
   </script>
 </body>
