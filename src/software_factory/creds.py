@@ -40,9 +40,10 @@ def check_railway(
     env = os.environ if env is None else env
     if not (env.get("RAILWAY_TOKEN") or env.get("RAILWAY_API_TOKEN")):
         return CredCheck("railway", False, "no RAILWAY_TOKEN / RAILWAY_API_TOKEN in environment")
-    rc = run(["railway", "whoami"]).returncode
+    # `railway status` works for project-scoped tokens; `whoami` only works for account tokens.
+    rc = run(["railway", "status"]).returncode
     if rc != 0:
-        return CredCheck("railway", False, "Railway token rejected (railway whoami failed)")
+        return CredCheck("railway", False, "Railway token rejected (railway status failed)")
     return CredCheck("railway", True, "token accepted")
 
 

@@ -35,5 +35,7 @@ RUN mkdir -p /home/node/.claude/skills \
 
 # Entrypoint drops to uid 1000 (node) even if the platform starts us as root.
 # Required at runtime (set on the service): ANTHROPIC_API_KEY, GH_TOKEN, RAILWAY_TOKEN, SUPABASE_ACCESS_TOKEN
-ENV PYTHONUNBUFFERED=1 SF_BIND=0.0.0.0
+# PYTHONPATH so `import software_factory` works for any python invocation (the orchestrator
+# shells fresh python processes, not just the server).
+ENV PYTHONUNBUFFERED=1 SF_BIND=0.0.0.0 PYTHONPATH=/app/src
 CMD ["/app/entrypoint.sh"]
