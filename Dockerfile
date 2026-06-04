@@ -30,10 +30,10 @@ RUN mkdir -p /home/factory/.claude/skills \
     && ln -sfn /app /home/factory/.claude/skills/software-factory \
     && printf '%s\n' '{"mcpServers":{"playwright":{"command":"npx","args":["-y","@playwright/mcp@latest","--headless","--browser","chromium"]}}}' > /app/.mcp.json \
     && printf '%s\n' '{"enableAllProjectMcpServers":true}' > /home/factory/.claude/settings.json \
+    && chmod +x /app/entrypoint.sh \
     && chown -R factory:factory /app /home/factory /ms-playwright
 
-USER factory
-
+# Entrypoint drops to the non-root `factory` user even if the platform starts us as root.
 # Required at runtime (set on the service): ANTHROPIC_API_KEY, GH_TOKEN, RAILWAY_TOKEN, SUPABASE_ACCESS_TOKEN
-ENV PYTHONUNBUFFERED=1 SF_BIND=0.0.0.0
-CMD ["python3", "console/server.py"]
+ENV PYTHONUNBUFFERED=1 SF_BIND=0.0.0.0 HOME=/home/factory
+CMD ["/app/entrypoint.sh"]

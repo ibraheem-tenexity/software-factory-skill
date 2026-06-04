@@ -73,5 +73,7 @@ if __name__ == "__main__":
     # Loopback only: the console + the BYO creds form are for local single-user use, never
     # exposed on the network. Override with SF_BIND=0.0.0.0 if you really mean to.
     host = os.environ.get("SF_BIND", "127.0.0.1")
+    import getpass
+    print(f"[runner] uid={os.getuid()} user={getpass.getuser()} home={os.environ.get('HOME')}", flush=True)
     print(f"software-factory console on http://{host}:{port}  (runs in {os.path.abspath(RUNS_DIR)})")
     ThreadingHTTPServer((host, port), Handler).serve_forever()
