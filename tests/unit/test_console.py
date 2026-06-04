@@ -220,6 +220,23 @@ def test_graph_marks_artifacts_missing_until_the_file_really_exists(tmp_path):
     assert art()["status"] == "created"                     # file now exists -> real
 
 
+def test_real_agent_tool_spawns_flag_the_roster_node(tmp_path):
+    # A genuine subagent spawn in the stream (Agent tool) marks the roster node real=True and sets
+    # its status — proof, vs an emitted event alone. No duplicate node.
+    import os, json
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    with open(os.path.join(str(tmp_path), rid, "run.log"), "w") as f:
+        f.write(json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "a1", "name": "Agent",
+             "input": {"description": "HORIZON agent: context assembly", "subagent_type": "Explore"}}]}}) + "\n")
+    hs = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "agent" and n["data"]["label"] == "HORIZON"]
+    assert len(hs) == 1 and hs[0]["real"] is True and hs[0]["status"] == "running"
+    # a roster agent with NO real spawn stays planned + not real
+    av = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["label"] == "VANGUARD"][0]
+    assert av["status"] == "planned" and av["real"] is False
+
+
 def test_graph_always_shows_the_named_phase_agents(tmp_path):
     from software_factory import events
     c = console(tmp_path, FakeLauncher())
@@ -304,6 +321,17 @@ def test_run_uses_sonnet_model_and_a_turn_cap_by_default(tmp_path):
     argv = launcher.argv
     assert "--model" in argv and argv[argv.index("--model") + 1] == "claude-sonnet-4-6"
     assert "--max-turns" in argv
+
+
+def test_read_log_tails_by_default_but_full_returns_everything(tmp_path):
+    import os
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    big = "L\n" * 30000  # ~60KB of saved log
+    with open(os.path.join(str(tmp_path), rid, "run.log"), "w") as f:
+        f.write(big)
+    assert len(c.read_log(rid)) <= 20000              # feed gets the tail
+    assert len(c.read_log(rid, max_bytes=None)) == len(big)  # full saved log is retrievable
 
 
 def test_default_launch_tees_agent_output_to_the_log_file(tmp_path):

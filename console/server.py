@@ -52,7 +52,15 @@ class Handler(BaseHTTPRequestHandler):
             if rest.endswith("/artifact"):
                 return self._send(200, console.artifact(rest[:-len("/artifact")], qs.get("path", [""])[0]))
             if rest.endswith("/log"):
-                return self._send(200, {"log": console.read_log(rest[:-len("/log")])})
+                rid = rest[:-len("/log")]
+                if qs.get("full"):   # full saved log, downloadable
+                    body = console.read_log(rid, max_bytes=None).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("Content-Disposition", f'attachment; filename="{rid}.log"')
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers(); self.wfile.write(body); return
+                return self._send(200, {"log": console.read_log(rid)})
             return self._send(200, console.status(rest))
         return self._send(404, {"error": "not found"})
 

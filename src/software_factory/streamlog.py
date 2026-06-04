@@ -49,7 +49,7 @@ def agents(text: str) -> list[dict]:
     done: set[str] = set()
     for ev in _events(text):
         for c in (ev.get("message") or {}).get("content", []) or []:
-            if c.get("type") == "tool_use" and c.get("name") == "Task":
+            if c.get("type") == "tool_use" and c.get("name") in ("Task", "Agent"):
                 inp = c.get("input", {}) or {}
                 nodes[c["id"]] = {
                     "id": c["id"],

@@ -222,7 +222,13 @@ class Console:
         with open(p, "r", errors="replace") as f:
             return f.read()
 
-    def read_log(self, run_id: str, max_bytes: int = 20000) -> str:
+    def read_log(self, run_id: str, max_bytes: int | None = 20000) -> str:
+        """Tail of the saved run.log by default; pass max_bytes=None for the FULL saved log."""
+        if max_bytes is None:
+            return self._full_log(run_id)
+        return self._read_log_tail(run_id, max_bytes)
+
+    def _read_log_tail(self, run_id: str, max_bytes: int) -> str:
         """Tail of the headless run's captured stdout/stderr (run.log)."""
         p = os.path.join(self._paths(run_id)["base"], "run.log")
         if not os.path.exists(p):
@@ -343,12 +349,23 @@ class Console:
                 if k in agent_info:
                     out = p.get("outcome")
                     agent_info[k]["status"] = "done" if out in (None, "real_diff", "success") else out
+        # REAL proof: subagents actually spawned in the claude stream (Agent/Task tool calls).
+        # Match them to a roster slot by role keyword so a genuine spawn upgrades that node and
+        # flags it `real` — an emitted agent_spawned event alone is NOT proof; a stream spawn is.
         for a in streamlog.agents(self._full_log(run_id)):
-            agent_info.setdefault(a["id"], {"label": a["label"], "phase": None, "status": a["status"]})
+            lbl = (a.get("label") or "").lower()
+            matched = next((aid for labelkey, aid in roster_keys.items() if labelkey in lbl), None)
+            if matched:
+                agent_info[matched]["status"] = a["status"]
+                agent_info[matched]["real"] = True
+            else:
+                agent_info.setdefault(a["id"], {"label": a["label"], "phase": None,
+                                                "status": a["status"], "real": True})
         agent_ids = set()
         for aid, info in agent_info.items():
             nid = "agent:" + aid; agent_ids.add(nid)
-            nodes.append({"data": {"id": nid, "label": info["label"], "kind": "agent", "status": info["status"]}})
+            nodes.append({"data": {"id": nid, "label": info["label"], "kind": "agent",
+                                   "status": info["status"], "real": bool(info.get("real"))}})
             src = "phase:" + info["phase"] if info.get("phase") in PIPELINE else "orchestrator"
             edges.append({"data": {"source": src, "target": nid}})  # orchestrator/phase spawns the agent
 
