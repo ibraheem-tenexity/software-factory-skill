@@ -26,6 +26,14 @@ SKILL_VERSION = "0.0.1"
 PIPELINE = ["provision", "research", "architect", "wait-for-deps", "tickets", "build", "deploy", "test"]
 PIPELINE_LABELS = {"wait-for-deps": "wait for deps"}
 
+# The named agent roster per phase (from the skill). The graph ALWAYS shows these so the canvas
+# reflects the swarm even before/without the live run emitting agent_spawned — they go
+# planned → running → done as agent_spawned/agent_done events arrive. (build/fix agents are dynamic.)
+PHASE_AGENTS = {
+    "research": [("horizon", "HORIZON"), ("archivist", "ARCHIVIST"), ("vanguard", "VANGUARD"), ("chroma", "CHROMA")],
+    "architect": [("architect", "software-architect")],
+}
+
 
 @dataclass
 class RunRequest:
@@ -309,14 +317,20 @@ class Console:
             edges.append({"data": {"source": prev, "target": pid}})
             prev = pid
 
-        # Agents are spawned by the orchestrator (ruflo swarm) per task — derive them from
-        # agent_spawned/agent_done events; fall back to Task subagents in the claude stream.
+        # Agents: start from the known per-phase roster (always visible as "planned"), then upgrade
+        # from agent_spawned/agent_done events; build/fix agents come in dynamically; Task subagents
+        # in the claude stream are a fallback.
         agent_info = {}  # agent_id -> {label, phase, status}
+        for ph, roster in PHASE_AGENTS.items():
+            for aid, role in roster:
+                agent_info[aid] = {"label": role, "phase": ph, "status": "planned"}
         for e in evs:
             p = e.get("payload") or {}
             if e["type"] == "agent_spawned":
                 aid = p.get("id") or p.get("role") or "agent"
-                agent_info[aid] = {"label": p.get("role") or aid, "phase": p.get("phase"), "status": "running"}
+                cur = agent_info.get(aid, {})
+                agent_info[aid] = {"label": p.get("role") or cur.get("label") or aid,
+                                   "phase": p.get("phase") or cur.get("phase"), "status": "running"}
             elif e["type"] == "agent_done":
                 aid = p.get("id") or p.get("role")
                 if aid in agent_info:

@@ -220,6 +220,21 @@ def test_graph_marks_artifacts_missing_until_the_file_really_exists(tmp_path):
     assert art()["status"] == "created"                     # file now exists -> real
 
 
+def test_graph_always_shows_the_named_phase_agents(tmp_path):
+    from software_factory import events
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    labels = lambda: {n["data"]["label"]: n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "agent"}
+    L = labels()
+    assert {"HORIZON", "ARCHIVIST", "VANGUARD", "CHROMA", "software-architect"} <= set(L)
+    assert L["HORIZON"]["status"] == "planned"                    # shown before any event
+    # agent_spawned upgrades the node to running; the named agent hangs off its phase
+    events.emit(str(tmp_path), rid, "agent_spawned", {"id": "horizon", "role": "HORIZON", "phase": "research"})
+    assert labels()["HORIZON"]["status"] == "running"
+    g = c.graph(rid)
+    assert any(e["data"]["source"] == "phase:research" and e["data"]["target"] == "agent:horizon" for e in g["edges"])
+
+
 def test_pasted_description_is_persisted_and_input_artifact_is_real(tmp_path):
     # The user pastes context (no file) → it's saved as input/context.txt and the input artifact
     # is a REAL green node, not a hollow placeholder.

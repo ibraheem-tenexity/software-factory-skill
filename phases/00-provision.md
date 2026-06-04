@@ -4,7 +4,7 @@
 URL + creds: PAT+username+email, or OAuth).
 
 **Do:**
-- **Extract** the uploaded context to usable text (install packages if needed for pdf/docx).
+- **Extract** the uploaded context to usable text (install packages if needed for pdf/docx), Or if the user input text then use that as input.
 - Create/connect the repo via `gh` — `repo.GitHub.create_repo(name)`.
 - Verify every surface has its creds first — `creds.check_all(target, env)`; any failure is a
   **hard block** (recorded, never guessed/hard-coded).

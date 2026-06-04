@@ -168,7 +168,7 @@
       const k = ele.data("kind"), s = ele.data("status");
       if (k === "orchestrator") return "#002b5c";
       if (k === "phase") return s === "done" ? "#059669" : s === "active" ? "#d97706" : "#aeb6c4";
-      if (k === "agent") return s === "done" ? "#059669" : (s === "no_op" || s === "failed") ? "#dc2626" : "#d97706";
+      if (k === "agent") return s === "done" ? "#059669" : (s === "no_op" || s === "failed") ? "#dc2626" : s === "planned" ? "#aeb6c4" : "#d97706";
       if (k === "artifact") return s === "missing" ? "#dc2626" : "#7c3aed";
       if (k === "blocker") return "#dc2626";
       if (k === "gate") return "#0891b2";
