@@ -228,9 +228,11 @@ def test_graph_always_shows_the_named_phase_agents(tmp_path):
     L = labels()
     assert {"HORIZON", "ARCHIVIST", "VANGUARD", "CHROMA", "software-architect"} <= set(L)
     assert L["HORIZON"]["status"] == "planned"                    # shown before any event
-    # agent_spawned upgrades the node to running; the named agent hangs off its phase
-    events.emit(str(tmp_path), rid, "agent_spawned", {"id": "horizon", "role": "HORIZON", "phase": "research"})
-    assert labels()["HORIZON"]["status"] == "running"
+    # an event with a MISMATCHED id but the same role upgrades the roster node (no duplicate)
+    events.emit(str(tmp_path), rid, "agent_spawned", {"id": "HORIZON", "role": "HORIZON", "phase": "research"})
+    g2 = c.graph(rid)
+    horizons = [n for n in g2["nodes"] if n["data"]["kind"] == "agent" and n["data"]["label"] == "HORIZON"]
+    assert len(horizons) == 1 and horizons[0]["data"]["status"] == "running"
     g = c.graph(rid)
     assert any(e["data"]["source"] == "phase:research" and e["data"]["target"] == "agent:horizon" for e in g["edges"])
 

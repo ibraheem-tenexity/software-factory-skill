@@ -320,22 +320,29 @@ class Console:
         # Agents: start from the known per-phase roster (always visible as "planned"), then upgrade
         # from agent_spawned/agent_done events; build/fix agents come in dynamically; Task subagents
         # in the claude stream are a fallback.
-        agent_info = {}  # agent_id -> {label, phase, status}
+        agent_info = {}  # agent_key -> {label, phase, status}
+        roster_keys = {label.lower(): aid for _ph, r in PHASE_AGENTS.items() for aid, label in r}
         for ph, roster in PHASE_AGENTS.items():
             for aid, role in roster:
                 agent_info[aid] = {"label": role, "phase": ph, "status": "planned"}
+
+        def _akey(p):  # match a named-roster agent by role (case-insensitive) so events upgrade, not duplicate
+            r = (p.get("role") or "").strip().lower()
+            if r in roster_keys:
+                return roster_keys[r]
+            return p.get("id") or p.get("role") or "agent"
+
         for e in evs:
             p = e.get("payload") or {}
             if e["type"] == "agent_spawned":
-                aid = p.get("id") or p.get("role") or "agent"
-                cur = agent_info.get(aid, {})
-                agent_info[aid] = {"label": p.get("role") or cur.get("label") or aid,
-                                   "phase": p.get("phase") or cur.get("phase"), "status": "running"}
+                k = _akey(p); cur = agent_info.get(k, {})
+                agent_info[k] = {"label": p.get("role") or cur.get("label") or k,
+                                 "phase": p.get("phase") or cur.get("phase"), "status": "running"}
             elif e["type"] == "agent_done":
-                aid = p.get("id") or p.get("role")
-                if aid in agent_info:
+                k = _akey(p)
+                if k in agent_info:
                     out = p.get("outcome")
-                    agent_info[aid]["status"] = "done" if out in (None, "real_diff", "success") else out
+                    agent_info[k]["status"] = "done" if out in (None, "real_diff", "success") else out
         for a in streamlog.agents(self._full_log(run_id)):
             agent_info.setdefault(a["id"], {"label": a["label"], "phase": None, "status": a["status"]})
         agent_ids = set()
