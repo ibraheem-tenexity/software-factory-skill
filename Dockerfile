@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Orchestrator runtime + deploy CLI + browser-test MCP, all global
 RUN npm install -g @anthropic-ai/claude-code @railway/cli @playwright/mcp playwright
 
-# Chromium + OS libs into a SHARED path so a non-root runtime user can use them.
+# Chromium + OS libs into a SHARED path so the non-root runtime user can use them.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN npx -y playwright install --with-deps chromium
 
@@ -19,21 +19,21 @@ RUN curl -fsSL https://github.com/cli/cli/releases/download/v2.62.0/gh_2.62.0_li
     && mv /tmp/gh_2.62.0_linux_amd64/bin/gh /usr/local/bin/gh \
     && rm -rf /tmp/gh_2.62.0_linux_amd64
 
-# Claude Code refuses bypassed permissions as root — run as a non-root user.
-RUN useradd -m -u 1000 factory
-ENV HOME=/home/factory
+# The node base image already ships an unprivileged `node` user (uid 1000) with home
+# /home/node — reuse it (Claude Code refuses bypassed permissions as root).
+ENV HOME=/home/node
 
 WORKDIR /app
 COPY . /app
 
-RUN mkdir -p /home/factory/.claude/skills \
-    && ln -sfn /app /home/factory/.claude/skills/software-factory \
+RUN mkdir -p /home/node/.claude/skills \
+    && ln -sfn /app /home/node/.claude/skills/software-factory \
     && printf '%s\n' '{"mcpServers":{"playwright":{"command":"npx","args":["-y","@playwright/mcp@latest","--headless","--browser","chromium"]}}}' > /app/.mcp.json \
-    && printf '%s\n' '{"enableAllProjectMcpServers":true}' > /home/factory/.claude/settings.json \
+    && printf '%s\n' '{"enableAllProjectMcpServers":true}' > /home/node/.claude/settings.json \
     && chmod +x /app/entrypoint.sh \
-    && chown -R factory:factory /app /home/factory /ms-playwright
+    && chown -R node:node /app /home/node /ms-playwright
 
-# Entrypoint drops to the non-root `factory` user even if the platform starts us as root.
+# Entrypoint drops to uid 1000 (node) even if the platform starts us as root.
 # Required at runtime (set on the service): ANTHROPIC_API_KEY, GH_TOKEN, RAILWAY_TOKEN, SUPABASE_ACCESS_TOKEN
-ENV PYTHONUNBUFFERED=1 SF_BIND=0.0.0.0 HOME=/home/factory
+ENV PYTHONUNBUFFERED=1 SF_BIND=0.0.0.0
 CMD ["/app/entrypoint.sh"]
