@@ -75,39 +75,44 @@ clears them itself; it never stops for a review.
   not in the workspace — so teardown never touches the proof.
 - **Done-gate:** repo writable, brain reachable, budget set, workspace created.
 
-### research
-Produce a PRD grounded in **real web research** — do not skip the web.
-- **Define the problem.** From the extracted context, state it crisply: who the customer is, the
-  job-to-be-done, and what success looks like.
-- **Research sub-agent — web search is REQUIRED (not optional).** Spawn a research subagent that runs
-  the `WebSearch` tool on 4–6 concrete queries — e.g. `"<category> app"`, `"<category> competitors"`,
-  `"open source <category>"`, `"best <category> tools 2026"`, `"how does <known competitor> work"` —
-  then `WebFetch`es the 4–8 most relevant results and READS them. It MUST return **≥3 real existing
-  products** (name + URL + what they do, features, gaps). Fewer than 3 ⇒ search more (synonyms,
-  adjacent categories). **A PRD with no researched products is a FAILED research phase — keep searching.**
-- **PM lead — define the product.** From the problem + competitor landscape, decide the features that
-  should exist: the single primary happy-flow, the must-haves, and what's explicitly out of scope.
-- **PM UI/UX — design the usage.** Research how people use products in this space; propose the screens
-  and the primary user journeys (the happy-flow click-path the Playwright gate will verify).
-- **Write `PRD.md`** in the repo: problem; users; value; **competitor landscape (every product found,
-  with URL)**; features; screens/journeys; MVP scope; out-of-scope; risks; recommended approach.
-  Commit + push, then `emit artifact {title:"PRD", path:"workspace/<repo>/PRD.md", kind:"prd"}` so it
-  shows on the factory UI. Continue immediately — do not wait.
-- **Done-gate:** `PRD.md` cites **≥3 real researched products with URLs** and covers
-  problem+users+features+screens+MVP scope.
+### research  — PIPELINE 1 (product definition)
+Spawn the named PRD agents in order (`emit agent_spawned`/`agent_done` per role). They carry forward
+the previous version's contracts; pull/write findings via ruflo (memory).
 
-### architect
-- Two co-design agents converse to produce, from the PRD: (a) a **demo-simple** architecture and (b)
-  the **feature + screen list**. YAGNI hard — ask "do I need all of this for a first demo version?" and
-  use the **fewest services possible**. Fixed constraints: **Railway** for compute, **Supabase** for
-  storage + auth, **Vercel** for frontend if needed. Disclose dependencies between features.
-- Write `architecture.md` (components, data model, dependency list). Build the Mermaid, then
-  `diagram.render(mermaid, ".../architecture.svg")` (mmdc → SVG). Commit both; `emit artifact` for the
-  SVG and the md so they render on the canvas.
-- Note which provider tokens the app itself will need at runtime (Railway/Supabase, plus any service
-  tokens the app uses) so `wait-for-deps` can require them.
-- **Done-gate:** `architecture.md` + `architecture.svg` committed; features map to PRD scope; the
-  dependency + required-token list is recorded.
+1. **HORIZON (pm.lead) — context assembly.** From the extracted context, normalize the transcript into
+   a tight, ordered **scope**: who the customer is, the job-to-be-done, success criteria; cut
+   non-load-bearing detail; list open questions. → `context_packet`.
+2. **ARCHIVIST (scout.librarian) — reuse scan.** Query prior runs / ruflo precedent
+   (`memory.recall_precedent`) for similar work → **fork / extend / standalone** recommendation +
+   reuse candidates. (Don't rebuild what exists.)
+3. **VANGUARD (domain.expert) — pain, solution paths, AND deep research.** Bring industry **gravity** —
+   push back on the scope, name domain constraints. Evaluate **≥2 solution paths** with tradeoffs and
+   recommend the MVP proof. **Web search is REQUIRED:** run `WebSearch` on 4–6 concrete queries
+   (`"<category> app"`, `"<category> competitors"`, `"how does <competitor> work"`, …), `WebFetch` the
+   4–8 best, and surface **≥3 real existing products** (name + URL + features + gaps). Fewer than 3 ⇒
+   keep searching. → solution options + tradeoffs, recommended MVP, research brief + source map.
+4. **CHROMA (design.lead / pm-UI/UX) — design spec.** Journeys, screens, states, a11y — define the
+   **primary happy-flow click-path** the Playwright gate will verify.
+5. **HORIZON (pm.lead) — write the PRD.** `PRD.md` in the repo with the full contract: product thesis;
+   users/JTBD; journeys; **competitor landscape (every product found, with URL)**; MVP scope; features;
+   NFRs; **acceptance criteria (given/when/then/verification)**; out-of-scope; **ticket seeds**. Commit +
+   push, then `emit artifact {title:"PRD", path:"workspace/<repo>/PRD.md", kind:"prd"}`.
+- **Done-gate (mechanical):** `artifacts.prd_is_complete(PRD.md)` passes — **≥3 real product URLs**,
+  an acceptance-criteria section, and ticket seeds. A hollow/absent PRD does NOT advance (the canvas
+  shows it red until the file truly exists). No human approval — a code check, not a pause.
+
+### architect  — END OF PIPELINE 1
+- **software-architect (NEW agent)** — from the PRD + CHROMA's design spec, design the **demo-simplest**
+  architecture: YAGNI hard ("do I need all of this for a first demo?"), the **fewest services possible**.
+  Fixed constraints: **Railway** compute, **Supabase** storage + auth, **Vercel** frontend if needed.
+  Produce the service list, **data model**, **dependency list** between features, and the
+  **required-token list** (which provider/service tokens the app needs at runtime, so `wait-for-deps`
+  can require them). CHROMA may consult on screen↔component mapping.
+- Write `architecture.md`; build the Mermaid, then `diagram.render(mermaid, ".../architecture.svg")`
+  (mmdc → SVG). Commit both; `emit artifact` for the SVG and the md.
+- **Done-gate = PIPELINE-1 COMPLETE (mechanical).** `artifacts.verify(run_dir, ["…/PRD.md",
+  "…/architecture.md", "…/architecture.svg"])` must pass (all exist, non-empty) AND the PRD gate held.
+  **The orchestrator must NOT begin pipeline 2 until this passes** — product definition is done first.
 
 ### wait-for-deps
 - Provision the infra the architecture needs and **wait (autonomously) for it to be ready before
@@ -182,6 +187,8 @@ Produce a PRD grounded in **real web research** — do not skip the web.
 | Tickets with enforced done | `tickets.TicketStore` — `create_ticket`, `claim`, `mark_done` |
 | Repo / PR / merge-on-green | `repo.GitHub` — `create_repo`, `open_pr`, `merge_if_green` |
 | Architecture diagram (Mermaid → SVG) | `diagram.render(mermaid_text, out_path)` |
+| Pipeline-1 gate (PRD/architecture real) | `artifacts.verify(run_dir, paths)`, `artifacts.prd_is_complete(text)` |
+| Pull memory + ReasoningBank precedent | `memory.recall_precedent` / `record_precedent` / `consolidate` |
 | Deploy to the per-run service + prove live | `deploy.deploy(target, dir)` (token via env), `deploy.healthy(url)` |
 | Done verdict + bug list | `gate.happy_flow_passed(result)`, `gate.bugs_from(result)` |
 | Isolated workspace (mk/rm) | `workspace.create(runs_dir, run_id)`, `workspace.destroy(path, runs_dir)` |
