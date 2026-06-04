@@ -131,6 +131,49 @@ def test_empty_credentials_are_ignored(tmp_path):
     assert "RAILWAY_TOKEN" not in launcher.env
 
 
+def test_make_prompt_targets_a_dedicated_service_not_the_runner(tmp_path):
+    # Spec 1: the built app must deploy to its OWN service, never the runner's own.
+    p = make_prompt(RunRequest(description="x", target="railway"), "run-xyz", runs_dir="/runs")
+    assert "sf-run-xyz" in p           # per-run dedicated service name
+    assert "never" in p.lower() and "factory" in p.lower()  # explicit don't-clobber warning
+
+
+def test_status_cost_is_derived_from_the_run_log(tmp_path):
+    # Spec 2: live cost comes from the real claude stream, not self-reported state.
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="guestbook"))
+    with open(launcher.log_path, "w") as f:
+        f.write('{"type":"result","subtype":"success","total_cost_usd":0.0731}\n')
+    assert c.status(run_id)["spent_usd"] == 0.0731
+
+
+def test_list_runs_returns_launched_runs_for_reconnect(tmp_path):
+    # Spec 3: persistence — the server can enumerate runs so the UI reconnects after reload.
+    c = console(tmp_path, FakeLauncher())
+    ids = []
+    for i in range(2):
+        c._new_id = lambda i=i: f"run-{i}"
+        ids.append(c.start_run(RunRequest(description=f"app {i}")))
+    listed = {r["run_id"] for r in c.list_runs()}
+    assert set(ids) <= listed
+    one = [r for r in c.list_runs() if r["run_id"] == "run-0"][0]
+    assert one["description"] == "app 0" and "phase" in one
+
+
+def test_graph_has_central_orchestrator_and_agent_nodes(tmp_path):
+    # Spec 4: orchestrator at center, Task subagents as nodes around it.
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="guestbook"))
+    with open(launcher.log_path, "w") as f:
+        f.write('{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Task","input":{"description":"build form","subagent_type":"general-purpose"}}]}}\n')
+    g = c.graph(run_id)
+    assert g["orchestrator"]["id"] == "orchestrator"
+    assert g["orchestrator"]["phase"] == "provision"
+    assert [a["label"] for a in g["agents"]] == ["build form"]
+
+
 def test_run_uses_sonnet_model_and_a_turn_cap_by_default(tmp_path):
     # Cost controls, pinned: default model is Sonnet 4.6 and turns are bounded.
     launcher = FakeLauncher()

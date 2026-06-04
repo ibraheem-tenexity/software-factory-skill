@@ -13,6 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from . import streamlog
 from .agents import AgentRegistry
 from .evidence import build_evidence, verify_evidence
 from .runstate import JsonFileStore, RunState
@@ -45,10 +46,16 @@ def run_paths(runs_dir: str, run_id: str) -> dict:
 def make_prompt(req: RunRequest, run_id: str, runs_dir: str) -> str:
     base = os.path.join(runs_dir, run_id)
     ctx = f"\nContext: {req.context}" if req.context else ""
+    service = f"sf-{run_id}"
     return (
         "Use the software-factory skill to build, deploy, and browser-verify this app, "
         "fully autonomously.\n"
         f"run_id={run_id}. Budget ${req.budget:.0f} (hard cutoff). Deploy target: {req.target}.\n"
+        f"DEPLOY ISOLATION (critical): deploy the built app to a NEW, dedicated Railway service "
+        f"named '{service}' — create it with `railway add --service {service}`, then "
+        f"`railway up --service {service}`. NEVER run a bare `railway up`, and NEVER deploy to an "
+        f"existing service or the service you are running in (the factory console). Deploying "
+        f"onto your own service would overwrite the console — do not do it.\n"
         f"Write run state and telemetry under {base}/ "
         f"(runstate JsonFileStore at {base}, agents.db and tickets.db in that dir), and stamp "
         "the run's proof marker at provision.\n"
@@ -114,6 +121,13 @@ class Console:
         self._launch(argv, env, os.path.join(paths["base"], "run.log"))
         return run_id
 
+    def _full_log(self, run_id: str) -> str:
+        p = os.path.join(self._paths(run_id)["base"], "run.log")
+        if not os.path.exists(p):
+            return ""
+        with open(p, "r", errors="replace") as f:
+            return f.read()
+
     def read_log(self, run_id: str, max_bytes: int = 20000) -> str:
         """Tail of the headless run's captured stdout/stderr (run.log)."""
         p = os.path.join(self._paths(run_id)["base"], "run.log")
@@ -143,12 +157,44 @@ class Console:
             "phase": state.phase,
             "done": state.phase == "done",
             "deploy_url": state.deploy_url,
-            "spent_usd": state.spent_usd,
+            # Spec 2: live cost from the real claude stream, falling back to recorded state.
+            "spent_usd": streamlog.cost_usd(self._full_log(run_id)) or state.spent_usd,
             "creds_provided": state.creds_provided,  # names only, never values
             "byo_railway": "RAILWAY_TOKEN" in (state.creds_provided or []),
             "workspace": self._workspace_state(run_id, state.phase),
             "agents": reg.counts(run_id),
             "no_op_rate": reg.no_op_rate(run_id),
+        }
+
+    def list_runs(self) -> list[dict]:
+        """All launched runs (newest first) so the UI can reconnect after a reload (spec 3)."""
+        runs = []
+        for name in os.listdir(self._runs_dir):
+            base = os.path.join(self._runs_dir, name)
+            state_json = os.path.join(base, f"{name}.json")
+            if not os.path.isdir(base) or not os.path.exists(state_json):
+                continue
+            st = self._load_state(name)
+            runs.append({
+                "run_id": name,
+                "phase": st.phase,
+                "description": st.description,
+                "deploy_url": st.deploy_url,
+                "spent_usd": streamlog.cost_usd(self._full_log(name)) or st.spent_usd,
+            })
+        runs.sort(key=lambda r: os.path.getmtime(os.path.join(self._runs_dir, r["run_id"])), reverse=True)
+        return runs
+
+    def graph(self, run_id: str) -> dict:
+        """Spec 4: central orchestrator node + the Task subagents radiating from it."""
+        state = self._load_state(run_id)
+        return {
+            "orchestrator": {
+                "id": "orchestrator",
+                "label": "Claude · software-factory",
+                "phase": state.phase,
+            },
+            "agents": streamlog.agents(self._full_log(run_id)),
         }
 
     def evidence(self, run_id: str) -> dict:

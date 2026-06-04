@@ -7,28 +7,30 @@
   <style>
     :root { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
     body { margin: 0; background: #0b0e14; color: #d6deeb; display: flex; min-height: 100vh; }
-    .pane { flex: 1; padding: 24px 28px; }
-    .left { border-right: 1px solid #1c2230; max-width: 460px; }
-    h1 { font-size: 15px; color: #7fdbca; margin: 0 0 18px; }
-    label { display: block; font-size: 12px; color: #5f7e97; margin: 14px 0 5px; }
+    .pane { padding: 22px 26px; box-sizing: border-box; }
+    .left { width: 430px; border-right: 1px solid #1c2230; flex: none; }
+    .right { flex: 1; display: flex; flex-direction: column; }
+    h1 { font-size: 15px; color: #7fdbca; margin: 0 0 16px; }
+    label { display: block; font-size: 12px; color: #5f7e97; margin: 13px 0 5px; }
     textarea, input, select { width: 100%; box-sizing: border-box; background: #0e1320; color: #d6deeb;
       border: 1px solid #1c2230; border-radius: 6px; padding: 9px; font: inherit; font-size: 13px; }
-    textarea { min-height: 90px; resize: vertical; }
+    textarea { min-height: 80px; resize: vertical; }
     .row { display: flex; gap: 12px; } .row > div { flex: 1; }
-    button { margin-top: 18px; width: 100%; padding: 11px; border: 0; border-radius: 6px;
+    button { margin-top: 16px; width: 100%; padding: 11px; border: 0; border-radius: 6px;
       background: #7fdbca; color: #0b0e14; font: inherit; font-weight: 600; cursor: pointer; }
     button:disabled { opacity: .5; cursor: default; }
-    .phase { font-size: 12px; color: #5f7e97; margin-bottom: 14px; }
-    .phase b { color: #ffcb6b; }
-    .stats { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 18px; }
-    .stat { font-size: 12px; color: #5f7e97; } .stat b { display: block; font-size: 20px; color: #d6deeb; }
-    .stat.warn b { color: #ef5350; }
-    .url { margin: 16px 0; padding: 14px; background: #0e1320; border: 1px solid #22c55e44; border-radius: 8px; }
-    .url a { color: #c3e88d; font-size: 15px; word-break: break-all; }
-    pre { background: #0e1320; border: 1px solid #1c2230; border-radius: 8px; padding: 14px;
-      font-size: 11px; overflow: auto; white-space: pre-wrap; }
-    .ok { color: #c3e88d; } .bad { color: #ef5350; }
     .muted { color: #5f7e97; font-size: 12px; }
+    .bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+    .phase b { color: #ffcb6b; }
+    .stats { display: flex; gap: 20px; flex-wrap: wrap; margin: 10px 0 6px; }
+    .stat { font-size: 12px; color: #5f7e97; } .stat b { display: block; font-size: 19px; color: #d6deeb; }
+    .stat.cost b { color: #c3e88d; } .stat.warn b { color: #ef5350; }
+    #graph { flex: 1; min-height: 360px; border: 1px solid #161b27; border-radius: 10px; margin-top: 8px; background: #0a0d13; }
+    .url { margin: 12px 0; padding: 12px; background: #0e1320; border: 1px solid #22c55e44; border-radius: 8px; }
+    .url a { color: #c3e88d; word-break: break-all; }
+    pre { background: #0e1320; border: 1px solid #1c2230; border-radius: 8px; padding: 12px;
+      font-size: 11px; max-height: 220px; overflow: auto; white-space: pre-wrap; }
+    select.runs { margin-bottom: 4px; }
   </style>
 </head>
 <body>
@@ -37,103 +39,160 @@
     <label>What should we build?</label>
     <textarea id="description" placeholder="A guestbook web app: visitors leave a name and see the list."></textarea>
     <label>Context / data (optional)</label>
-    <textarea id="context" placeholder="Branding, sample data, constraints…"></textarea>
+    <textarea id="context" placeholder="Branding, sample data, an email, constraints…"></textarea>
     <div class="row">
       <div><label>Budget (USD)</label><input id="budget" type="number" value="100" /></div>
       <div><label>Deploy target</label>
         <select id="target"><option value="railway">railway</option><option value="vercel">vercel</option></select>
       </div>
     </div>
-
     <label>Railway</label>
     <select id="railwayMode">
-      <option value="managed">Managed (use the platform's Railway)</option>
+      <option value="managed">Managed (platform Railway)</option>
       <option value="byo">Bring your own Railway</option>
     </select>
     <div id="byo" style="display:none">
       <label>Railway API token</label>
       <input id="railwayToken" type="password" autocomplete="off" placeholder="rwt_…" />
-      <label>Railway project ID (optional)</label>
-      <input id="railwayProject" type="text" autocomplete="off" placeholder="project uuid" />
-      <p class="muted" id="secnote">🔒 Sent once to launch this run, injected into the build's
-        environment, and never stored, logged, or shown again. Cleared from this page on submit.</p>
+      <p class="muted">🔒 Sent once to launch this run, injected into the build's environment, never stored.</p>
     </div>
-
     <button id="go">Build &amp; deploy</button>
     <p class="muted" id="note"></p>
   </div>
 
-  <div class="pane">
-    <div class="phase" id="phase">Idle — submit a build to begin.</div>
+  <div class="pane right">
+    <div class="bar">
+      <label style="margin:0">Run</label>
+      <select id="runs" class="runs" style="width:auto; min-width:280px"></select>
+      <span class="phase muted" id="phase">—</span>
+    </div>
     <div class="stats" id="stats"></div>
     <div id="urlbox"></div>
+    <svg id="graph" preserveAspectRatio="xMidYMid meet"></svg>
     <div id="proof"></div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
+    const SVGNS = "http://www.w3.org/2000/svg";
     let timer = null, runId = null;
 
-    $("railwayMode").onchange = (e) => {
-      $("byo").style.display = e.target.value === "byo" ? "block" : "none";
-    };
+    $("railwayMode").onchange = (e) => { $("byo").style.display = e.target.value === "byo" ? "block" : "none"; };
+
+    // ---- persistence: reconnect on reload (spec 3) ----
+    async function loadRuns(selectRunId) {
+      const { runs } = await (await fetch("/api/runs")).json();
+      const sel = $("runs");
+      sel.innerHTML = "";
+      if (!runs.length) { sel.innerHTML = '<option>(no runs yet)</option>'; return; }
+      for (const r of runs) {
+        const o = document.createElement("option");
+        o.value = r.run_id;
+        o.textContent = `${r.run_id} · ${r.phase} · $${(r.spent_usd || 0).toFixed(2)} · ${(r.description || "").slice(0, 40)}`;
+        sel.appendChild(o);
+      }
+      const want = selectRunId || localStorage.getItem("sf_run") || runs[0].run_id;
+      if ([...sel.options].some((o) => o.value === want)) sel.value = want;
+      attach(sel.value);
+    }
+    $("runs").onchange = (e) => attach(e.target.value);
+
+    function attach(id) {
+      runId = id;
+      localStorage.setItem("sf_run", id);
+      if (timer) clearInterval(timer);
+      poll();
+      timer = setInterval(poll, 2500);
+    }
 
     $("go").onclick = async () => {
-      $("go").disabled = true;
-      $("proof").innerHTML = ""; $("urlbox").innerHTML = "";
+      $("go").disabled = true; $("proof").innerHTML = ""; $("urlbox").innerHTML = "";
       const byo = $("railwayMode").value === "byo";
-      const payload = {
-        description: $("description").value, context: $("context").value,
-        budget: Number($("budget").value), target: $("target").value,
-      };
-      if (byo) {
-        payload.railway_token = $("railwayToken").value;
-        payload.railway_project_id = $("railwayProject").value;
-      }
-      const res = await fetch("/api/runs", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      // wipe the secret from the page the instant it's submitted
-      $("railwayToken").value = ""; $("railwayProject").value = "";
-      runId = (await res.json()).run_id;
-      $("note").textContent = "run " + runId + " launched (headless claude).";
-      if (timer) clearInterval(timer);
-      poll(); timer = setInterval(poll, 2500);
+      const payload = { description: $("description").value, context: $("context").value,
+        budget: Number($("budget").value), target: $("target").value };
+      if (byo) payload.railway_token = $("railwayToken").value;
+      const res = await fetch("/api/runs", { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      $("railwayToken").value = "";
+      const id = (await res.json()).run_id;
+      $("note").textContent = "run " + id + " launched (headless claude).";
+      $("go").disabled = false;
+      await loadRuns(id);
     };
 
     async function poll() {
       if (!runId) return;
-      const s = await (await fetch("/api/runs/" + runId)).json();
-      const rail = s.byo_railway ? " · railway: your key 🔑" : "";
-      const wsIcon = { active: "📂 workspace", cleaned: "🧹 workspace cleaned", pending: "" };
-      const ws = s.workspace && wsIcon[s.workspace] ? " · " + wsIcon[s.workspace] : "";
-      $("phase").innerHTML = "phase: <b>" + s.phase + "</b>" + (s.done ? " ✓" : "") + rail + ws;
+      let s, g;
+      try {
+        s = await (await fetch("/api/runs/" + runId)).json();
+        g = await (await fetch("/api/runs/" + runId + "/graph")).json();
+      } catch { return; }
+      $("phase").innerHTML = "phase: <b>" + s.phase + "</b>" + (s.done ? " ✓" : "")
+        + (s.byo_railway ? " · railway:your key 🔑" : "")
+        + (s.workspace === "cleaned" ? " · 🧹 cleaned" : s.workspace === "active" ? " · 📂 workspace" : "");
       const a = s.agents || {};
       const warn = (s.no_op_rate || 0) > 0.3 ? "warn" : "";
       $("stats").innerHTML = `
-        <div class="stat"><b>${a.spawned||0}</b>agents</div>
-        <div class="stat"><b>${a.running||0}</b>running</div>
-        <div class="stat"><b>${a.done||0}</b>done</div>
-        <div class="stat ${warn}"><b>${Math.round((s.no_op_rate||0)*100)}%</b>no-op</div>
-        <div class="stat"><b>$${(s.spent_usd||0).toFixed(2)}</b>spent</div>`;
-      if (s.done && s.deploy_url) {
-        clearInterval(timer); $("go").disabled = false;
-        $("urlbox").innerHTML = `<div class="url">🚀 deployed: <a href="${s.deploy_url}" target="_blank">${s.deploy_url}</a></div>`;
-        showProof();
-      } else if (s.phase === "blocked" || s.phase === "stopped") {
-        clearInterval(timer); $("go").disabled = false; showProof();
-      }
+        <div class="stat cost"><b>$${(s.spent_usd || 0).toFixed(4)}</b>spent (live)</div>
+        <div class="stat"><b>${(g.agents || []).length}</b>agents</div>
+        <div class="stat"><b>${(g.agents || []).filter(x => x.status === "running").length}</b>running</div>
+        <div class="stat ${warn}"><b>${Math.round((s.no_op_rate || 0) * 100)}%</b>no-op</div>`;
+      $("urlbox").innerHTML = (s.done && s.deploy_url)
+        ? `<div class="url">🚀 deployed: <a href="${s.deploy_url}" target="_blank">${s.deploy_url}</a></div>` : "";
+      drawGraph(g);
+      if (s.done) { showProof(); }
+    }
+
+    // ---- node graph: orchestrator at center, agents around it (spec 4) ----
+    function drawGraph(g) {
+      const svg = $("graph");
+      const W = svg.clientWidth || 700, H = svg.clientHeight || 380;
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      svg.innerHTML = "";
+      const cx = W / 2, cy = H / 2;
+      const agents = g.agents || [];
+      // edges first (under nodes)
+      const R = Math.min(W, H) / 2 - 70;
+      agents.forEach((ag, i) => {
+        const ang = (2 * Math.PI * i) / Math.max(agents.length, 1) - Math.PI / 2;
+        const x = cx + R * Math.cos(ang), y = cy + R * Math.sin(ang);
+        line(svg, cx, cy, x, y, ag.status === "done" ? "#2e4a36" : "#4a4326");
+        node(svg, x, y, 22, ag.status === "done" ? "#c3e88d" : "#ffcb6b",
+          (ag.label || "agent").slice(0, 18), ag.type || "");
+      });
+      // central orchestrator
+      node(svg, cx, cy, 40, "#7fdbca", "orchestrator", g.orchestrator ? g.orchestrator.phase : "");
+    }
+    function line(svg, x1, y1, x2, y2, color) {
+      const l = document.createElementNS(SVGNS, "line");
+      l.setAttribute("x1", x1); l.setAttribute("y1", y1); l.setAttribute("x2", x2); l.setAttribute("y2", y2);
+      l.setAttribute("stroke", color); l.setAttribute("stroke-width", "1.5"); svg.appendChild(l);
+    }
+    function node(svg, x, y, r, color, label, sub) {
+      const c = document.createElementNS(SVGNS, "circle");
+      c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", r);
+      c.setAttribute("fill", "#0e1320"); c.setAttribute("stroke", color); c.setAttribute("stroke-width", "2");
+      svg.appendChild(c);
+      text(svg, x, y + r + 13, color, label);
+      if (sub) text(svg, x, y + r + 26, "#5f7e97", sub);
+    }
+    function text(svg, x, y, fill, s) {
+      const t = document.createElementNS(SVGNS, "text");
+      t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("text-anchor", "middle");
+      t.setAttribute("fill", fill); t.setAttribute("font-size", "11"); t.setAttribute("font-family", "ui-monospace,monospace");
+      t.textContent = s; svg.appendChild(t);
     }
 
     async function showProof() {
-      const e = await (await fetch("/api/runs/" + runId + "/evidence")).json();
-      const badge = e.verified
-        ? '<span class="ok">✓ VERIFIED — skill usage corroborated by artifacts</span>'
-        : '<span class="bad">✗ NOT verified</span>';
-      const reasons = e.reasons.length ? "\n\nreasons:\n - " + e.reasons.join("\n - ") : "";
-      $("proof").innerHTML = `<p>proof of run: ${badge}</p><pre>${JSON.stringify(e.bundle, null, 2)}${reasons}</pre>`;
+      try {
+        const e = await (await fetch("/api/runs/" + runId + "/evidence")).json();
+        const badge = e.verified ? '<span style="color:#c3e88d">✓ VERIFIED</span>' : '<span style="color:#ef5350">✗ not verified</span>';
+        const reasons = e.reasons && e.reasons.length ? "\nreasons:\n - " + e.reasons.join("\n - ") : "";
+        $("proof").innerHTML = `<p class="muted">proof of run: ${badge}</p><pre>${JSON.stringify(e.bundle, null, 2)}${reasons}</pre>`;
+      } catch {}
     }
+
+    loadRuns();  // reconnect on page load
   </script>
 </body>
 </html>
