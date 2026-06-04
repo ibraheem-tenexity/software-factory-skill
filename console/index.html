@@ -4,13 +4,19 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Software Factory — console</title>
-  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+  <!-- Cytoscape render core ported from ~/graph_viz: fcose base + continuous cola overlap-avoidance -->
+  <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+  <script src="https://unpkg.com/layout-base@2.0.1/layout-base.js"></script>
+  <script src="https://unpkg.com/cose-base@2.2.0/cose-base.js"></script>
+  <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
+  <script src="https://unpkg.com/webcola@3.4.0/WebCola/cola.min.js"></script>
+  <script src="https://unpkg.com/cytoscape-cola@2.5.1/cytoscape-cola.js"></script>
   <style>
     :root { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
     body { margin: 0; background: #0b0e14; color: #d6deeb; display: flex; height: 100vh; overflow: hidden; }
     .pane { padding: 20px 24px; box-sizing: border-box; }
     .left { width: 410px; flex: none; border-right: 1px solid #1c2230; overflow-y: auto; }
-    .right { flex: 1; display: flex; flex-direction: column; padding: 0; }
+    .right { flex: 1; display: flex; flex-direction: column; padding: 0; position: relative; }
     h1 { font-size: 15px; color: #7fdbca; margin: 0 0 14px; }
     label { display: block; font-size: 12px; color: #5f7e97; margin: 12px 0 5px; }
     textarea, input, select { width: 100%; box-sizing: border-box; background: #0e1320; color: #d6deeb;
@@ -19,20 +25,21 @@
     .row { display: flex; gap: 12px; } .row > div { flex: 1; }
     button { margin-top: 14px; width: 100%; padding: 11px; border: 0; border-radius: 6px;
       background: #7fdbca; color: #0b0e14; font: inherit; font-weight: 600; cursor: pointer; }
-    .muted { color: #5f7e97; font-size: 12px; }
-    .topbar { display: flex; align-items: center; gap: 16px; padding: 14px 22px; border-bottom: 1px solid #1c2230; flex-wrap: wrap; }
-    .topbar select { width: auto; min-width: 300px; }
+    button:disabled { opacity: .5; } .muted { color: #5f7e97; font-size: 12px; }
+    .topbar { display: flex; align-items: center; gap: 16px; padding: 13px 20px; border-bottom: 1px solid #1c2230; flex-wrap: wrap; }
+    .topbar select { width: auto; min-width: 260px; }
     .stat { font-size: 12px; color: #5f7e97; } .stat b { color: #d6deeb; } .stat.cost b { color: #c3e88d; }
-    #cy { flex: 1; background: #0a0d13; }
-    #inspect { position: absolute; right: 0; top: 0; bottom: 0; width: 360px; background: #0e1320;
-      border-left: 1px solid #1c2230; padding: 18px; overflow: auto; transform: translateX(100%); transition: transform .15s; }
+    #cy { flex: 1; }
+    .legend { padding: 6px 20px; font-size: 11px; color: #5f7e97; border-top: 1px solid #161b27; }
+    .legend span { margin-right: 13px; white-space: nowrap; }
+    #inspect { position: absolute; right: 0; top: 49px; bottom: 0; width: 360px; background: #0e1320e6;
+      backdrop-filter: blur(4px); border-left: 1px solid #1c2230; padding: 16px; overflow: auto;
+      transform: translateX(100%); transition: transform .15s; }
     #inspect.open { transform: none; }
     #inspect h3 { color: #7fdbca; font-size: 14px; margin: 0 0 4px; } #inspect .x { float: right; cursor: pointer; color: #5f7e97; }
-    #inspect pre { white-space: pre-wrap; font-size: 11px; background: #0b0e14; border: 1px solid #1c2230; border-radius: 6px; padding: 10px; max-height: 60vh; overflow: auto; }
-    #inspect img, #inspect svg { max-width: 100%; background: #fff; border-radius: 6px; }
-    .gate-btn { background: #ffcb6b; }
-    .legend { padding: 6px 22px; font-size: 11px; color: #5f7e97; border-top: 1px solid #161b27; }
-    .legend span { margin-right: 14px; }
+    #inspect pre { white-space: pre-wrap; font-size: 11px; background: #0b0e14; border: 1px solid #1c2230; border-radius: 6px; padding: 10px; max-height: 55vh; overflow: auto; }
+    #inspect svg { max-width: 100%; background: #fff; border-radius: 6px; }
+    .bad { color: #ef5350; } .gate-btn { background: #f78c6c; }
   </style>
 </head>
 <body>
@@ -72,71 +79,123 @@
     <div id="cy"></div>
     <div class="legend">
       <span style="color:#7fdbca">● orchestrator</span><span style="color:#82aaff">● phase</span>
-      <span style="color:#ffcb6b">● agent/active</span><span style="color:#c3e88d">● done/artifact</span>
-      <span style="color:#ef5350">● blocker</span><span style="color:#f78c6c">● gate (click to continue)</span>
+      <span style="color:#ffcb6b">● active/agent</span><span style="color:#c3e88d">● done/artifact</span>
+      <span style="color:#ef5350">● blocker / missing artifact</span><span style="color:#f78c6c">◆ gate</span>
     </div>
     <div id="inspect"></div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    let cy = null, runId = null, timer = null, lastIds = "";
+    let cy = null, runId = null, timer = null, cola = null, laidOut = false;
 
-    $("railwayMode").onchange = (e) => { $("byo").style.display = e.target.value === "byo" ? "block" : "none"; };
-
-    const COLOR = {
-      orchestrator: "#7fdbca", phase: "#82aaff", agent: "#ffcb6b", artifact: "#c3e88d",
-      blocker: "#ef5350", gate: "#f78c6c",
-    };
-    function colorFor(ele) {
+    // ---- palette + styles (ported technique from ~/graph_viz/cytoscapeStyles.ts) ----
+    function nodeColor(ele) {
       const k = ele.data("kind"), s = ele.data("status");
+      if (k === "orchestrator") return "#7fdbca";
       if (k === "phase") return s === "done" ? "#c3e88d" : s === "active" ? "#ffcb6b" : "#3b4a63";
-      if (k === "agent") return s === "done" ? "#c3e88d" : s === "no_op" ? "#ef5350" : "#ffcb6b";
-      return COLOR[k] || "#5f7e97";
+      if (k === "agent") return s === "done" ? "#c3e88d" : (s === "no_op" || s === "failed") ? "#ef5350" : "#ffcb6b";
+      if (k === "artifact") return s === "missing" ? "#ef5350" : "#c3e88d";
+      if (k === "blocker") return "#ef5350";
+      if (k === "gate") return "#f78c6c";
+      return "#9aa0a6";
     }
+    const STYLE = [
+      { selector: "node", style: {
+        "background-color": nodeColor, label: "data(label)", "font-size": 9, "font-weight": 500,
+        "text-valign": "bottom", "text-margin-y": 3, color: "#d6deeb",
+        "text-outline-width": 2, "text-outline-color": "#0b0e14",
+        "text-wrap": "ellipsis", "text-max-width": "110px", "min-zoomed-font-size": 8,
+        "border-width": 1.5, "border-color": "#0b0e14", width: 26, height: 26 } },
+      { selector: 'node[kind="orchestrator"]', style: { width: 50, height: 50, "font-size": 12 } },
+      { selector: 'node[kind="phase"]', style: { shape: "round-rectangle", width: 78, height: 28 } },
+      { selector: 'node[kind="gate"]', style: { shape: "diamond", width: 38, height: 38 } },
+      { selector: 'node[kind="blocker"]', style: { shape: "octagon" } },
+      { selector: 'node[kind="artifact"][status="missing"]', style: { "border-width": 2, "border-color": "#ef5350" } },
+      { selector: "edge", style: { width: 1.3, "line-color": "#2a3550", "target-arrow-color": "#2a3550",
+        "target-arrow-shape": "triangle", "arrow-scale": 0.8, "curve-style": "bezier" } },
+      { selector: ".active-run", style: { "border-width": 4, "border-color": "#34a853" } },
+    ];
+    // ---- layout configs (ported from ~/graph_viz/layout.ts) ----
+    const FCOSE = { name: "fcose", quality: "default", animate: false, randomize: true,
+      nodeRepulsion: 20000, idealEdgeLength: 150, edgeElasticity: 0.45, gravity: 0.22,
+      nodeSeparation: 140, numIter: 2500, packComponents: true, padding: 40 };
+    const COLA = { name: "cola", animate: true, infinite: true, fit: false, randomize: false,
+      avoidOverlap: true, nodeSpacing: 30, edgeLength: 150, unconstrIter: 0, userConstIter: 0,
+      allConstIter: 40, handleDisconnected: true, centerGraph: false };
+    const haveFcose = typeof window.cytoscapeFcose !== "undefined";
+    const haveCola = typeof window.cytoscapeCola !== "undefined";
+    if (haveFcose) cytoscape.use(window.cytoscapeFcose);
+    if (haveCola) cytoscape.use(window.cytoscapeCola);
 
     function initCy() {
-      cy = cytoscape({
-        container: $("cy"),
-        style: [
-          { selector: "node", style: {
-            "background-color": colorFor, "label": "data(label)", "color": "#d6deeb",
-            "font-size": 10, "font-family": "ui-monospace,monospace", "text-wrap": "wrap", "text-max-width": 110,
-            "text-valign": "bottom", "text-margin-y": 4, "width": 26, "height": 26, "border-width": 0 } },
-          { selector: 'node[kind="orchestrator"]', style: { "width": 52, "height": 52, "font-size": 12 } },
-          { selector: 'node[kind="phase"]', style: { "shape": "round-rectangle", "width": 80, "height": 30 } },
-          { selector: 'node[kind="gate"]', style: { "shape": "diamond", "width": 40, "height": 40 } },
-          { selector: 'node[kind="blocker"]', style: { "shape": "octagon" } },
-          { selector: "edge", style: { "width": 1.5, "line-color": "#2a3550",
-            "target-arrow-color": "#2a3550", "target-arrow-shape": "triangle", "curve-style": "bezier" } },
-        ],
-        layout: { name: "cose", animate: false },
-        wheelSensitivity: 0.2,
-      });
+      cy = cytoscape({ container: $("cy"), style: STYLE, wheelSensitivity: 0.2,
+        minZoom: 0.2, maxZoom: 2.5 });
       cy.on("tap", "node", (ev) => inspect(ev.target.data()));
+      cy.on("tap", (ev) => { if (ev.target === cy) $("inspect").classList.remove("open"); });
+    }
+
+    // ---- diff/applyGraphUpdate (ported concept): survivors keep positions; only new nodes laid out ----
+    function applyGraph(g) {
+      const els = [...g.nodes, ...g.edges];
+      const want = new Set(els.map((e) => e.data.id || e.data.source + "->" + e.data.target));
+      let structural = false;
+      // remove gone
+      cy.elements().forEach((el) => { if (!want.has(el.id() || "")) { /* edges have generated ids */ } });
+      cy.nodes().forEach((n) => { if (!want.has(n.id())) { n.remove(); structural = true; } });
+      // add/update
+      const center = cy.getElementById("orchestrator");
+      const pos = center.nonempty() ? center.position() : { x: 300, y: 300 };
+      els.forEach((e) => {
+        const id = e.data.id;
+        if (e.data.source) {  // edge
+          const eid = e.data.source + "->" + e.data.target;
+          if (!cy.getElementById(eid).nonempty())
+            cy.add({ group: "edges", data: { id: eid, source: e.data.source, target: e.data.target } });
+          return;
+        }
+        const ex = cy.getElementById(id);
+        if (ex.nonempty()) { ex.data(e.data); }                              // survivor: update data in place
+        else { cy.add({ group: "nodes", data: e.data, position: { x: pos.x + (Math.random() - .5) * 60, y: pos.y + (Math.random() - .5) * 60 } }); structural = true; }
+      });
+      cy.style().update();
+      if (!laidOut && cy.nodes().length) {
+        cy.layout(haveFcose ? FCOSE : { name: "cose", animate: false }).run();
+        laidOut = true; startCola();
+      } else if (structural) {
+        startCola();   // re-run constraint-only cola to absorb new nodes without reshuffling
+      }
+    }
+    function startCola() {
+      if (!haveCola) return;
+      if (cola) cola.stop();
+      cola = cy.layout(COLA); cola.run();
     }
 
     async function inspect(d) {
       const box = $("inspect");
       let html = `<span class="x" onclick="document.getElementById('inspect').classList.remove('open')">✕</span>`;
       html += `<h3>${d.label || d.id}</h3><p class="muted">${d.kind}${d.status ? " · " + d.status : ""}</p>`;
-      if (d.kind === "artifact" && d.path) {
-        const a = await (await fetch(`/api/runs/${runId}/artifact?path=${encodeURIComponent(d.path)}`)).json();
-        html += (d.path.endsWith(".svg") && a.content) ? `<div>${a.content}</div>`
-              : `<pre>${(a.content || a.error || "").replace(/</g, "&lt;")}</pre>`;
+      if (d.kind === "artifact") {
+        if (d.status === "missing") html += `<p class="bad">⚠ This artifact was announced but the file does not exist — hollow. Not real progress.</p>`;
+        else {
+          const a = await (await fetch(`/api/runs/${runId}/artifact?path=${encodeURIComponent(d.path)}`)).json();
+          html += (d.path && d.path.endsWith(".svg") && a.content) ? `<div>${a.content}</div>`
+                : `<pre>${(a.content || a.error || "").replace(/</g, "&lt;")}</pre>`;
+        }
       } else if (d.kind === "blocker") {
         html += `<pre>blocks: ${d.blocks || "?"}\n\n${d.label}</pre>`;
       } else if (d.kind === "gate") {
-        html += `<p class="muted">The run is paused for your review.</p>`
-              + `<button class="gate-btn" onclick="continueRun('${d.gate}')">Continue ▶</button>`;
+        html += `<button class="gate-btn" onclick="continueRun('${d.gate}')">Continue ▶</button>`;
       } else if (d.kind === "agent") {
         html += `<pre>subagent: ${d.label}\nstatus: ${d.status}</pre>`;
+      } else if (d.kind === "orchestrator") {
+        html += `<pre>phase: ${d.status}</pre>`;
       }
       box.innerHTML = html; box.classList.add("open");
     }
     window.continueRun = async (gate) => {
-      await fetch(`/api/runs/${runId}/continue`, { method: "POST",
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gate }) });
+      await fetch(`/api/runs/${runId}/continue`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gate }) });
       $("inspect").classList.remove("open"); poll();
     };
 
@@ -144,40 +203,29 @@
       const { runs } = await (await fetch("/api/runs")).json();
       const sel = $("runs"); sel.innerHTML = "";
       if (!runs.length) { sel.innerHTML = "<option>(no runs yet)</option>"; return; }
-      for (const r of runs) {
-        const o = document.createElement("option"); o.value = r.run_id;
-        o.textContent = `${r.run_id} · ${r.phase} · $${(r.spent_usd || 0).toFixed(2)}`;
-        sel.appendChild(o);
-      }
+      for (const r of runs) { const o = document.createElement("option"); o.value = r.run_id;
+        o.textContent = `${r.run_id} · ${r.phase} · $${(r.spent_usd || 0).toFixed(2)}`; sel.appendChild(o); }
       const want = select || localStorage.getItem("sf_run") || runs[0].run_id;
       if ([...sel.options].some((o) => o.value === want)) sel.value = want;
       attach(sel.value);
     }
     $("runs").onchange = (e) => attach(e.target.value);
-    function attach(id) { runId = id; localStorage.setItem("sf_run", id); lastIds = ""; if (timer) clearInterval(timer); poll(); timer = setInterval(poll, 2500); }
+    function attach(id) { runId = id; localStorage.setItem("sf_run", id); laidOut = false; cy.elements().remove(); if (timer) clearInterval(timer); poll(); timer = setInterval(poll, 2500); }
 
-    function readFileB64(file) {
-      return new Promise((resolve) => {
-        const r = new FileReader();
-        r.onload = () => resolve({ name: file.name, content_b64: String(r.result).split(",")[1] });
-        r.readAsDataURL(file);   // base64 — works for binary docx/pdf
-      });
-    }
-
+    $("railwayMode").onchange = (e) => { $("byo").style.display = e.target.value === "byo" ? "block" : "none"; };
+    function readFileB64(f) { return new Promise((res) => { const r = new FileReader(); r.onload = () => res({ name: f.name, content_b64: String(r.result).split(",")[1] }); r.readAsDataURL(f); }); }
     $("go").onclick = async () => {
       $("go").disabled = true;
       const byo = $("railwayMode").value === "byo";
       const files = await Promise.all([...($("files").files || [])].map(readFileB64));
       if (files.length) $("filenote").textContent = "uploading: " + files.map((f) => f.name).join(", ");
-      const p = { description: $("description").value, context: $("context").value,
-        budget: Number($("budget").value), target: $("target").value, files };
+      const p = { description: $("description").value, context: $("context").value, budget: Number($("budget").value), target: $("target").value, files };
       if (byo) p.railway_token = $("railwayToken").value;
       const res = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
       $("railwayToken").value = "";
       const id = (await res.json()).run_id;
       $("note").textContent = "run " + id + " launched.";
-      $("go").disabled = false;
-      await loadRuns(id);
+      $("go").disabled = false; await loadRuns(id);
     };
 
     async function poll() {
@@ -187,18 +235,10 @@
       catch { return; }
       $("phase").innerHTML = "phase: <b>" + s.phase + "</b>" + (s.done ? " ✓" : "");
       $("cost").innerHTML = "spent <b>$" + (s.spent_usd || 0).toFixed(4) + "</b>";
-      const els = [...g.nodes, ...g.edges];
-      const ids = els.map((e) => e.data.id || (e.data.source + "->" + e.data.target)).sort().join(",");
-      if (ids !== lastIds) {                    // structure changed → rebuild + relayout
-        cy.json({ elements: els }); cy.layout({ name: "cose", animate: false }).run(); lastIds = ids;
-      } else {                                   // same structure → just update statuses (stable positions)
-        g.nodes.forEach((n) => { const el = cy.getElementById(n.data.id); if (el) el.data("status", n.data.status); });
-        cy.style().update();
-      }
+      applyGraph(g);
     }
 
-    initCy();
-    loadRuns();
+    initCy(); loadRuns();
   </script>
 </body>
 </html>

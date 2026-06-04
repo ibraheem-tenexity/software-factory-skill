@@ -205,6 +205,21 @@ def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
     assert any(e["data"]["source"] == "orchestrator" for e in g["edges"])
 
 
+def test_graph_marks_artifacts_missing_until_the_file_really_exists(tmp_path):
+    # The "no hollow done" scar at the artifact level: an emitted artifact whose file does not
+    # exist is status="missing" (red on the canvas), not a fake green "created".
+    import os
+    from software_factory import events
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    events.emit(str(tmp_path), rid, "artifact", {"title": "PRD", "path": "workspace/PRD.md", "kind": "prd"})
+    art = lambda: [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "artifact"][0]
+    assert art()["status"] == "missing"                     # emitted but no file -> hollow
+    os.makedirs(os.path.join(str(tmp_path), rid, "workspace"), exist_ok=True)
+    open(os.path.join(str(tmp_path), rid, "workspace", "PRD.md"), "w").write("a real PRD")
+    assert art()["status"] == "created"                     # file now exists -> real
+
+
 def test_events_continue_and_artifact(tmp_path):
     from software_factory import events, gates
     c = console(tmp_path, FakeLauncher())

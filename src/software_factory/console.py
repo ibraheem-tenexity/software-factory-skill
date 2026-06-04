@@ -292,8 +292,12 @@ class Console:
 
         for i, e in enumerate([e for e in evs if e["type"] == "artifact"]):
             p = e["payload"]; aid = "artifact:%d" % i
+            # Honesty: an artifact whose file doesn't actually exist is "missing", not "created"
+            # — the canvas paints it red so a fabricated PRD/diagram can't masquerade as done.
+            path = p.get("path")
+            real = bool(path) and "content" in self.artifact(run_id, path)
             nodes.append({"data": {"id": aid, "label": p.get("title", "artifact"), "kind": "artifact",
-                                   "path": p.get("path"), "status": "created"}})
+                                   "path": path, "status": "created" if real else "missing"}})
             edges.append({"data": {"source": "orchestrator", "target": aid}})
 
         cleared = {e["payload"].get("what") for e in evs if e["type"] == "blocker_cleared"}
