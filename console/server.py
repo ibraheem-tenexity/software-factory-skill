@@ -14,6 +14,7 @@ import json
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from software_factory.console import Console, RunRequest  # noqa: E402
@@ -36,20 +37,31 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/" or self.path == "/index.html":
             with open(os.path.join(HERE, "index.html"), "rb") as f:
                 return self._send(200, f.read(), "text/html")
-        if self.path in ("/api/runs", "/api/runs/"):
-            return self._send(200, {"runs": console.list_runs()})  # spec 3: reconnect on reload
-        if self.path.startswith("/api/runs/"):
-            rest = self.path[len("/api/runs/"):]
+        parsed = urlparse(self.path)
+        path, qs = parsed.path, parse_qs(parsed.query)
+        if path in ("/api/runs", "/api/runs/"):
+            return self._send(200, {"runs": console.list_runs()})  # reconnect on reload
+        if path.startswith("/api/runs/"):
+            rest = path[len("/api/runs/"):]
             if rest.endswith("/evidence"):
                 return self._send(200, console.evidence(rest[:-len("/evidence")]))
             if rest.endswith("/graph"):
-                return self._send(200, console.graph(rest[:-len("/graph")]))  # spec 4
+                return self._send(200, console.graph(rest[:-len("/graph")]))
+            if rest.endswith("/events"):
+                return self._send(200, {"events": console.events(rest[:-len("/events")])})
+            if rest.endswith("/artifact"):
+                return self._send(200, console.artifact(rest[:-len("/artifact")], qs.get("path", [""])[0]))
             if rest.endswith("/log"):
                 return self._send(200, {"log": console.read_log(rest[:-len("/log")])})
             return self._send(200, console.status(rest))
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.path.startswith("/api/runs/") and self.path.endswith("/continue"):
+            run_id = self.path[len("/api/runs/"):-len("/continue")]
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            return self._send(200, console.continue_run(run_id, body.get("gate", "")))
         if self.path == "/api/runs":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length) or b"{}")

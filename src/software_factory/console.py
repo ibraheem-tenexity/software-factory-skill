@@ -13,13 +13,18 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import streamlog
+from . import events, gates, streamlog
 from .agents import AgentRegistry
 from .evidence import build_evidence, verify_evidence
 from .runstate import JsonFileStore, RunState
 from .tickets import TicketStore
 
 SKILL_VERSION = "0.0.1"
+
+# The pipeline the run advances through (matches SKILL.md). "wait-for-deps" is the phase that
+# waits on infra/dependencies and surfaces blockers until they're ready.
+PIPELINE = ["provision", "research", "architect", "wait-for-deps", "tickets", "build", "deploy", "test"]
+PIPELINE_LABELS = {"wait-for-deps": "wait for deps"}
 
 
 @dataclass
@@ -44,21 +49,39 @@ def run_paths(runs_dir: str, run_id: str) -> dict:
 
 
 def make_prompt(req: RunRequest, run_id: str, runs_dir: str) -> str:
+    """Imperative runbook so the headless run EXECUTES the full pipeline instead of wandering."""
     base = os.path.join(runs_dir, run_id)
-    ctx = f"\nContext: {req.context}" if req.context else ""
+    ctx = f"\n\nContext / detailed input:\n{req.context}" if req.context else ""
     service = f"sf-{run_id}"
+    emit = f"python -m software_factory.events emit {runs_dir} {run_id}"
     return (
-        "Use the software-factory skill to build, deploy, and browser-verify this app, "
-        "fully autonomously.\n"
-        f"run_id={run_id}. Budget ${req.budget:.0f} (hard cutoff). Deploy target: {req.target}.\n"
-        f"DEPLOY ISOLATION (critical): deploy the built app to a NEW, dedicated Railway service "
-        f"named '{service}' — create it with `railway add --service {service}`, then "
-        f"`railway up --service {service}`. NEVER run a bare `railway up`, and NEVER deploy to an "
-        f"existing service or the service you are running in (the factory console). Deploying "
-        f"onto your own service would overwrite the console — do not do it.\n"
-        f"Write run state and telemetry under {base}/ "
-        f"(runstate JsonFileStore at {base}, agents.db and tickets.db in that dir), and stamp "
-        "the run's proof marker at provision.\n"
+        f"Use the **software-factory** skill to build, deploy, and browser-verify this customer "
+        f"solution, FULLY AUTONOMOUSLY — never wait on a human.\n"
+        f"run_id={run_id}. runs_dir={runs_dir}. Budget ${req.budget:.0f} (HARD cutoff). "
+        f"Deploy target: {req.target}.\n\n"
+        f"Read SKILL.md and the phases/ files. Execute these phases IN ORDER, and at each one run "
+        f"`{emit} phase '{{\"name\":\"<phase>\"}}'` so the canvas shows progress. Pull what you need "
+        f"from ruflo (memory) before acting; do not re-inject context.\n"
+        f"1. extract  — extract the input (text/pdf/docx) to usable text.\n"
+        f"2. provision — `creds.check_all`; `GitHub.create_repo`; `Budget(100)`; `workspace.create`; seed ruflo.\n"
+        f"3. research  — REQUIRED web search: run WebSearch/WebFetch and surface >=3 real competing "
+        f"products WITH URLs, then write PRD.md and `{emit} artifact '{{\"title\":\"PRD\",\"path\":\"workspace/<repo>/PRD.md\",\"kind\":\"prd\"}}'`.\n"
+        f"4. architect — two co-design agents (claude-peers) produce architecture.md + a Mermaid diagram "
+        f"rendered to architecture.svg via `diagram.render`; commit + emit both as artifacts.\n"
+        f"5. wait-for-deps — provision infra (the Railway service '{service}', Supabase, Vercel if used) "
+        f"and WAIT for readiness; `{emit} blocker '{{...}}'` for anything not ready, clear when ready.\n"
+        f"6. tickets   — `TicketStore.create_ticket` in waves with acceptance + DoD.\n"
+        f"7. build     — per ticket: spawn a build agent (pull from ruflo), merge only via "
+        f"`merge_if_green`, `mark_done`; record precedent via `memory.record_precedent`. No-op = retry.\n"
+        f"8. deploy    — DEPLOY ISOLATION (critical): create + deploy to the dedicated service "
+        f"'{service}' (`railway add --service {service}` then `railway up --service {service}`). "
+        f"NEVER run a bare `railway up`, and NEVER deploy to the factory console's own service — that "
+        f"would overwrite the console. `deploy.healthy(url)` must pass; `{emit} deployed '{{\"url\":...}}'`.\n"
+        f"9. test      — drive the live URL with Playwright; `gate.happy_flow_passed`. Green => `{emit} done` "
+        f"=> DONE. Red => fix agents => redeploy => re-test.\n"
+        f"10. teardown — `workspace.destroy` on any terminal state; proof + events survive at the base.\n\n"
+        f"Write run state and telemetry under {base}/ (runstate JsonFileStore at {base}; agents.db and "
+        f"tickets.db there). Stamp the proof marker at provision.\n"
         f"App: {req.description}{ctx}"
     )
 
@@ -185,17 +208,74 @@ class Console:
         runs.sort(key=lambda r: os.path.getmtime(os.path.join(self._runs_dir, r["run_id"])), reverse=True)
         return runs
 
+    def events(self, run_id: str) -> list:
+        return events.read_events(self._runs_dir, run_id)
+
+    def continue_run(self, run_id: str, gate: str) -> dict:
+        """Dashboard 'Continue' — clear a review gate so the paused run proceeds."""
+        gates.clear_gate(self._runs_dir, run_id, gate)
+        return {"cleared": gate}
+
+    def artifact(self, run_id: str, path: str) -> dict:
+        """Read a committed artifact (PRD.md, architecture.svg, …) for the inspector. Path-safe."""
+        base = os.path.realpath(self._paths(run_id)["base"])
+        full = os.path.realpath(os.path.join(base, path))
+        if os.path.commonpath([full, base]) != base or not os.path.isfile(full):
+            return {"error": "not found", "path": path}
+        with open(full, "r", errors="replace") as f:
+            return {"path": path, "content": f.read()[:200000]}
+
     def graph(self, run_id: str) -> dict:
-        """Spec 4: central orchestrator node + the Task subagents radiating from it."""
+        """Cytoscape elements: orchestrator + the pipeline, with agents, artifacts, blockers and
+        the pending review gate folded in from events + the claude stream (specs 4 + the canvas)."""
+        d = self._runs_dir
+        evs = self.events(run_id)
         state = self._load_state(run_id)
-        return {
-            "orchestrator": {
-                "id": "orchestrator",
-                "label": "Claude · software-factory",
-                "phase": state.phase,
-            },
-            "agents": streamlog.agents(self._full_log(run_id)),
-        }
+        nodes = [{"data": {"id": "orchestrator", "label": "Claude · software-factory",
+                           "kind": "orchestrator", "status": state.phase}}]
+        edges = []
+
+        phase_status = {e["payload"].get("name"): e["payload"].get("status", "active")
+                        for e in evs if e["type"] == "phase"}
+        prev = "orchestrator"
+        for name in PIPELINE:
+            st = "active" if state.phase == name else phase_status.get(name, "pending")
+            pid = "phase:" + name
+            nodes.append({"data": {"id": pid, "label": PIPELINE_LABELS.get(name, name),
+                                   "kind": "phase", "status": st}})
+            edges.append({"data": {"source": prev, "target": pid}})
+            prev = pid
+
+        for a in streamlog.agents(self._full_log(run_id)):
+            aid = "agent:" + a["id"]
+            nodes.append({"data": {"id": aid, "label": a["label"], "kind": "agent", "status": a["status"]}})
+            edges.append({"data": {"source": "orchestrator", "target": aid}})
+
+        for i, e in enumerate([e for e in evs if e["type"] == "artifact"]):
+            p = e["payload"]; aid = "artifact:%d" % i
+            nodes.append({"data": {"id": aid, "label": p.get("title", "artifact"), "kind": "artifact",
+                                   "path": p.get("path"), "status": "created"}})
+            edges.append({"data": {"source": "orchestrator", "target": aid}})
+
+        cleared = {e["payload"].get("what") for e in evs if e["type"] == "blocker_cleared"}
+        for i, e in enumerate([e for e in evs if e["type"] == "blocker"]):
+            p = e["payload"]
+            if p.get("what") in cleared:
+                continue
+            bid = "blocker:%d" % i
+            target = ("phase:" + p["blocks"]) if p.get("blocks") in PIPELINE else "orchestrator"
+            nodes.append({"data": {"id": bid, "label": p.get("what", "blocker"), "kind": "blocker",
+                                   "status": "open", "blocks": p.get("blocks")}})
+            edges.append({"data": {"source": bid, "target": target}})
+
+        g = gates.pending_gate(d, run_id)
+        if g:
+            gid = "gate:" + g
+            nodes.append({"data": {"id": gid, "label": "awaiting review: " + g, "kind": "gate",
+                                   "status": "awaiting", "gate": g}})
+            edges.append({"data": {"source": gid, "target": "phase:" + g if ("phase:" + g) in
+                                   [n["data"]["id"] for n in nodes] else "orchestrator"}})
+        return {"nodes": nodes, "edges": edges}
 
     def evidence(self, run_id: str) -> dict:
         paths = self._paths(run_id)

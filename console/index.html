@@ -4,42 +4,44 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Software Factory — console</title>
+  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
   <style>
     :root { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    body { margin: 0; background: #0b0e14; color: #d6deeb; display: flex; min-height: 100vh; }
-    .pane { padding: 22px 26px; box-sizing: border-box; }
-    .left { width: 430px; border-right: 1px solid #1c2230; flex: none; }
-    .right { flex: 1; display: flex; flex-direction: column; }
-    h1 { font-size: 15px; color: #7fdbca; margin: 0 0 16px; }
-    label { display: block; font-size: 12px; color: #5f7e97; margin: 13px 0 5px; }
+    body { margin: 0; background: #0b0e14; color: #d6deeb; display: flex; height: 100vh; overflow: hidden; }
+    .pane { padding: 20px 24px; box-sizing: border-box; }
+    .left { width: 410px; flex: none; border-right: 1px solid #1c2230; overflow-y: auto; }
+    .right { flex: 1; display: flex; flex-direction: column; padding: 0; }
+    h1 { font-size: 15px; color: #7fdbca; margin: 0 0 14px; }
+    label { display: block; font-size: 12px; color: #5f7e97; margin: 12px 0 5px; }
     textarea, input, select { width: 100%; box-sizing: border-box; background: #0e1320; color: #d6deeb;
       border: 1px solid #1c2230; border-radius: 6px; padding: 9px; font: inherit; font-size: 13px; }
-    textarea { min-height: 80px; resize: vertical; }
+    textarea { min-height: 76px; resize: vertical; }
     .row { display: flex; gap: 12px; } .row > div { flex: 1; }
-    button { margin-top: 16px; width: 100%; padding: 11px; border: 0; border-radius: 6px;
+    button { margin-top: 14px; width: 100%; padding: 11px; border: 0; border-radius: 6px;
       background: #7fdbca; color: #0b0e14; font: inherit; font-weight: 600; cursor: pointer; }
-    button:disabled { opacity: .5; cursor: default; }
     .muted { color: #5f7e97; font-size: 12px; }
-    .bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
-    .phase b { color: #ffcb6b; }
-    .stats { display: flex; gap: 20px; flex-wrap: wrap; margin: 10px 0 6px; }
-    .stat { font-size: 12px; color: #5f7e97; } .stat b { display: block; font-size: 19px; color: #d6deeb; }
-    .stat.cost b { color: #c3e88d; } .stat.warn b { color: #ef5350; }
-    #graph { flex: 1; min-height: 360px; border: 1px solid #161b27; border-radius: 10px; margin-top: 8px; background: #0a0d13; }
-    .url { margin: 12px 0; padding: 12px; background: #0e1320; border: 1px solid #22c55e44; border-radius: 8px; }
-    .url a { color: #c3e88d; word-break: break-all; }
-    pre { background: #0e1320; border: 1px solid #1c2230; border-radius: 8px; padding: 12px;
-      font-size: 11px; max-height: 220px; overflow: auto; white-space: pre-wrap; }
-    select.runs { margin-bottom: 4px; }
+    .topbar { display: flex; align-items: center; gap: 16px; padding: 14px 22px; border-bottom: 1px solid #1c2230; flex-wrap: wrap; }
+    .topbar select { width: auto; min-width: 300px; }
+    .stat { font-size: 12px; color: #5f7e97; } .stat b { color: #d6deeb; } .stat.cost b { color: #c3e88d; }
+    #cy { flex: 1; background: #0a0d13; }
+    #inspect { position: absolute; right: 0; top: 0; bottom: 0; width: 360px; background: #0e1320;
+      border-left: 1px solid #1c2230; padding: 18px; overflow: auto; transform: translateX(100%); transition: transform .15s; }
+    #inspect.open { transform: none; }
+    #inspect h3 { color: #7fdbca; font-size: 14px; margin: 0 0 4px; } #inspect .x { float: right; cursor: pointer; color: #5f7e97; }
+    #inspect pre { white-space: pre-wrap; font-size: 11px; background: #0b0e14; border: 1px solid #1c2230; border-radius: 6px; padding: 10px; max-height: 60vh; overflow: auto; }
+    #inspect img, #inspect svg { max-width: 100%; background: #fff; border-radius: 6px; }
+    .gate-btn { background: #ffcb6b; }
+    .legend { padding: 6px 22px; font-size: 11px; color: #5f7e97; border-top: 1px solid #161b27; }
+    .legend span { margin-right: 14px; }
   </style>
 </head>
 <body>
   <div class="pane left">
     <h1>SOFTWARE FACTORY · console</h1>
-    <label>What should we build?</label>
-    <textarea id="description" placeholder="A guestbook web app: visitors leave a name and see the list."></textarea>
+    <label>What should we build? (a customer solution)</label>
+    <textarea id="description" placeholder="One line, or paste detailed context / an email."></textarea>
     <label>Context / data (optional)</label>
-    <textarea id="context" placeholder="Branding, sample data, an email, constraints…"></textarea>
+    <textarea id="context" placeholder="Domain, constraints, sample data…"></textarea>
     <div class="row">
       <div><label>Budget (USD)</label><input id="budget" type="number" value="100" /></div>
       <div><label>Deploy target</label>
@@ -47,152 +49,142 @@
       </div>
     </div>
     <label>Railway</label>
-    <select id="railwayMode">
-      <option value="managed">Managed (platform Railway)</option>
-      <option value="byo">Bring your own Railway</option>
-    </select>
+    <select id="railwayMode"><option value="managed">Managed</option><option value="byo">Bring your own</option></select>
     <div id="byo" style="display:none">
       <label>Railway API token</label>
       <input id="railwayToken" type="password" autocomplete="off" placeholder="rwt_…" />
-      <p class="muted">🔒 Sent once to launch this run, injected into the build's environment, never stored.</p>
+      <p class="muted">🔒 Injected into the run env, never stored.</p>
     </div>
     <button id="go">Build &amp; deploy</button>
     <p class="muted" id="note"></p>
   </div>
 
   <div class="pane right">
-    <div class="bar">
+    <div class="topbar">
       <label style="margin:0">Run</label>
-      <select id="runs" class="runs" style="width:auto; min-width:280px"></select>
-      <span class="phase muted" id="phase">—</span>
+      <select id="runs"></select>
+      <span class="stat" id="phase">—</span>
+      <span class="stat cost" id="cost"></span>
     </div>
-    <div class="stats" id="stats"></div>
-    <div id="urlbox"></div>
-    <svg id="graph" preserveAspectRatio="xMidYMid meet"></svg>
-    <div id="proof"></div>
+    <div id="cy"></div>
+    <div class="legend">
+      <span style="color:#7fdbca">● orchestrator</span><span style="color:#82aaff">● phase</span>
+      <span style="color:#ffcb6b">● agent/active</span><span style="color:#c3e88d">● done/artifact</span>
+      <span style="color:#ef5350">● blocker</span><span style="color:#f78c6c">● gate (click to continue)</span>
+    </div>
+    <div id="inspect"></div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const SVGNS = "http://www.w3.org/2000/svg";
-    let timer = null, runId = null;
+    let cy = null, runId = null, timer = null, lastIds = "";
 
     $("railwayMode").onchange = (e) => { $("byo").style.display = e.target.value === "byo" ? "block" : "none"; };
 
-    // ---- persistence: reconnect on reload (spec 3) ----
-    async function loadRuns(selectRunId) {
+    const COLOR = {
+      orchestrator: "#7fdbca", phase: "#82aaff", agent: "#ffcb6b", artifact: "#c3e88d",
+      blocker: "#ef5350", gate: "#f78c6c",
+    };
+    function colorFor(ele) {
+      const k = ele.data("kind"), s = ele.data("status");
+      if (k === "phase") return s === "done" ? "#c3e88d" : s === "active" ? "#ffcb6b" : "#3b4a63";
+      if (k === "agent") return s === "done" ? "#c3e88d" : s === "no_op" ? "#ef5350" : "#ffcb6b";
+      return COLOR[k] || "#5f7e97";
+    }
+
+    function initCy() {
+      cy = cytoscape({
+        container: $("cy"),
+        style: [
+          { selector: "node", style: {
+            "background-color": colorFor, "label": "data(label)", "color": "#d6deeb",
+            "font-size": 10, "font-family": "ui-monospace,monospace", "text-wrap": "wrap", "text-max-width": 110,
+            "text-valign": "bottom", "text-margin-y": 4, "width": 26, "height": 26, "border-width": 0 } },
+          { selector: 'node[kind="orchestrator"]', style: { "width": 52, "height": 52, "font-size": 12 } },
+          { selector: 'node[kind="phase"]', style: { "shape": "round-rectangle", "width": 80, "height": 30 } },
+          { selector: 'node[kind="gate"]', style: { "shape": "diamond", "width": 40, "height": 40 } },
+          { selector: 'node[kind="blocker"]', style: { "shape": "octagon" } },
+          { selector: "edge", style: { "width": 1.5, "line-color": "#2a3550",
+            "target-arrow-color": "#2a3550", "target-arrow-shape": "triangle", "curve-style": "bezier" } },
+        ],
+        layout: { name: "cose", animate: false },
+        wheelSensitivity: 0.2,
+      });
+      cy.on("tap", "node", (ev) => inspect(ev.target.data()));
+    }
+
+    async function inspect(d) {
+      const box = $("inspect");
+      let html = `<span class="x" onclick="document.getElementById('inspect').classList.remove('open')">✕</span>`;
+      html += `<h3>${d.label || d.id}</h3><p class="muted">${d.kind}${d.status ? " · " + d.status : ""}</p>`;
+      if (d.kind === "artifact" && d.path) {
+        const a = await (await fetch(`/api/runs/${runId}/artifact?path=${encodeURIComponent(d.path)}`)).json();
+        html += (d.path.endsWith(".svg") && a.content) ? `<div>${a.content}</div>`
+              : `<pre>${(a.content || a.error || "").replace(/</g, "&lt;")}</pre>`;
+      } else if (d.kind === "blocker") {
+        html += `<pre>blocks: ${d.blocks || "?"}\n\n${d.label}</pre>`;
+      } else if (d.kind === "gate") {
+        html += `<p class="muted">The run is paused for your review.</p>`
+              + `<button class="gate-btn" onclick="continueRun('${d.gate}')">Continue ▶</button>`;
+      } else if (d.kind === "agent") {
+        html += `<pre>subagent: ${d.label}\nstatus: ${d.status}</pre>`;
+      }
+      box.innerHTML = html; box.classList.add("open");
+    }
+    window.continueRun = async (gate) => {
+      await fetch(`/api/runs/${runId}/continue`, { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gate }) });
+      $("inspect").classList.remove("open"); poll();
+    };
+
+    async function loadRuns(select) {
       const { runs } = await (await fetch("/api/runs")).json();
-      const sel = $("runs");
-      sel.innerHTML = "";
-      if (!runs.length) { sel.innerHTML = '<option>(no runs yet)</option>'; return; }
+      const sel = $("runs"); sel.innerHTML = "";
+      if (!runs.length) { sel.innerHTML = "<option>(no runs yet)</option>"; return; }
       for (const r of runs) {
-        const o = document.createElement("option");
-        o.value = r.run_id;
-        o.textContent = `${r.run_id} · ${r.phase} · $${(r.spent_usd || 0).toFixed(2)} · ${(r.description || "").slice(0, 40)}`;
+        const o = document.createElement("option"); o.value = r.run_id;
+        o.textContent = `${r.run_id} · ${r.phase} · $${(r.spent_usd || 0).toFixed(2)}`;
         sel.appendChild(o);
       }
-      const want = selectRunId || localStorage.getItem("sf_run") || runs[0].run_id;
+      const want = select || localStorage.getItem("sf_run") || runs[0].run_id;
       if ([...sel.options].some((o) => o.value === want)) sel.value = want;
       attach(sel.value);
     }
     $("runs").onchange = (e) => attach(e.target.value);
-
-    function attach(id) {
-      runId = id;
-      localStorage.setItem("sf_run", id);
-      if (timer) clearInterval(timer);
-      poll();
-      timer = setInterval(poll, 2500);
-    }
+    function attach(id) { runId = id; localStorage.setItem("sf_run", id); lastIds = ""; if (timer) clearInterval(timer); poll(); timer = setInterval(poll, 2500); }
 
     $("go").onclick = async () => {
-      $("go").disabled = true; $("proof").innerHTML = ""; $("urlbox").innerHTML = "";
+      $("go").disabled = true;
       const byo = $("railwayMode").value === "byo";
-      const payload = { description: $("description").value, context: $("context").value,
-        budget: Number($("budget").value), target: $("target").value };
-      if (byo) payload.railway_token = $("railwayToken").value;
-      const res = await fetch("/api/runs", { method: "POST",
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const p = { description: $("description").value, context: $("context").value, budget: Number($("budget").value), target: $("target").value };
+      if (byo) p.railway_token = $("railwayToken").value;
+      const res = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
       $("railwayToken").value = "";
       const id = (await res.json()).run_id;
-      $("note").textContent = "run " + id + " launched (headless claude).";
+      $("note").textContent = "run " + id + " launched.";
       $("go").disabled = false;
       await loadRuns(id);
     };
 
     async function poll() {
-      if (!runId) return;
+      if (!runId || !cy) return;
       let s, g;
-      try {
-        s = await (await fetch("/api/runs/" + runId)).json();
-        g = await (await fetch("/api/runs/" + runId + "/graph")).json();
-      } catch { return; }
-      $("phase").innerHTML = "phase: <b>" + s.phase + "</b>" + (s.done ? " ✓" : "")
-        + (s.byo_railway ? " · railway:your key 🔑" : "")
-        + (s.workspace === "cleaned" ? " · 🧹 cleaned" : s.workspace === "active" ? " · 📂 workspace" : "");
-      const a = s.agents || {};
-      const warn = (s.no_op_rate || 0) > 0.3 ? "warn" : "";
-      $("stats").innerHTML = `
-        <div class="stat cost"><b>$${(s.spent_usd || 0).toFixed(4)}</b>spent (live)</div>
-        <div class="stat"><b>${(g.agents || []).length}</b>agents</div>
-        <div class="stat"><b>${(g.agents || []).filter(x => x.status === "running").length}</b>running</div>
-        <div class="stat ${warn}"><b>${Math.round((s.no_op_rate || 0) * 100)}%</b>no-op</div>`;
-      $("urlbox").innerHTML = (s.done && s.deploy_url)
-        ? `<div class="url">🚀 deployed: <a href="${s.deploy_url}" target="_blank">${s.deploy_url}</a></div>` : "";
-      drawGraph(g);
-      if (s.done) { showProof(); }
+      try { s = await (await fetch(`/api/runs/${runId}`)).json(); g = await (await fetch(`/api/runs/${runId}/graph`)).json(); }
+      catch { return; }
+      $("phase").innerHTML = "phase: <b>" + s.phase + "</b>" + (s.done ? " ✓" : "");
+      $("cost").innerHTML = "spent <b>$" + (s.spent_usd || 0).toFixed(4) + "</b>";
+      const els = [...g.nodes, ...g.edges];
+      const ids = els.map((e) => e.data.id || (e.data.source + "->" + e.data.target)).sort().join(",");
+      if (ids !== lastIds) {                    // structure changed → rebuild + relayout
+        cy.json({ elements: els }); cy.layout({ name: "cose", animate: false }).run(); lastIds = ids;
+      } else {                                   // same structure → just update statuses (stable positions)
+        g.nodes.forEach((n) => { const el = cy.getElementById(n.data.id); if (el) el.data("status", n.data.status); });
+        cy.style().update();
+      }
     }
 
-    // ---- node graph: orchestrator at center, agents around it (spec 4) ----
-    function drawGraph(g) {
-      const svg = $("graph");
-      const W = svg.clientWidth || 700, H = svg.clientHeight || 380;
-      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-      svg.innerHTML = "";
-      const cx = W / 2, cy = H / 2;
-      const agents = g.agents || [];
-      // edges first (under nodes)
-      const R = Math.min(W, H) / 2 - 70;
-      agents.forEach((ag, i) => {
-        const ang = (2 * Math.PI * i) / Math.max(agents.length, 1) - Math.PI / 2;
-        const x = cx + R * Math.cos(ang), y = cy + R * Math.sin(ang);
-        line(svg, cx, cy, x, y, ag.status === "done" ? "#2e4a36" : "#4a4326");
-        node(svg, x, y, 22, ag.status === "done" ? "#c3e88d" : "#ffcb6b",
-          (ag.label || "agent").slice(0, 18), ag.type || "");
-      });
-      // central orchestrator
-      node(svg, cx, cy, 40, "#7fdbca", "orchestrator", g.orchestrator ? g.orchestrator.phase : "");
-    }
-    function line(svg, x1, y1, x2, y2, color) {
-      const l = document.createElementNS(SVGNS, "line");
-      l.setAttribute("x1", x1); l.setAttribute("y1", y1); l.setAttribute("x2", x2); l.setAttribute("y2", y2);
-      l.setAttribute("stroke", color); l.setAttribute("stroke-width", "1.5"); svg.appendChild(l);
-    }
-    function node(svg, x, y, r, color, label, sub) {
-      const c = document.createElementNS(SVGNS, "circle");
-      c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", r);
-      c.setAttribute("fill", "#0e1320"); c.setAttribute("stroke", color); c.setAttribute("stroke-width", "2");
-      svg.appendChild(c);
-      text(svg, x, y + r + 13, color, label);
-      if (sub) text(svg, x, y + r + 26, "#5f7e97", sub);
-    }
-    function text(svg, x, y, fill, s) {
-      const t = document.createElementNS(SVGNS, "text");
-      t.setAttribute("x", x); t.setAttribute("y", y); t.setAttribute("text-anchor", "middle");
-      t.setAttribute("fill", fill); t.setAttribute("font-size", "11"); t.setAttribute("font-family", "ui-monospace,monospace");
-      t.textContent = s; svg.appendChild(t);
-    }
-
-    async function showProof() {
-      try {
-        const e = await (await fetch("/api/runs/" + runId + "/evidence")).json();
-        const badge = e.verified ? '<span style="color:#c3e88d">✓ VERIFIED</span>' : '<span style="color:#ef5350">✗ not verified</span>';
-        const reasons = e.reasons && e.reasons.length ? "\nreasons:\n - " + e.reasons.join("\n - ") : "";
-        $("proof").innerHTML = `<p class="muted">proof of run: ${badge}</p><pre>${JSON.stringify(e.bundle, null, 2)}${reasons}</pre>`;
-      } catch {}
-    }
-
-    loadRuns();  // reconnect on page load
+    initCy();
+    loadRuns();
   </script>
 </body>
 </html>

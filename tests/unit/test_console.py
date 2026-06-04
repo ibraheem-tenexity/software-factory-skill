@@ -161,17 +161,46 @@ def test_list_runs_returns_launched_runs_for_reconnect(tmp_path):
     assert one["description"] == "app 0" and "phase" in one
 
 
-def test_graph_has_central_orchestrator_and_agent_nodes(tmp_path):
-    # Spec 4: orchestrator at center, Task subagents as nodes around it.
+def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
+    from software_factory import events, gates
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
     run_id = c.start_run(RunRequest(description="guestbook"))
+    d = str(tmp_path)
+    # an agent (from the claude stream), an artifact, a blocker, and an open gate
     with open(launcher.log_path, "w") as f:
         f.write('{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Task","input":{"description":"build form","subagent_type":"general-purpose"}}]}}\n')
+    events.emit(d, run_id, "artifact", {"title": "PRD", "path": "PRD.md", "kind": "prd"})
+    events.emit(d, run_id, "blocker", {"what": "Supabase project not ready", "blocks": "wait-for-deps"})
+    events.emit(d, run_id, "awaiting_review", {"gate": "prd"})
+
     g = c.graph(run_id)
-    assert g["orchestrator"]["id"] == "orchestrator"
-    assert g["orchestrator"]["phase"] == "provision"
-    assert [a["label"] for a in g["agents"]] == ["build form"]
+    kinds = {n["data"]["kind"] for n in g["nodes"]}
+    assert {"orchestrator", "phase", "agent", "artifact", "blocker", "gate"} <= kinds
+    # the pipeline the user defined is present as phase nodes
+    phase_labels = {n["data"]["label"] for n in g["nodes"] if n["data"]["kind"] == "phase"}
+    assert {"research", "architect", "wait for deps", "deploy"} <= phase_labels
+    # edges connect things (orchestrator -> first phase exists)
+    assert any(e["data"]["source"] == "orchestrator" for e in g["edges"])
+
+
+def test_events_continue_and_artifact(tmp_path):
+    from software_factory import events, gates
+    c = console(tmp_path, FakeLauncher())
+    run_id = c.start_run(RunRequest(description="guestbook"))
+    d = str(tmp_path)
+    events.emit(d, run_id, "awaiting_review", {"gate": "prd"})
+    assert gates.pending_gate(d, run_id) == "prd"
+    c.continue_run(run_id, "prd")                       # dashboard "Continue"
+    assert gates.pending_gate(d, run_id) is None
+    assert any(e["type"] == "awaiting_review" for e in c.events(run_id))
+
+    # artifact read stays inside the run dir
+    import os
+    os.makedirs(os.path.join(d, run_id, "workspace"), exist_ok=True)
+    open(os.path.join(d, run_id, "workspace", "PRD.md"), "w").write("# PRD\nproblem...")
+    assert "PRD" in c.artifact(run_id, "workspace/PRD.md")["content"]
+    assert "error" in c.artifact(run_id, "../../etc/passwd")  # traversal rejected
 
 
 def test_run_uses_sonnet_model_and_a_turn_cap_by_default(tmp_path):
