@@ -40,6 +40,8 @@ class Handler(BaseHTTPRequestHandler):
             rest = self.path[len("/api/runs/"):]
             if rest.endswith("/evidence"):
                 return self._send(200, console.evidence(rest[:-len("/evidence")]))
+            if rest.endswith("/log"):
+                return self._send(200, {"log": console.read_log(rest[:-len("/log")])})
             return self._send(200, console.status(rest))
         return self._send(404, {"error": "not found"})
 

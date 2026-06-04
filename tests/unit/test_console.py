@@ -15,9 +15,10 @@ class FakeLauncher:
         self.argv = None
         self.env = None
 
-    def __call__(self, argv, env=None):
+    def __call__(self, argv, env=None, log_path=None):
         self.argv = argv
         self.env = env or {}
+        self.log_path = log_path
         return {"pid": 1234}
 
 
@@ -128,6 +129,19 @@ def test_empty_credentials_are_ignored(tmp_path):
     run_id = c.start_run(RunRequest(description="guestbook", credentials={"RAILWAY_TOKEN": ""}))
     assert c.status(run_id)["creds_provided"] == []
     assert "RAILWAY_TOKEN" not in launcher.env
+
+
+def test_run_output_is_captured_to_a_readable_log(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="guestbook"))
+    # the launcher is told where to capture the run's stdout/stderr
+    assert launcher.log_path.endswith("run.log")
+    # and read_log surfaces whatever lands there
+    import os
+    with open(launcher.log_path, "w") as f:
+        f.write("provision: checking creds\nhello from claude\n")
+    assert "hello from claude" in c.read_log(run_id)
 
 
 def test_status_reports_workspace_lifecycle(tmp_path):

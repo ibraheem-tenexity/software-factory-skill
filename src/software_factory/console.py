@@ -56,18 +56,20 @@ def make_prompt(req: RunRequest, run_id: str, runs_dir: str) -> str:
     )
 
 
-def _default_launch(argv: list[str], env: dict) -> Any:
+def _default_launch(argv: list[str], env: dict, log_path: str | None = None) -> Any:
     import subprocess
 
-    # Secrets ride in the child's environment, not argv (argv shows up in `ps` / logs).
-    return subprocess.Popen(argv, env={**os.environ, **env})
+    # Capture the headless run's output to a per-run log so it's visible (and debuggable)
+    # regardless of the platform's log pipeline. Secrets ride in env, never argv.
+    out = open(log_path, "ab") if log_path else None
+    return subprocess.Popen(argv, env={**os.environ, **env}, stdout=out, stderr=out)
 
 
 class Console:
     def __init__(
         self,
         runs_dir: str,
-        launch: Callable[[list[str], dict], Any] = _default_launch,
+        launch: Callable[..., Any] = _default_launch,
         new_id: Callable[[], str] = lambda: "run-" + uuid.uuid4().hex[:8],
     ):
         self._runs_dir = runs_dir
@@ -103,8 +105,19 @@ class Console:
             "--permission-mode", "bypassPermissions",
             "--output-format", "stream-json", "--verbose",
         ]
-        self._launch(argv, env)
+        self._launch(argv, env, os.path.join(paths["base"], "run.log"))
         return run_id
+
+    def read_log(self, run_id: str, max_bytes: int = 20000) -> str:
+        """Tail of the headless run's captured stdout/stderr (run.log)."""
+        p = os.path.join(self._paths(run_id)["base"], "run.log")
+        if not os.path.exists(p):
+            return ""
+        with open(p, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            return f.read().decode("utf-8", "replace")
 
     def _workspace_state(self, run_id: str, phase: str) -> str:
         ws = os.path.join(self._paths(run_id)["base"], "workspace")
