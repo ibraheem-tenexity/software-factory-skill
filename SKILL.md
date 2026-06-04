@@ -82,8 +82,10 @@ Every phase emits `phase {name, status}` on entry/exit. Done-gates are automated
 clears them itself; it never stops for a review.
 
 ### extract
-- The input may be plain text, a `.pdf`, or a `.docx`. Use tool calls + code to extract its full
-  content; install packages if needed to read it. `emit artifact {title:"input", kind:"context"}`.
+- The console has **already saved the input** under `<base>/input/` (uploaded files, and a pasted
+  description as `input/context.txt`) and **recorded the input artifact** — do NOT emit another input
+  artifact. Read everything in `<base>/input/` (install a parser for `.pdf`/`.docx` if needed) and
+  extract it to usable text.
 - **Done-gate:** the customer context is fully extracted into usable text.
 
 ### provision

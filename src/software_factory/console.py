@@ -71,9 +71,9 @@ def make_prompt(req: RunRequest, run_id: str, runs_dir: str) -> str:
         f"on spawn and `agent_done {{\"id\":..,\"outcome\":..}}` on result; it pulls/writes via ruflo (memory); "
         f"and it attributes any file it creates to itself via `emit artifact {{...,\"agent\":\"<its id>\"}}` so "
         f"the artifact shows as that agent's child on the canvas.\n"
-        f"1. extract  — read any uploaded files in {base}/input/ (txt/pdf/docx; install a parser "
-        f"like python-docx / pdfplumber if needed) and extract them to usable text alongside the "
-        f"description below.\n"
+        f"1. extract  — the console already saved the input under {base}/input/ and recorded the input "
+        f"artifact (do NOT emit another). Read everything in {base}/input/ (txt/pdf/docx; install a "
+        f"parser like python-docx / pdfplumber if needed) and extract it to usable text.\n"
         f"2. provision — `creds.check_all`; `GitHub.create_repo`; `Budget(100)`; `workspace.create`; seed ruflo.\n"
         f"3. research (PIPELINE 1) — `swarm_init` a research swarm, then `agent_spawn` the named agents IN "
         f"ORDER (each emits agent_spawned/agent_done + attributes its artifacts): "
@@ -161,6 +161,7 @@ class Console:
         # Persist any uploaded context files (txt/pdf/docx) to the run's input/ dir for the
         # extract phase. Basename-only — never let a filename escape the input dir.
         import base64
+        inputs = []
         for f in (req.context_files or []):
             name = os.path.basename(f.get("name") or "upload")
             if not name or not f.get("content_b64"):
@@ -168,6 +169,17 @@ class Console:
             os.makedirs(paths["input_dir"], exist_ok=True)
             with open(os.path.join(paths["input_dir"], name), "wb") as out:
                 out.write(base64.b64decode(f["content_b64"]))
+            inputs.append("input/" + name)
+        # Persist a pasted description as a real file too, so the "input" artifact is never a hollow
+        # placeholder — the canvas shows the actual context, and the extract phase reads it.
+        if (req.description or "").strip():
+            os.makedirs(paths["input_dir"], exist_ok=True)
+            with open(os.path.join(paths["input_dir"], "context.txt"), "w") as cf:
+                cf.write(req.description)
+            inputs.append("input/context.txt")
+        for rel in inputs:
+            events.emit(self._runs_dir, run_id, "artifact",
+                        {"title": "input", "path": rel, "kind": "context"})
 
         # Stamp the proof marker at launch — the receipt of which skill is driving this run.
         # The teeth (that real work happened) live in verify_evidence, not here.
@@ -321,11 +333,14 @@ class Console:
 
         for i, e in enumerate([e for e in evs if e["type"] == "artifact"]):
             p = e["payload"]; aid = "artifact:%d" % i
-            # Honesty: an artifact whose file doesn't actually exist is "missing", not "created".
-            path = p.get("path")
-            real = bool(path) and "content" in self.artifact(run_id, path)
+            path = p.get("path") or ""
+            if path.startswith("http"):
+                status = "created"   # a link (repo / deployed URL), not a local file to verify
+            else:
+                # Honesty: a file artifact that doesn't actually exist is "missing", not "created".
+                status = "created" if (path and "content" in self.artifact(run_id, path)) else "missing"
             nodes.append({"data": {"id": aid, "label": p.get("title", "artifact"), "kind": "artifact",
-                                   "path": path, "status": "created" if real else "missing"}})
+                                   "path": path, "status": status, "url": path if path.startswith("http") else None}})
             # The artifact is a CHILD of the agent that created it (falls back to orchestrator).
             owner = "agent:" + p["agent"] if p.get("agent") and ("agent:" + p["agent"]) in agent_ids else "orchestrator"
             edges.append({"data": {"source": owner, "target": aid}})

@@ -213,11 +213,31 @@ def test_graph_marks_artifacts_missing_until_the_file_really_exists(tmp_path):
     c = console(tmp_path, FakeLauncher())
     rid = c.start_run(RunRequest(description="x"))
     events.emit(str(tmp_path), rid, "artifact", {"title": "PRD", "path": "workspace/PRD.md", "kind": "prd"})
-    art = lambda: [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "artifact"][0]
+    art = lambda: [n["data"] for n in c.graph(rid)["nodes"] if n["data"].get("path") == "workspace/PRD.md"][0]
     assert art()["status"] == "missing"                     # emitted but no file -> hollow
     os.makedirs(os.path.join(str(tmp_path), rid, "workspace"), exist_ok=True)
     open(os.path.join(str(tmp_path), rid, "workspace", "PRD.md"), "w").write("a real PRD")
     assert art()["status"] == "created"                     # file now exists -> real
+
+
+def test_pasted_description_is_persisted_and_input_artifact_is_real(tmp_path):
+    # The user pastes context (no file) → it's saved as input/context.txt and the input artifact
+    # is a REAL green node, not a hollow placeholder.
+    import os
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="the full SOW text"))
+    assert open(os.path.join(str(tmp_path), rid, "input", "context.txt")).read() == "the full SOW text"
+    inp = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "artifact" and n["data"]["label"] == "input"]
+    assert inp and inp[0]["status"] == "created"
+
+
+def test_url_artifacts_are_links_not_missing(tmp_path):
+    from software_factory import events
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    events.emit(str(tmp_path), rid, "artifact", {"title": "GitHub Repo", "path": "https://github.com/a/b", "kind": "repo"})
+    repo = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["label"] == "GitHub Repo"][0]
+    assert repo["status"] == "created" and repo["url"] == "https://github.com/a/b"
 
 
 def test_artifacts_are_children_of_the_agent_that_created_them(tmp_path):
@@ -233,7 +253,7 @@ def test_artifacts_are_children_of_the_agent_that_created_them(tmp_path):
     g = c.graph(rid)
     ids = {n["data"]["id"]: n["data"] for n in g["nodes"]}
     assert "agent:horizon" in ids and ids["agent:horizon"]["label"] == "HORIZON"
-    art_id = [n["data"]["id"] for n in g["nodes"] if n["data"]["kind"] == "artifact"][0]
+    art_id = [n["data"]["id"] for n in g["nodes"] if n["data"].get("path") == "workspace/PRD.md"][0]
     # the PRD artifact's parent edge comes FROM the agent that made it
     assert any(e["data"]["source"] == "agent:horizon" and e["data"]["target"] == art_id for e in g["edges"])
     # and the agent itself hangs off its phase (orchestrator spawns per-phase)
