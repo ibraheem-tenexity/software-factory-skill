@@ -234,6 +234,18 @@ def test_run_uses_sonnet_model_and_a_turn_cap_by_default(tmp_path):
     assert "--max-turns" in argv
 
 
+def test_default_launch_tees_agent_output_to_the_log_file(tmp_path):
+    # Real subprocess: the launcher tees child output to run.log (and to container stdout,
+    # which Railway captures — verified live, not here).
+    import time
+    from software_factory.console import _default_launch
+    log = str(tmp_path / "run.log")
+    proc = _default_launch(["python3", "-c", "print('hello-from-agent')"], {}, log)
+    proc.wait()
+    time.sleep(0.3)  # let the pump thread flush
+    assert "hello-from-agent" in open(log).read()
+
+
 def test_run_output_is_captured_to_a_readable_log(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)

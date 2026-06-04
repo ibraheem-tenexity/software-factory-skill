@@ -94,11 +94,33 @@ def make_prompt(req: RunRequest, run_id: str, runs_dir: str) -> str:
 
 def _default_launch(argv: list[str], env: dict, log_path: str | None = None) -> Any:
     import subprocess
+    import sys
+    import threading
 
-    # Capture the headless run's output to a per-run log so it's visible (and debuggable)
-    # regardless of the platform's log pipeline. Secrets ride in env, never argv.
-    out = open(log_path, "ab") if log_path else None
-    return subprocess.Popen(argv, env={**os.environ, **env}, stdout=out, stderr=out)
+    # Tee the headless run's output to BOTH the per-run log file (for the /log endpoint) AND
+    # the container's stdout, prefixed by run id, so it streams into the platform's live logs
+    # (e.g. Railway). Secrets ride in env, never argv.
+    proc = subprocess.Popen(
+        argv, env={**os.environ, **env},
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True,
+    )
+    prefix = f"[{os.path.basename(os.path.dirname(log_path))}] " if log_path else ""
+
+    def _pump():
+        logf = open(log_path, "a") if log_path else None
+        try:
+            for line in proc.stdout:
+                sys.stdout.write(prefix + line)   # → container stdout → Railway live logs
+                sys.stdout.flush()
+                if logf:
+                    logf.write(line)              # → run.log → /api/runs/<id>/log
+                    logf.flush()
+        finally:
+            if logf:
+                logf.close()
+
+    threading.Thread(target=_pump, daemon=True).start()
+    return proc
 
 
 class Console:
