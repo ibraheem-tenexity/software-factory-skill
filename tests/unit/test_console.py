@@ -131,6 +131,16 @@ def test_empty_credentials_are_ignored(tmp_path):
     assert "RAILWAY_TOKEN" not in launcher.env
 
 
+def test_run_uses_sonnet_model_and_a_turn_cap_by_default(tmp_path):
+    # Cost controls, pinned: default model is Sonnet 4.6 and turns are bounded.
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    c.start_run(RunRequest(description="guestbook"))
+    argv = launcher.argv
+    assert "--model" in argv and argv[argv.index("--model") + 1] == "claude-sonnet-4-6"
+    assert "--max-turns" in argv
+
+
 def test_run_output_is_captured_to_a_readable_log(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)

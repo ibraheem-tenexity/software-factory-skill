@@ -100,8 +100,14 @@ class Console:
         state.creds_provided = sorted(env.keys())
         state.save()
 
+        # Model + turn cap are cost controls. Default to Sonnet (≈5x cheaper than Opus) and a
+        # bounded number of turns so a wandering headless run can never burn tokens unbounded.
+        model = os.environ.get("SF_MODEL", "claude-sonnet-4-6")
+        max_turns = os.environ.get("SF_MAX_TURNS", "60")
         argv = [
             "claude", "-p", make_prompt(req, run_id, self._runs_dir),
+            "--model", model,
+            "--max-turns", max_turns,
             "--permission-mode", "bypassPermissions",
             "--output-format", "stream-json", "--verbose",
         ]
