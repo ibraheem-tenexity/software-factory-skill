@@ -220,6 +220,26 @@ def test_graph_marks_artifacts_missing_until_the_file_really_exists(tmp_path):
     assert art()["status"] == "created"                     # file now exists -> real
 
 
+def test_artifacts_are_children_of_the_agent_that_created_them(tmp_path):
+    import os
+    from software_factory import events
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    d = str(tmp_path)
+    events.emit(d, rid, "agent_spawned", {"id": "horizon", "role": "HORIZON", "phase": "research"})
+    os.makedirs(os.path.join(d, rid, "workspace"), exist_ok=True)
+    open(os.path.join(d, rid, "workspace", "PRD.md"), "w").write("real")
+    events.emit(d, rid, "artifact", {"title": "PRD", "path": "workspace/PRD.md", "kind": "prd", "agent": "horizon"})
+    g = c.graph(rid)
+    ids = {n["data"]["id"]: n["data"] for n in g["nodes"]}
+    assert "agent:horizon" in ids and ids["agent:horizon"]["label"] == "HORIZON"
+    art_id = [n["data"]["id"] for n in g["nodes"] if n["data"]["kind"] == "artifact"][0]
+    # the PRD artifact's parent edge comes FROM the agent that made it
+    assert any(e["data"]["source"] == "agent:horizon" and e["data"]["target"] == art_id for e in g["edges"])
+    # and the agent itself hangs off its phase (orchestrator spawns per-phase)
+    assert any(e["data"]["source"] == "phase:research" and e["data"]["target"] == "agent:horizon" for e in g["edges"])
+
+
 def test_events_continue_and_artifact(tmp_path):
     from software_factory import events, gates
     c = console(tmp_path, FakeLauncher())

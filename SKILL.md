@@ -22,7 +22,29 @@ reimplement or estimate what it computes.
 **Emit events as you go.** At every phase boundary, artifact, agent spawn, and blocker, emit an
 event so the operator console/canvas shows the run live. Emit from a shell:
 `python -m software_factory.events emit <runs_dir> <run_id> <type> '<json>'`. Emitting is
-fire-and-forget telemetry — it **never** pauses the run.
+fire-and-forget telemetry — it **never** pauses the run. Conventions:
+- spawning an agent → `emit agent_spawned {"id":"<unique>","role":"HORIZON","phase":"research"}`;
+  on its result → `emit agent_done {"id":"<unique>","outcome":"success|no_op|blocked"}`.
+- an agent that produces a file → `emit artifact {"title":"PRD","path":"…","kind":"prd","agent":"<that agent's id>"}`
+  so the canvas shows the **artifact as a child of the agent that created it**.
+
+## Orchestration model — you spawn ruflo swarms; you do NOT do the work yourself
+
+From the very first phase, **ruflo is the swarm runtime.** You are the orchestrator: for **every**
+task type you **start a ruflo swarm** (`swarm_init`) and **populate it with agents** (`agent_spawn`),
+then coordinate + judge their output and advance the phase. You never do the research, design,
+architecture, or coding inline as a single agent — you delegate each to its swarm:
+
+| Phase | ruflo swarm | agents spawned (`agent_spawn`) |
+|------|------|------|
+| research | research/PRD swarm | HORIZON, ARCHIVIST, VANGUARD, CHROMA → HORIZON writes PRD |
+| architect | architecture swarm | software-architect (CHROMA consults) |
+| build | coding swarm | one build agent per ticket (per wave) |
+| test→fix | fix swarm | one fix agent per bug |
+
+Each spawned agent **pulls** its context from ruflo (memory), writes its result back, emits its own
+`agent_spawned`/`agent_done`, and attributes any file it creates to itself (`artifact {…, "agent":id}`).
+A phase is done when its swarm's output passes the phase's mechanical done-gate.
 
 ## The four standing decisions (do not relitigate)
 
@@ -76,8 +98,10 @@ clears them itself; it never stops for a review.
 - **Done-gate:** repo writable, brain reachable, budget set, workspace created.
 
 ### research  — PIPELINE 1 (product definition)
-Spawn the named PRD agents in order (`emit agent_spawned`/`agent_done` per role). They carry forward
-the previous version's contracts; pull/write findings via ruflo (memory).
+**Start a ruflo research swarm** (`swarm_init`) and **`agent_spawn` the named agents into it** — you
+coordinate, they do the work. Spawn them in order; each emits its own `agent_spawned {id, role,
+phase:"research"}` / `agent_done`, pulls/writes via ruflo (memory), and attributes the files it creates
+to itself (`artifact {…, "agent": id}`). They carry forward the previous version's contracts.
 
 1. **HORIZON (pm.lead) — context assembly.** From the extracted context, normalize the transcript into
    a tight, ordered **scope**: who the customer is, the job-to-be-done, success criteria; cut
@@ -102,7 +126,8 @@ the previous version's contracts; pull/write findings via ruflo (memory).
   shows it red until the file truly exists). No human approval — a code check, not a pause.
 
 ### architect  — END OF PIPELINE 1
-- **software-architect (NEW agent)** — from the PRD + CHROMA's design spec, design the **demo-simplest**
+**Start a ruflo architecture swarm** (`swarm_init`) and `agent_spawn` the architect into it.
+- **software-architect (agent)** — from the PRD + CHROMA's design spec, design the **demo-simplest**
   architecture: YAGNI hard ("do I need all of this for a first demo?"), the **fewest services possible**.
   Fixed constraints: **Railway** compute, **Supabase** storage + auth, **Vercel** frontend if needed.
   Produce the service list, **data model**, **dependency list** between features, and the
@@ -131,9 +156,10 @@ the previous version's contracts; pull/write findings via ruflo (memory).
 - **Done-gate:** ≥1 open ticket exists with acceptance criteria; waves ordered; no orphan features.
 
 ### build
-- For each open ticket in the current wave: `claim`, `emit agent_spawned`, then spawn a Claude build
-  agent that **pulls** context from ruflo (do not inject a dump), implements, and opens a PR. On result
-  `emit agent_done {outcome}`.
+- **Start a ruflo coding swarm** (`swarm_init`). For each open ticket in the current wave: `claim`,
+  `agent_spawn` a build agent + `emit agent_spawned {id, role, phase:"build"}`; it **pulls** context from
+  ruflo (do not inject a dump), implements, opens a PR, and attributes its diff/PR artifact to itself.
+  On result `emit agent_done {id, outcome}`.
 - Merge only via `GitHub.merge_if_green(pr, diff_lines)` — it refuses red checks and empty diffs. Then
   `TicketStore.mark_done(pr, diff_lines)` — which refuses a hollow close.
 - **A no-op agent turn (empty diff) is a retry/escalate signal, never a completion.** Serialize per

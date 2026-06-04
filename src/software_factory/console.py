@@ -64,14 +64,20 @@ def make_prompt(req: RunRequest, run_id: str, runs_dir: str) -> str:
         f"run_id={run_id}. runs_dir={runs_dir}. Budget ${req.budget:.0f} (HARD cutoff). "
         f"Deploy target: {req.target}.\n\n"
         f"Read SKILL.md and the phases/ files. Execute these phases IN ORDER, and at each one run "
-        f"`{emit} phase '{{\"name\":\"<phase>\"}}'` so the canvas shows progress. Pull what you need "
-        f"from ruflo (memory) before acting; do not re-inject context.\n"
+        f"`{emit} phase '{{\"name\":\"<phase>\"}}'` so the canvas shows progress.\n"
+        f"ORCHESTRATION MODEL: you do NOT do the work yourself. From the start, ruflo is the swarm "
+        f"runtime — for each task type start a ruflo swarm (`swarm_init`) and `agent_spawn` agents into "
+        f"it, then coordinate + judge. Each agent: emit `agent_spawned {{\"id\":..,\"role\":..,\"phase\":..}}` "
+        f"on spawn and `agent_done {{\"id\":..,\"outcome\":..}}` on result; it pulls/writes via ruflo (memory); "
+        f"and it attributes any file it creates to itself via `emit artifact {{...,\"agent\":\"<its id>\"}}` so "
+        f"the artifact shows as that agent's child on the canvas.\n"
         f"1. extract  — read any uploaded files in {base}/input/ (txt/pdf/docx; install a parser "
         f"like python-docx / pdfplumber if needed) and extract them to usable text alongside the "
         f"description below.\n"
         f"2. provision — `creds.check_all`; `GitHub.create_repo`; `Budget(100)`; `workspace.create`; seed ruflo.\n"
-        f"3. research (PIPELINE 1) — spawn the named PRD agents IN ORDER, emit agent_spawned/agent_done "
-        f"each: HORIZON(pm.lead: scope) → ARCHIVIST(reuse scan via ruflo) → VANGUARD(domain-expert: "
+        f"3. research (PIPELINE 1) — `swarm_init` a research swarm, then `agent_spawn` the named agents IN "
+        f"ORDER (each emits agent_spawned/agent_done + attributes its artifacts): "
+        f"HORIZON(pm.lead: scope) → ARCHIVIST(reuse scan via ruflo) → VANGUARD(domain-expert: "
         f">=2 solution paths + REQUIRED WebSearch/WebFetch, >=3 real products WITH URLs) → "
         f"CHROMA(design.lead: screens + happy-flow journey) → HORIZON writes PRD.md with acceptance "
         f"criteria (given/when/then) + ticket seeds; commit; `{emit} artifact '{{\"title\":\"PRD\",\"path\":\"workspace/<repo>/PRD.md\",\"kind\":\"prd\"}}'`. "
@@ -291,20 +297,38 @@ class Console:
             edges.append({"data": {"source": prev, "target": pid}})
             prev = pid
 
+        # Agents are spawned by the orchestrator (ruflo swarm) per task — derive them from
+        # agent_spawned/agent_done events; fall back to Task subagents in the claude stream.
+        agent_info = {}  # agent_id -> {label, phase, status}
+        for e in evs:
+            p = e.get("payload") or {}
+            if e["type"] == "agent_spawned":
+                aid = p.get("id") or p.get("role") or "agent"
+                agent_info[aid] = {"label": p.get("role") or aid, "phase": p.get("phase"), "status": "running"}
+            elif e["type"] == "agent_done":
+                aid = p.get("id") or p.get("role")
+                if aid in agent_info:
+                    out = p.get("outcome")
+                    agent_info[aid]["status"] = "done" if out in (None, "real_diff", "success") else out
         for a in streamlog.agents(self._full_log(run_id)):
-            aid = "agent:" + a["id"]
-            nodes.append({"data": {"id": aid, "label": a["label"], "kind": "agent", "status": a["status"]}})
-            edges.append({"data": {"source": "orchestrator", "target": aid}})
+            agent_info.setdefault(a["id"], {"label": a["label"], "phase": None, "status": a["status"]})
+        agent_ids = set()
+        for aid, info in agent_info.items():
+            nid = "agent:" + aid; agent_ids.add(nid)
+            nodes.append({"data": {"id": nid, "label": info["label"], "kind": "agent", "status": info["status"]}})
+            src = "phase:" + info["phase"] if info.get("phase") in PIPELINE else "orchestrator"
+            edges.append({"data": {"source": src, "target": nid}})  # orchestrator/phase spawns the agent
 
         for i, e in enumerate([e for e in evs if e["type"] == "artifact"]):
             p = e["payload"]; aid = "artifact:%d" % i
-            # Honesty: an artifact whose file doesn't actually exist is "missing", not "created"
-            # — the canvas paints it red so a fabricated PRD/diagram can't masquerade as done.
+            # Honesty: an artifact whose file doesn't actually exist is "missing", not "created".
             path = p.get("path")
             real = bool(path) and "content" in self.artifact(run_id, path)
             nodes.append({"data": {"id": aid, "label": p.get("title", "artifact"), "kind": "artifact",
                                    "path": path, "status": "created" if real else "missing"}})
-            edges.append({"data": {"source": "orchestrator", "target": aid}})
+            # The artifact is a CHILD of the agent that created it (falls back to orchestrator).
+            owner = "agent:" + p["agent"] if p.get("agent") and ("agent:" + p["agent"]) in agent_ids else "orchestrator"
+            edges.append({"data": {"source": owner, "target": aid}})
 
         cleared = {e["payload"].get("what") for e in evs if e["type"] == "blocker_cleared"}
         for i, e in enumerate([e for e in evs if e["type"] == "blocker"]):
