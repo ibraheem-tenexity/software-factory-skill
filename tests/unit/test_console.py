@@ -131,6 +131,27 @@ def test_empty_credentials_are_ignored(tmp_path):
     assert "RAILWAY_TOKEN" not in launcher.env
 
 
+def test_uploaded_context_files_are_written_to_the_run_input_dir(tmp_path):
+    import base64, os
+    c = console(tmp_path, FakeLauncher())
+    b64 = base64.b64encode(b"EPC contract T&C brief...").decode()
+    run_id = c.start_run(RunRequest(description="analyze this",
+                                    context_files=[{"name": "brief.pdf", "content_b64": b64}]))
+    p = os.path.join(str(tmp_path), run_id, "input", "brief.pdf")
+    assert os.path.exists(p)
+    assert open(p, "rb").read() == b"EPC contract T&C brief..."
+
+
+def test_uploaded_filenames_are_basename_only_no_traversal(tmp_path):
+    import base64, os
+    c = console(tmp_path, FakeLauncher())
+    b64 = base64.b64encode(b"x").decode()
+    run_id = c.start_run(RunRequest(description="d",
+                                    context_files=[{"name": "../../evil.txt", "content_b64": b64}]))
+    assert os.path.exists(os.path.join(str(tmp_path), run_id, "input", "evil.txt"))
+    assert not os.path.exists(os.path.join(str(tmp_path), "evil.txt"))
+
+
 def test_make_prompt_targets_a_dedicated_service_not_the_runner(tmp_path):
     # Spec 1: the built app must deploy to its OWN service, never the runner's own.
     p = make_prompt(RunRequest(description="x", target="railway"), "run-xyz", runs_dir="/runs")

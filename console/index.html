@@ -42,6 +42,9 @@
     <textarea id="description" placeholder="One line, or paste detailed context / an email."></textarea>
     <label>Context / data (optional)</label>
     <textarea id="context" placeholder="Domain, constraints, sample data…"></textarea>
+    <label>…or upload context files (txt / pdf / docx)</label>
+    <input id="files" type="file" multiple accept=".txt,.md,.pdf,.docx" />
+    <p class="muted" id="filenote"></p>
     <div class="row">
       <div><label>Budget (USD)</label><input id="budget" type="number" value="100" /></div>
       <div><label>Deploy target</label>
@@ -153,10 +156,21 @@
     $("runs").onchange = (e) => attach(e.target.value);
     function attach(id) { runId = id; localStorage.setItem("sf_run", id); lastIds = ""; if (timer) clearInterval(timer); poll(); timer = setInterval(poll, 2500); }
 
+    function readFileB64(file) {
+      return new Promise((resolve) => {
+        const r = new FileReader();
+        r.onload = () => resolve({ name: file.name, content_b64: String(r.result).split(",")[1] });
+        r.readAsDataURL(file);   // base64 — works for binary docx/pdf
+      });
+    }
+
     $("go").onclick = async () => {
       $("go").disabled = true;
       const byo = $("railwayMode").value === "byo";
-      const p = { description: $("description").value, context: $("context").value, budget: Number($("budget").value), target: $("target").value };
+      const files = await Promise.all([...($("files").files || [])].map(readFileB64));
+      if (files.length) $("filenote").textContent = "uploading: " + files.map((f) => f.name).join(", ");
+      const p = { description: $("description").value, context: $("context").value,
+        budget: Number($("budget").value), target: $("target").value, files };
       if (byo) p.railway_token = $("railwayToken").value;
       const res = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
       $("railwayToken").value = "";

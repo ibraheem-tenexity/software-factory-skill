@@ -36,6 +36,9 @@ class RunRequest:
     # Secret env (e.g. {"RAILWAY_TOKEN": "..."}) for a bring-your-own run. Injected into the
     # headless child's environment only — never persisted, never put on the command line.
     credentials: dict = field(default_factory=dict)
+    # Uploaded context files [{"name","content_b64"}] (txt/pdf/docx) — written to the run's
+    # input/ dir for the extract phase to read.
+    context_files: list = field(default_factory=list)
 
 
 def run_paths(runs_dir: str, run_id: str) -> dict:
@@ -45,6 +48,7 @@ def run_paths(runs_dir: str, run_id: str) -> dict:
         "state_dir": base,
         "agents_db": os.path.join(base, "agents.db"),
         "tickets_db": os.path.join(base, "tickets.db"),
+        "input_dir": os.path.join(base, "input"),
     }
 
 
@@ -62,7 +66,9 @@ def make_prompt(req: RunRequest, run_id: str, runs_dir: str) -> str:
         f"Read SKILL.md and the phases/ files. Execute these phases IN ORDER, and at each one run "
         f"`{emit} phase '{{\"name\":\"<phase>\"}}'` so the canvas shows progress. Pull what you need "
         f"from ruflo (memory) before acting; do not re-inject context.\n"
-        f"1. extract  — extract the input (text/pdf/docx) to usable text.\n"
+        f"1. extract  — read any uploaded files in {base}/input/ (txt/pdf/docx; install a parser "
+        f"like python-docx / pdfplumber if needed) and extract them to usable text alongside the "
+        f"description below.\n"
         f"2. provision — `creds.check_all`; `GitHub.create_repo`; `Budget(100)`; `workspace.create`; seed ruflo.\n"
         f"3. research  — REQUIRED web search: run WebSearch/WebFetch and surface >=3 real competing "
         f"products WITH URLs, then write PRD.md and `{emit} artifact '{{\"title\":\"PRD\",\"path\":\"workspace/<repo>/PRD.md\",\"kind\":\"prd\"}}'`.\n"
@@ -117,6 +123,17 @@ class Console:
         run_id = self._new_id()
         paths = self._paths(run_id)
         os.makedirs(paths["base"], exist_ok=True)
+
+        # Persist any uploaded context files (txt/pdf/docx) to the run's input/ dir for the
+        # extract phase. Basename-only — never let a filename escape the input dir.
+        import base64
+        for f in (req.context_files or []):
+            name = os.path.basename(f.get("name") or "upload")
+            if not name or not f.get("content_b64"):
+                continue
+            os.makedirs(paths["input_dir"], exist_ok=True)
+            with open(os.path.join(paths["input_dir"], name), "wb") as out:
+                out.write(base64.b64decode(f["content_b64"]))
 
         # Stamp the proof marker at launch — the receipt of which skill is driving this run.
         # The teeth (that real work happened) live in verify_evidence, not here.

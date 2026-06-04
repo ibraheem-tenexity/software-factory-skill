@@ -78,6 +78,7 @@ class Handler(BaseHTTPRequestHandler):
                 budget=float(body.get("budget", 100)),
                 target=body.get("target", "railway"),
                 credentials=creds,
+                context_files=body.get("files", []),  # [{name, content_b64}] — txt/pdf/docx
             )
             return self._send(200, {"run_id": console.start_run(req)})
         return self._send(404, {"error": "not found"})
