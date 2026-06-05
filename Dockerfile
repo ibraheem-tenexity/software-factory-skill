@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Puppeteer (mermaid-cli) chromium into a SHARED path reachable by the non-root runtime user.
 ENV PUPPETEER_CACHE_DIR=/ms-puppeteer
 # Orchestrator runtime + deploy CLI + browser-test MCP + Mermaid->SVG (architecture diagrams), all global
-RUN npm install -g @anthropic-ai/claude-code @railway/cli @playwright/mcp playwright @mermaid-js/mermaid-cli @claude-flow/cli
+RUN npm install -g @anthropic-ai/claude-code @railway/cli @playwright/mcp playwright @mermaid-js/mermaid-cli @claude-flow/cli \
+    && pip3 install --break-system-packages openai-agents
 
 # Chromium + OS libs into a SHARED path so the non-root runtime user can use them.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
@@ -35,7 +36,7 @@ RUN mkdir -p /home/node/.claude/skills /ms-puppeteer \
     && chown -R node:node /app /home/node /ms-playwright /ms-puppeteer
 
 # Entrypoint drops to uid 1000 (node) even if the platform starts us as root.
-# Required at runtime (set on the service): ANTHROPIC_API_KEY, GH_TOKEN, RAILWAY_TOKEN, SUPABASE_ACCESS_TOKEN
+# Required at runtime (set on the service): ANTHROPIC_API_KEY, OPENAI_API_KEY, GH_TOKEN, RAILWAY_TOKEN, SUPABASE_ACCESS_TOKEN
 # PYTHONPATH so `import software_factory` works for any python invocation (the orchestrator
 # shells fresh python processes, not just the server).
 ENV PYTHONUNBUFFERED=1 SF_BIND=0.0.0.0 PYTHONPATH=/app/src

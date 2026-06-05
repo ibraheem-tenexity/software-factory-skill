@@ -1,27 +1,98 @@
 """Thin stdlib HTTP shell around software_factory.console — no third-party deps.
 
-Serves the operator page and a small JSON API:
-  GET  /                       -> input + live view
-  POST /api/runs               -> {description, context, budget, target} -> launches a run
-  GET  /api/runs/<id>          -> live status (phase, agents, spend, deploy_url)
-  GET  /api/runs/<id>/evidence -> proof-of-run bundle + verification verdict
+Serves the operator page, a JSON API, and a chat interface backed by OpenAI Agents SDK:
+  GET  /                       -> UI (graph + chat panel)
+  POST /api/runs               -> launches a run (legacy form path)
+  GET  /api/runs/<id>          -> live status
+  GET  /api/runs/<id>/evidence -> proof-of-run bundle
+  POST /api/chat               -> send chat message, get agent response
+  GET  /api/chat/<id>/history  -> full chat history for a run
+  POST /api/chat/<id>/deps     -> submit dep values securely
+  GET  /api/chat/<id>/stream   -> SSE for real-time pipeline updates
 
 Run:  python3 console/server.py   (then open http://localhost:8765)
-Launching a run shells out to headless `claude`, so ANTHROPIC_API_KEY + gh/Railway creds must
-be present for a real build; without them the run will hard-block at provision (by design).
 """
+import asyncio
 import json
 import os
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from software_factory.console import Console, RunRequest  # noqa: E402
+from software_factory.chat_store import ChatStore, ChatMessage  # noqa: E402
+from software_factory.chat_agent import ChatAgentRunner  # noqa: E402
 
 RUNS_DIR = os.environ.get("SF_RUNS_DIR", os.path.join(os.path.dirname(__file__), "..", ".runs"))
 HERE = os.path.dirname(__file__)
 console = Console(RUNS_DIR)
+
+_has_openai_key = bool(os.environ.get("OPENAI_API_KEY"))
+_chat_runner = ChatAgentRunner(console) if _has_openai_key else None
+
+_sse_clients: dict[str, list] = {}
+_sse_lock = threading.Lock()
+_run_stages: dict[str, int] = {}
+
+
+def _chat_path(run_id: str) -> str:
+    return os.path.join(RUNS_DIR, run_id, "chat.jsonl")
+
+
+def _run_async(coro):
+    """Run an async coroutine from sync code."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+def _push_sse(run_id: str, msgs: list[ChatMessage]):
+    """Push messages to all SSE clients watching this run."""
+    with _sse_lock:
+        clients = _sse_clients.get(run_id, [])
+    for msg in msgs:
+        data = json.dumps(msg.to_dict())
+        for q in clients:
+            q.append(f"data: {data}\n\n")
+
+
+def _poll_transitions():
+    """Background thread: detect stage transitions and push chat notifications."""
+    while True:
+        time.sleep(3)
+        try:
+            for run_info in console.list_runs():
+                rid = run_info.get("id") or run_info.get("run_id", "")
+                if not rid:
+                    continue
+                st = console.status(rid)
+                if st.get("done") or st.get("phase") == "pending":
+                    continue
+                prev = _run_stages.get(rid, 0)
+                cur = st.get("stage", 1)
+                if cur != prev:
+                    _run_stages[rid] = cur
+                    if _chat_runner:
+                        msgs = _chat_runner.check_and_notify(rid, prev_stage=prev)
+                        store = ChatStore(_chat_path(rid))
+                        for m in msgs:
+                            store.append(m)
+                        _push_sse(rid, msgs)
+                if st.get("done") and prev > 0:
+                    if _chat_runner:
+                        msgs = _chat_runner.check_and_notify(rid, prev_stage=cur)
+                        store = ChatStore(_chat_path(rid))
+                        for m in msgs:
+                            store.append(m)
+                        _push_sse(rid, msgs)
+                    _run_stages.pop(rid, None)
+        except Exception:
+            pass
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -41,6 +112,43 @@ class Handler(BaseHTTPRequestHandler):
         path, qs = parsed.path, parse_qs(parsed.query)
         if path in ("/api/runs", "/api/runs/"):
             return self._send(200, {"runs": console.list_runs()})
+
+        # Chat history
+        if path.startswith("/api/chat/") and path.endswith("/history"):
+            run_id = path[len("/api/chat/"):-len("/history")]
+            store = ChatStore(_chat_path(run_id))
+            return self._send(200, {"messages": [m.to_dict() for m in store.history()]})
+
+        # SSE stream
+        if path.startswith("/api/chat/") and path.endswith("/stream"):
+            run_id = path[len("/api/chat/"):-len("/stream")]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            q: list[str] = []
+            with _sse_lock:
+                _sse_clients.setdefault(run_id, []).append(q)
+            try:
+                while True:
+                    if q:
+                        chunk = q.pop(0)
+                        self.wfile.write(chunk.encode())
+                        self.wfile.flush()
+                    else:
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+                        time.sleep(2)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                with _sse_lock:
+                    clients = _sse_clients.get(run_id, [])
+                    if q in clients:
+                        clients.remove(q)
+            return
+
         if path.startswith("/api/runs/"):
             rest = path[len("/api/runs/"):]
             if rest.endswith("/evidence"):
@@ -70,6 +178,75 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        # Chat message
+        if self.path == "/api/chat":
+            if not _chat_runner:
+                return self._send(503, {"error": "OPENAI_API_KEY not set — chat unavailable"})
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            run_id = body.get("run_id")
+            message = body.get("message", "")
+            files = body.get("files", [])
+            images = body.get("images", [])
+
+            store = ChatStore(_chat_path(run_id)) if run_id else None
+            user_msg = ChatMessage(role="user", content=message, msg_type="text",
+                                   ts=time.time())
+            if files:
+                user_msg.metadata["files"] = [f.get("name", "file") for f in files]
+            if images:
+                user_msg.metadata["images"] = [i.get("name", "image") for i in images]
+
+            try:
+                result_run_id, response_msgs = _run_async(
+                    _chat_runner.handle_message(run_id, message, files, images)
+                )
+            except Exception as e:
+                return self._send(500, {"error": str(e)})
+
+            if not run_id:
+                run_id = result_run_id
+            if run_id:
+                store = ChatStore(_chat_path(run_id))
+                store.append(user_msg)
+                for m in response_msgs:
+                    store.append(m)
+                _push_sse(run_id, response_msgs)
+
+            return self._send(200, {
+                "run_id": run_id,
+                "messages": [m.to_dict() for m in response_msgs],
+            })
+
+        # Chat deps submission
+        if self.path.startswith("/api/chat/") and self.path.endswith("/deps"):
+            run_id = self.path[len("/api/chat/"):-len("/deps")]
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            deps = body.get("deps", {})
+            result = console.submit_deps(run_id, deps)
+            dep_msg = ChatMessage(
+                role="user", content=f"Provided: {', '.join(deps.keys())}",
+                msg_type="dep_submit", ts=time.time(),
+                metadata={"dep_names": list(deps.keys())},
+            )
+            store = ChatStore(_chat_path(run_id))
+            store.append(dep_msg)
+            if result.get("satisfied"):
+                console.start_stage3(run_id, extra_creds=deps)
+                launch_msg = ChatMessage(
+                    role="system",
+                    content="Dependencies received. Build stage launching.",
+                    msg_type="status_update", ts=time.time(),
+                    metadata={"run_id": run_id, "stage": 3},
+                )
+                store.append(launch_msg)
+                _push_sse(run_id, [dep_msg, launch_msg])
+            else:
+                _push_sse(run_id, [dep_msg])
+            return self._send(200, result)
+
+        # Legacy: existing run management endpoints
         if self.path.startswith("/api/runs/") and self.path.endswith("/continue"):
             run_id = self.path[len("/api/runs/"):-len("/continue")]
             length = int(self.headers.get("Content-Length", 0))
@@ -119,10 +296,12 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8765"))
-    # Loopback only: the console + the BYO creds form are for local single-user use, never
-    # exposed on the network. Override with SF_BIND=0.0.0.0 if you really mean to.
     host = os.environ.get("SF_BIND", "127.0.0.1")
     import getpass
     print(f"[runner] uid={os.getuid()} user={getpass.getuser()} home={os.environ.get('HOME')}", flush=True)
+    if not _has_openai_key:
+        print("[warn] OPENAI_API_KEY not set — chat agent disabled, API-only mode")
+    t = threading.Thread(target=_poll_transitions, daemon=True)
+    t.start()
     print(f"software-factory console on http://{host}:{port}  (runs in {os.path.abspath(RUNS_DIR)})")
     ThreadingHTTPServer((host, port), Handler).serve_forever()

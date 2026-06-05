@@ -49,19 +49,48 @@
     .pill b { color: var(--fg); } .pill.cost b { color: var(--success); }
 
     .main { display: flex; flex: 1; min-height: 0; }
-    /* Build form (left) */
-    .build { width: 360px; flex: none; border-right: 1px solid var(--border); background: var(--card); padding: 1.1rem; overflow-y: auto; }
-    .build h2 { font-family: var(--display); font-weight: 600; font-size: 1.05rem; margin: 0 0 .2rem; letter-spacing: -.01em; }
-    .build p.sub { color: var(--muted-fg); font-size: .76rem; margin: 0 0 1rem; }
-    label { display: block; font-size: .72rem; font-weight: 600; color: var(--muted-fg); text-transform: uppercase; letter-spacing: .04em; margin: .85rem 0 .35rem; }
-    textarea, input, .build select { width: 100%; border: 1px solid var(--input); border-radius: var(--radius); background: var(--card);
-      color: var(--fg); font: .85rem var(--sans); padding: .55rem .6rem; }
-    textarea { min-height: 74px; resize: vertical; } input:focus, textarea:focus, select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgb(0 43 92 / .12); }
-    .row { display: flex; gap: .7rem; } .row > div { flex: 1; }
-    .go { margin-top: 1.1rem; width: 100%; padding: .7rem; border: 0; border-radius: var(--radius); background: var(--primary);
-      color: var(--primary-fg); font: 600 .9rem var(--sans); cursor: pointer; transition: filter .15s; }
-    .go:hover { filter: brightness(1.12); } .go:disabled { opacity: .5; }
+    /* Chat panel (left) */
+    .chat-panel { width: 400px; flex: none; border-right: 1px solid var(--border); background: var(--card);
+      display: flex; flex-direction: column; }
+    .chat-messages { flex: 1; overflow-y: auto; padding: .8rem; display: flex; flex-direction: column; gap: .5rem; }
+    .msg { max-width: 88%; padding: .55rem .75rem; border-radius: 12px; font-size: .84rem; line-height: 1.5; word-wrap: break-word; }
+    .msg.user { align-self: flex-end; background: var(--primary); color: var(--primary-fg); border-bottom-right-radius: 4px; }
+    .msg.assistant { align-self: flex-start; background: var(--muted); color: var(--fg); border-bottom-left-radius: 4px; }
+    .msg.assistant .markdown { font-size: .82rem; }
+    .msg.system { align-self: center; background: none; color: var(--muted-fg); font: 600 .72rem var(--mono);
+      border: 1px solid var(--border); border-radius: 999px; padding: .25rem .7rem; }
+    .msg.system.pipeline { border-color: var(--success); color: var(--success); }
+    .msg.system.complete { border-color: var(--gold); color: var(--gold); }
+    .msg .file-badge { display: inline-flex; align-items: center; gap: .3rem; font-size: .76rem; opacity: .85; margin-top: .2rem; }
+    .msg .dep-inputs { margin-top: .5rem; }
+    .msg .dep-inputs label { display: block; font-size: .72rem; font-weight: 600; color: var(--muted-fg); text-transform: uppercase;
+      letter-spacing: .04em; margin: .5rem 0 .2rem; }
+    .msg .dep-inputs input { width: 100%; border: 1px solid var(--input); border-radius: var(--radius);
+      background: var(--card); color: var(--fg); font: .82rem var(--mono); padding: .4rem .5rem; }
+    .msg .dep-inputs input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgb(0 43 92 / .12); }
+    .msg .dep-submit { margin-top: .6rem; padding: .45rem .8rem; border: 0; border-radius: var(--radius);
+      background: var(--gold); color: #1c1402; font: 600 .8rem var(--sans); cursor: pointer; }
+    .msg a.deploy-link { color: var(--primary); font-weight: 600; }
+    .chat-compose { display: flex; align-items: flex-end; gap: .4rem; padding: .6rem .8rem; border-top: 1px solid var(--border); background: var(--card); }
+    .chat-compose textarea { flex: 1; border: 1px solid var(--input); border-radius: var(--radius); background: var(--card);
+      color: var(--fg); font: .85rem var(--sans); padding: .55rem .6rem; resize: none; min-height: 40px; max-height: 120px; overflow-y: auto; }
+    .chat-compose textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgb(0 43 92 / .12); }
+    .chat-compose .attach-btn, .chat-compose .send-btn { flex: none; width: 38px; height: 38px; border: 1px solid var(--input);
+      border-radius: var(--radius); background: var(--card); color: var(--muted-fg); font-size: 1rem; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; }
+    .chat-compose .send-btn { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); font-weight: 700; }
+    .chat-compose .send-btn:disabled { opacity: .4; }
+    .chat-attachments { display: flex; gap: .3rem; padding: 0 .8rem; flex-wrap: wrap; }
+    .chat-attachments .att { font: .72rem var(--mono); background: var(--muted); padding: .2rem .5rem; border-radius: var(--radius);
+      display: flex; align-items: center; gap: .3rem; }
+    .chat-attachments .att button { border: 0; background: none; color: var(--destructive); cursor: pointer; font-size: .7rem; }
+    .typing-indicator { align-self: flex-start; color: var(--muted-fg); font-size: .76rem; padding: .3rem .6rem; }
+    @keyframes blink { 0%,80%,100% { opacity: 0; } 40% { opacity: 1; } }
+    .typing-indicator span { animation: blink 1.4s infinite; }
+    .typing-indicator span:nth-child(2) { animation-delay: .2s; }
+    .typing-indicator span:nth-child(3) { animation-delay: .4s; }
     .hint { color: var(--muted-fg); font-size: .72rem; margin-top: .5rem; }
+    label { display: block; font-size: .72rem; font-weight: 600; color: var(--muted-fg); text-transform: uppercase; letter-spacing: .04em; margin: .85rem 0 .35rem; }
 
     /* Canvas — dotted blueprint backdrop + grain */
     .canvas-area { flex: 1; position: relative; background-color: var(--bg);
@@ -118,29 +147,17 @@
       <span class="pill cost" id="cost"></span>
     </header>
     <div class="main">
-      <aside class="build rise" style="animation-delay:.05s">
-        <h2>Build a customer solution</h2>
-        <p class="sub">One line or detailed context. The factory researches, writes a PRD &amp; architecture, then builds &amp; deploys.</p>
-        <label>What should we build?</label>
-        <textarea id="description" placeholder="A guestbook… or paste an email / SOW."></textarea>
-        <label>Context (optional)</label>
-        <textarea id="context" placeholder="Domain, constraints, sample data…"></textarea>
-        <label>…or upload files (txt / pdf / docx)</label>
-        <input id="files" type="file" multiple accept=".txt,.md,.pdf,.docx" />
-        <p class="hint" id="filenote"></p>
-        <div class="row">
-          <div><label>Budget $</label><input id="budget" type="number" value="100" /></div>
-          <div><label>Target</label><select id="target"><option value="railway">railway</option><option value="vercel">vercel</option></select></div>
+      <aside class="chat-panel rise" style="animation-delay:.05s">
+        <div class="chat-messages" id="messages">
+          <div class="msg assistant">Hi! I'm your Factory Concierge. Tell me what you'd like to build — paste a description, attach files, or just chat.</div>
         </div>
-        <label>Railway</label>
-        <select id="railwayMode"><option value="managed">Managed</option><option value="byo">Bring your own</option></select>
-        <div id="byo" style="display:none">
-          <label>Railway API token</label>
-          <input id="railwayToken" type="password" autocomplete="off" placeholder="rwt_…" />
-          <p class="hint">🔒 Injected into the run env, never stored.</p>
+        <div class="chat-attachments" id="attachments"></div>
+        <div class="chat-compose">
+          <button class="attach-btn" id="attach-btn" title="Attach files">&#x1f4ce;</button>
+          <input type="file" id="file-input" multiple accept=".txt,.md,.pdf,.docx,.png,.jpg,.jpeg,.gif,.webp" hidden />
+          <textarea id="chat-input" placeholder="Describe what you want to build..." rows="1"></textarea>
+          <button class="send-btn" id="send-btn" title="Send">&rarr;</button>
         </div>
-        <button class="go" id="go">Build &amp; deploy</button>
-        <p class="hint" id="note"></p>
       </aside>
 
       <div class="canvas-area rise" style="animation-delay:.1s">
@@ -339,20 +356,184 @@
       attach(sel.value);
     }
     $("runs").onchange = (e) => attach(e.target.value);
-    function attach(id) { runId = id; localStorage.setItem("sf_run", id); laidOut = false; cy.elements().remove(); if (timer) clearInterval(timer); poll(); timer = setInterval(poll, 2000); }
-    $("railwayMode").onchange = (e) => { $("byo").style.display = e.target.value === "byo" ? "block" : "none"; };
+    function attach(id) { runId = id; localStorage.setItem("sf_run", id); laidOut = false; cy.elements().remove(); if (timer) clearInterval(timer); poll(); timer = setInterval(poll, 2000); loadChatHistory(id); }
+
+    // ---- Chat logic ----
+    let chatRunId = null, pendingFiles = [], sseSource = null;
+
     function readFileB64(f) { return new Promise((res) => { const r = new FileReader(); r.onload = () => res({ name: f.name, content_b64: String(r.result).split(",")[1] }); r.readAsDataURL(f); }); }
-    $("go").onclick = async () => {
-      $("go").disabled = true;
-      const byo = $("railwayMode").value === "byo";
-      const files = await Promise.all([...($("files").files || [])].map(readFileB64));
-      if (files.length) $("filenote").textContent = "uploading: " + files.map((f) => f.name).join(", ");
-      const p = { description: $("description").value, context: $("context").value, budget: Number($("budget").value), target: $("target").value, files };
-      if (byo) p.railway_token = $("railwayToken").value;
-      const res = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
-      $("railwayToken").value = "";
-      const id = (await res.json()).run_id; $("note").textContent = "run " + id + " launched."; $("go").disabled = false; await loadRuns(id);
+
+    function renderMsg(m) {
+      const el = document.createElement("div");
+      if (m.msg_type === "status_update" || m.msg_type === "pipeline_started") {
+        el.className = "msg system" + (m.msg_type === "pipeline_started" ? " pipeline" : "");
+        el.textContent = m.content;
+      } else if (m.msg_type === "complete") {
+        el.className = "msg system complete";
+        const url = (m.metadata || {}).url || "";
+        el.innerHTML = m.content + (url ? ` <a class="deploy-link" href="${url}" target="_blank">${url}</a>` : "");
+      } else if (m.msg_type === "dep_request") {
+        el.className = "msg assistant";
+        let h = `<div>${marked.parse(m.content)}</div><div class="dep-inputs">`;
+        for (const name of (m.metadata || {}).dep_names || []) {
+          h += `<label>${name}</label><input type="password" data-dep="${name}" autocomplete="off" placeholder="${name}" />`;
+        }
+        h += `<button class="dep-submit" onclick="submitChatDeps()">Submit credentials</button></div>`;
+        el.innerHTML = h;
+      } else if (m.msg_type === "dep_submit") {
+        el.className = "msg user";
+        el.textContent = m.content;
+      } else if (m.role === "user") {
+        el.className = "msg user";
+        el.textContent = m.content;
+        if (m.metadata && m.metadata.files) {
+          for (const f of m.metadata.files) el.innerHTML += `<div class="file-badge">&#x1f4c4; ${f}</div>`;
+        }
+        if (m.metadata && m.metadata.images) {
+          for (const f of m.metadata.images) el.innerHTML += `<div class="file-badge">&#x1f5bc; ${f}</div>`;
+        }
+      } else {
+        el.className = "msg assistant";
+        el.innerHTML = `<div class="markdown">${marked.parse(m.content || "")}</div>`;
+      }
+      return el;
+    }
+
+    function appendMsg(m) {
+      const box = $("messages");
+      box.appendChild(renderMsg(m));
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function showTyping() {
+      let t = document.getElementById("typing");
+      if (!t) { t = document.createElement("div"); t.id = "typing"; t.className = "typing-indicator";
+        t.innerHTML = "<span>.</span><span>.</span><span>.</span>"; $("messages").appendChild(t); }
+      $("messages").scrollTop = $("messages").scrollHeight;
+    }
+    function hideTyping() { const t = document.getElementById("typing"); if (t) t.remove(); }
+
+    async function sendMessage() {
+      const input = $("chat-input");
+      const text = input.value.trim();
+      if (!text && !pendingFiles.length) return;
+
+      const files = [];
+      const images = [];
+      for (const pf of pendingFiles) {
+        const b64 = await readFileB64(pf);
+        if (pf.type.startsWith("image/")) images.push(b64);
+        else files.push(b64);
+      }
+      pendingFiles = [];
+      $("attachments").innerHTML = "";
+
+      appendMsg({ role: "user", content: text, msg_type: "text", metadata: {
+        files: files.map(f => f.name), images: images.map(f => f.name) } });
+      input.value = ""; input.style.height = "40px";
+      $("send-btn").disabled = true;
+      showTyping();
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ run_id: chatRunId, message: text, files, images })
+        });
+        const data = await res.json();
+        hideTyping();
+        if (data.error) { appendMsg({ role: "assistant", content: "Error: " + data.error, msg_type: "text" }); return; }
+        if (data.run_id && !chatRunId) {
+          chatRunId = data.run_id;
+          connectSSE(chatRunId);
+          loadRuns(chatRunId);
+        }
+        for (const m of (data.messages || [])) appendMsg(m);
+      } catch (e) {
+        hideTyping();
+        appendMsg({ role: "assistant", content: "Connection error. Please try again.", msg_type: "text" });
+      } finally { $("send-btn").disabled = false; }
+    }
+
+    function connectSSE(rid) {
+      if (sseSource) sseSource.close();
+      sseSource = new EventSource(`/api/chat/${rid}/stream`);
+      sseSource.onmessage = (ev) => {
+        try { const m = JSON.parse(ev.data); appendMsg(m); } catch {}
+      };
+    }
+
+    async function loadChatHistory(rid) {
+      try {
+        const data = await (await fetch(`/api/chat/${rid}/history`)).json();
+        const box = $("messages");
+        box.innerHTML = "";
+        if (!(data.messages || []).length) {
+          box.innerHTML = '<div class="msg assistant">Hi! I\'m your Factory Concierge. Tell me what you\'d like to build.</div>';
+        }
+        for (const m of (data.messages || [])) box.appendChild(renderMsg(m));
+        box.scrollTop = box.scrollHeight;
+        chatRunId = rid;
+        connectSSE(rid);
+      } catch {}
+    }
+
+    window.submitChatDeps = async () => {
+      const deps = {};
+      document.querySelectorAll('[data-dep]').forEach(el => { if (el.value) deps[el.dataset.dep] = el.value; });
+      if (!Object.keys(deps).length) return;
+      document.querySelectorAll('[data-dep]').forEach(el => { el.value = ""; el.disabled = true; });
+      const btn = document.querySelector(".dep-submit"); if (btn) btn.disabled = true;
+      await fetch(`/api/chat/${chatRunId}/deps`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deps })
+      });
     };
+
+    // Attach files
+    $("attach-btn").onclick = () => $("file-input").click();
+    $("file-input").onchange = (e) => {
+      for (const f of e.target.files) {
+        pendingFiles.push(f);
+        const att = document.createElement("span"); att.className = "att";
+        att.innerHTML = `${f.name} <button onclick="this.parentElement.remove(); pendingFiles = pendingFiles.filter(p => p.name !== '${f.name}')">&times;</button>`;
+        $("attachments").appendChild(att);
+      }
+      e.target.value = "";
+    };
+
+    // Textarea: enter=send, shift+enter=newline, auto-resize
+    $("chat-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+    $("chat-input").addEventListener("input", () => {
+      const el = $("chat-input"); el.style.height = "40px"; el.style.height = Math.min(el.scrollHeight, 120) + "px";
+    });
+    $("send-btn").onclick = sendMessage;
+
+    // Drag-and-drop files on chat
+    $("messages").addEventListener("dragover", (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; });
+    $("messages").addEventListener("drop", (e) => {
+      e.preventDefault();
+      for (const f of e.dataTransfer.files) {
+        pendingFiles.push(f);
+        const att = document.createElement("span"); att.className = "att";
+        att.innerHTML = `${f.name} <button onclick="this.parentElement.remove()">&times;</button>`;
+        $("attachments").appendChild(att);
+      }
+    });
+
+    // Paste images from clipboard
+    $("chat-input").addEventListener("paste", (e) => {
+      for (const item of (e.clipboardData || {}).items || []) {
+        if (item.type.startsWith("image/")) {
+          const f = item.getAsFile();
+          pendingFiles.push(f);
+          const att = document.createElement("span"); att.className = "att";
+          att.innerHTML = `${f.name || "pasted-image"} <button onclick="this.parentElement.remove()">&times;</button>`;
+          $("attachments").appendChild(att);
+        }
+      }
+    });
     async function poll() {
       if (!runId || !cy) return;
       let s, g, log = "", evs = [];
