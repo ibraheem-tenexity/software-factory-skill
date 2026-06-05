@@ -3,7 +3,12 @@ name: software-factory
 description: Use when the user asks to build and ship a working customer solution end-to-end from a description or detailed context — research, PRD, architecture, provision infra, write and deploy the code, and verify the app live in a browser, autonomously and within a fixed dollar budget. Triggers on "build and deploy", "ship me an app", "make a working demo", "stand up a prototype".
 ---
 
-# Software Factory
+# Software Factory (Legacy — Single-Stage)
+
+> **Deprecated.** This monolithic skill is retained for backward compatibility with existing runs.
+> New runs use the three-stage skills in `skills/`: `stage-1-research.md`, `stage-2-design.md`,
+> `stage-3-build.md`. The console orchestrates stage transitions and dependency collection between
+> stages.
 
 ## Overview
 

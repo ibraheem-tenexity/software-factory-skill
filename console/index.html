@@ -85,8 +85,10 @@
     .a-art { color: var(--purple); } .a-block { color: var(--destructive); }
 
     /* Inspect sidebar */
-    .sidebar { width: 372px; flex: none; border-left: 1px solid var(--border); background: var(--card); overflow-y: auto; padding: 1.1rem; display: none; }
+    .sidebar { width: 420px; flex: none; border-left: 1px solid var(--border); background: var(--card); overflow-y: auto; padding: 1.1rem; display: none; }
     .sidebar.open { display: block; }
+    .transcript { max-height: calc(100vh - 140px); overflow-y: auto; background: #0f1729; color: #d4d4d8; font: .72rem/1.6 var(--mono);
+      padding: .8rem; border-radius: var(--radius); white-space: pre-wrap; overflow-wrap: anywhere; }
     .kind-badge { display: inline-block; font: 700 .6rem var(--sans); letter-spacing: .08em; text-transform: uppercase;
       color: var(--primary); background: #e9eef6; border-radius: 999px; padding: .18rem .55rem; }
     .chip { display: inline-block; font: 600 .66rem var(--mono); border-radius: 999px; padding: .12rem .5rem; }
@@ -111,6 +113,7 @@
       <span class="brand">Software Factory <small>console</small></span>
       <select id="runs"></select>
       <span class="pill" id="phase">—</span>
+      <span class="pill" id="stage-pill">stage 1</span>
       <span class="spacer"></span>
       <span class="pill cost" id="cost"></span>
     </header>
@@ -157,6 +160,7 @@
       <span><i class="dot" style="background:#7c3aed"></i>artifact</span>
       <span><i class="dot" style="background:#dc2626"></i>blocker / missing</span>
       <span><i class="dot" style="background:#0891b2"></i>gate</span>
+      <span><i class="dot" style="background:#d97706"></i>deps</span>
     </div>
   </div>
 
@@ -171,21 +175,33 @@
       if (k === "agent") return s === "done" ? "#059669" : (s === "no_op" || s === "failed") ? "#dc2626" : s === "planned" ? "#aeb6c4" : "#d97706";
       if (k === "artifact") return s === "missing" ? "#dc2626" : "#7c3aed";
       if (k === "blocker") return "#dc2626";
-      if (k === "gate") return "#0891b2";
+      if (k === "gate") return s === "passed" ? "#059669" : s === "pending" ? "#0891b2" : "#0891b2";
+      if (k === "deps") return s === "satisfied" ? "#059669" : "#d97706";
       return "#9aa0a6";
     }
     const STYLE = [
-      { selector: "node", style: { "background-color": nodeColor, label: "data(label)", "font-family": "JetBrains Mono, monospace",
-        "font-size": 9, "text-valign": "bottom", "text-margin-y": 4, color: "#0f1729", "text-outline-width": 2,
-        "text-outline-color": "#f6f7f9", "text-wrap": "ellipsis", "text-max-width": "110px", "min-zoomed-font-size": 8,
-        "border-width": 1.5, "border-color": "#fff", width: 26, height: 26 } },
-      { selector: 'node[kind="orchestrator"]', style: { width: 50, height: 50, "font-size": 11, "font-weight": 700 } },
-      { selector: 'node[kind="phase"]', style: { shape: "round-rectangle", width: 82, height: 30 } },
-      { selector: 'node[kind="gate"]', style: { shape: "diamond", width: 38, height: 38 } },
-      { selector: 'node[kind="blocker"]', style: { shape: "octagon" } },
+      { selector: "node", style: { "background-color": nodeColor, label: "data(label)", "font-family": "Public Sans, system-ui, sans-serif",
+        "font-size": 20, "font-weight": 600, "text-valign": "bottom", "text-margin-y": 8, color: "#0f1729",
+        "text-outline-width": 3, "text-outline-color": "#f6f7f9", "text-outline-opacity": 1,
+        "text-wrap": "wrap", "text-max-width": "240px", "min-zoomed-font-size": 4,
+        "border-width": 2, "border-color": "#fff", width: 48, height: 48 } },
+      { selector: 'node[kind="orchestrator"]', style: { width: 84, height: 84, "font-size": 21, "font-weight": 700 } },
+      { selector: 'node[kind="phase"]', style: { shape: "round-rectangle", width: 150, height: 51, "font-size": 20, "text-valign": "center", "text-margin-y": 0, color: "#fff", "text-outline-width": 0 } },
+      { selector: 'node[kind="gate"]', style: { shape: "diamond", width: 63, height: 63, "font-size": 17 } },
+      { selector: 'node[kind="blocker"]', style: { shape: "octagon", width: 51, height: 51 } },
+      { selector: 'node[kind="deps"]', style: { shape: "round-rectangle", width: 180, height: 51, "font-size": 20, "text-valign": "center", "text-margin-y": 0, color: "#fff", "text-outline-width": 0 } },
+      { selector: 'node[kind="artifact"]', style: { "font-size": 17, width: 42, height: 42 } },
       { selector: 'node[kind="artifact"][status="missing"]', style: { "border-width": 2.5, "border-color": "#dc2626" } },
-      { selector: "edge", style: { width: 1.2, "line-color": "#cbd2dd", "target-arrow-color": "#cbd2dd",
-        "target-arrow-shape": "triangle", "arrow-scale": 0.8, "curve-style": "bezier" } },
+      { selector: "edge", style: { width: 1.2, "line-color": "#c0c6d0", "target-arrow-color": "#c0c6d0",
+        "target-arrow-shape": "triangle", "arrow-scale": 0.9, "curve-style": "bezier", "line-style": "solid" } },
+      { selector: 'edge[etype="flow"]', style: { width: 3, "line-color": "#64748b", "target-arrow-color": "#64748b",
+        "arrow-scale": 1.5 } },
+      { selector: 'edge[etype="feedback"]', style: { width: 2.4, "line-color": "#e97316", "target-arrow-color": "#e97316",
+        "arrow-scale": 1.3, "line-style": "dashed", "curve-style": "unbundled-bezier",
+        "control-point-distances": [80], "control-point-weights": [0.5] } },
+      { selector: 'node[label="test"]', style: { shape: "diamond", width: 80, height: 80, "font-size": 17 } },
+      { selector: 'node[status="active"]', style: { "border-width": 4, "border-color": "#d97706", "border-opacity": 1,
+        "overlay-color": "#d97706", "overlay-opacity": 0.12, "overlay-padding": 8 } },
     ];
     const FCOSE = { name: "fcose", quality: "default", animate: false, randomize: true, nodeRepulsion: 20000,
       idealEdgeLength: 150, edgeElasticity: 0.45, gravity: 0.22, nodeSeparation: 140, numIter: 2500, packComponents: true, padding: 50 };
@@ -220,6 +236,7 @@
     }
     function startCola() { if (!haveCola) return; if (cola) cola.stop(); cola = cy.layout(COLA); cola.run(); }
 
+    window.inspect = inspect;
     async function inspect(d) {
       const box = $("inspect");
       let h = `<button class="close" onclick="document.getElementById('inspect').classList.remove('open')">✕</button>`;
@@ -231,11 +248,62 @@
         else { const a = await (await fetch(`/api/runs/${runId}/artifact?path=${encodeURIComponent(d.path)}`)).json();
           h += (d.path && d.path.endsWith(".svg") && a.content) ? `<div>${a.content}</div>` : `<div class="markdown">${marked.parse(a.content || a.error || "")}</div>`; }
       } else if (d.kind === "blocker") { h += `<div class="markdown"><p><b>blocks:</b> ${d.blocks || "?"}</p><p>${d.label}</p></div>`; }
-      else if (d.kind === "gate") { h += `<p class="hint">Run paused for review.</p><button class="gate-go" onclick="continueRun('${d.gate}')">Continue ▶</button>`; }
+      else if (d.kind === "deps") {
+        const deps = await (await fetch(`/api/runs/${runId}/deps`)).json();
+        h += `<div class="markdown"><p><b>Dependencies required by architecture</b></p>`;
+        const req = deps.deps_required || [];
+        const prov = new Set(deps.deps_provided || []);
+        if (!req.length) h += `<p>No dependencies required.</p>`;
+        else {
+          h += `<table><tr><th>Name</th><th>Status</th></tr>`;
+          for (const name of req) {
+            const ok = prov.has(name);
+            h += `<tr><td><code>${name}</code></td><td><span class="chip ${ok ? 'ok' : 'bad'}">${ok ? '✓ provided' : '✗ missing'}</span></td></tr>`;
+          }
+          h += `</table>`;
+          const missing = req.filter(n => !prov.has(n));
+          if (missing.length) {
+            h += `<p style="margin-top:1rem"><b>Provide missing dependencies:</b></p>`;
+            for (const name of missing) {
+              h += `<label>${name}</label><input type="password" id="dep-${name}" autocomplete="off" placeholder="${name}" />`;
+            }
+            h += `<button class="gate-go" style="margin-top:.8rem" onclick="submitDeps()">Save &amp; Launch Build ▶</button>`;
+          } else {
+            h += `<p class="chip ok" style="margin-top:.8rem;display:block;padding:.4rem">All dependencies satisfied.</p>`;
+            if (!deps.deps_satisfied) h += `<button class="gate-go" style="margin-top:.5rem" onclick="launchStage3()">Launch Build ▶</button>`;
+          }
+        }
+        h += `</div>`;
+      }
+      else if (d.kind === "gate") {
+        if (d.status === "passed") h += `<p class="chip ok">Gate passed.</p>`;
+        else { h += `<p class="hint">Run paused for review.</p><button class="gate-go" onclick="continueRun('${d.gate}')">Continue ▶</button>`; }
+      }
+      else if (d.kind === "orchestrator") {
+        h += `<p class="hint">Full claude transcript</p>`;
+        h += `<div class="transcript" id="transcript-box">Loading…</div>`;
+        box.innerHTML = h; box.classList.add("open");
+        const res = await fetch(`/api/runs/${runId}/log?full=json`);
+        const data = await res.json();
+        const el = document.getElementById("transcript-box");
+        if (el) { el.textContent = data.log || "(no output yet)"; el.scrollTop = el.scrollHeight; }
+        return;
+      }
       else if (d.kind === "agent") { h += `<div class="markdown"><p>subagent · ${d.status}</p></div>`; }
       box.innerHTML = h; box.classList.add("open");
     }
     window.continueRun = async (gate) => { await fetch(`/api/runs/${runId}/continue`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gate }) }); $("inspect").classList.remove("open"); poll(); };
+    window.submitDeps = async () => {
+      const deps = {};
+      document.querySelectorAll('[id^="dep-"]').forEach(el => { if (el.value) deps[el.id.slice(4)] = el.value; });
+      await fetch(`/api/runs/${runId}/deps`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deps }) });
+      document.querySelectorAll('[id^="dep-"]').forEach(el => { el.value = ""; });
+      await launchStage3();
+    };
+    window.launchStage3 = async () => {
+      await fetch(`/api/runs/${runId}/stage3`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      $("inspect").classList.remove("open"); poll();
+    };
 
     // ---- live activity feed: tail /log (claude stream) + /events into human-readable lines ----
     function renderActivity(logText, events, done) {
@@ -295,9 +363,28 @@
         evs = (await (await fetch(`/api/runs/${runId}/events`)).json()).events || [];
       } catch { return; }
       $("phase").innerHTML = "phase <b>" + s.phase + "</b>" + (s.done ? " ✓" : "");
+      $("stage-pill").innerHTML = "stage <b>" + (s.stage || 1) + "</b>" +
+        (s.stage1_done ? (s.stage2_done ? (s.deps_satisfied ? " ✓✓✓" : " ✓✓") : " ✓") : "");
       $("cost").innerHTML = "spent <b>$" + (s.spent_usd || 0).toFixed(4) + "</b>";
       applyGraph(g);
       renderActivity(log, evs, s.done || ["stopped", "blocked"].includes(s.phase));
+      // Stage transitions
+      if (s.stage === 1 && s.stage1_done && !window._s1banner) {
+        window._s1banner = true;
+        const b = document.createElement("div"); b.className = "a-phase";
+        b.textContent = "▸ Research complete — launching Design stage...";
+        $("feed").appendChild(b);
+        fetch(`/api/runs/${runId}/stage2`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      }
+      if (s.stage === 2 && s.stage2_done && !window._s2banner) {
+        window._s2banner = true;
+        const b = document.createElement("div"); b.className = "a-phase";
+        b.textContent = "▸ Design complete — resolve dependencies to continue.";
+        $("feed").appendChild(b);
+        // Auto-open deps inspector
+        const depsNode = cy.getElementById("deps:wait");
+        if (depsNode.nonempty()) inspect(depsNode.data());
+      }
     }
     initCy(); loadRuns();
   </script>

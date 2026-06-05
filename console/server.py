@@ -40,7 +40,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path, qs = parsed.path, parse_qs(parsed.query)
         if path in ("/api/runs", "/api/runs/"):
-            return self._send(200, {"runs": console.list_runs()})  # reconnect on reload
+            return self._send(200, {"runs": console.list_runs()})
         if path.startswith("/api/runs/"):
             rest = path[len("/api/runs/"):]
             if rest.endswith("/evidence"):
@@ -53,7 +53,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, console.artifact(rest[:-len("/artifact")], qs.get("path", [""])[0]))
             if rest.endswith("/log"):
                 rid = rest[:-len("/log")]
-                if qs.get("full"):   # full saved log, downloadable
+                full = (qs.get("full") or [None])[0]
+                if full == "json":
+                    return self._send(200, {"log": console.read_log(rid, max_bytes=None)})
+                if full:
                     body = console.read_log(rid, max_bytes=None).encode()
                     self.send_response(200)
                     self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -61,6 +64,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers(); self.wfile.write(body); return
                 return self._send(200, {"log": console.read_log(rid)})
+            if rest.endswith("/deps"):
+                return self._send(200, console.stage2_artifacts(rest[:-len("/deps")]))
             return self._send(200, console.status(rest))
         return self._send(404, {"error": "not found"})
 
@@ -70,11 +75,28 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length) or b"{}")
             return self._send(200, console.continue_run(run_id, body.get("gate", "")))
+        if self.path.startswith("/api/runs/") and self.path.endswith("/deps"):
+            run_id = self.path[len("/api/runs/"):-len("/deps")]
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            return self._send(200, console.submit_deps(run_id, body.get("deps", {})))
+        if self.path.startswith("/api/runs/") and self.path.endswith("/stage2"):
+            run_id = self.path[len("/api/runs/"):-len("/stage2")]
+            result = console.start_stage2(run_id)
+            if result:
+                return self._send(200, {"run_id": result, "stage": 2})
+            return self._send(409, {"error": "stage1 not done or MCP unhealthy"})
+        if self.path.startswith("/api/runs/") and self.path.endswith("/stage3"):
+            run_id = self.path[len("/api/runs/"):-len("/stage3")]
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            result = console.start_stage3(run_id, extra_creds=body.get("creds"))
+            if result:
+                return self._send(200, {"run_id": result, "stage": 3})
+            return self._send(409, {"error": "stage2 not done or deps not satisfied"})
         if self.path == "/api/runs":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length) or b"{}")
-            # Bring-your-own creds: map the form fields to secret env. These are passed to
-            # console.start_run, which injects them into the child env and NEVER persists them.
             creds = {}
             if body.get("railway_token"):
                 creds["RAILWAY_TOKEN"] = body["railway_token"]
@@ -86,7 +108,7 @@ class Handler(BaseHTTPRequestHandler):
                 budget=float(body.get("budget", 100)),
                 target=body.get("target", "railway"),
                 credentials=creds,
-                context_files=body.get("files", []),  # [{name, content_b64}] — txt/pdf/docx
+                context_files=body.get("files", []),
             )
             return self._send(200, {"run_id": console.start_run(req)})
         return self._send(404, {"error": "not found"})

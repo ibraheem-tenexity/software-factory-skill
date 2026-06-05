@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Puppeteer (mermaid-cli) chromium into a SHARED path reachable by the non-root runtime user.
 ENV PUPPETEER_CACHE_DIR=/ms-puppeteer
 # Orchestrator runtime + deploy CLI + browser-test MCP + Mermaid->SVG (architecture diagrams), all global
-RUN npm install -g @anthropic-ai/claude-code @railway/cli @playwright/mcp playwright @mermaid-js/mermaid-cli
+RUN npm install -g @anthropic-ai/claude-code @railway/cli @playwright/mcp playwright @mermaid-js/mermaid-cli @claude-flow/cli
 
 # Chromium + OS libs into a SHARED path so the non-root runtime user can use them.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
@@ -30,8 +30,7 @@ COPY . /app
 
 RUN mkdir -p /home/node/.claude/skills /ms-puppeteer \
     && ln -sfn /app /home/node/.claude/skills/software-factory \
-    && printf '%s\n' '{"mcpServers":{"playwright":{"command":"npx","args":["-y","@playwright/mcp@latest","--headless","--browser","chromium"]},"ruflo":{"command":"npx","args":["-y","ruflo@latest","mcp","start"]}}}' > /app/.mcp.json \
-    && printf '%s\n' '{"enableAllProjectMcpServers":true}' > /home/node/.claude/settings.json \
+    && cp /app/claude-settings.json /home/node/.claude/settings.json \
     && chmod +x /app/entrypoint.sh \
     && chown -R node:node /app /home/node /ms-playwright /ms-puppeteer
 

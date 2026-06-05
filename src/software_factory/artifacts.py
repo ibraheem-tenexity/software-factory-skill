@@ -36,3 +36,33 @@ def prd_is_complete(text: str) -> tuple[bool, list[str]]:
     if "ticket seed" not in low:   # the phrase, not just the word "ticket" (e.g. "no tickets")
         reasons.append("no ticket seeds")
     return (len(reasons) == 0, reasons)
+
+
+def parse_required_tokens(text: str) -> list[dict]:
+    """Extract required tokens/keys/URLs from architecture.md's dependency section.
+
+    Looks for a '## Required Tokens' or '## Dependencies' section and pulls out
+    env-var-shaped names (UPPER_SNAKE_CASE ending in _TOKEN, _KEY, _URL, _SECRET,
+    _ID, or _PASSWORD). Returns [{"name": "RAILWAY_TOKEN", "provider": "Railway"}, ...].
+    """
+    section = ""
+    in_section = False
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if re.match(r"^#{1,3}\s+(required\s+tokens|dependencies)", stripped, re.I):
+            in_section = True
+            continue
+        if in_section:
+            if re.match(r"^#{1,3}\s+", stripped) and not re.match(r"^#{4,}", stripped):
+                break
+            section += line + "\n"
+    names = re.findall(r"\b([A-Z][A-Z0-9_]*(?:_TOKEN|_KEY|_URL|_SECRET|_ID|_PASSWORD))\b", section)
+    seen = set()
+    result = []
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        provider = name.split("_")[0].capitalize()
+        result.append({"name": name, "provider": provider})
+    return result

@@ -50,3 +50,58 @@ def test_prd_is_complete_requires_acceptance_and_ticket_seeds():
     assert ok is False
     assert any("acceptance" in r.lower() for r in reasons)
     assert any("ticket" in r.lower() for r in reasons)
+
+
+ARCH_WITH_TOKENS = """\
+# Architecture
+
+## Required Tokens
+
+- `RAILWAY_TOKEN` — deploy to Railway
+- `SUPABASE_URL` — Supabase project URL
+- `SUPABASE_KEY` — Supabase anon key
+- `OPENAI_API_KEY` — LLM calls
+
+## Data Model
+...
+"""
+
+
+def test_parse_required_tokens_extracts_all():
+    tokens = artifacts.parse_required_tokens(ARCH_WITH_TOKENS)
+    names = [t["name"] for t in tokens]
+    assert "RAILWAY_TOKEN" in names
+    assert "SUPABASE_URL" in names
+    assert "SUPABASE_KEY" in names
+    assert "OPENAI_API_KEY" in names
+    assert len(tokens) == 4
+
+
+def test_parse_required_tokens_provider_from_prefix():
+    tokens = artifacts.parse_required_tokens(ARCH_WITH_TOKENS)
+    by_name = {t["name"]: t for t in tokens}
+    assert by_name["RAILWAY_TOKEN"]["provider"] == "Railway"
+    assert by_name["SUPABASE_URL"]["provider"] == "Supabase"
+
+
+def test_parse_required_tokens_empty_input():
+    assert artifacts.parse_required_tokens("") == []
+    assert artifacts.parse_required_tokens(None) == []
+
+
+def test_parse_required_tokens_no_section():
+    text = "# Architecture\n## Data Model\nSOME_TOKEN_KEY in prose"
+    assert artifacts.parse_required_tokens(text) == []
+
+
+def test_parse_required_tokens_deduplicates():
+    text = "## Required Tokens\n- RAILWAY_TOKEN\n- RAILWAY_TOKEN again\n"
+    tokens = artifacts.parse_required_tokens(text)
+    assert len(tokens) == 1
+
+
+def test_parse_required_tokens_dependencies_heading():
+    text = "## Dependencies\n- STRIPE_SECRET_KEY for payments\n## Next\n"
+    tokens = artifacts.parse_required_tokens(text)
+    assert len(tokens) == 1
+    assert tokens[0]["name"] == "STRIPE_SECRET_KEY"

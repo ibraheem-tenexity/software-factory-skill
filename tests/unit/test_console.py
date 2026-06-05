@@ -5,7 +5,10 @@ real `claude` process.
 This is the harness around the skill — it launches the skill and reads back the skill's own
 artifacts; it does not do the building itself.
 """
-from software_factory.console import Console, RunRequest, make_prompt, run_paths
+from software_factory.console import (
+    Console, RunRequest, make_prompt, make_prompt_stage1, make_prompt_stage2,
+    make_prompt_stage3, run_paths,
+)
 from software_factory.agents import AgentRegistry
 from software_factory.budget import Usage
 
@@ -32,10 +35,13 @@ def test_make_prompt_invokes_the_skill_with_run_id_target_and_budget():
     p = make_prompt(req, "run-xyz", runs_dir="/runs")
     assert "software-factory" in p          # explicit, deterministic invocation
     assert "run-xyz" in p
-    assert "railway" in p
     assert "100" in p
     assert "guestbook" in p
     assert "/runs/run-xyz" in p             # tells the orchestrator where to write artifacts
+    # Stage 3 prompt carries the deploy target
+    p3 = make_prompt_stage3(req, "run-xyz", runs_dir="/runs")
+    assert "railway" in p3
+    assert "sf-run-xyz" in p3
 
 
 def test_start_run_stamps_proof_marker_and_launches_headless_claude(tmp_path):
@@ -154,9 +160,9 @@ def test_uploaded_filenames_are_basename_only_no_traversal(tmp_path):
 
 def test_make_prompt_targets_a_dedicated_service_not_the_runner(tmp_path):
     # Spec 1: the built app must deploy to its OWN service, never the runner's own.
-    p = make_prompt(RunRequest(description="x", target="railway"), "run-xyz", runs_dir="/runs")
+    p = make_prompt_stage3(RunRequest(description="x", target="railway"), "run-xyz", runs_dir="/runs")
     assert "sf-run-xyz" in p           # per-run dedicated service name
-    assert "never" in p.lower() and "factory" in p.lower()  # explicit don't-clobber warning
+    assert "never" in p.lower()  # explicit don't-clobber warning
 
 
 def test_status_cost_is_derived_from_the_run_log(tmp_path):
@@ -198,9 +204,15 @@ def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
     g = c.graph(run_id)
     kinds = {n["data"]["kind"] for n in g["nodes"]}
     assert {"orchestrator", "phase", "agent", "artifact", "blocker", "gate"} <= kinds
-    # the pipeline the user defined is present as phase nodes
+    # the pipeline phases are present as phase nodes
     phase_labels = {n["data"]["label"] for n in g["nodes"] if n["data"]["kind"] == "phase"}
-    assert {"research", "architect", "wait for deps", "deploy"} <= phase_labels
+    assert {"research", "architect", "deploy"} <= phase_labels
+    # stage gates and deps node are present
+    gate_ids = {n["data"]["id"] for n in g["nodes"] if n["data"]["kind"] == "gate"}
+    assert "gate:stage1" in gate_ids
+    assert "gate:stage2" in gate_ids
+    deps_nodes = [n for n in g["nodes"] if n["data"]["kind"] == "deps"]
+    assert len(deps_nodes) == 1 and deps_nodes[0]["data"]["id"] == "deps:wait"
     # edges connect things (orchestrator -> first phase exists)
     assert any(e["data"]["source"] == "orchestrator" for e in g["edges"])
 
@@ -243,7 +255,7 @@ def test_graph_always_shows_the_named_phase_agents(tmp_path):
     rid = c.start_run(RunRequest(description="x"))
     labels = lambda: {n["data"]["label"]: n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "agent"}
     L = labels()
-    assert {"HORIZON", "ARCHIVIST", "VANGUARD", "CHROMA", "software-architect"} <= set(L)
+    assert {"HORIZON", "ARCHIVIST", "VANGUARD", "CHROMA", "DESIGNER", "software-architect"} <= set(L)
     assert L["HORIZON"]["status"] == "planned"                    # shown before any event
     # an event with a MISMATCHED id but the same role upgrades the roster node (no duplicate)
     events.emit(str(tmp_path), rid, "agent_spawned", {"id": "HORIZON", "role": "HORIZON", "phase": "research"})
@@ -360,17 +372,16 @@ def test_run_output_is_captured_to_a_readable_log(tmp_path):
 
 
 def test_status_reports_workspace_lifecycle(tmp_path):
+    import os
     from software_factory import workspace
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
     run_id = c.start_run(RunRequest(description="guestbook"))
-    # not created yet by the (faked) skill -> pending
-    assert c.status(run_id)["workspace"] == "pending"
-
-    ws = workspace.create(str(tmp_path), run_id)   # skill provisions it
+    # start_run calls _launch_stage which calls prepare_workspace -> workspace exists immediately
     assert c.status(run_id)["workspace"] == "active"
 
     # terminal + torn down -> cleaned
+    ws = os.path.join(str(tmp_path), run_id, "workspace")
     st = c._load_state(run_id); st.phase = "done"; st.deploy_url = "https://x"; st.save()
     workspace.destroy(ws, runs_dir=str(tmp_path))
     assert c.status(run_id)["workspace"] == "cleaned"
@@ -398,3 +409,129 @@ def test_evidence_verifies_the_run_was_really_built_by_the_skill(tmp_path):
     assert ev["verified"] is True
     assert ev["reasons"] == []
     assert ev["bundle"]["skill"] == "software-factory"
+
+
+def test_stage_handoff_stage1_done_enables_stage2(tmp_path):
+    """Stage 1 events + PRD → detect_stage1_done → start_stage2."""
+    import os
+    from software_factory import events, artifacts
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="guestbook"))
+
+    assert c.detect_stage1_done(run_id) is False
+
+    # Simulate Stage 1 completing: emit stage_done event + write a real PRD
+    d = str(tmp_path)
+    events.emit(d, run_id, "stage_done", {"stage": 1})
+    base = os.path.join(d, run_id)
+    ws = os.path.join(base, "workspace")
+    os.makedirs(ws, exist_ok=True)
+    prd = (
+        "# PRD\nhttps://a.com https://b.com https://c.com\n"
+        "## Acceptance criteria\nGiven a visitor, when submit, then shown\n"
+        "## Ticket seeds\n- seed: form\n"
+    )
+    with open(os.path.join(ws, "PRD.md"), "w") as f:
+        f.write(prd)
+
+    assert c.detect_stage1_done(run_id) is True
+
+    state = c._load_state(run_id)
+    assert state.stage1_done is True
+
+    st = c.status(run_id)
+    assert st["stage1_done"] is True
+
+
+def test_stage2_done_and_deps_flow(tmp_path):
+    """Stage 2 artifacts + tickets → detect_stage2_done → submit_deps → start_stage3."""
+    import os
+    from software_factory import events
+    from software_factory.tickets import TicketStore
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="guestbook"))
+    d = str(tmp_path)
+    base = os.path.join(d, run_id)
+
+    # Mark stage 1 done
+    state = c._load_state(run_id)
+    state.stage1_done = True
+    state.save()
+
+    # Simulate stage 2 completing
+    events.emit(d, run_id, "stage_done", {"stage": 2})
+    ws = os.path.join(base, "workspace")
+    os.makedirs(ws, exist_ok=True)
+    with open(os.path.join(ws, "PRD.md"), "w") as f:
+        f.write("# PRD content")
+    arch_text = (
+        "# Architecture\n## Required Tokens\n"
+        "- RAILWAY_TOKEN — deploy\n- SUPABASE_URL — storage\n## Data Model\n"
+    )
+    with open(os.path.join(ws, "architecture.md"), "w") as f:
+        f.write(arch_text)
+    with open(os.path.join(ws, "architecture.svg"), "w") as f:
+        f.write("<svg/>")
+    ts = TicketStore(run_paths(d, run_id)["tickets_db"])
+    ts.create_ticket("build form", acceptance="a", dod="d", wave=1)
+
+    assert c.detect_stage2_done(run_id) is True
+    state = c._load_state(run_id)
+    assert state.stage2_done is True
+    assert "RAILWAY_TOKEN" in state.deps_required
+    assert "SUPABASE_URL" in state.deps_required
+
+    # Deps not satisfied yet
+    assert state.deps_satisfied is False
+    assert c.start_stage3(run_id) is None
+
+    # Submit deps
+    result = c.submit_deps(run_id, {"RAILWAY_TOKEN": "tok1", "SUPABASE_URL": "url1"})
+    assert result["satisfied"] is True
+    assert result["missing"] == []
+
+    # Status reflects deps
+    st = c.status(run_id)
+    assert st["stage2_done"] is True
+    assert st["deps_satisfied"] is True
+    assert "RAILWAY_TOKEN" in st["deps_provided"]
+
+
+def test_graph_includes_stage_gates_and_deps_node(tmp_path):
+    """The graph always includes stage gates and a deps node."""
+    c = console(tmp_path, FakeLauncher())
+    run_id = c.start_run(RunRequest(description="x"))
+    g = c.graph(run_id)
+
+    # Stage gates
+    gate_nodes = [n for n in g["nodes"] if n["data"]["kind"] == "gate"]
+    gate_ids = {n["data"]["id"] for n in gate_nodes}
+    assert "gate:stage1" in gate_ids
+    assert "gate:stage2" in gate_ids
+
+    # Deps node
+    deps_nodes = [n for n in g["nodes"] if n["data"]["kind"] == "deps"]
+    assert len(deps_nodes) == 1
+    assert deps_nodes[0]["data"]["id"] == "deps:wait"
+    assert deps_nodes[0]["data"]["status"] == "pending"
+
+    # When stage1 is done, gate shows passed
+    state = c._load_state(run_id)
+    state.stage1_done = True
+    state.save()
+    g2 = c.graph(run_id)
+    s1gate = [n for n in g2["nodes"] if n["data"]["id"] == "gate:stage1"][0]
+    assert s1gate["data"]["status"] == "passed"
+
+
+def test_status_includes_stage_fields(tmp_path):
+    c = console(tmp_path, FakeLauncher())
+    run_id = c.start_run(RunRequest(description="x"))
+    st = c.status(run_id)
+    assert "stage" in st
+    assert st["stage"] == 1
+    assert st["stage1_done"] is False
+    assert st["stage2_done"] is False
+    assert st["deps_satisfied"] is False
