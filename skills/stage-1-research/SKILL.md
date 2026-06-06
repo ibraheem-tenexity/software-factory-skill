@@ -13,7 +13,7 @@ a separate Stage 2 process will handle architecture and tickets.
 
 At every phase boundary, artifact, agent spawn, and blocker, emit an event:
 ```bash
-python -m software_factory.events emit <runs_dir> <run_id> <type> '<json>'
+python3 -m software_factory.events emit <runs_dir> <run_id> <type> '<json>'
 ```
 - spawning an agent → `emit agent_spawned {"id":"<unique>","role":"<ROLE>","phase":"<phase>"}`
 - agent result → `emit agent_done {"id":"<unique>","outcome":"success|no_op|blocked"}`
@@ -70,7 +70,7 @@ an acceptance-criteria section, and ticket seeds. A hollow/absent PRD does NOT a
 
 Once the PRD passes `prd_is_complete()`:
 ```bash
-python -m software_factory.events emit <runs_dir> <run_id> stage_done '{"stage":1}'
+python3 -m software_factory.events emit <runs_dir> <run_id> stage_done '{"stage":1}'
 ```
 Then **STOP**. Do not proceed to architecture or tickets — Stage 2 handles that.
 

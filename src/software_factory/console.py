@@ -54,7 +54,7 @@ for _p in STAGE_3:
 class RunRequest:
     description: str
     context: str = ""
-    budget: float = 100.0
+    budget: float = 25.0
     target: str = "railway"
     credentials: dict = field(default_factory=dict)
     context_files: list = field(default_factory=list)
@@ -74,7 +74,7 @@ def run_paths(runs_dir: str, run_id: str) -> dict:
 def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str) -> str:
     base = os.path.join(runs_dir, run_id)
     ctx = f"\n\nContext / detailed input:\n{req.context}" if req.context else ""
-    emit = f"python -m software_factory.events emit {runs_dir} {run_id}"
+    emit = f"python3 -m software_factory.events emit {runs_dir} {run_id}"
     return (
         f"Use the **software-factory** skill (Stage 1 — Research) to research and define this "
         f"customer solution, FULLY AUTONOMOUSLY — never wait on a human.\n"
@@ -106,7 +106,7 @@ def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str) -> str:
 
 def make_prompt_stage2(req: RunRequest, run_id: str, runs_dir: str) -> str:
     base = os.path.join(runs_dir, run_id)
-    emit = f"python -m software_factory.events emit {runs_dir} {run_id}"
+    emit = f"python3 -m software_factory.events emit {runs_dir} {run_id}"
     return (
         f"Use the **software-factory** skill (Stage 2 — Design & Plan) to architect and plan "
         f"this customer solution, FULLY AUTONOMOUSLY.\n"
@@ -154,7 +154,7 @@ def _disposition_guidance(dispositions: dict | None) -> str:
 def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions: dict | None = None) -> str:
     base = os.path.join(runs_dir, run_id)
     service = f"sf-{run_id}"
-    emit = f"python -m software_factory.events emit {runs_dir} {run_id}"
+    emit = f"python3 -m software_factory.events emit {runs_dir} {run_id}"
     return (
         f"Use the **software-factory** skill (Stage 3 — Build & Ship) to build, deploy, and "
         f"browser-verify this customer solution, FULLY AUTONOMOUSLY.\n"
@@ -249,7 +249,7 @@ class Console:
         state.save()
 
         model = os.environ.get("SF_MODEL", "claude-sonnet-4-6")
-        max_turns = os.environ.get("SF_MAX_TURNS", "60")
+        max_turns = os.environ.get("SF_MAX_TURNS", "200")
         argv = [
             "claude", "-p", prompt,
             "--model", model,

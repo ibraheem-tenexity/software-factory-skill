@@ -53,7 +53,7 @@ def make_tools(console: Console, attachments=lambda: []) -> list[FunctionTool]:
     """
 
     async def _start_pipeline(description: str, context: str = "",
-                              budget: float = 100.0, target: str = "railway") -> str:
+                              budget: float = 25.0, target: str = "railway") -> str:
         req = RunRequest(description=description, context=context,
                          budget=budget, target=target, context_files=attachments())
         run_id = console.start_run(req)
@@ -81,7 +81,7 @@ def make_tools(console: Console, attachments=lambda: []) -> list[FunctionTool]:
                 "properties": {
                     "description": {"type": "string", "description": "What to build"},
                     "context": {"type": "string", "description": "Additional context", "default": ""},
-                    "budget": {"type": "number", "description": "Budget in USD", "default": 100},
+                    "budget": {"type": "number", "description": "Budget in USD", "default": 25},
                     "target": {"type": "string", "enum": ["railway", "vercel"], "default": "railway"},
                 },
                 "required": ["description"],

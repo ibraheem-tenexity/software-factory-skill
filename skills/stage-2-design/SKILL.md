@@ -14,7 +14,7 @@ Read the Stage 1 artifacts from `context/` — they contain PRD.md and the desig
 ## Emit events as you go
 
 ```bash
-python -m software_factory.events emit <runs_dir> <run_id> <type> '<json>'
+python3 -m software_factory.events emit <runs_dir> <run_id> <type> '<json>'
 ```
 Same conventions as Stage 1: `agent_spawned`, `agent_done`, `artifact`, `phase`.
 
@@ -63,7 +63,7 @@ assert TicketStore('<tickets_db>').buildable_count() >= 1, 'EMPTY/HOLLOW ticket 
 Once both gates pass — **and `TicketStore.buildable_count() >= 1`** (do NOT skip this; an empty
 store means you only emitted events and the run will dead-end at the Stage 2→3 gate):
 ```bash
-python -m software_factory.events emit <runs_dir> <run_id> stage_done '{"stage":2}'
+python3 -m software_factory.events emit <runs_dir> <run_id> stage_done '{"stage":2}'
 ```
 Then **STOP**. Do not proceed to build — the console will collect required dependencies from the
 user and launch Stage 3 separately.

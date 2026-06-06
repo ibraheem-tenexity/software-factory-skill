@@ -20,7 +20,7 @@ happy flow on the live URL is done.
 ## Emit events as you go
 
 ```bash
-python -m software_factory.events emit <runs_dir> <run_id> <type> '<json>'
+python3 -m software_factory.events emit <runs_dir> <run_id> <type> '<json>'
 ```
 Same conventions: `agent_spawned`, `agent_done`, `artifact`, `phase`.
 
