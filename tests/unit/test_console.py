@@ -25,9 +25,9 @@ class FakeLauncher:
         return {"pid": 1234}
 
 
-def console(tmp_path, launcher):
+def console(tmp_path, launcher, extract=lambda path: "# Extracted\n\nbrief contents"):
     ids = iter(["run-xyz"])
-    return Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids))
+    return Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids), extract=extract)
 
 
 def test_make_prompt_invokes_the_skill_with_run_id_target_and_budget():
@@ -137,15 +137,63 @@ def test_empty_credentials_are_ignored(tmp_path):
     assert "RAILWAY_TOKEN" not in launcher.env
 
 
-def test_uploaded_context_files_are_written_to_the_run_input_dir(tmp_path):
+def test_uploaded_pdf_is_extracted_to_markdown_and_composed_into_stage1_input(tmp_path):
     import base64, os
-    c = console(tmp_path, FakeLauncher())
-    b64 = base64.b64encode(b"EPC contract T&C brief...").decode()
+    c = console(tmp_path, FakeLauncher(), extract=lambda path: "# Brief\n\nEPC contract T&C")
+    b64 = base64.b64encode(b"%PDF-1.4 ...").decode()
     run_id = c.start_run(RunRequest(description="analyze this",
                                     context_files=[{"name": "brief.pdf", "content_b64": b64}]))
-    p = os.path.join(str(tmp_path), run_id, "input", "brief.pdf")
-    assert os.path.exists(p)
-    assert open(p, "rb").read() == b"EPC contract T&C brief..."
+    input_dir = os.path.join(str(tmp_path), run_id, "input")
+    # raw PDF is consumed by the conversion; the markdown is what Stage 1 reads
+    assert not os.path.exists(os.path.join(input_dir, "brief.pdf"))
+    assert "EPC contract T&C" in open(os.path.join(input_dir, "brief.pdf.md")).read()
+    # the composed Stage 1 input merges the user prompt and the extracted markdown
+    ctx = open(os.path.join(input_dir, "context.txt")).read()
+    assert "analyze this" in ctx
+    assert "EPC contract T&C" in ctx
+
+
+def test_retry_stage2_relaunches_with_the_stage2_prompt(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="x", target="railway"))
+    st = c._load_state(run_id); st.stage1_done = True; st.save()
+    launcher.argv = None
+
+    out = c.retry_stage(run_id, 2)
+
+    assert out == run_id
+    assert launcher.argv is not None and "claude" in launcher.argv[0]
+    assert "Stage 2" in launcher.argv[2]        # the rebuilt prompt is for stage 2
+    assert c.status(run_id)["stage"] == 2
+
+
+def test_retry_stage2_blocked_when_stage1_not_done(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="x"))
+    st = c._load_state(run_id); st.stage1_done = False; st.save()
+    launcher.argv = None
+
+    assert c.retry_stage(run_id, 2) is None
+    assert launcher.argv is None                # nothing relaunched
+
+
+def test_retry_clears_the_target_stage_done_flag(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="x"))
+    st = c._load_state(run_id); st.stage1_done = True; st.stage2_done = True; st.save()
+
+    c.retry_stage(run_id, 2)
+
+    assert c.status(run_id)["stage2_done"] is False   # re-runs so the gate re-evaluates
+
+
+def test_retry_invalid_stage_returns_none(tmp_path):
+    c = console(tmp_path, FakeLauncher())
+    run_id = c.start_run(RunRequest(description="x"))
+    assert c.retry_stage(run_id, 9) is None
 
 
 def test_uploaded_filenames_are_basename_only_no_traversal(tmp_path):
@@ -444,6 +492,26 @@ def test_stage_handoff_stage1_done_enables_stage2(tmp_path):
     assert st["stage1_done"] is True
 
 
+def test_stage2_not_done_when_ticket_store_is_empty(tmp_path):
+    """Fix #1: emitting stage_done{2} + artifacts is NOT enough — if the agent only emitted
+    ticket EVENTS and never persisted them, the store is empty and Stage 2 is not done."""
+    import os
+    from software_factory import events
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="x"))
+    d = str(tmp_path); base = os.path.join(d, run_id)
+    state = c._load_state(run_id); state.stage1_done = True; state.save()
+    events.emit(d, run_id, "stage_done", {"stage": 2})
+    ws = os.path.join(base, "workspace"); os.makedirs(ws, exist_ok=True)
+    for name, body in [("PRD.md", "# PRD"), ("architecture.md", "# A\n## Required Tokens\n- X_KEY — y\n"),
+                       ("architecture.svg", "<svg/>")]:
+        with open(os.path.join(ws, name), "w") as f:
+            f.write(body)
+    # No tickets persisted → not done
+    assert c.detect_stage2_done(run_id) is False
+
+
 def test_stage2_done_and_deps_flow(tmp_path):
     """Stage 2 artifacts + tickets → detect_stage2_done → submit_deps → start_stage3."""
     import os
@@ -497,6 +565,42 @@ def test_stage2_done_and_deps_flow(tmp_path):
     assert st["stage2_done"] is True
     assert st["deps_satisfied"] is True
     assert "RAILWAY_TOKEN" in st["deps_provided"]
+
+
+def test_submit_deps_dispositions_satisfy_without_values(tmp_path):
+    """Mock/MCP/env deps satisfy with no value; only 'provide' needs one. Values never persist."""
+    import os
+    c = console(tmp_path, FakeLauncher())
+    run_id = c.start_run(RunRequest(description="x"))
+    state = c._load_state(run_id)
+    state.stage1_done = True
+    state.stage2_done = True
+    state.deps_required = ["SUPABASE_URL", "ADP_CLIENT_ID", "OPENROUTER_API_KEY"]
+    state.save()
+
+    # SUPABASE_URL→mcp (default), ADP_CLIENT_ID→mock (default), OPENROUTER→provide w/ value
+    result = c.submit_deps(run_id, {
+        "SUPABASE_URL": {"disposition": "mcp"},
+        "ADP_CLIENT_ID": {"disposition": "mock"},
+        "OPENROUTER_API_KEY": {"disposition": "provide", "value": "sk-or-real"},
+    })
+    assert result["satisfied"] is True
+    assert result["missing"] == []
+    # Disposition persisted (metadata), but the provided VALUE is NOT on disk.
+    saved = open(os.path.join(str(tmp_path), run_id, f"{run_id}.json")).read()
+    assert "sk-or-real" not in saved
+    assert c._load_state(run_id).deps_disposition["SUPABASE_URL"] == "mcp"
+
+
+def test_submit_deps_unsatisfied_when_provide_lacks_value(tmp_path):
+    c = console(tmp_path, FakeLauncher())
+    run_id = c.start_run(RunRequest(description="x"))
+    state = c._load_state(run_id)
+    state.deps_required = ["OPENROUTER_API_KEY"]
+    state.save()
+    result = c.submit_deps(run_id, {"OPENROUTER_API_KEY": {"disposition": "provide"}})  # no value
+    assert result["satisfied"] is False
+    assert "OPENROUTER_API_KEY" in result["missing"]
 
 
 def test_graph_includes_stage_gates_and_deps_node(tmp_path):

@@ -134,12 +134,79 @@
     .gate-go { background: var(--gold); color: #1c1402; border: 0; border-radius: var(--radius); padding: .5rem .9rem; font: 600 .82rem var(--sans); cursor: pointer; }
     .legend { padding: .35rem 1.1rem; font: .68rem var(--mono); color: var(--muted-fg); border-top: 1px solid var(--border); background: var(--card); }
     .legend span { margin-right: 1rem; } .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: .25rem; vertical-align: middle; }
+
+    /* Project selection screen */
+    .projects-screen { position: fixed; inset: 0; z-index: 100; background: var(--bg);
+      display: flex; flex-direction: column; align-items: center; overflow-y: auto; }
+    .projects-screen.hidden { display: none; }
+    .projects-header { text-align: center; padding: 3rem 1rem 1.5rem; }
+    .projects-header h1 { font-family: var(--display); font-size: 1.8rem; font-weight: 700; color: var(--primary); margin: 0 0 .3rem; }
+    .projects-header p { color: var(--muted-fg); font-size: .88rem; margin: 0; }
+    .projects-body { width: 100%; max-width: 700px; padding: 0 1.5rem 3rem; }
+    .new-project-card { background: var(--card); border: 2px dashed var(--input); border-radius: var(--radius);
+      padding: 1.5rem; margin-bottom: 1.5rem; cursor: default; }
+    .new-project-card h3 { font-family: var(--display); font-size: 1.05rem; margin: 0 0 .8rem; }
+    .model-row { display: flex; gap: .6rem; margin-bottom: 1rem; }
+    .model-opt { flex: 1; padding: .7rem; border: 1px solid var(--input); border-radius: var(--radius); background: var(--card);
+      text-align: center; cursor: pointer; font: 500 .84rem var(--sans); transition: border-color .15s, box-shadow .15s; }
+    .model-opt:hover { border-color: var(--primary); }
+    .model-opt.selected { border-color: var(--primary); box-shadow: 0 0 0 3px rgb(0 43 92 / .12); background: #f0f4fa; }
+    .model-opt .model-name { font-weight: 600; font-size: .9rem; }
+    .model-opt .model-sub { font-size: .7rem; color: var(--muted-fg); margin-top: .15rem; }
+    .new-project-go { width: 100%; padding: .65rem; border: 0; border-radius: var(--radius); background: var(--primary);
+      color: var(--primary-fg); font: 600 .88rem var(--sans); cursor: pointer; }
+    .new-project-go:hover { opacity: .9; }
+    .section-label { font: 600 .72rem var(--sans); color: var(--muted-fg); text-transform: uppercase; letter-spacing: .08em;
+      margin: 0 0 .6rem; }
+    .project-list { display: flex; flex-direction: column; gap: .5rem; }
+    .project-card { display: flex; align-items: center; gap: .8rem; background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: .75rem 1rem; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+    .project-card:hover { border-color: var(--primary); box-shadow: var(--shadow-sm); }
+    .project-card .pc-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+    .project-card .pc-dot.active { background: var(--success); }
+    .project-card .pc-dot.inactive { background: #b9c0cc; }
+    .project-card .pc-info { flex: 1; min-width: 0; }
+    .project-card .pc-name { font: 600 .88rem var(--sans); color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .project-card .pc-meta { font: .72rem var(--mono); color: var(--muted-fg); margin-top: .1rem; }
+    .project-card .pc-cost { font: 500 .78rem var(--mono); color: var(--success); flex: none; }
   </style>
 </head>
 <body>
-  <div class="app">
+  <!-- Project selection screen -->
+  <div class="projects-screen" id="projects-screen">
+    <div class="projects-header">
+      <h1>Software Factory</h1>
+      <p>Select a project or create a new one</p>
+    </div>
+    <div class="projects-body">
+      <div class="new-project-card">
+        <h3>New Project</h3>
+        <div class="model-row">
+          <div class="model-opt selected" data-model="claude" onclick="selectModel(this)">
+            <div class="model-name">Claude</div>
+            <div class="model-sub">Anthropic Sonnet 4</div>
+          </div>
+          <div class="model-opt" data-model="kimi" onclick="selectModel(this)">
+            <div class="model-name">Kimi K 2.6</div>
+            <div class="model-sub">Moonshot AI</div>
+          </div>
+        </div>
+        <button class="new-project-go" onclick="createNewProject()">Create Project &rarr;</button>
+      </div>
+      <div id="active-section" style="display:none">
+        <div class="section-label">Active</div>
+        <div class="project-list" id="active-projects"></div>
+      </div>
+      <div id="inactive-section" style="display:none; margin-top:1.2rem">
+        <div class="section-label">Completed</div>
+        <div class="project-list" id="inactive-projects"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="app" id="app-main" style="display:none">
     <header class="toolbar rise">
-      <span class="brand">Software Factory <small>console</small></span>
+      <span class="brand" style="cursor:pointer" onclick="showProjectsScreen()" title="Back to projects">&larr; Software Factory <small>console</small></span>
       <select id="runs"></select>
       <span class="pill" id="phase">—</span>
       <span class="pill" id="stage-pill">stage 1</span>
@@ -229,6 +296,7 @@
     if (haveCola) cytoscape.use(window.cytoscapeCola);
 
     function initCy() {
+      if (cy) return;
       cy = cytoscape({ container: $("cy"), style: STYLE, wheelSensitivity: 0.2, minZoom: 0.2, maxZoom: 2.5 });
       cy.on("tap", "node", (ev) => inspect(ev.target.data()));
       cy.on("tap", (ev) => { if (ev.target === cy) $("inspect").classList.remove("open"); });
@@ -242,7 +310,7 @@
       const pos = center.nonempty() ? center.position() : { x: 360, y: 260 };
       els.forEach((e) => {
         if (e.data.source) { const eid = e.data.source + "->" + e.data.target;
-          if (!cy.getElementById(eid).nonempty()) cy.add({ group: "edges", data: { id: eid, source: e.data.source, target: e.data.target } }); return; }
+          if (!cy.getElementById(eid).nonempty()) cy.add({ group: "edges", data: { ...e.data, id: eid } }); return; }
         const ex = cy.getElementById(e.data.id);
         if (ex.nonempty()) ex.data(e.data);
         else { cy.add({ group: "nodes", data: e.data, position: { x: pos.x + (Math.random() - .5) * 80, y: pos.y + (Math.random() - .5) * 80 } }); structural = true; }
@@ -269,26 +337,24 @@
         const deps = await (await fetch(`/api/runs/${runId}/deps`)).json();
         h += `<div class="markdown"><p><b>Dependencies required by architecture</b></p>`;
         const req = deps.deps_required || [];
-        const prov = new Set(deps.deps_provided || []);
+        const disp = deps.disposition || {};
         if (!req.length) h += `<p>No dependencies required.</p>`;
         else {
-          h += `<table><tr><th>Name</th><th>Status</th></tr>`;
+          h += `<p class="hint">Choose how the build agent satisfies each. Defaults are smart-picked — "Mock" builds a working local fake, "Auto · MCP" provisions it via the Supabase/Railway MCP.</p>`;
           for (const name of req) {
-            const ok = prov.has(name);
-            h += `<tr><td><code>${name}</code></td><td><span class="chip ${ok ? 'ok' : 'bad'}">${ok ? '✓ provided' : '✗ missing'}</span></td></tr>`;
+            const dd = disp[name] || 'mock';
+            h += `<div class="dep-row" data-dep="${name}" style="margin:.55rem 0;border-bottom:1px solid var(--border);padding-bottom:.5rem">
+              <label style="margin:.1rem 0 .25rem">${name}</label>
+              <select class="dep-disp" data-dep="${name}" onchange="depDispChange(this)" style="width:100%;height:30px;border:1px solid var(--input);border-radius:var(--radius);background:var(--card);font:.78rem var(--mono);padding:0 .4rem">
+                <option value="provide"${dd==='provide'?' selected':''}>Provide a real value</option>
+                <option value="mock"${dd==='mock'?' selected':''}>Mock — working local fake</option>
+                <option value="mcp"${dd==='mcp'?' selected':''}>Auto · provision via MCP</option>
+                <option value="env"${dd==='env'?' selected':''}>From runner env</option>
+              </select>
+              <input type="password" class="dep-val" data-dep="${name}" autocomplete="off" placeholder="${name} value" style="margin-top:.3rem;${dd==='provide'?'':'display:none'}" />
+            </div>`;
           }
-          h += `</table>`;
-          const missing = req.filter(n => !prov.has(n));
-          if (missing.length) {
-            h += `<p style="margin-top:1rem"><b>Provide missing dependencies:</b></p>`;
-            for (const name of missing) {
-              h += `<label>${name}</label><input type="password" id="dep-${name}" autocomplete="off" placeholder="${name}" />`;
-            }
-            h += `<button class="gate-go" style="margin-top:.8rem" onclick="submitDeps()">Save &amp; Launch Build ▶</button>`;
-          } else {
-            h += `<p class="chip ok" style="margin-top:.8rem;display:block;padding:.4rem">All dependencies satisfied.</p>`;
-            if (!deps.deps_satisfied) h += `<button class="gate-go" style="margin-top:.5rem" onclick="launchStage3()">Launch Build ▶</button>`;
-          }
+          h += `<button class="gate-go" style="margin-top:.8rem" onclick="submitDeps()">Save &amp; Launch Build ▶</button>`;
         }
         h += `</div>`;
       }
@@ -310,15 +376,26 @@
       box.innerHTML = h; box.classList.add("open");
     }
     window.continueRun = async (gate) => { await fetch(`/api/runs/${runId}/continue`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gate }) }); $("inspect").classList.remove("open"); poll(); };
+    window.depDispChange = (sel) => {
+      const row = sel.closest('.dep-row');
+      const val = row && row.querySelector('.dep-val');
+      if (val) val.style.display = sel.value === 'provide' ? '' : 'none';
+    };
     window.submitDeps = async () => {
       const deps = {};
-      document.querySelectorAll('[id^="dep-"]').forEach(el => { if (el.value) deps[el.id.slice(4)] = el.value; });
+      document.querySelectorAll('.dep-disp').forEach(sel => {
+        const name = sel.dataset.dep;
+        const valEl = document.querySelector(`.dep-val[data-dep="${name}"]`);
+        const d = { disposition: sel.value };
+        if (sel.value === 'provide' && valEl && valEl.value) d.value = valEl.value;
+        deps[name] = d;
+      });
       await fetch(`/api/runs/${runId}/deps`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deps }) });
-      document.querySelectorAll('[id^="dep-"]').forEach(el => { el.value = ""; });
-      await launchStage3();
+      document.querySelectorAll('.dep-val').forEach(el => { el.value = ""; });
+      await launchStage3(deps);
     };
-    window.launchStage3 = async () => {
-      await fetch(`/api/runs/${runId}/stage3`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    window.launchStage3 = async (creds) => {
+      await fetch(`/api/runs/${runId}/stage3`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ creds: creds || {} }) });
       $("inspect").classList.remove("open"); poll();
     };
 
@@ -567,7 +644,71 @@
         if (depsNode.nonempty()) inspect(depsNode.data());
       }
     }
-    initCy(); loadRuns();
+    // ---- Projects screen ----
+    let selectedModel = "claude";
+    window.selectModel = (el) => {
+      document.querySelectorAll(".model-opt").forEach(o => o.classList.remove("selected"));
+      el.classList.add("selected");
+      selectedModel = el.dataset.model;
+    };
+
+    window.createNewProject = () => {
+      $("projects-screen").classList.add("hidden");
+      $("app-main").style.display = "";
+      initCy();
+      chatRunId = null; runId = null;
+      $("messages").innerHTML = '<div class="msg assistant">Hi! I\'m your Factory Concierge. Tell me what you\'d like to build.</div>';
+      cy.elements().remove();
+      $("feed").innerHTML = "";
+      $("phase").innerHTML = "—";
+      $("stage-pill").innerHTML = "stage 1";
+      $("cost").innerHTML = "";
+      const sel = $("runs"); sel.innerHTML = "<option>(new project)</option>";
+    };
+
+    function openProject(rid) {
+      $("projects-screen").classList.add("hidden");
+      $("app-main").style.display = "";
+      initCy(); loadRuns(rid);
+    }
+
+    async function loadProjectsScreen() {
+      let runs = [];
+      try { runs = (await (await fetch("/api/runs")).json()).runs || []; } catch {}
+      const active = runs.filter(r => r.phase !== "done");
+      const inactive = runs.filter(r => r.phase === "done");
+
+      const render = (list, container) => {
+        container.innerHTML = "";
+        for (const r of list) {
+          const isActive = r.phase !== "done";
+          const card = document.createElement("div");
+          card.className = "project-card";
+          card.onclick = () => openProject(r.run_id);
+          card.innerHTML = `<div class="pc-dot ${isActive ? "active" : "inactive"}"></div>
+            <div class="pc-info">
+              <div class="pc-name">${r.run_id}</div>
+              <div class="pc-meta">${r.phase}${r.description ? " · " + r.description.slice(0, 60) : ""}</div>
+            </div>
+            <div class="pc-cost">$${(r.spent_usd || 0).toFixed(2)}</div>`;
+          container.appendChild(card);
+        }
+      };
+
+      if (active.length) { $("active-section").style.display = ""; render(active, $("active-projects")); }
+      if (inactive.length) { $("inactive-section").style.display = ""; render(inactive, $("inactive-projects")); }
+    }
+
+    window.showProjectsScreen = () => {
+      if (timer) clearInterval(timer);
+      if (sseSource) sseSource.close();
+      $("app-main").style.display = "none";
+      $("projects-screen").classList.remove("hidden");
+      loadProjectsScreen();
+    };
+
+    // Boot: show projects screen, init graph lazily
+    loadProjectsScreen();
   </script>
 </body>
 </html>

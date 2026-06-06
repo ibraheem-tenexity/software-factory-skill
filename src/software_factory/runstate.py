@@ -43,7 +43,7 @@ _PERSISTED = {
     "run_id", "phase", "spent_usd", "repo_url", "deploy_url",
     "skill", "skill_version", "description", "deploy_target", "creds_provided",
     "stage", "stage1_done", "stage2_done",
-    "deps_required", "deps_provided", "deps_satisfied",
+    "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
 }
 
 
@@ -66,6 +66,7 @@ class RunState:
     deps_required: list = field(default_factory=list)
     deps_provided: list = field(default_factory=list)  # dep NAMES only, never values
     deps_satisfied: bool = False
+    deps_disposition: dict = field(default_factory=dict)  # name -> provide|mock|mcp|env (metadata, safe on disk)
     _store: Optional[Store] = field(default=None, repr=False, compare=False)
 
     @classmethod

@@ -5,7 +5,9 @@ import json
 import time
 from typing import Any
 
-from agents import Agent, FunctionTool
+from agents import Agent, FunctionTool, ItemHelpers
+from agents.items import MessageOutputItem, ToolCallItem
+from openai.types.responses import ResponseFunctionToolCall
 
 from software_factory.chat_store import ChatMessage
 from software_factory.console import Console, RunRequest
@@ -43,13 +45,17 @@ software factory pipeline.
 """
 
 
-def make_tools(console: Console) -> list[FunctionTool]:
-    """Create agent tools that delegate to Console methods."""
+def make_tools(console: Console, attachments=lambda: []) -> list[FunctionTool]:
+    """Create agent tools that delegate to Console methods.
+
+    `attachments` returns the files attached to the message currently being
+    handled, so start_pipeline can thread them into the run.
+    """
 
     async def _start_pipeline(description: str, context: str = "",
                               budget: float = 100.0, target: str = "railway") -> str:
         req = RunRequest(description=description, context=context,
-                         budget=budget, target=target)
+                         budget=budget, target=target, context_files=attachments())
         run_id = console.start_run(req)
         return json.dumps({"run_id": run_id, "status": "started"})
 
@@ -133,7 +139,8 @@ class ChatAgentRunner:
 
     def __init__(self, console: Console):
         self._console = console
-        tools = make_tools(console)
+        self._pending_files: list = []
+        tools = make_tools(console, attachments=lambda: self._pending_files)
         self._agent = Agent(
             name="Factory Concierge",
             instructions=CONCIERGE_INSTRUCTIONS,
@@ -167,40 +174,47 @@ class ChatAgentRunner:
 
         history.append({"role": "user", "content": user_input})
 
-        result = await Runner.run(self._agent, input=history)
+        # Make attachments available to start_pipeline, which fires inside Runner.run.
+        self._pending_files = files or []
+        try:
+            result = await Runner.run(self._agent, input=history)
+        finally:
+            self._pending_files = []
 
         response_msgs = []
         now = time.time()
 
         for item in result.new_items:
-            item_type = getattr(item, "type", None)
-            if item_type == "message_output_item":
-                text = ""
-                for part in getattr(item, "raw_item", {}).get("content", []):
-                    if part.get("type") == "output_text":
-                        text += part.get("text", "")
+            if isinstance(item, MessageOutputItem):
+                # raw_item is a ResponseOutputMessage; ItemHelpers walks its
+                # ResponseOutputText parts and concatenates the text.
+                text = ItemHelpers.text_message_output(item)
                 if text:
                     response_msgs.append(ChatMessage(
                         role="assistant", content=text, msg_type="text", ts=now,
                     ))
-            elif item_type == "tool_call_item":
-                tool_name = getattr(item, "raw_item", {}).get("name", "")
-                if tool_name == "start_pipeline":
-                    args = json.loads(getattr(item, "raw_item", {}).get("arguments", "{}"))
+            elif isinstance(item, ToolCallItem) and isinstance(item.raw_item, ResponseFunctionToolCall):
+                call = item.raw_item  # typed: .name and .arguments (JSON str) always present
+                if call.name == "start_pipeline":
+                    # 'description' is a required param in the tool schema; the SDK
+                    # validates before invoking, so index it directly — a missing
+                    # value is a contract break we want to raise, not paper over.
+                    args = json.loads(call.arguments)
                     if not run_id:
-                        run_id = f"run-{args.get('description', 'chat')[:8].lower().replace(' ', '-')}"
+                        run_id = f"run-{args['description'][:8].lower().replace(' ', '-')}"
                     response_msgs.append(ChatMessage(
                         role="system", content="Pipeline started.",
                         msg_type="pipeline_started", ts=now,
                         metadata={"run_id": run_id},
                     ))
-                elif tool_name == "request_dep_input":
-                    args = json.loads(getattr(item, "raw_item", {}).get("arguments", "{}"))
+                elif call.name == "request_dep_input":
+                    # 'dep_names' is a required param in the tool schema.
+                    args = json.loads(call.arguments)
                     response_msgs.append(ChatMessage(
                         role="assistant",
                         content="The architecture requires these credentials. Please provide them below.",
                         msg_type="dep_request", ts=now,
-                        metadata={"run_id": run_id, "dep_names": args.get("dep_names", [])},
+                        metadata={"run_id": run_id, "dep_names": args["dep_names"]},
                     ))
 
         if result.final_output and not response_msgs:

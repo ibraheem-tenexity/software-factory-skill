@@ -13,9 +13,9 @@ import shutil
 
 from . import workspace
 
-SKILL_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "skills")
+SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "skills")
 PHASE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "phases")
-DESIGN_SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "design-skills")
+DESIGN_SKILL_NAMES = ("frontend-design", "ui-ux-pro-max")
 
 MCP_CONFIG = {
     "mcpServers": {
@@ -33,17 +33,17 @@ MCP_CONFIG = {
 CLAUDE_SETTINGS = {"enableAllProjectMcpServers": True}
 
 
-def _skill_file(stage: int) -> str:
-    names = {1: "stage-1-research.md", 2: "stage-2-design.md", 3: "stage-3-build.md"}
-    return os.path.join(SKILL_DIR, names[stage])
+def _skill_file(stage: int, skills_dir: str | None = None) -> str:
+    names = {1: "stage-1-research", 2: "stage-2-design", 3: "stage-3-build"}
+    base = skills_dir or SKILLS_DIR
+    return os.path.join(base, names[stage], "SKILL.md")
 
 
 def prepare_workspace(
     runs_dir: str,
     run_id: str,
     stage: int,
-    design_skills_dir: str | None = None,
-    skill_dir: str | None = None,
+    skills_dir: str | None = None,
     phase_dir: str | None = None,
 ) -> str:
     ws = workspace.create(runs_dir, run_id)
@@ -53,7 +53,7 @@ def prepare_workspace(
     with open(os.path.join(ws, "claude-settings.json"), "w") as f:
         json.dump(CLAUDE_SETTINGS, f, indent=2)
 
-    src_skill = _skill_file(stage) if skill_dir is None else os.path.join(skill_dir, os.path.basename(_skill_file(stage)))
+    src_skill = _skill_file(stage, skills_dir)
     if os.path.isfile(src_skill):
         shutil.copy2(src_skill, os.path.join(ws, "SKILL.md"))
 
@@ -64,16 +64,12 @@ def prepare_workspace(
             shutil.copytree(src_phases, dst_phases)
 
     if stage == 1:
-        ds = design_skills_dir or DESIGN_SKILLS_DIR
-        if os.path.isdir(ds):
-            for skill_name in os.listdir(ds):
-                src = os.path.join(ds, skill_name)
-                dst = os.path.join(ws, "skills", skill_name)
-                if os.path.isdir(src):
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
-                elif os.path.isfile(src):
-                    os.makedirs(os.path.dirname(dst), exist_ok=True)
-                    shutil.copy2(src, dst)
+        base = skills_dir or SKILLS_DIR
+        for name in DESIGN_SKILL_NAMES:
+            src = os.path.join(base, name)
+            if os.path.isdir(src):
+                dst = os.path.join(ws, "skills", name)
+                shutil.copytree(src, dst, dirs_exist_ok=True)
 
     if stage >= 2:
         _copy_prior_artifacts(runs_dir, run_id, ws, ["PRD.md", "design-spec.md"])
@@ -86,9 +82,17 @@ def prepare_workspace(
 def _copy_prior_artifacts(runs_dir: str, run_id: str, ws: str, names: list[str]) -> None:
     base = os.path.join(runs_dir, run_id)
     ctx_dir = os.path.join(ws, "context")
+    ctx_real = os.path.realpath(ctx_dir)
     for name in names:
         for root, _dirs, files in os.walk(base):
+            # Skip the destination itself — on a stage re-run (retry) the artifact already
+            # lives in context/, and copying it onto itself raises SameFileError.
+            if os.path.realpath(root) == ctx_real:
+                continue
             if name in files:
                 os.makedirs(ctx_dir, exist_ok=True)
-                shutil.copy2(os.path.join(root, name), os.path.join(ctx_dir, name))
+                src = os.path.join(root, name)
+                dst = os.path.join(ctx_dir, name)
+                if os.path.realpath(src) != os.path.realpath(dst):
+                    shutil.copy2(src, dst)
                 break

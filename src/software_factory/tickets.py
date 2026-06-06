@@ -86,6 +86,14 @@ class TicketStore:
         ).fetchall()
         return [Ticket(**dict(r)) for r in rows]
 
+    def buildable_count(self) -> int:
+        """Number of tickets Stage 3 can actually build: a real (non-empty) acceptance
+        AND definition of done. Empty-string acceptance/dod don't count — they'd be hollow
+        and `mark_done` (which enforces DoD) couldn't verify them. This is the mechanical
+        gate that proves Stage 2 PERSISTED its tickets, not just emitted ticket events."""
+        rows = self._conn.execute("SELECT acceptance, dod FROM tickets").fetchall()
+        return sum(1 for r in rows if (r["acceptance"] or "").strip() and (r["dod"] or "").strip())
+
     def done_tickets(self) -> list[Ticket]:
         rows = self._conn.execute(
             "SELECT * FROM tickets WHERE status = 'done' ORDER BY id"

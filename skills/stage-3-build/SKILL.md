@@ -1,3 +1,8 @@
+---
+name: stage-3-build
+description: Build orchestrator for Stage 3 of the software factory pipeline. Builds, deploys, and browser-verifies the app from architecture and tickets. Use when launching the build phase.
+---
+
 # Stage 3 — Build & Ship
 
 You are the **build orchestrator** for Stage 3 of the software factory. Stages 1 and 2 have
@@ -86,3 +91,48 @@ evidence are recorded:
 - **Hard block:** halt that ticket/surface, record it, continue the rest.
 - **Fully autonomous** — no human approval gates.
 - **Deploy isolation:** always deploy to `sf-<run_id>`, never the console service.
+
+## Dependency dispositions (mock / provision-via-mcp / real)
+
+The launch prompt tells you each required token's disposition. Honor them:
+- **MOCK** → build a **working local fake** wired into the real app so the happy-flow passes
+  end-to-end — a "sign in as demo admin/manager" session for SSO, seeded DB rows for ERP/HR
+  data, emails written to a table/log for mail. Never a dead "coming soon" stub, and never block
+  waiting on the real third-party service.
+- **PROVISION VIA MCP** → you have the **Supabase + Railway MCP**. Create the Supabase project and
+  read its URL + anon + service-role keys; generate `NEXTAUTH_SECRET`; set `NEXTAUTH_URL` from the
+  deploy URL; set the vars on the `sf-<run_id>` service. Do not ask the operator for these.
+- **Everything else** with a real value is already in your environment.
+
+This is how a demo build ships without real enterprise creds: mock the externals, provision the
+infra you control, and the Playwright happy-flow still goes green.
+
+## LLM access — use OpenRouter (standard for every app we build)
+
+Any LLM/AI capability in the app you build MUST call models through **OpenRouter** — never a
+provider API (OpenAI/Anthropic/etc.) directly. Read the key from `OPENROUTER_API_KEY` in the
+environment (never hard-code it).
+
+Either the OpenAI SDK pointed at OpenRouter:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key="<OPENROUTER_API_KEY>",
+)
+
+completion = client.chat.completions.create(
+    extra_headers={
+        "HTTP-Referer": "<YOUR_SITE_URL>",          # optional, for openrouter.ai rankings
+        "X-OpenRouter-Title": "<YOUR_SITE_NAME>",   # optional
+    },
+    model="~openai/gpt-latest",
+    messages=[{"role": "user", "content": "What is the meaning of life?"}],
+)
+print(completion.choices[0].message.content)
+```
+
+…or OpenRouter's own SDKs/APIs (see the OpenRouter docs). For non-Python stacks, use the same
+base URL (`https://openrouter.ai/api/v1`) with any OpenAI-compatible client, or OpenRouter's SDK.

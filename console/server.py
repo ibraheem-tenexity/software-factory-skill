@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from software_factory.console import Console, RunRequest  # noqa: E402
 from software_factory.chat_store import ChatStore, ChatMessage  # noqa: E402
 from software_factory.chat_agent import ChatAgentRunner  # noqa: E402
+from software_factory.deps import extract_env_creds  # noqa: E402
 
 RUNS_DIR = os.environ.get("SF_RUNS_DIR", os.path.join(os.path.dirname(__file__), "..", ".runs"))
 HERE = os.path.dirname(__file__)
@@ -61,8 +62,26 @@ def _push_sse(run_id: str, msgs: list[ChatMessage]):
             q.append(f"data: {data}\n\n")
 
 
+_stage2_launched: set = set()
+
+
+def _auto_advance(rid: str):
+    """Fix #2: flip the stage-done flags + launch the next stage when ready, so runs advance
+    without a manual nudge or an open browser. detect_* set stage{1,2}_done and surface deps;
+    Stage 2 auto-launches once Stage 1 is done; Stage 3 still waits for the deps gate."""
+    try:
+        if console.detect_stage1_done(rid):
+            s = console.status(rid)
+            if s.get("stage") == 1 and rid not in _stage2_launched:
+                _stage2_launched.add(rid)
+                console.start_stage2(rid)
+        console.detect_stage2_done(rid)  # flips stage2_done + parses required tokens
+    except Exception:
+        pass
+
+
 def _poll_transitions():
-    """Background thread: detect stage transitions and push chat notifications."""
+    """Background thread: auto-advance stages + push chat notifications."""
     while True:
         time.sleep(3)
         try:
@@ -70,6 +89,7 @@ def _poll_transitions():
                 rid = run_info.get("id") or run_info.get("run_id", "")
                 if not rid:
                     continue
+                _auto_advance(rid)
                 st = console.status(rid)
                 if st.get("done") or st.get("phase") == "pending":
                     continue
@@ -233,7 +253,7 @@ class Handler(BaseHTTPRequestHandler):
             store = ChatStore(_chat_path(run_id))
             store.append(dep_msg)
             if result.get("satisfied"):
-                console.start_stage3(run_id, extra_creds=deps)
+                console.start_stage3(run_id, extra_creds=extract_env_creds(deps))
                 launch_msg = ChatMessage(
                     role="system",
                     content="Dependencies received. Build stage launching.",
@@ -267,10 +287,19 @@ class Handler(BaseHTTPRequestHandler):
             run_id = self.path[len("/api/runs/"):-len("/stage3")]
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length) or b"{}")
-            result = console.start_stage3(run_id, extra_creds=body.get("creds"))
+            result = console.start_stage3(run_id, extra_creds=extract_env_creds(body.get("creds") or {}))
             if result:
                 return self._send(200, {"run_id": result, "stage": 3})
             return self._send(409, {"error": "stage2 not done or deps not satisfied"})
+        if self.path.startswith("/api/runs/") and self.path.endswith("/retry"):
+            run_id = self.path[len("/api/runs/"):-len("/retry")]
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            result = console.retry_stage(run_id, int(body.get("stage", 0)),
+                                         extra_creds=body.get("creds"))
+            if result:
+                return self._send(200, {"run_id": result, "retried_stage": int(body["stage"])})
+            return self._send(409, {"error": "cannot retry: invalid stage or prior stage not done"})
         if self.path == "/api/runs":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length) or b"{}")

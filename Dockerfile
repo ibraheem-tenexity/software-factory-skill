@@ -3,14 +3,18 @@
 FROM node:20-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 git curl ca-certificates \
+        python3 python3-pip git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Puppeteer (mermaid-cli) chromium into a SHARED path reachable by the non-root runtime user.
 ENV PUPPETEER_CACHE_DIR=/ms-puppeteer
-# Orchestrator runtime + deploy CLI + browser-test MCP + Mermaid->SVG (architecture diagrams), all global
-RUN npm install -g @anthropic-ai/claude-code @railway/cli @playwright/mcp playwright @mermaid-js/mermaid-cli @claude-flow/cli \
-    && pip3 install --break-system-packages openai-agents
+# Deploy CLI + browser-test MCP + Mermaid->SVG (architecture diagrams), all global.
+# NOTE: Claude Code is NOT installed via npm — its npm package is now a thin launcher
+# whose postinstall must download a platform-native binary, which fails in this build
+# (omit=optional / no network for the optional dep) and leaves an unrunnable text stub.
+# We install it via the official native installer below instead.
+RUN npm install -g @railway/cli @playwright/mcp playwright @mermaid-js/mermaid-cli @claude-flow/cli
+RUN pip3 install --break-system-packages openai-agents 'markitdown[pdf]'
 
 # Chromium + OS libs into a SHARED path so the non-root runtime user can use them.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
@@ -25,6 +29,13 @@ RUN curl -fsSL https://github.com/cli/cli/releases/download/v2.62.0/gh_2.62.0_li
 # The node base image already ships an unprivileged `node` user (uid 1000) with home
 # /home/node — reuse it (Claude Code refuses bypassed permissions as root).
 ENV HOME=/home/node
+
+# Claude Code via the official native installer (a self-contained ELF binary, not the
+# broken npm launcher). It lands in $HOME/.local; symlink onto PATH so `claude` resolves
+# for the orchestrator's `subprocess` calls. Verify the binary actually runs at build time.
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && ln -sf /home/node/.local/bin/claude /usr/local/bin/claude \
+    && claude --version
 
 WORKDIR /app
 COPY . /app

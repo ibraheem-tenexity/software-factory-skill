@@ -5,3 +5,5 @@ __pycache__/
 .runs/
 *.db
 .env
+env_text.txt
+open-ai-key.txt

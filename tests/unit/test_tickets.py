@@ -13,6 +13,18 @@ def fresh(tmp_path):
     return TicketStore(str(tmp_path / "tickets.db"))
 
 
+def test_buildable_count_zero_on_empty_store(tmp_path):
+    assert fresh(tmp_path).buildable_count() == 0
+
+
+def test_buildable_count_requires_nonempty_acceptance_and_dod(tmp_path):
+    ts = fresh(tmp_path)
+    ts.create_ticket("real", acceptance="user sees X", dod="happy flow green", wave=1)
+    ts.create_ticket("hollow", acceptance="", dod="", wave=1)          # empty → not buildable
+    ts.create_ticket("half", acceptance="something", dod="   ", wave=2)  # blank dod → not buildable
+    assert ts.buildable_count() == 1
+
+
 def test_create_and_list_open_tickets(tmp_path):
     ts = fresh(tmp_path)
     tid = ts.create_ticket("Guestbook form", acceptance="submit shows name", dod="happy flow green", wave=1)

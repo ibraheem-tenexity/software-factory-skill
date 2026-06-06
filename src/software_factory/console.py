@@ -16,6 +16,9 @@ from typing import Any, Callable
 from . import artifacts, events, gates, streamlog
 from .agents import AgentRegistry
 from .evidence import build_evidence, verify_evidence
+from .input_pipeline import persist_and_compose
+from .pdf_extract import extract_to_markdown
+from . import deps as deps_mod
 from .mcp_health import check_mcp
 from .runstate import JsonFileStore, RunState
 from .tickets import TicketStore
@@ -114,6 +117,11 @@ def make_prompt_stage2(req: RunRequest, run_id: str, runs_dir: str) -> str:
         f"produce architecture.md (fewest services; data model; dependency + required-token list with "
         f"a `## Required Tokens` section using UPPER_SNAKE_CASE names) + Mermaid → architecture.svg via "
         f"`diagram.render`. Commit + emit both artifacts.\n"
+        f"   The Stage 3 build agent will have the **Supabase MCP + Railway MCP** (and Railway/Supabase "
+        f"tokens in env) — design Supabase (DB/auth/storage) + Railway (compute) as agent-provisionable; "
+        f"do NOT require the operator to supply Supabase/Railway/NextAuth creds. External integrations "
+        f"(SSO/ERP/email) may be mocked for the demo. List every runtime token regardless; the console "
+        f"auto-classifies each as provide/mock/mcp.\n"
         f"2. tickets — `TicketStore.create_ticket` in waves with acceptance + DoD (from PRD ticket seeds + "
         f"architecture + design spec). Emit a node per ticket.\n\n"
         f"Done-gate: `artifacts.verify(run_dir, [\"PRD.md\", \"architecture.md\", \"architecture.svg\"])` "
@@ -124,7 +132,26 @@ def make_prompt_stage2(req: RunRequest, run_id: str, runs_dir: str) -> str:
     )
 
 
-def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str) -> str:
+def _disposition_guidance(dispositions: dict | None) -> str:
+    disp = dispositions or {}
+    mock = sorted(n for n, d in disp.items() if d == "mock")
+    mcp = sorted(n for n, d in disp.items() if d == "mcp")
+    if not disp:
+        return ""
+    return (
+        f"\nDEPENDENCY DISPOSITIONS — satisfy each capability as marked:\n"
+        f"- **MOCK** (build a WORKING LOCAL FAKE wired into the real app so the happy-flow passes "
+        f"end-to-end — e.g. a 'sign in as demo admin' session for SSO, seeded DB rows for ERP/HR "
+        f"data, emails written to a table/log for mail; NOT a dead stub): {mock or 'none'}\n"
+        f"- **PROVISION VIA MCP** (you have the Supabase + Railway MCP — create the Supabase project "
+        f"and read URL/anon/service-role keys; generate NEXTAUTH_SECRET; set NEXTAUTH_URL from the "
+        f"deploy URL; set vars on the sf-<run_id> service): {mcp or 'none'}\n"
+        f"- All other required tokens with real values are already in your environment.\n"
+        f"Do NOT block on a real third-party integration when its token is marked MOCK — build the fake.\n"
+    )
+
+
+def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions: dict | None = None) -> str:
     base = os.path.join(runs_dir, run_id)
     service = f"sf-{run_id}"
     emit = f"python -m software_factory.events emit {runs_dir} {run_id}"
@@ -133,6 +160,7 @@ def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str) -> str:
         f"browser-verify this customer solution, FULLY AUTONOMOUSLY.\n"
         f"run_id={run_id}. runs_dir={runs_dir}. Budget ${req.budget:.0f} (HARD cutoff). "
         f"Deploy target: {req.target}.\n\n"
+        f"{_disposition_guidance(dispositions)}"
         f"Read SKILL.md and context/ for prior-stage artifacts (PRD.md, architecture.md, architecture.svg).\n"
         f"Read phases/ files. Emit `{emit} phase '{{\"name\":\"<phase>\"}}'` at each phase.\n"
         f"1. build — per ticket: spawn a build agent (pull from ruflo), merge only via "
@@ -187,10 +215,12 @@ class Console:
         runs_dir: str,
         launch: Callable[..., Any] = _default_launch,
         new_id: Callable[[], str] = lambda: "run-" + uuid.uuid4().hex[:8],
+        extract: Callable[[str], str] = extract_to_markdown,
     ):
         self._runs_dir = runs_dir
         self._launch = launch
         self._new_id = new_id
+        self._extract = extract
         os.makedirs(runs_dir, exist_ok=True)
 
     def _paths(self, run_id: str) -> dict:
@@ -235,24 +265,14 @@ class Console:
         paths = self._paths(run_id)
         os.makedirs(paths["base"], exist_ok=True)
 
-        import base64
-        inputs = []
-        for f in (req.context_files or []):
-            name = os.path.basename(f.get("name") or "upload")
-            if not name or not f.get("content_b64"):
-                continue
-            os.makedirs(paths["input_dir"], exist_ok=True)
-            with open(os.path.join(paths["input_dir"], name), "wb") as out:
-                out.write(base64.b64decode(f["content_b64"]))
-            inputs.append("input/" + name)
-        if (req.description or "").strip():
-            os.makedirs(paths["input_dir"], exist_ok=True)
-            with open(os.path.join(paths["input_dir"], "context.txt"), "w") as cf:
-                cf.write(req.description)
-            inputs.append("input/context.txt")
-        for rel in inputs:
+        # input -> (pdf->markdown) -> markdown + prompt -> composed Stage 1 input.
+        written = persist_and_compose(
+            paths["input_dir"], req.description, req.context_files or [],
+            extract=self._extract,
+        )
+        for name in written:
             events.emit(self._runs_dir, run_id, "artifact",
-                        {"title": "input", "path": rel, "kind": "context"})
+                        {"title": "input", "path": "input/" + name, "kind": "context"})
 
         state = self._load_state(run_id)
         env = {k: v for k, v in (req.credentials or {}).items() if v}
@@ -326,9 +346,10 @@ class Console:
                     break
         if not ok:
             return False
+        # The store must hold real, buildable tickets (acceptance + DoD) — not just
+        # ticket *events* on the canvas. An empty/hollow store is NOT a done Stage 2.
         tickets = TicketStore(self._paths(run_id)["tickets_db"])
-        has_tickets = len(tickets.open_tickets(wave=1)) > 0 or len(tickets.done_tickets()) > 0
-        if not has_tickets:
+        if tickets.buildable_count() < 1:
             return False
         state.stage2_done = True
         # Parse required tokens from architecture.md
@@ -342,11 +363,14 @@ class Console:
         return True
 
     def stage2_artifacts(self, run_id: str) -> dict:
-        """Return Stage 2 artifact paths + parsed required tokens."""
+        """Return Stage 2 artifact paths + parsed required tokens + default dispositions."""
         state = self._load_state(run_id)
         base = self._paths(run_id)["base"]
+        # default disposition per token (smart-classified), overlaid with any saved choices
+        disposition = deps_mod.default_dispositions(state.deps_required)
+        disposition.update(state.deps_disposition or {})
         result = {"deps_required": state.deps_required, "deps_provided": state.deps_provided,
-                  "deps_satisfied": state.deps_satisfied, "tokens": []}
+                  "deps_satisfied": state.deps_satisfied, "disposition": disposition, "tokens": []}
         for root, _dirs, files in os.walk(base):
             if "architecture.md" in files:
                 with open(os.path.join(root, "architecture.md")) as f:
@@ -355,17 +379,35 @@ class Console:
         return result
 
     def submit_deps(self, run_id: str, deps: dict) -> dict:
-        """Accept dependency key-value pairs. Persist names to state, values to env for Stage 3.
-        Values are NEVER written to disk — they go only into the env of the Stage 3 process."""
+        """Accept per-dep dispositions (+ values for `provide`). Accepts both the new shape
+        `{name: {disposition, value?}}` and legacy `{name: value_string}` (treated as provide).
+
+        Persists NAMES + dispositions (metadata) to state. Provided VALUES are NEVER written to
+        disk — they ride into the Stage 3 env via `start_stage3(extra_creds=...)`."""
         state = self._load_state(run_id)
-        provided_names = list(deps.keys())
-        state.deps_provided = sorted(set(state.deps_provided + provided_names))
-        missing = [n for n in state.deps_required if n not in state.deps_provided]
-        state.deps_satisfied = len(missing) == 0
+        disposition = deps_mod.default_dispositions(state.deps_required)
+        disposition.update(state.deps_disposition or {})
+        provided = set(state.deps_provided)
+        for name, spec in deps.items():
+            if isinstance(spec, dict):
+                disposition[name] = spec.get("disposition") or deps_mod.classify_dep(name)
+                if disposition[name] == "provide" and spec.get("value") not in (None, ""):
+                    provided.add(name)
+            else:  # legacy: a bare value string => provide
+                disposition[name] = "provide"
+                if spec not in (None, ""):
+                    provided.add(name)
+        state.deps_disposition = disposition
+        state.deps_provided = sorted(provided)
+        state.deps_satisfied = deps_mod.resolve_satisfied(
+            state.deps_required, disposition, state.deps_provided)
         state.save()
+        missing = [n for n in state.deps_required
+                   if not deps_mod.resolve_satisfied([n], disposition, state.deps_provided)]
         return {
             "deps_provided": state.deps_provided,
             "deps_required": state.deps_required,
+            "disposition": disposition,
             "missing": missing,
             "satisfied": state.deps_satisfied,
         }
@@ -380,8 +422,43 @@ class Console:
                if k in (state.creds_provided or [])}
         if extra_creds:
             env.update(extra_creds)
-        prompt = make_prompt_stage3(req, run_id, self._runs_dir)
+        prompt = make_prompt_stage3(req, run_id, self._runs_dir, dispositions=state.deps_disposition)
         result = self._launch_stage(run_id, 3, prompt, env)
+        return run_id if result is not None else None
+
+    def retry_stage(self, run_id: str, stage: int, extra_creds: dict | None = None) -> str | None:
+        """Re-run a single stage against the EXISTING workspace + prior-stage artifacts.
+
+        Unlike `start_stageN`, this does not require the stage's own completion — it's for
+        re-running a stage that produced incomplete/bad output (e.g. Stage 2 emitted tickets
+        as events but didn't persist them). The prior stage must be done so its inputs exist;
+        `workspace.create` is idempotent so earlier stages are reused, never repeated.
+        """
+        if stage not in (1, 2, 3):
+            return None
+        state = self._load_state(run_id)
+        if stage >= 2 and not state.stage1_done:
+            return None
+        if stage >= 3 and not state.stage2_done:
+            return None
+        # Invalidate this stage's (and downstream) completion so the done-gates re-evaluate.
+        if stage <= 1:
+            state.stage1_done = False
+        if stage <= 2:
+            state.stage2_done = False
+        state.save()
+
+        req = RunRequest(description=state.description or "", target=state.deploy_target or "railway")
+        env = {k: v for k, v in os.environ.items() if k in (state.creds_provided or [])}
+        if extra_creds:
+            env.update(extra_creds)
+        if stage == 3:
+            prompt = make_prompt_stage3(req, run_id, self._runs_dir, dispositions=state.deps_disposition)
+        else:
+            prompt = {1: make_prompt_stage1, 2: make_prompt_stage2}[stage](req, run_id, self._runs_dir)
+        events.emit(self._runs_dir, run_id, "phase",
+                    {"name": "retry-stage-%d" % stage, "status": "started"})
+        result = self._launch_stage(run_id, stage, prompt, env)
         return run_id if result is not None else None
 
     def _full_log(self, run_id: str) -> str:
