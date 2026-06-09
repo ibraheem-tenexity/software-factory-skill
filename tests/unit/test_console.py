@@ -262,26 +262,24 @@ def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
     assert any(e["data"]["source"] == "orchestrator" for e in g["edges"])
 
 
-def test_cumulative_spend_sums_runs_plus_sunk_offset(tmp_path, monkeypatch):
-    # The $50 ceiling must count money already spent on wiped/off-surface runs. SF_COST_SUNK
-    # carries that sunk total; _cumulative_spend = sum(spent_usd across live runs) + SF_COST_SUNK.
-    monkeypatch.setenv("SF_COST_SUNK", "10.16")
+def test_run_spend_is_per_run_not_cumulative(tmp_path):
+    # Per-run budget: each run/project is capped independently. _run_spend reflects ONLY this run's
+    # own spend; a prior run's spend does not count against another.
     ids = iter(["run-a", "run-b"])
     c = Console(str(tmp_path), launch=FakeLauncher(), new_id=lambda: next(ids))
-    assert c._cumulative_spend() == 10.16            # no runs yet -> just the sunk offset
     a = c.start_run(RunRequest(description="x"))
     st = c._load_state(a); st.spent_usd = 4.0; st.save()
     b = c.start_run(RunRequest(description="y"))
-    st = c._load_state(b); st.spent_usd = 3.5; st.save()
-    assert abs(c._cumulative_spend() - (10.16 + 4.0 + 3.5)) < 1e-6
+    st = c._load_state(b); st.spent_usd = 9.0; st.save()
+    assert c._run_spend(a) == 4.0                         # only run-a's spend
+    assert c._run_spend(b) == 9.0                         # run-a's $4 does NOT count against run-b
 
 
-def test_launch_refused_when_projected_cumulative_crosses_ceiling(tmp_path, monkeypatch):
-    # Mechanical hard stop: a stage launch is refused when cumulative + a stage reserve would
-    # cross the ceiling — so an advisory-only per-run budget can't silently blow past $50.
+def test_launch_refused_when_this_runs_spend_crosses_ceiling(tmp_path, monkeypatch):
+    # Mechanical per-run hard stop: refuse a stage launch when THIS run's spend + a stage reserve
+    # would cross SF_COST_CEILING — so the advisory in-prompt budget can't silently blow past it.
     monkeypatch.setenv("SF_COST_CEILING", "10")
     monkeypatch.setenv("SF_STAGE_RESERVE", "5")
-    monkeypatch.setenv("SF_COST_SUNK", "0")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
     rid = c.start_run(RunRequest(description="x"))
@@ -291,13 +289,12 @@ def test_launch_refused_when_projected_cumulative_crosses_ceiling(tmp_path, monk
     assert launcher.argv is None                          # no process launched
     from software_factory.db import RunDB, db_path
     blockers = " ".join(b.get("what", "") for b in RunDB(db_path(str(tmp_path), rid)).blockers())
-    assert "budget" in blockers.lower() or "ceiling" in blockers.lower()
+    assert "budget" in blockers.lower()
 
 
 def test_launch_proceeds_when_under_ceiling(tmp_path, monkeypatch):
-    monkeypatch.setenv("SF_COST_CEILING", "50")
+    monkeypatch.setenv("SF_COST_CEILING", "30")
     monkeypatch.setenv("SF_STAGE_RESERVE", "5")
-    monkeypatch.setenv("SF_COST_SUNK", "0")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
     rid = c.start_run(RunRequest(description="x"))
@@ -320,6 +317,22 @@ def test_resurfaced_pre_redesign_run_is_not_a_pipeline_run(tmp_path):
     os.makedirs(os.path.join(old, "workspace"), exist_ok=True)
     open(os.path.join(old, "workspace", "PRD.md"), "w").write("# PRD")
     assert c.is_pipeline_run("run-old") is False
+
+
+def test_graph_resolves_workspace_relative_artifact_paths(tmp_path):
+    # Agents run with cwd=workspace and record artifact paths relative to it ("architecture.md",
+    # not "workspace/architecture.md"). graph() must resolve those against the workspace dir too,
+    # else every real artifact reads "missing/hollow" (the canvas-all-red bug).
+    import os
+    from software_factory.db import RunDB, db_path
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    RunDB(db_path(str(tmp_path), rid)).record_artifact("Architecture", "architecture.md", kind="doc")
+    art = lambda: [n["data"] for n in c.graph(rid)["nodes"] if n["data"].get("path") == "architecture.md"][0]
+    assert art()["status"] == "missing"                      # not written yet
+    ws = os.path.join(str(tmp_path), rid, "workspace"); os.makedirs(ws, exist_ok=True)
+    open(os.path.join(ws, "architecture.md"), "w").write("# Arch")
+    assert art()["status"] == "created"                      # workspace-relative path now resolves
 
 
 def test_graph_marks_artifacts_missing_until_the_file_really_exists(tmp_path):
@@ -466,7 +479,9 @@ def test_stage3_prompt_is_plan_first_orchestrator_only_with_playwright_gate(tmp_
     p3 = make_prompt_stage3(RunRequest(description="x"), "run-z", "/tmp/r",
                             dispositions={"ADP_CLIENT_ID": "mock", "SUPABASE_URL": "mcp"})
     for needle in ["build-plan.md", "Playwright", "record-verification", "Task sub-agent",
-                   "software_factory.db", "sf-run-z", "ORCHESTRATOR-ONLY"]:
+                   "software_factory.db", "sf-run-z", "ORCHESTRATOR-ONLY",
+                   # deploy hardening (run-ce47692e gaps) baked into the prompt backstop:
+                   "Railway MCP", "generate_domain", "npm audit", "get_logs", "GitHub Repo"]:
         assert needle in p3, needle
     # prompts defer to SKILL.md and carry NO event/ruflo instructions
     for bad in ["events emit", "swarm_init", "agent_spawn ", "ruflo"]:

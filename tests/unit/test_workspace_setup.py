@@ -49,6 +49,29 @@ def test_stage1_workspace_has_mcp_and_settings(tmp_path):
     assert settings["enableAllProjectMcpServers"] is True
 
 
+def test_stage3_workspace_wires_railway_and_supabase_mcp(tmp_path):
+    # Stage 3 deploys + provisions, so its workspace gets the Railway + Supabase MCP (authed by the
+    # env tokens) in addition to playwright. Verified-good invocations: railway `railway mcp`,
+    # supabase `npx @supabase/mcp-server-supabase`.
+    runs = tmp_path / "runs"; runs.mkdir()
+    ws = prepare_workspace(str(runs), "run-s3mcp", 3,
+                           skills_dir=_make_skills_dir(tmp_path), phase_dir=_make_phase_dir(tmp_path))
+    mcp = json.loads(open(os.path.join(ws, ".mcp.json")).read())["mcpServers"]
+    assert {"playwright", "railway", "supabase"}.issubset(set(mcp))
+    assert mcp["railway"]["command"] == "railway" and mcp["railway"]["args"] == ["mcp"]
+    assert "@supabase/mcp-server-supabase" in " ".join(mcp["supabase"]["args"])
+
+
+def test_stage1_and_2_workspace_is_playwright_only(tmp_path):
+    runs = tmp_path / "runs"; runs.mkdir()
+    skills_dir = _make_skills_dir(tmp_path); phase_dir = _make_phase_dir(tmp_path)
+    for stage in (1, 2):
+        ws = prepare_workspace(str(runs), "run-s%d" % stage, stage,
+                               skills_dir=skills_dir, phase_dir=phase_dir)
+        mcp = json.loads(open(os.path.join(ws, ".mcp.json")).read())["mcpServers"]
+        assert set(mcp) == {"playwright"}, "stages 1-2 must not get the deploy MCPs"
+
+
 def test_stage1_includes_design_skills(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()

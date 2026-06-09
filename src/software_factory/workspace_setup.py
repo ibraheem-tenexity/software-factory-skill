@@ -17,16 +17,26 @@ SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "skills")
 PHASE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "phases")
 DESIGN_SKILL_NAMES = ("frontend-design", "ui-ux-pro-max")
 
-MCP_CONFIG = {
-    "mcpServers": {
-        # Playwright is the ONLY MCP server: the Stage-3 happy-flow gate drives the live app with it.
-        # ruflo/claude-flow was removed — native Task sub-agents are the workers, run.db is the datastore.
-        "playwright": {
-            "command": "npx",
-            "args": ["-y", "@playwright/mcp@latest", "--headless", "--browser", "chromium"],
-        },
-    },
-}
+# Playwright everywhere (the happy-flow gate drives the live app with it). Stage 3 ALSO gets the
+# Railway + Supabase MCP for deploy/provisioning. Both auth from env tokens already in the workspace
+# (RAILWAY_TOKEN, SUPABASE_ACCESS_TOKEN) — verified headless: `railway mcp` exposes project-scoped
+# tools (create_service/deploy/generate_domain/get_logs/set_variables) with a project token, and the
+# supabase server reads SUPABASE_ACCESS_TOKEN from env. ruflo/claude-flow is gone.
+_PLAYWRIGHT = {"command": "npx", "args": ["-y", "@playwright/mcp@latest", "--headless", "--browser", "chromium"]}
+_RAILWAY = {"command": "railway", "args": ["mcp"]}
+_SUPABASE = {"command": "npx", "args": ["-y", "@supabase/mcp-server-supabase@latest"]}
+
+
+def mcp_config(stage: int) -> dict:
+    servers = {"playwright": _PLAYWRIGHT}
+    if stage >= 3:
+        servers["railway"] = _RAILWAY
+        servers["supabase"] = _SUPABASE
+    return {"mcpServers": servers}
+
+
+# Back-compat alias (stage-1 view); prefer mcp_config(stage).
+MCP_CONFIG = mcp_config(1)
 
 CLAUDE_SETTINGS = {"enableAllProjectMcpServers": True}
 
@@ -47,7 +57,7 @@ def prepare_workspace(
     ws = workspace.create(runs_dir, run_id)
 
     with open(os.path.join(ws, ".mcp.json"), "w") as f:
-        json.dump(MCP_CONFIG, f, indent=2)
+        json.dump(mcp_config(stage), f, indent=2)
     with open(os.path.join(ws, "claude-settings.json"), "w") as f:
         json.dump(CLAUDE_SETTINGS, f, indent=2)
 

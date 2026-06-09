@@ -150,8 +150,18 @@ def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions
     return (
         _orchestration_preamble("Stage 3 — Build & Ship", run_id, runs_dir, req.budget)
         + _disposition_guidance(dispositions)
-        + f"Deploy target: {req.target}. DEPLOY ISOLATION: create + deploy ONLY to the dedicated service "
-          f"'{service}' (`railway add --service {service}` then `railway up --service {service}`); NEVER a bare `railway up`.\n"
+        + f"Deploy target: {req.target}. DEPLOY VIA THE **Railway MCP** (its project-scoped tools work "
+          f"with the env's RAILWAY_TOKEN; `whoami`/`list_projects` do NOT — don't call them). Create + deploy "
+          f"ONLY to the dedicated service '{service}': `create_service` '{service}' → `set_variables` (all runtime "
+          f"env) → `deploy` → `generate_domain` (the app has NO public url until you do this; derive the health url "
+          f"from it). NEVER deploy to the console service.\n"
+          f"DEPLOY PREFLIGHT (Railway blocks the build otherwise): run `npm audit` and bump HIGH/CRITICAL deps to "
+          f"patched versions + regen the lockfile; give module-load clients (e.g. Supabase) BUILD-TIME placeholder env "
+          f"in the Dockerfile so `next build` doesn't throw (runtime values override); ship a Dockerfile. The build runs "
+          f"REMOTELY on Railway — do NOT run `npm run build` locally (it OOM-kills the shared container).\n"
+          f"HEALTH: use a FINITE health-wait (bounded attempts, never an infinite loop). On failure call the Railway MCP "
+          f"`get_logs` (build AND deploy), read the real error, fix it (one Task sub-agent), redeploy.\n"
+          f"Record the source repo (CLEAN url, strip any token): `record-artifact 'GitHub Repo' <https-url> repo`.\n"
           f"PHASE 0 — PLAN FIRST: before building, write `build-plan.md` (approach, wave/ticket order, "
           f"mock/MCP decisions, the happy-flow you will verify) and `record-artifact 'Build Plan' build-plan.md plan`. "
           f"THEN execute (no human approval — this is autonomous).\n"
@@ -219,25 +229,25 @@ class Console:
     def _load_state(self, run_id: str) -> RunState:
         return RunState.load(run_id, RunDB(self._paths(run_id)["db"]))
 
-    def _cumulative_spend(self) -> float:
-        """True cumulative spend across ALL runs + SF_COST_SUNK (money already spent on
-        wiped/off-surface runs, which /api/runs can no longer see). The basis for the hard cap."""
-        sunk = float(os.environ.get("SF_COST_SUNK", "0") or 0)
-        return sunk + sum((r.get("spent_usd") or 0) for r in self.list_runs())
+    def _run_spend(self, run_id: str) -> float:
+        """THIS run's own spend (the per-run budget basis). Prior runs/projects do NOT count —
+        each run/project is independently capped. Authoritative cost from the run.log, falling
+        back to the recorded runstate spend."""
+        return streamlog.cost_usd(self._full_log(run_id)) or (self._load_state(run_id).spent_usd or 0)
 
     def _launch_stage(self, run_id: str, stage: int, prompt: str, env: dict) -> Any:
         """Prepare workspace, health-check MCP, and launch a claude -p process for a stage."""
         paths = self._paths(run_id)
 
-        # Mechanical cost ceiling: the per-run "$25 HARD cutoff" is only an advisory prompt and
-        # stages don't share a counter, so refuse to launch the next stage when cumulative spend
-        # (+ a stage reserve) would cross SF_COST_CEILING. This is the real hard stop.
-        ceiling = float(os.environ.get("SF_COST_CEILING", "50") or 50)
-        reserve = float(os.environ.get("SF_STAGE_RESERVE", "0") or 0)
-        cumulative = self._cumulative_spend()
-        if cumulative + reserve > ceiling:
+        # Mechanical PER-RUN cost ceiling: the in-prompt budget is advisory-only and stages don't
+        # share a counter, so refuse to launch the next stage when THIS run's own spend (+ a stage
+        # reserve) would cross SF_COST_CEILING. Per-run, not cumulative — each project gets a fresh cap.
+        ceiling = float(os.environ.get("SF_COST_CEILING", "30") or 30)
+        reserve = float(os.environ.get("SF_STAGE_RESERVE", "5") or 5)
+        spend = self._run_spend(run_id)
+        if spend + reserve > ceiling:
             RunDB(paths["db"]).add_blocker(
-                f"Cost ceiling: cumulative ${cumulative:.2f} + reserve ${reserve:.2f} "
+                f"Per-run budget: this run ${spend:.2f} + reserve ${reserve:.2f} "
                 f"> ceiling ${ceiling:.2f} — stage {stage} launch refused",
                 blocks="budget",
             )
@@ -249,11 +259,17 @@ class Console:
         mcp_path = os.path.join(ws, ".mcp.json")
         checks = check_mcp(mcp_path)
         unhealthy = [c for c in checks if not c.ok]
+        # Hard-gate ONLY playwright (the happy-flow verification gate needs it). The deploy/provision
+        # MCPs (railway, supabase) are best-effort: record a blocker if unhealthy but still launch —
+        # a transient npx/token hiccup must not block the whole stage, and the agent surfaces real
+        # deploy-tool failures itself (bounded health-wait + get_logs).
+        _HARD = {"playwright", "config"}
         if unhealthy:
             db = RunDB(paths["db"])
             for c in unhealthy:
                 db.add_blocker(f"MCP:{c.name} — {c.detail}", blocks="mcp")
-            return None
+            if any(c.name in _HARD for c in unhealthy):
+                return None
 
         state = self._load_state(run_id)
         state.stage = stage
@@ -592,12 +608,16 @@ class Console:
         return {"cleared": gate}
 
     def artifact(self, run_id: str, path: str) -> dict:
+        # Stage agents run with cwd=workspace and record paths relative to it (e.g. "architecture.md"),
+        # while the host records base-relative paths (e.g. "input/..."). Resolve against BOTH — but
+        # the resolved file must stay under the run base (no traversal escape).
         base = os.path.realpath(self._paths(run_id)["base"])
-        full = os.path.realpath(os.path.join(base, path))
-        if os.path.commonpath([full, base]) != base or not os.path.isfile(full):
-            return {"error": "not found", "path": path}
-        with open(full, "r", errors="replace") as f:
-            return {"path": path, "content": f.read()[:200000]}
+        for root in (base, os.path.join(base, "workspace")):
+            full = os.path.realpath(os.path.join(root, path))
+            if os.path.commonpath([full, base]) == base and os.path.isfile(full):
+                with open(full, "r", errors="replace") as f:
+                    return {"path": path, "content": f.read()[:200000]}
+        return {"error": "not found", "path": path}
 
     def graph(self, run_id: str) -> dict:
         """Cytoscape elements projected ENTIRELY from run.db (the single source of truth):

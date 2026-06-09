@@ -7,12 +7,13 @@ description: Build orchestrator for Stage 3 of the software factory pipeline. Bu
 
 You are the **build orchestrator** for Stage 3 of the software factory. Stages 1 and 2 have
 produced a validated PRD, architecture (with diagram), and tickets. All required dependencies
-(tokens, keys, URLs) have been resolved and are available in your environment. Your job is to launch agents that
-build, deploy, test, and ship.
+(tokens, keys, URLs) have been resolved and are available in your environment. Your job is to launch subagents that
+use claude sonnet 4.6 build, deploy, test, and ship.
 
 **You are an ORCHESTRATOR — you MUST NOT edit app/source files yourself.** For each ticket you launch ONE
 native **Task** sub-agent; it implements the ticket and opens a PR; you coordinate, merge, and record state.
 Read prior-stage artifacts from `context/` (PRD.md, architecture.md, architecture.svg) and the tickets from the store.
+The sub agents must use sonnet 4.6 as their model not opus 4.8.
 
 **The one definition of done:** the app's primary user journey passes end-to-end in a real browser
 (Playwright) on the LIVE deployed URL. Code merging is not done. Deploy succeeding is not done. Only a
@@ -53,9 +54,54 @@ A no-op sub-agent turn (empty diff) is a retry/escalate signal, never a completi
 
 ## Phase 2: deploy  (`set-phase deploy`)
 
-Deploy to the run's **own dedicated service** `sf-<run_id>`: `railway add --service sf-<run_id>` then
-`railway up --service sf-<run_id>`. **NEVER** a bare `railway up` (it would overwrite the factory console).
-`deploy.healthy(url)` must return True. `record-artifact "Live URL" <url> deploy`.
+Deploy ONLY to this run's own dedicated service `sf-<run_id>` — **NEVER** a bare/un-named deploy
+(it would overwrite the factory console).
+
+### Use the local Railway MCP (`railway`) — wired into your workspace
+It is the local stdio MCP server (`railway mcp`) and authenticates with the container's
+`RAILWAY_TOKEN` (a **project** token). VERIFIED, rely on this:
+- **Project-scoped tools WORK** with this token and infer the project from `RAILWAY_PROJECT_ID` in
+  your env (most take no project arg). Use these for the whole deploy:
+  `create_service`, `set_variables`, `deploy`, `generate_domain`, `get_logs`, `list_services`,
+  `list_deployments`, `environment_status`.
+- **Account-level tools do NOT work** with a project token — `whoami` and `list_projects` return
+  *"Not authenticated. Run 'railway login'…"*. You do **not** need them; never call them, and never
+  treat that error as "the MCP is broken" — it only means the token has no user identity.
+- Supabase provisioning uses the **`supabase` MCP** (authed by `SUPABASE_ACCESS_TOKEN`, account-level).
+
+### Successful deploy path (the proven sequence — follow it in order)
+1. **Preflight the build FIRST** (see below) — skipping this is why deploys fail at "scheduling build".
+2. `create_service` named `sf-<run_id>` (idempotent: if `list_services` shows it, reuse it).
+3. `set_variables` on `sf-<run_id>`: every runtime var the app needs (`DATABASE_URL`, `SUPABASE_URL`,
+   `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`,
+   `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`).
+4. `deploy` the service. Railway builds it **remotely** — do NOT run `npm run build` locally (it
+   OOM-restarts the shared container and kills you mid-run).
+5. `generate_domain` for `sf-<run_id>` (target the app's listen port). **The app has NO public URL
+   until you do this** — derive your health URL from the domain `generate_domain` returns. (Skipping
+   this and polling a guessed URL is how a prior run hung forever.)
+6. **Finite** health-wait — a bounded number of checks (≈20 over a few minutes), NEVER an infinite
+   `until curl health` loop. If it does not go healthy in that window the deploy FAILED → call
+   `get_logs` (build AND deploy), READ the real error, fix it (one fix Task sub-agent), redeploy.
+7. `record-artifact "Live URL" <url> deploy`.
+
+### Deploy preflight — Railway BLOCKS the build if you skip these
+- **Dependency security gate:** Railway refuses builds with HIGH/CRITICAL dependency CVEs (the build
+  dies at "scheduling build" with the reason only in the FULL build logs). Run `npm audit`, bump every
+  flagged package to its patched version (e.g. `npm install next@^14.2.35`), regenerate the lockfile,
+  commit — BEFORE deploy.
+- **Build-time env:** Railway injects service vars at RUNTIME, not into the build. Any client built at
+  module load (`createClient(SUPABASE_URL, …)`, etc.) throws *"supabaseUrl is required"* during
+  `next build` page-data collection if its env is missing. Provide **build-time placeholder env** in
+  the Dockerfile (real values override at runtime) OR construct those clients lazily.
+- **Builder:** ship a **Dockerfile** (Nixpacks/Railpack may fail to detect the app). Canonical pattern:
+  `COPY package*.json` → `npm ci` → `COPY . .` → placeholder build `ENV` → `npm run build` →
+  start on `$PORT` (`next start -p ${PORT:-3000} -H 0.0.0.0`).
+
+### Surface the repo
+The build sub-agents create a GitHub repo. Once it exists, record it with a **CLEAN** url (strip any
+embedded `ghp_` token — use a credential helper / `GH_TOKEN`, never bake the token into the remote):
+`record-artifact "GitHub Repo" https://github.com/<org>/<repo> repo`.
 
 ## Phase 3: test — the GATE (mandatory; the only path to done)  (`set-phase test`)
 

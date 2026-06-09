@@ -118,6 +118,9 @@
     .sidebar.open { display: block; }
     .transcript { max-height: calc(100vh - 140px); overflow-y: auto; background: #0f1729; color: #d4d4d8; font: .72rem/1.6 var(--mono);
       padding: .8rem; border-radius: var(--radius); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .copy-btn { float: right; font: 600 .68rem var(--sans); padding: .12rem .5rem; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--card); color: var(--fg); cursor: pointer; }
+    .copy-btn:hover { background: var(--bg); }
     .kind-badge { display: inline-block; font: 700 .6rem var(--sans); letter-spacing: .08em; text-transform: uppercase;
       color: var(--primary); background: #e9eef6; border-radius: 999px; padding: .18rem .55rem; }
     .chip { display: inline-block; font: 600 .66rem var(--mono); border-radius: 999px; padding: .12rem .5rem; }
@@ -210,6 +213,7 @@
       <select id="runs"></select>
       <span class="pill" id="phase">—</span>
       <span class="pill" id="stage-pill">stage 1</span>
+      <span class="pill" id="links"></span>
       <span class="spacer"></span>
       <span class="pill cost" id="cost"></span>
     </header>
@@ -363,13 +367,19 @@
         else { h += `<p class="hint">Run paused for review.</p><button class="gate-go" onclick="continueRun('${d.gate}')">Continue ▶</button>`; }
       }
       else if (d.kind === "orchestrator") {
-        h += `<p class="hint">Full claude transcript</p>`;
+        h += `<p class="hint">Full claude transcript <button class="copy-btn" id="copy-transcript">Copy</button></p>`;
         h += `<div class="transcript" id="transcript-box">Loading…</div>`;
         box.innerHTML = h; box.classList.add("open");
         const res = await fetch(`/api/runs/${runId}/log?full=json`);
         const data = await res.json();
         const el = document.getElementById("transcript-box");
         if (el) { el.textContent = data.log || "(no output yet)"; el.scrollTop = el.scrollHeight; }
+        const cb = document.getElementById("copy-transcript");
+        if (cb) cb.onclick = async () => {
+          try { await navigator.clipboard.writeText(data.log || ""); cb.textContent = "Copied ✓"; }
+          catch (e) { cb.textContent = "Copy failed"; }
+          setTimeout(() => { cb.textContent = "Copy"; }, 1500);
+        };
         return;
       }
       else if (d.kind === "agent") { h += `<div class="markdown"><p>subagent · ${d.status}</p></div>`; }
@@ -624,6 +634,12 @@
       $("stage-pill").innerHTML = "stage <b>" + (s.stage || 1) + "</b>" +
         (s.stage1_done ? (s.stage2_done ? (s.deps_satisfied ? " ✓✓✓" : " ✓✓") : " ✓") : "");
       $("cost").innerHTML = "spent <b>$" + (s.spent_usd || 0).toFixed(4) + "</b>";
+      // Surface the live demo + source-repo links (repo comes from the run.db "GitHub Repo" artifact)
+      let linksHtml = "";
+      if (s.deploy_url) linksHtml += `<a href="${s.deploy_url}" target="_blank" rel="noopener">demo ↗</a>`;
+      const repo = (g.nodes || []).map(n => n.data || n).find(d => d.kind === "artifact" && /repo/i.test(d.label || "") && (d.url || "").startsWith("http"));
+      if (repo) linksHtml += (linksHtml ? " · " : "") + `<a href="${repo.url}" target="_blank" rel="noopener">repo ↗</a>`;
+      $("links").innerHTML = linksHtml;
       applyGraph(g);
       renderActivity(log, evs, s.done || ["stopped", "blocked"].includes(s.phase));
       // Stage transitions
