@@ -262,6 +262,22 @@ def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
     assert any(e["data"]["source"] == "orchestrator" for e in g["edges"])
 
 
+def test_resurfaced_pre_redesign_run_is_not_a_pipeline_run(tmp_path):
+    # Budget-bleed scar: an old run dir (PRD.md on disk, but never started by THIS pipeline)
+    # must NOT auto-advance. start_run records an "input" artifact in run.db; a resurfaced dir
+    # whose run.db is empty (created fresh on load) is_pipeline_run -> False, so the poller skips it.
+    import os
+    c = console(tmp_path, FakeLauncher())
+    # a real run created by start_run has recorded input artifacts:
+    rid = c.start_run(RunRequest(description="x"))
+    assert c.is_pipeline_run(rid) is True
+    # a resurfaced old dir: just a PRD on disk, no run.db activity.
+    old = os.path.join(str(tmp_path), "run-old")
+    os.makedirs(os.path.join(old, "workspace"), exist_ok=True)
+    open(os.path.join(old, "workspace", "PRD.md"), "w").write("# PRD")
+    assert c.is_pipeline_run("run-old") is False
+
+
 def test_graph_marks_artifacts_missing_until_the_file_really_exists(tmp_path):
     # The "no hollow done" scar at the artifact level: a recorded artifact whose file does not
     # exist is status="missing" (red on the canvas), not a fake green "created".

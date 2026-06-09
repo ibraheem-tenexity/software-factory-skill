@@ -1,0 +1,67 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - text: Software Factory
+      - generic [ref=e5]: console
+    - combobox [ref=e6] [cursor=pointer]:
+      - option "run-3d610422 · done · $8.45" [selected]
+      - option "run-d26d35fd · wait-for-deps · $2.93"
+      - option "demo-singer · research · $0.83"
+    - generic [ref=e7]: phase done ✓
+    - generic [ref=e8]: stage 1
+    - generic [ref=e9]: spent $8.4500
+  - generic [ref=e10]:
+    - complementary [ref=e11]:
+      - heading "Build a customer solution" [level=2] [ref=e12]
+      - paragraph [ref=e13]: One line or detailed context. The factory researches, writes a PRD & architecture, then builds & deploys.
+      - generic [ref=e14]: What should we build?
+      - textbox "A guestbook… or paste an email / SOW." [ref=e15]
+      - generic [ref=e16]: Context (optional)
+      - textbox "Domain, constraints, sample data…" [ref=e17]
+      - generic [ref=e18]: …or upload files (txt / pdf / docx)
+      - button "Choose File" [ref=e19]
+      - paragraph
+      - generic [ref=e20]:
+        - generic [ref=e21]:
+          - generic [ref=e22]: Budget $
+          - spinbutton [ref=e23]: "100"
+        - generic [ref=e24]:
+          - generic [ref=e25]: Target
+          - combobox [ref=e26]:
+            - option "railway" [selected]
+            - option "vercel"
+      - generic [ref=e27]: Railway
+      - combobox [ref=e28]:
+        - option "Managed" [selected]
+        - option "Bring your own"
+      - button "Build & deploy" [ref=e29] [cursor=pointer]
+      - paragraph
+    - generic [ref=e36]:
+      - generic [ref=e39]: run finished
+      - generic [ref=e40]:
+        - generic [ref=e41]: "▸ phase: provision"
+        - generic [ref=e42]: "✦ artifact: Customer Context"
+        - generic [ref=e43]: "▸ phase: provision"
+        - generic [ref=e44]: "▸ phase: research"
+        - generic [ref=e45]: "▸ phase: research"
+        - generic [ref=e46]: "▸ phase: architect"
+        - generic [ref=e47]: "▸ phase: wait-for-deps"
+        - generic [ref=e48]: "✦ artifact: PRD"
+        - generic [ref=e49]: "✦ artifact: Architecture"
+        - generic [ref=e50]: "▸ phase: wait-for-deps"
+        - generic [ref=e51]: "▸ phase: tickets"
+        - generic [ref=e52]: "▸ phase: tickets"
+        - generic [ref=e53]: "▸ phase: build"
+        - generic [ref=e54]: "▸ phase: build"
+        - generic [ref=e55]: "▸ phase: deploy"
+        - generic [ref=e56]: "▸ phase: test"
+        - generic [ref=e57]: "▸ phase: test"
+        - generic [ref=e58]: ✓ done
+  - generic [ref=e59]:
+    - generic [ref=e60]: orchestrator
+    - generic [ref=e62]: phase
+    - generic [ref=e64]: active/agent
+    - generic [ref=e66]: artifact
+    - generic [ref=e68]: blocker / missing
+    - generic [ref=e70]: gate
+    - generic [ref=e72]: deps

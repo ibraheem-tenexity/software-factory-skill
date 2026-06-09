@@ -281,6 +281,13 @@ class Console:
         self._launch_stage(run_id, 1, prompt, env)
         return run_id
 
+    def is_pipeline_run(self, run_id: str) -> bool:
+        """True only if this run was actually started by THIS pipeline (start_run records ≥1
+        artifact in run.db). A resurfaced pre-redesign dir — PRD.md on disk but an empty run.db
+        (created fresh on load) — is False, so the poller never auto-advances/zombie-launches it."""
+        db = RunDB(self._paths(run_id)["db"])
+        return bool(db.artifacts())
+
     def detect_stage1_done(self, run_id: str) -> bool:
         """Stage 1 is done when the PRD passes the mechanical gate (the artifact IS the proof —
         no event needed; the datastore + the committed PRD are the source of truth)."""

@@ -70,6 +70,8 @@ def _auto_advance(rid: str):
     without a manual nudge or an open browser. detect_* set stage{1,2}_done and surface deps;
     Stage 2 auto-launches once Stage 1 is done; Stage 3 still waits for the deps gate."""
     try:
+        if not console.is_pipeline_run(rid):
+            return  # resurfaced pre-redesign dir (empty run.db) — never auto-advance/zombie-launch it
         if console.detect_stage1_done(rid):
             s = console.status(rid)
             if s.get("stage") == 1 and rid not in _stage2_launched:

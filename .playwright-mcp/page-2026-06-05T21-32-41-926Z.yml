@@ -1,0 +1,55 @@
+- generic [ref=e41]:
+  - banner [ref=e42]:
+    - generic [ref=e43] [cursor=pointer]:
+      - text: Software Factory
+      - generic [ref=e44]: console
+    - combobox [ref=e45] [cursor=pointer]:
+      - option "run-3d610422 · done · $8.45"
+      - option "run-d26d35fd · wait-for-deps · $2.93" [selected]
+      - option "demo-singer · research · $0.83"
+    - generic [ref=e46]: phase wait-for-deps
+    - generic [ref=e47]: stage 1
+    - generic [ref=e48]: spent $2.9302
+  - generic [ref=e49]:
+    - complementary [ref=e50]:
+      - generic [ref=e52]: Hi! I'm your Factory Concierge. Tell me what you'd like to build.
+      - generic [ref=e53]:
+        - button "📎" [ref=e54] [cursor=pointer]
+        - textbox "Describe what you want to build..." [ref=e55]
+        - button "→" [ref=e56] [cursor=pointer]
+    - generic [ref=e63]:
+      - generic [ref=e66]: live activity
+      - generic [ref=e67]:
+        - generic [ref=e68]: "▸ phase: extract"
+        - generic [ref=e69]: "▸ phase: extract"
+        - generic [ref=e70]: "✦ artifact: input"
+        - generic [ref=e71]: "▸ phase: extract"
+        - generic [ref=e72]: "▸ phase: provision"
+        - generic [ref=e73]: "▸ phase: provision"
+        - generic [ref=e74]: "✦ artifact: GitHub Repo"
+        - generic [ref=e75]: "▸ phase: research"
+        - generic [ref=e76]: "✦ artifact: PRD"
+        - generic [ref=e77]: "▸ phase: research"
+        - generic [ref=e78]: "▸ phase: architect"
+        - generic [ref=e79]: "✦ artifact: Architecture"
+        - generic [ref=e80]: "✦ artifact: Architecture Diagram"
+        - generic [ref=e81]: "▸ phase: architect"
+        - generic [ref=e82]: "▸ phase: wait-for-deps"
+        - generic [ref=e83]: "🔧 Bash {\"command\":\"RUNS=/home/ibraheem/software-factory-skill/.runs\\nRUN_ID=run-d26d35fd\\nREPO_DIR=/home/ibraheem/software-fact"
+        - generic [ref=e84]: 💬 Pipeline-1 gate passes. Now commit architecture artifacts and advance to pipeline 2.
+        - generic [ref=e85]: "🔧 Bash {\"command\":\"RUNS=/home/ibraheem/software-factory-skill/.runs\\nRUN_ID=run-d26d35fd\\nREPO_DIR=/home/ibraheem/software-fact"
+        - generic [ref=e86]: "🔧 Bash {\"command\":\"RUNS=/home/ibraheem/software-factory-skill/.runs\\nRUN_ID=run-d26d35fd\\n\\n# Update run state to wait-for-deps"
+        - generic [ref=e87]: "💬 **Phase: wait-for-deps** — provisioning Railway service and Supabase project."
+        - generic [ref=e88]: "🔧 Bash {\"command\":\"# Create Railway project for this run\\nSERVICE_NAME=\\\"sf-run-d26d35fd\\\"\\necho \\\"Creating Railway service: $S"
+        - generic [ref=e89]: "🔧 Bash {\"command\":\"railway whoami 2>&1 && railway list 2>&1 | head -20\",\"description\":\"Check Railway workspaces\"}"
+        - generic [ref=e90]: "🔧 Bash {\"command\":\"# Check if we need to use the Tenexity workspace\\nrailway list --workspace \\\"Tenexity\\\" 2>&1 | head -20\",\"de"
+        - generic [ref=e91]: "🔧 Bash {\"command\":\"REPO_DIR=/home/ibraheem/software-factory-skill/.runs/run-d26d35fd/workspace/autobuilder-singer\\ncd $REPO_DIR"
+        - generic [ref=e92]: "🔧 Bash {\"command\":\"REPO_DIR=/home/ibraheem/software-factory-skill/.runs/run-d26d35fd/workspace/autobuilder-singer\\ncd $REPO_DIR"
+  - generic [ref=e93]:
+    - generic [ref=e94]: orchestrator
+    - generic [ref=e96]: phase
+    - generic [ref=e98]: active/agent
+    - generic [ref=e100]: artifact
+    - generic [ref=e102]: blocker / missing
+    - generic [ref=e104]: gate
+    - generic [ref=e106]: deps

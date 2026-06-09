@@ -1,0 +1,27 @@
+{
+  "swarms": {
+    "swarm-1780684259190-c6psga": {
+      "swarmId": "swarm-1780684259190-c6psga",
+      "topology": "hierarchical",
+      "maxAgents": 6,
+      "status": "running",
+      "agents": [
+        "impl-chat-store",
+        "audit-coherence"
+      ],
+      "tasks": [],
+      "config": {
+        "topology": "hierarchical",
+        "maxAgents": 6,
+        "strategy": "specialized",
+        "communicationProtocol": "message-bus",
+        "autoScaling": true,
+        "consensusMechanism": "majority"
+      },
+      "createdAt": "2026-06-05T18:30:59.190Z",
+      "updatedAt": "2026-06-05T18:30:59.190Z",
+      "pid": 589435
+    }
+  },
+  "version": "3.0.0"
+}

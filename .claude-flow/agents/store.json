@@ -1,0 +1,33 @@
+{
+  "agents": {
+    "impl-chat-store": {
+      "agentId": "impl-chat-store",
+      "agentType": "implementer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "sonnet"
+      },
+      "createdAt": "2026-06-05T18:38:22.928Z",
+      "domain": "backend",
+      "model": "sonnet",
+      "modelRoutedBy": "explicit"
+    },
+    "audit-coherence": {
+      "agentId": "audit-coherence",
+      "agentType": "auditor",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "opus"
+      },
+      "createdAt": "2026-06-05T18:38:26.835Z",
+      "domain": "qa",
+      "model": "opus",
+      "modelRoutedBy": "explicit"
+    }
+  },
+  "version": "3.0.0"
+}

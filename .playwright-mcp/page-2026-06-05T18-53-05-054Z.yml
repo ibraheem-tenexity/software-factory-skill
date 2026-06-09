@@ -1,0 +1,48 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - text: Software Factory
+      - generic [ref=e5]: console
+    - combobox [ref=e6] [cursor=pointer]:
+      - option "run-3d610422 · done · $8.45" [selected]
+      - option "run-d26d35fd · wait-for-deps · $2.93"
+      - option "demo-singer · research · $0.83"
+    - generic [ref=e7]: phase done ✓
+    - generic [ref=e8]: stage 1
+    - generic [ref=e9]: spent $8.4500
+  - generic [ref=e10]:
+    - complementary [ref=e11]:
+      - generic [ref=e13]: Hi! I'm your Factory Concierge. Tell me what you'd like to build.
+      - generic [ref=e14]:
+        - button "📎" [ref=e15] [cursor=pointer]
+        - textbox "Describe what you want to build..." [ref=e16]
+        - button "→" [ref=e17] [cursor=pointer]
+    - generic [ref=e24]:
+      - generic [ref=e27]: run finished
+      - generic [ref=e28]:
+        - generic [ref=e29]: "▸ phase: provision"
+        - generic [ref=e30]: "✦ artifact: Customer Context"
+        - generic [ref=e31]: "▸ phase: provision"
+        - generic [ref=e32]: "▸ phase: research"
+        - generic [ref=e33]: "▸ phase: research"
+        - generic [ref=e34]: "▸ phase: architect"
+        - generic [ref=e35]: "▸ phase: wait-for-deps"
+        - generic [ref=e36]: "✦ artifact: PRD"
+        - generic [ref=e37]: "✦ artifact: Architecture"
+        - generic [ref=e38]: "▸ phase: wait-for-deps"
+        - generic [ref=e39]: "▸ phase: tickets"
+        - generic [ref=e40]: "▸ phase: tickets"
+        - generic [ref=e41]: "▸ phase: build"
+        - generic [ref=e42]: "▸ phase: build"
+        - generic [ref=e43]: "▸ phase: deploy"
+        - generic [ref=e44]: "▸ phase: test"
+        - generic [ref=e45]: "▸ phase: test"
+        - generic [ref=e46]: ✓ done
+  - generic [ref=e47]:
+    - generic [ref=e48]: orchestrator
+    - generic [ref=e50]: phase
+    - generic [ref=e52]: active/agent
+    - generic [ref=e54]: artifact
+    - generic [ref=e56]: blocker / missing
+    - generic [ref=e58]: gate
+    - generic [ref=e60]: deps

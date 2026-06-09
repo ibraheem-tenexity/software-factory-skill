@@ -14,6 +14,12 @@ Before implementing:
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name what's confusing. Ask.
 
+## 2. Verify Datastructures
+
+Before Shipping: 
+- Verify that the object an api returns is actually the shape that you expect
+- Do not try to avoid exceptions by attaching try catches or fail safes, actually use the correct return object
+
 ## 2. Simplicity First
 
 **Minimum code that solves the problem. Nothing speculative.**
