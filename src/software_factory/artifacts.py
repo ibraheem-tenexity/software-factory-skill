@@ -53,7 +53,9 @@ def parse_required_tokens(text: str) -> list[dict]:
             in_section = True
             continue
         if in_section:
-            if re.match(r"^#{1,3}\s+", stripped) and not re.match(r"^#{4,}", stripped):
+            # End the section only at the next h1/h2 — h3+ subheadings (e.g.
+            # '### Operator must supply') are subsections that BELONG to it.
+            if re.match(r"^#{1,2}\s+\S", stripped):
                 break
             section += line + "\n"
     names = re.findall(r"\b([A-Z][A-Z0-9_]*(?:_TOKEN|_KEY|_URL|_SECRET|_ID|_PASSWORD))\b", section)

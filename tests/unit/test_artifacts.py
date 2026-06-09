@@ -94,6 +94,28 @@ def test_parse_required_tokens_no_section():
     assert artifacts.parse_required_tokens(text) == []
 
 
+def test_parse_required_tokens_keeps_h3_subsections():
+    # Real Stage-2 architecture.md groups tokens under '### Operator must supply' /
+    # '### Agent-provisionable' subheadings. The parser must NOT treat an h3 as section-end
+    # (it did, breaking on '#{1,3}', so deps_required came back EMPTY on run-ce47692e).
+    text = (
+        "## Required Tokens\n\n"
+        "### Operator must supply\n"
+        "| Token | Purpose |\n"
+        "| `OPENROUTER_API_KEY` | LLM |\n\n"
+        "### Agent-provisionable\n"
+        "| `SUPABASE_URL` | db |\n"
+        "| `DATABASE_URL` | pg |\n\n"
+        "## Data Model\n"
+        "NOT_A_TOKEN_KEY in prose after the section ends\n"
+    )
+    names = [t["name"] for t in artifacts.parse_required_tokens(text)]
+    assert "OPENROUTER_API_KEY" in names
+    assert "SUPABASE_URL" in names
+    assert "DATABASE_URL" in names
+    assert "NOT_A_TOKEN_KEY" not in names      # the h2 after the section still ends it
+
+
 def test_parse_required_tokens_deduplicates():
     text = "## Required Tokens\n- RAILWAY_TOKEN\n- RAILWAY_TOKEN again\n"
     tokens = artifacts.parse_required_tokens(text)
