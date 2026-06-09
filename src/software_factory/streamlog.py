@@ -24,17 +24,39 @@ def _events(text: str):
             continue
 
 
+# OpenCode events carry no model id, so the token-pricing fallback uses the run's model.
+OPENCODE_FALLBACK_MODEL = "openrouter/moonshotai/kimi-k2.6"
+
+
 def cost_usd(text: str, prices: dict | None = None) -> float:
-    # run.log APPENDS every stage's claude -p session; each finished session emits one authoritative
-    # `result.total_cost_usd`. True cost = SUM of those, PLUS a token estimate for the in-flight
-    # session (events after the last result line). Taking only the last result lost earlier stages.
+    # run.log APPENDS every stage's session; the log may be claude stream-json or opencode
+    # --format json (one runtime per run — RunState.runtime pins it — but one parser handles
+    # both vocabularies; the schemas are disjoint, so neither path miscounts the other).
+    # claude: each finished session emits one authoritative `result.total_cost_usd`. True cost
+    # = SUM of those, PLUS a token estimate for the in-flight session (events after the last
+    # result line). Taking only the last result lost earlier stages.
+    # opencode: each `step_finish` event carries authoritative `part.cost` (+ `part.tokens`
+    # for the rare cost-less step, priced at the Kimi rate; reasoning bills as output).
     prices = prices or PRICES
-    finished_total = 0.0            # Σ authoritative cost of completed sessions
+    finished_total = 0.0            # Σ authoritative cost of completed sessions/steps
     tail_estimate = 0.0             # token estimate of the events since the last result line
     for ev in _events(text):
         if ev.get("type") == "result" and ev.get("total_cost_usd") is not None:
             finished_total += ev["total_cost_usd"]
             tail_estimate = 0.0     # everything after this belongs to the next session
+            continue
+        part = ev.get("part") or {}
+        if ev.get("type") == "step_finish" and part.get("type") == "step-finish":
+            if part.get("cost") is not None:
+                finished_total += part["cost"]
+            else:
+                tokens = part.get("tokens") or {}
+                rate = prices.get(OPENCODE_FALLBACK_MODEL, prices["claude-sonnet-4-6"])
+                finished_total += (
+                    tokens.get("input", 0) * rate["input"]
+                    + (tokens.get("cache") or {}).get("read", 0) * rate["cached"]
+                    + (tokens.get("output", 0) + tokens.get("reasoning", 0)) * rate["output"]
+                )
             continue
         msg = ev.get("message") or {}
         usage = msg.get("usage")

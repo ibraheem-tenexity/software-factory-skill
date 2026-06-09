@@ -41,6 +41,35 @@ MCP_CONFIG = mcp_config(1)
 CLAUDE_SETTINGS = {"enableAllProjectMcpServers": True}
 
 
+def opencode_config(stage: int, steps: int) -> dict:
+    """opencode.json for a stage workspace — same MCP set as the claude path, translated to
+    OpenCode's shape, plus: permissions that can't 'ask' (headless never answers prompts), the
+    stage contract injected ambiently via `instructions`, and the steps-capped primary agent
+    (OpenCode has no --max-turns; the cap lives here)."""
+    servers = {
+        name: {"type": "local", "command": [srv["command"], *srv["args"]], "enabled": True}
+        for name, srv in mcp_config(stage)["mcpServers"].items()
+    }
+    cfg = {
+        "$schema": "https://opencode.ai/config.json",
+        "mcp": servers,
+        "permission": {"doom_loop": "allow", "external_directory": {"*": "allow"}},
+        "instructions": ["SKILL.md"],
+        "agent": {
+            "factory": {
+                "mode": "primary",
+                "description": "Software factory stage agent",
+                "steps": steps,
+            },
+        },
+    }
+    if stage == 1:
+        # The design sub-skills (frontend-design, ui-ux-pro-max) are copied into ws/skills/;
+        # nothing auto-loads them in OpenCode, so register the dir with the skill scanner.
+        cfg["skills"] = {"paths": ["skills"]}
+    return cfg
+
+
 def _skill_file(stage: int, skills_dir: str | None = None) -> str:
     names = {1: "stage-1-research", 2: "stage-2-design", 3: "stage-3-build"}
     base = skills_dir or SKILLS_DIR
@@ -53,15 +82,30 @@ def prepare_workspace(
     stage: int,
     skills_dir: str | None = None,
     phase_dir: str | None = None,
+    runtime: str = "claude",
 ) -> str:
     ws = workspace.create(runs_dir, run_id)
 
+    # .mcp.json is written for BOTH runtimes: mcp_health.check_mcp reads exactly this shape
+    # and _launch_stage hard-gates on it before any launch.
     with open(os.path.join(ws, ".mcp.json"), "w") as f:
         json.dump(mcp_config(stage), f, indent=2)
-    with open(os.path.join(ws, "claude-settings.json"), "w") as f:
-        json.dump(CLAUDE_SETTINGS, f, indent=2)
+    if runtime == "opencode":
+        steps = int(os.environ.get("SF_MAX_TURNS", "200") or 200)
+        with open(os.path.join(ws, "opencode.json"), "w") as f:
+            json.dump(opencode_config(stage, steps), f, indent=2)
+    else:
+        with open(os.path.join(ws, "claude-settings.json"), "w") as f:
+            json.dump(CLAUDE_SETTINGS, f, indent=2)
 
+    # Stage contract: the opencode variant (monolithic framing) when it exists and the runtime
+    # asks for it; the claude SKILL.md otherwise. Both land as ws/SKILL.md — the prompts and
+    # opencode.json `instructions` reference that one name.
     src_skill = _skill_file(stage, skills_dir)
+    if runtime == "opencode":
+        oc_skill = src_skill.replace("SKILL.md", "SKILL.opencode.md")
+        if os.path.isfile(oc_skill):
+            src_skill = oc_skill
     if os.path.isfile(src_skill):
         shutil.copy2(src_skill, os.path.join(ws, "SKILL.md"))
 

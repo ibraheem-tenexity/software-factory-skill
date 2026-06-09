@@ -53,6 +53,8 @@ for _p in STAGE_3:
 # Per-stage model: research (1) & design (2) on Opus 4.8; build (3) on Sonnet (cheaper for
 # high-volume code edits). SF_MODEL env overrides all stages if set.
 _STAGE_MODEL = {1: "claude-opus-4-8", 2: "claude-opus-4-8", 3: "claude-sonnet-4-6"}
+# opencode runtime: one model for all stages (monolithic v1 — no per-stage split).
+_STAGE_MODEL_OPENCODE = {s: "openrouter/moonshotai/kimi-k2.6" for s in (1, 2, 3)}
 
 
 @dataclass
@@ -80,42 +82,69 @@ def run_paths(runs_dir: str, run_id: str) -> dict:
     }
 
 
-def _orchestration_preamble(stage_title: str, run_id: str, runs_dir: str, budget: float) -> str:
+def _orchestration_preamble(stage_title: str, run_id: str, runs_dir: str, budget: float,
+                            runtime: str = "claude") -> str:
     db = "python3 -m software_factory.db"
+    if runtime == "opencode":
+        # Monolithic: one agent does the work itself, but records one LOGICAL agent per unit
+        # of work so the done-gates (detect_stage3_done: spawned>0, tickets traceable) and the
+        # canvas agent graph keep their per-unit accounting.
+        work_model = (
+            f"MONOLITHIC: you do ALL the work yourself, sequentially — there is no Task tool and no "
+            f"sub-agents. For accounting, record one LOGICAL agent per unit of work (research unit / "
+            f"ticket / bugfix): `spawn-agent` BEFORE you start the unit, `finish-agent` when it's done.\n"
+        )
+        spawn_line = f"  spawn-agent <id> <role> <model> <phase>   — before each unit of work you start\n"
+        finish_line = (
+            f"  finish-agent <id> <outcome> [cost] [pr] [diff_lines]  — when the unit is done; outcome MUST be one of\n"
+        )
+    else:
+        work_model = (
+            f"ORCHESTRATOR-ONLY: you coordinate; the actual work is done by sub-agents you launch with the "
+            f"native **Task** tool (one per unit of work). Do NOT do the work in the main session.\n"
+        )
+        spawn_line = f"  spawn-agent <id> <role> <model> <phase>   — when you launch a Task sub-agent\n"
+        finish_line = (
+            f"  finish-agent <id> <outcome> [cost] [pr] [diff_lines]  — when it returns; outcome MUST be one of\n"
+        )
     return (
         f"Use the **software-factory** skill ({stage_title}), FULLY AUTONOMOUSLY — never wait on a human.\n"
         f"**Your contract is SKILL.md in this workspace (your cwd). Read it and follow it exactly.** "
         f"Prior-stage artifacts are in context/.\n"
         f"run_id={run_id}. runs_dir={runs_dir}. Run base: {os.path.join(runs_dir, run_id)} "
         f"(your cwd is its workspace/). Budget ${budget:.0f} (HARD cutoff).\n\n"
-        f"ORCHESTRATOR-ONLY: you coordinate; the actual work is done by sub-agents you launch with the "
-        f"native **Task** tool (one per unit of work). Do NOT do the work in the main session.\n"
-        f"RECORD canvas state in the datastore (there are NO events): `{db} <verb> {runs_dir} {run_id} ...`\n"
+        + work_model
+        + f"RECORD canvas state in the datastore (there are NO events): `{db} <verb> {runs_dir} {run_id} ...`\n"
         f"  set-phase <name> [status]            — at each phase you enter\n"
-        f"  spawn-agent <id> <role> <model> <phase>   — when you launch a Task sub-agent\n"
-        f"  finish-agent <id> <outcome> [cost] [pr] [diff_lines]  — when it returns; outcome MUST be one of\n"
-        f"      real_diff|success (worked) · no_op (empty turn) · blocked · failed — anything else records as failed\n"
+        + spawn_line
+        + finish_line
+        + f"      real_diff|success (worked) · no_op (empty turn) · blocked · failed — anything else records as failed\n"
         f"  record-artifact <title> <path> [kind] [agent]  — for each file produced\n"
         f"  add-blocker <what> [blocks] / clear-blocker <what>\n"
         f"Tickets go in the TicketStore; runstate is written by the host.\n"
     )
 
 
-def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str) -> str:
+def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str, runtime: str = "claude") -> str:
     ctx = f"\n\nContext / detailed input:\n{req.context}" if req.context else ""
+    if runtime == "opencode":
+        units = ("The named research units and the done-gate are in SKILL.md. Do each unit yourself, "
+                 "in order, recording each as a logical agent.")
+    else:
+        units = ("The named research sub-agents and the done-gate are in SKILL.md. Launch each as a "
+                 "Task sub-agent.")
     return (
-        _orchestration_preamble("Stage 1 — Research", run_id, runs_dir, req.budget)
+        _orchestration_preamble("Stage 1 — Research", run_id, runs_dir, req.budget, runtime)
         + "Goal: a validated PRD (PRD.md) that passes `artifacts.prd_is_complete` (≥3 real product "
-          "URLs + acceptance criteria + ticket seeds). The named research sub-agents and the done-gate "
-          "are in SKILL.md. Launch each as a Task sub-agent. When the PRD passes, STOP — the console "
-          "launches Stage 2.\n"
+          "URLs + acceptance criteria + ticket seeds). " + units + " When the PRD passes, STOP — the "
+          "console launches Stage 2.\n"
           f"App: {req.description}{ctx}"
     )
 
 
-def make_prompt_stage2(req: RunRequest, run_id: str, runs_dir: str) -> str:
+def make_prompt_stage2(req: RunRequest, run_id: str, runs_dir: str, runtime: str = "claude") -> str:
     return (
-        _orchestration_preamble("Stage 2 — Design & Plan", run_id, runs_dir, req.budget)
+        _orchestration_preamble("Stage 2 — Design & Plan", run_id, runs_dir, req.budget, runtime)
         + "Goal (per SKILL.md): architecture.md + architecture.svg (fewest services; data model; a "
           "`## Required Tokens` section, UPPER_SNAKE_CASE) AND PERSISTED buildable tickets — "
           "`TicketStore.create_ticket` with real acceptance + DoD (an empty store dead-ends Stage 3). "
@@ -146,10 +175,26 @@ def _disposition_guidance(dispositions: dict | None) -> str:
     )
 
 
-def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions: dict | None = None) -> str:
+def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions: dict | None = None,
+                       runtime: str = "claude") -> str:
     service = f"sf-{run_id}"
+    if runtime == "opencode":
+        build_line = (
+            f"BUILD: work ONE ticket at a time yourself, recording each as a logical agent "
+            f"(spawn-agent before, finish-agent after) and claiming it (`TicketStore.claim`) with that "
+            f"same agent id; merge only via `merge_if_green`; `TicketStore.mark_done`. Serialize per wave.\n"
+        )
+        fix_one = "fix it yourself (recorded as a logical fix agent)"
+        fix_bug = "a logical fix agent per bug"
+    else:
+        build_line = (
+            f"BUILD: one native Task sub-agent PER ticket (orchestrator-only — never edit app code yourself); "
+            f"merge only via `merge_if_green`; `TicketStore.mark_done`. Serialize per wave.\n"
+        )
+        fix_one = "fix it (one Task sub-agent)"
+        fix_bug = "a Task sub-agent per bug"
     return (
-        _orchestration_preamble("Stage 3 — Build & Ship", run_id, runs_dir, req.budget)
+        _orchestration_preamble("Stage 3 — Build & Ship", run_id, runs_dir, req.budget, runtime)
         + _disposition_guidance(dispositions)
         + f"Deploy target: {req.target}. DEPLOY VIA THE **Railway MCP** (its project-scoped tools work "
           f"with the env's RAILWAY_TOKEN; `whoami`/`list_projects` do NOT — don't call them). Create + deploy "
@@ -161,18 +206,17 @@ def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions
           f"in the Dockerfile so `next build` doesn't throw (runtime values override); ship a Dockerfile. The build runs "
           f"REMOTELY on Railway — do NOT run `npm run build` locally (it OOM-kills the shared container).\n"
           f"HEALTH: use a FINITE health-wait (bounded attempts, never an infinite loop). On failure call the Railway MCP "
-          f"`get_logs` (build AND deploy), read the real error, fix it (one Task sub-agent), redeploy.\n"
+          f"`get_logs` (build AND deploy), read the real error, {fix_one}, redeploy.\n"
           f"Record the source repo (CLEAN url, strip any token): `record-artifact 'GitHub Repo' <https-url> repo`.\n"
           f"PHASE 0 — PLAN FIRST: before building, write `build-plan.md` (approach, wave/ticket order, "
           f"mock/MCP decisions, the happy-flow you will verify) and `record-artifact 'Build Plan' build-plan.md plan`. "
           f"THEN execute (no human approval — this is autonomous).\n"
-          f"BUILD: one native Task sub-agent PER ticket (orchestrator-only — never edit app code yourself); "
-          f"merge only via `merge_if_green`; `TicketStore.mark_done`. Serialize per wave.\n"
-          f"GATE (mandatory — the ONLY definition of done): after deploy, drive the LIVE url with the "
+          + build_line
+          + f"GATE (mandatory — the ONLY definition of done): after deploy, drive the LIVE url with the "
           f"**Playwright MCP** through the primary journey, pass the structured result to "
           f"`gate.happy_flow_passed`, and record it: `record-verification <url> <0|1> <result-json>`. "
           f"A GREEN Playwright happy-flow on the live url is done; deploying/merging is NOT done. "
-          f"Red → fix (a Task sub-agent per bug) → redeploy → re-test. See SKILL.md for the full contract.\n"
+          f"Red → fix ({fix_bug}) → redeploy → re-test. See SKILL.md for the full contract.\n"
           f"App: {req.description}"
     )
 
@@ -254,8 +298,10 @@ class Console:
             )
             return None
 
+        state = self._load_state(run_id)
+        runtime = state.runtime or "claude"
         ws = prepare_workspace(
-            self._runs_dir, run_id, stage,
+            self._runs_dir, run_id, stage, runtime=runtime,
         )
         mcp_path = os.path.join(ws, ".mcp.json")
         checks = check_mcp(mcp_path)
@@ -272,21 +318,41 @@ class Console:
             if any(c.name in _HARD for c in unhealthy):
                 return None
 
-        state = self._load_state(run_id)
         state.stage = stage
         state.save()
 
-        # Per-stage model: research & design on Opus 4.8; build on Sonnet (cheaper for code volume).
-        # SF_MODEL (if set) overrides all stages.
-        model = os.environ.get("SF_MODEL") or _STAGE_MODEL.get(stage, "claude-sonnet-4-6")
-        max_turns = os.environ.get("SF_MAX_TURNS", "200")
-        argv = [
-            "claude", "-p", prompt,
-            "--model", model,
-            "--max-turns", max_turns,
-            "--permission-mode", "bypassPermissions",
-            "--output-format", "stream-json", "--verbose",
-        ]
+        if runtime == "opencode":
+            model = os.environ.get("SF_MODEL") or _STAGE_MODEL_OPENCODE.get(
+                stage, "openrouter/moonshotai/kimi-k2.6")
+            argv = [
+                "opencode", "run", prompt,
+                "--model", model,
+                "--agent", "factory",
+                "--format", "json",
+                "--dangerously-skip-permissions",
+            ]
+            # Isolate from the host's global opencode config (~/.config/opencode injects
+            # unrelated MCPs/instructions) and from externally scanned skills (~/.claude/skills
+            # holds dozens of dev-box skills) — the workspace opencode.json is the whole contract.
+            # The steps cap (claude's --max-turns analogue) lives in that opencode.json.
+            env = {
+                **env,
+                "XDG_CONFIG_HOME": os.path.join(ws, ".oc-config"),
+                "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS": "1",
+                "OPENCODE_DISABLE_EXTERNAL_SKILLS": "1",
+            }
+        else:
+            # Per-stage model: research & design on Opus 4.8; build on Sonnet (cheaper for code
+            # volume). SF_MODEL (if set) overrides all stages.
+            model = os.environ.get("SF_MODEL") or _STAGE_MODEL.get(stage, "claude-sonnet-4-6")
+            max_turns = os.environ.get("SF_MAX_TURNS", "200")
+            argv = [
+                "claude", "-p", prompt,
+                "--model", model,
+                "--max-turns", max_turns,
+                "--permission-mode", "bypassPermissions",
+                "--output-format", "stream-json", "--verbose",
+            ]
         # cwd = the workspace so the stage's SKILL.md / phases/ / context/ (its contract) load.
         return self._launch(argv, env, os.path.join(paths["base"], "run.log"), cwd=ws)
 
@@ -313,9 +379,11 @@ class Console:
         state.deploy_target = req.target
         state.creds_provided = sorted(env.keys())
         state.stage = 1
+        # Pin the agent runtime for the whole run (all stages + retries) at start.
+        state.runtime = os.environ.get("SF_RUNTIME", "claude")
         state.save()
 
-        prompt = make_prompt_stage1(req, run_id, self._runs_dir)
+        prompt = make_prompt_stage1(req, run_id, self._runs_dir, runtime=state.runtime)
         self._launch_stage(run_id, 1, prompt, env)
         return run_id
 
@@ -340,6 +408,7 @@ class Console:
                 ok, _reasons = artifacts.prd_is_complete(text)
                 if ok:
                     state.stage1_done = True
+                    state.spent_usd = streamlog.cost_usd(self._full_log(run_id)) or state.spent_usd
                     state.save()
                     return True
         return False
@@ -352,7 +421,7 @@ class Console:
         req = RunRequest(description=state.description or "", target=state.deploy_target or "railway")
         env = {k: v for k, v in os.environ.items()
                if k in (state.creds_provided or [])}
-        prompt = make_prompt_stage2(req, run_id, self._runs_dir)
+        prompt = make_prompt_stage2(req, run_id, self._runs_dir, runtime=state.runtime)
         result = self._launch_stage(run_id, 2, prompt, env)
         return run_id if result is not None else None
 
@@ -378,6 +447,7 @@ class Console:
         if tickets.buildable_count() < 1:
             return False
         state.stage2_done = True
+        state.spent_usd = streamlog.cost_usd(self._full_log(run_id)) or state.spent_usd
         # Parse required tokens from architecture.md
         for root, _dirs, files in os.walk(base):
             if "architecture.md" in files:
@@ -410,6 +480,8 @@ class Console:
         if passing:
             state.deploy_url = passing[-1]["url"]
         state.phase = "done"
+        # Record the final spend so verify_evidence's spent_usd comparison has a real basis.
+        state.spent_usd = streamlog.cost_usd(self._full_log(run_id)) or state.spent_usd
         state.save()
         return True
 
@@ -473,7 +545,8 @@ class Console:
                if k in (state.creds_provided or [])}
         if extra_creds:
             env.update(extra_creds)
-        prompt = make_prompt_stage3(req, run_id, self._runs_dir, dispositions=state.deps_disposition)
+        prompt = make_prompt_stage3(req, run_id, self._runs_dir, dispositions=state.deps_disposition,
+                                    runtime=state.runtime)
         result = self._launch_stage(run_id, 3, prompt, env)
         return run_id if result is not None else None
 
@@ -504,9 +577,11 @@ class Console:
         if extra_creds:
             env.update(extra_creds)
         if stage == 3:
-            prompt = make_prompt_stage3(req, run_id, self._runs_dir, dispositions=state.deps_disposition)
+            prompt = make_prompt_stage3(req, run_id, self._runs_dir, dispositions=state.deps_disposition,
+                                        runtime=state.runtime)
         else:
-            prompt = {1: make_prompt_stage1, 2: make_prompt_stage2}[stage](req, run_id, self._runs_dir)
+            prompt = {1: make_prompt_stage1, 2: make_prompt_stage2}[stage](
+                req, run_id, self._runs_dir, runtime=state.runtime)
         RunDB(self._paths(run_id)["db"]).set_phase("retry-stage-%d" % stage, "started")
         result = self._launch_stage(run_id, stage, prompt, env)
         return run_id if result is not None else None
@@ -628,7 +703,9 @@ class Console:
         paths = self._paths(run_id)
         db = RunDB(paths["db"])
         state = self._load_state(run_id)
-        nodes = [{"data": {"id": "orchestrator", "label": "Claude · software-factory",
+        orch_label = ("Kimi · software-factory" if state.runtime == "opencode"
+                      else "Claude · software-factory")
+        nodes = [{"data": {"id": "orchestrator", "label": orch_label,
                            "kind": "orchestrator", "status": state.phase}}]
         edges = []
 

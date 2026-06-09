@@ -42,7 +42,7 @@ class JsonFileStore:
 _PERSISTED = {
     "run_id", "phase", "spent_usd", "repo_url", "deploy_url",
     "skill", "skill_version", "description", "deploy_target", "creds_provided",
-    "stage", "stage1_done", "stage2_done",
+    "stage", "stage1_done", "stage2_done", "runtime",
     "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
 }
 
@@ -63,6 +63,7 @@ class RunState:
     stage: int = 1
     stage1_done: bool = False
     stage2_done: bool = False
+    runtime: str = "claude"  # agent runtime for this run: claude | opencode; pinned at start_run
     deps_required: list = field(default_factory=list)
     deps_provided: list = field(default_factory=list)  # dep NAMES only, never values
     deps_satisfied: bool = False

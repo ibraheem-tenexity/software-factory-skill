@@ -194,9 +194,11 @@ class TestHandleMessage:
             )
         assert seen["pending"] == files
 
-    def test_tool_call_missing_required_arg_raises(self, mock_console):
-        """A schema-violating tool call (missing required 'description') must raise,
-        not silently produce a degraded message."""
+    def test_tool_call_missing_required_arg_degrades_not_crashes(self, mock_console):
+        """A schema-violating tool call (missing required 'description') degrades to a plain
+        text reply instead of raising. OpenAI validates args server-side so this never fired
+        there, but a ChatCompletions-compat proxy (Kimi via OpenRouter) can emit malformed
+        arguments — crashing here would 500 the chat endpoint."""
         from agents.items import ToolCallItem
         from openai.types.responses import ResponseFunctionToolCall
 
@@ -208,10 +210,10 @@ class TestHandleMessage:
 
         runner = ChatAgentRunner(mock_console)
         with patch("agents.Runner.run", new=AsyncMock(return_value=_fake_run_result([item]))):
-            with pytest.raises(KeyError):
-                asyncio.get_event_loop().run_until_complete(
-                    runner.handle_message(None, "build", [], [])
-                )
+            _, msgs = asyncio.get_event_loop().run_until_complete(
+                runner.handle_message(None, "build", [], [])
+            )
+        assert all(m.msg_type != "pipeline_started" for m in msgs)
 
 
 class TestChatAgentRunner:

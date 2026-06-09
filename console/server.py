@@ -31,8 +31,9 @@ RUNS_DIR = os.environ.get("SF_RUNS_DIR", os.path.join(os.path.dirname(__file__),
 HERE = os.path.dirname(__file__)
 console = Console(RUNS_DIR)
 
-_has_openai_key = bool(os.environ.get("OPENAI_API_KEY"))
-_chat_runner = ChatAgentRunner(console) if _has_openai_key else None
+# The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
+_has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
+_chat_runner = ChatAgentRunner(console) if _has_chat_key else None
 
 _sse_clients: dict[str, list] = {}
 _sse_lock = threading.Lock()
@@ -217,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
         # Chat message
         if self.path == "/api/chat":
             if not _chat_runner:
-                return self._send(503, {"error": "OPENAI_API_KEY not set — chat unavailable"})
+                return self._send(503, {"error": "no OPENAI_API_KEY or OPENROUTER_API_KEY — chat unavailable"})
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length) or b"{}")
             run_id = body.get("run_id")
@@ -344,8 +345,8 @@ if __name__ == "__main__":
     host = os.environ.get("SF_BIND", "127.0.0.1")
     import getpass
     print(f"[runner] uid={os.getuid()} user={getpass.getuser()} home={os.environ.get('HOME')}", flush=True)
-    if not _has_openai_key:
-        print("[warn] OPENAI_API_KEY not set — chat agent disabled, API-only mode")
+    if not _has_chat_key:
+        print("[warn] no OPENAI_API_KEY or OPENROUTER_API_KEY — chat agent disabled, API-only mode")
     t = threading.Thread(target=_poll_transitions, daemon=True)
     t.start()
     print(f"software-factory console on http://{host}:{port}  (runs in {os.path.abspath(RUNS_DIR)})")

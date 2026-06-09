@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any
 
@@ -11,6 +12,29 @@ from openai.types.responses import ResponseFunctionToolCall
 
 from software_factory.chat_store import ChatMessage
 from software_factory.console import Console, RunRequest
+
+
+def select_chat_model():
+    """Concierge model: gpt-4o (OpenAI) or Kimi K2.6 via OpenRouter's OpenAI-compatible API.
+
+    SF_CHAT_MODEL=kimi forces Kimi; SF_CHAT_MODEL=gpt-4o forces OpenAI; unset picks gpt-4o when
+    OPENAI_API_KEY exists, else Kimi when only OPENROUTER_API_KEY does. The env flag IS the
+    rollback path if Kimi's function-calling misbehaves through the compat proxy."""
+    choice = os.environ.get("SF_CHAT_MODEL", "").strip().lower()
+    use_kimi = choice == "kimi" or (
+        not choice and not os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENROUTER_API_KEY")
+    )
+    if use_kimi:
+        from agents import OpenAIChatCompletionsModel, set_tracing_disabled
+        from openai import AsyncOpenAI
+
+        set_tracing_disabled(True)  # tracing would try (and fail) to reach OpenAI
+        client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.environ.get("OPENROUTER_API_KEY", ""),
+        )
+        return OpenAIChatCompletionsModel(model="moonshotai/kimi-k2.6", openai_client=client)
+    return "gpt-4o"
 
 
 CONCIERGE_INSTRUCTIONS = """\
@@ -145,7 +169,7 @@ class ChatAgentRunner:
             name="Factory Concierge",
             instructions=CONCIERGE_INSTRUCTIONS,
             tools=tools,
-            model="gpt-4o",
+            model=select_chat_model(),
         )
         self._conversations: dict[str, list] = {}
 
@@ -195,26 +219,31 @@ class ChatAgentRunner:
                     ))
             elif isinstance(item, ToolCallItem) and isinstance(item.raw_item, ResponseFunctionToolCall):
                 call = item.raw_item  # typed: .name and .arguments (JSON str) always present
+                # Required params are schema-validated by the SDK against OpenAI, but a
+                # ChatCompletions-compat proxy (Kimi via OpenRouter) can emit malformed
+                # arguments — degrade to a plain reply rather than 500ing the chat endpoint.
                 if call.name == "start_pipeline":
-                    # 'description' is a required param in the tool schema; the SDK
-                    # validates before invoking, so index it directly — a missing
-                    # value is a contract break we want to raise, not paper over.
-                    args = json.loads(call.arguments)
-                    if not run_id:
-                        run_id = f"run-{args['description'][:8].lower().replace(' ', '-')}"
+                    try:
+                        args = json.loads(call.arguments)
+                        if not run_id:
+                            run_id = f"run-{args['description'][:8].lower().replace(' ', '-')}"
+                    except (ValueError, TypeError, KeyError):
+                        continue
                     response_msgs.append(ChatMessage(
                         role="system", content="Pipeline started.",
                         msg_type="pipeline_started", ts=now,
                         metadata={"run_id": run_id},
                     ))
                 elif call.name == "request_dep_input":
-                    # 'dep_names' is a required param in the tool schema.
-                    args = json.loads(call.arguments)
+                    try:
+                        dep_names = json.loads(call.arguments)["dep_names"]
+                    except (ValueError, TypeError, KeyError):
+                        continue
                     response_msgs.append(ChatMessage(
                         role="assistant",
                         content="The architecture requires these credentials. Please provide them below.",
                         msg_type="dep_request", ts=now,
-                        metadata={"run_id": run_id, "dep_names": args["dep_names"]},
+                        metadata={"run_id": run_id, "dep_names": dep_names},
                     ))
 
         if result.final_output and not response_msgs:
