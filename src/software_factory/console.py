@@ -340,6 +340,10 @@ class Console:
                 "XDG_CONFIG_HOME": os.path.join(ws, ".oc-config"),
                 "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS": "1",
                 "OPENCODE_DISABLE_EXTERNAL_SKILLS": "1",
+                # Popen(cwd=ws) changes the real cwd but NOT the inherited PWD env var, and
+                # OpenCode trusts PWD for project resolution — a stale PWD (e.g. the repo root)
+                # makes it bind the session to the wrong directory and crash createUserMessage.
+                "PWD": ws,
             }
         else:
             # Per-stage model: research & design on Opus 4.8; build on Sonnet (cheaper for code

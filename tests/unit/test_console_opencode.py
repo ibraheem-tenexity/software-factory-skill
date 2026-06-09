@@ -56,6 +56,9 @@ def test_opencode_launch_env_isolates_global_config_and_external_skills(tmp_path
     assert launcher.env["XDG_CONFIG_HOME"].startswith(launcher.cwd)
     assert launcher.env["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"] == "1"
     assert launcher.env["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1"
+    # Popen doesn't update PWD; OpenCode trusts it for project resolution (live-debugged:
+    # a stale PWD bound the session to the repo root and crashed createUserMessage)
+    assert launcher.env["PWD"] == launcher.cwd
 
 
 def test_opencode_secrets_stay_in_env_never_argv(tmp_path, monkeypatch):
