@@ -19,13 +19,11 @@ DESIGN_SKILL_NAMES = ("frontend-design", "ui-ux-pro-max")
 
 MCP_CONFIG = {
     "mcpServers": {
+        # Playwright is the ONLY MCP server: the Stage-3 happy-flow gate drives the live app with it.
+        # ruflo/claude-flow was removed — native Task sub-agents are the workers, run.db is the datastore.
         "playwright": {
             "command": "npx",
             "args": ["-y", "@playwright/mcp@latest", "--headless", "--browser", "chromium"],
-        },
-        "ruflo": {
-            "command": "claude-flow",
-            "args": ["mcp", "start"],
         },
     },
 }

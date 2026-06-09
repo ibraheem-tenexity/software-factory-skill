@@ -9,7 +9,7 @@ that prompted the decoupling.
 import subprocess
 import sys
 
-CORE = ["budget", "runstate", "tickets", "repo", "deploy", "gate", "workspace", "creds", "streamlog", "events", "gates", "diagram", "memory", "artifacts"]
+CORE = ["budget", "runstate", "tickets", "repo", "deploy", "gate", "workspace", "creds", "streamlog", "db", "gates", "diagram", "memory", "artifacts"]
 HARNESS = ["agents", "sinks", "evidence", "console"]
 
 

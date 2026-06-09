@@ -76,6 +76,7 @@ def _auto_advance(rid: str):
                 _stage2_launched.add(rid)
                 console.start_stage2(rid)
         console.detect_stage2_done(rid)  # flips stage2_done + parses required tokens
+        console.detect_stage3_done(rid)  # marks done ONLY with a recorded passing Playwright verification
     except Exception:
         pass
 

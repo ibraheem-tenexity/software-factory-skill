@@ -36,6 +36,7 @@ class AgentRecord:
     ticket_id: Optional[int]
     role: str
     model: str
+    phase: Optional[str]
     status: str
     outcome: Optional[str]
     cost_usd: float
@@ -63,6 +64,7 @@ class AgentRegistry:
                 ticket_id INTEGER,
                 role TEXT NOT NULL,
                 model TEXT NOT NULL,
+                phase TEXT,
                 status TEXT NOT NULL DEFAULT 'running',
                 outcome TEXT,
                 cost_usd REAL NOT NULL DEFAULT 0,
@@ -79,18 +81,25 @@ class AgentRegistry:
         )
         self._conn.commit()
 
-    def spawn(self, agent_id: str, run_id: str, ticket_id: Optional[int], role: str, model: str) -> None:
+    def spawn(self, agent_id: str, run_id: str, ticket_id: Optional[int], role: str,
+              model: str, phase: Optional[str] = None) -> None:
         now = self._clock()
         self._conn.execute(
-            "INSERT INTO agents (agent_id, run_id, ticket_id, role, model, started_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (agent_id, run_id, ticket_id, role, model, now),
+            "INSERT INTO agents (agent_id, run_id, ticket_id, role, model, phase, started_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (agent_id, run_id, ticket_id, role, model, phase, now),
         )
         self._conn.commit()
         self._sink.emit(
             {"event": "spawn", "agent_id": agent_id, "run_id": run_id,
-             "ticket_id": ticket_id, "role": role, "model": model, "at": now}
+             "ticket_id": ticket_id, "role": role, "model": model, "phase": phase, "at": now}
         )
+
+    def agents_for(self, run_id: str) -> list[AgentRecord]:
+        rows = self._conn.execute(
+            "SELECT * FROM agents WHERE run_id=? ORDER BY started_at, agent_id", (run_id,)
+        ).fetchall()
+        return [AgentRecord(**dict(r)) for r in rows]
 
     def record(
         self,

@@ -1,45 +1,36 @@
 """Review gates — the "sit idle until reviewed" mechanism for key phases.
 
-`await_gate` emits `awaiting_review` and blocks (poll-sleeping) until the gate's `.ok` file
-appears; the dashboard's Continue button calls `clear_gate` (via the server) to write it. Sleep
-is injected so the block is testable. Cost stays bounded while waiting — it's just a sleep loop,
-no model calls.
+Backed by the per-run datastore (the `gates` table in run.db), not files or events.
+`await_gate` marks a gate `awaiting` and blocks (poll-sleeping) until it becomes `cleared`;
+the dashboard's Continue button calls `clear_gate` (via the server) to clear it. Sleep is
+injected so the block is testable. Cost stays bounded while waiting — just a sleep loop.
 """
 from __future__ import annotations
 
-import os
 import time
 from typing import Callable
 
-from . import events
+from . import db as _db
 
 
-def _ok_path(runs_dir: str, run_id: str, gate: str) -> str:
-    return os.path.join(runs_dir, run_id, "gates", f"{gate}.ok")
+def _db_for(runs_dir: str, run_id: str) -> "_db.RunDB":
+    return _db.RunDB(_db.db_path(runs_dir, run_id))
 
 
 def clear_gate(runs_dir: str, run_id: str, gate: str) -> None:
-    p = _ok_path(runs_dir, run_id, gate)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    open(p, "w").close()
-    events.emit(runs_dir, run_id, "resumed", {"gate": gate})
+    _db_for(runs_dir, run_id).set_gate(gate, "cleared")
 
 
 def is_cleared(runs_dir: str, run_id: str, gate: str) -> bool:
-    return os.path.exists(_ok_path(runs_dir, run_id, gate))
+    return _db_for(runs_dir, run_id).gate_status().get(gate) == "cleared"
 
 
 def pending_gate(runs_dir: str, run_id: str):
-    """The most recent awaiting_review gate that hasn't been cleared, else None."""
-    pending = None
-    for e in events.read_events(runs_dir, run_id):
-        if e.get("type") == "awaiting_review":
-            g = (e.get("payload") or {}).get("gate")
-            if g and not is_cleared(runs_dir, run_id, g):
-                pending = g
-            elif g and is_cleared(runs_dir, run_id, g):
-                pending = None
-    return pending
+    """The gate currently `awaiting` review (not yet cleared), else None."""
+    for name, status in _db_for(runs_dir, run_id).gate_status().items():
+        if status == "awaiting":
+            return name
+    return None
 
 
 def await_gate(
@@ -50,15 +41,14 @@ def await_gate(
     max_wait: float = 3600.0,
     sleep: Callable[[float], None] = time.sleep,
 ) -> bool:
-    """Pause for review: emit awaiting_review, block until cleared. True if cleared, False on timeout."""
+    """Pause for review: mark the gate `awaiting`, block until `cleared`. True if cleared, False on timeout."""
     if is_cleared(runs_dir, run_id, gate):
         return True
-    events.emit(runs_dir, run_id, "awaiting_review", {"gate": gate})
+    _db_for(runs_dir, run_id).set_gate(gate, "awaiting")
     waited = 0.0
     while waited < max_wait:
         sleep(interval)
         waited += interval
         if is_cleared(runs_dir, run_id, gate):
-            events.emit(runs_dir, run_id, "resumed", {"gate": gate})
             return True
     return False

@@ -13,14 +13,15 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import artifacts, events, gates, streamlog
+from . import artifacts, gates, streamlog
 from .agents import AgentRegistry
 from .evidence import build_evidence, verify_evidence
 from .input_pipeline import persist_and_compose
 from .pdf_extract import extract_to_markdown
 from . import deps as deps_mod
 from .mcp_health import check_mcp
-from .runstate import JsonFileStore, RunState
+from .runstate import RunState
+from .db import RunDB
 from .tickets import TicketStore
 from .workspace_setup import prepare_workspace
 
@@ -49,6 +50,10 @@ for _p in STAGE_2:
 for _p in STAGE_3:
     PHASE_STAGE[_p] = 3
 
+# Per-stage model: research (1) & design (2) on Opus 4.8; build (3) on Sonnet (cheaper for
+# high-volume code edits). SF_MODEL env overrides all stages if set.
+_STAGE_MODEL = {1: "claude-opus-4-8", 2: "claude-opus-4-8", 3: "claude-sonnet-4-6"}
+
 
 @dataclass
 class RunRequest:
@@ -62,73 +67,62 @@ class RunRequest:
 
 def run_paths(runs_dir: str, run_id: str) -> dict:
     base = os.path.join(runs_dir, run_id)
+    # ONE SQLite db per run is the source of truth: runstate + tickets + agents + the
+    # canvas-projected tables (phases/artifacts/blockers/gates/verifications) all live in run.db.
+    db = os.path.join(base, "run.db")
     return {
         "base": base,
         "state_dir": base,
-        "agents_db": os.path.join(base, "agents.db"),
-        "tickets_db": os.path.join(base, "tickets.db"),
+        "db": db,
+        "agents_db": db,
+        "tickets_db": db,
         "input_dir": os.path.join(base, "input"),
     }
 
 
-def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str) -> str:
-    base = os.path.join(runs_dir, run_id)
-    ctx = f"\n\nContext / detailed input:\n{req.context}" if req.context else ""
-    emit = f"python3 -m software_factory.events emit {runs_dir} {run_id}"
+def _orchestration_preamble(stage_title: str, run_id: str, runs_dir: str, budget: float) -> str:
+    db = "python3 -m software_factory.db"
     return (
-        f"Use the **software-factory** skill (Stage 1 — Research) to research and define this "
-        f"customer solution, FULLY AUTONOMOUSLY — never wait on a human.\n"
-        f"run_id={run_id}. runs_dir={runs_dir}. Budget ${req.budget:.0f} (HARD cutoff).\n\n"
-        f"Read SKILL.md and the phases/ files. Execute these phases IN ORDER, and at each one run "
-        f"`{emit} phase '{{\"name\":\"<phase>\"}}'` so the canvas shows progress.\n"
-        f"ORCHESTRATION MODEL: you do NOT do the work yourself. ruflo is the swarm runtime — "
-        f"for each task type start a ruflo swarm (`swarm_init`) and `agent_spawn` agents into it. "
-        f"Each agent: emit `agent_spawned` on spawn and `agent_done` on result; it pulls/writes via "
-        f"ruflo (memory); and attributes any file it creates via `emit artifact {{...,\"agent\":\"<id>\"}}` "
-        f"so the artifact shows as that agent's child.\n"
-        f"1. extract — the console already saved the input under {base}/input/. Read everything "
-        f"there (txt/pdf/docx; install a parser if needed) and extract it to usable text.\n"
-        f"2. provision — `creds.check_all`; `GitHub.create_repo`; `Budget(100)`; `workspace.create`; seed ruflo.\n"
-        f"3. research — `swarm_init` a research swarm, then `agent_spawn` the named agents IN ORDER: "
-        f"HORIZON(pm.lead: scope) → ARCHIVIST(reuse scan via ruflo) → VANGUARD(domain-expert: "
-        f"≥2 solution paths + REQUIRED WebSearch/WebFetch, ≥3 real products WITH URLs) → "
-        f"CHROMA(design.lead: screens + happy-flow journey) → DESIGNER(frontend-design: visual "
-        f"design guidance using the frontend-design + ui-ux-pro-max skills in skills/) → "
-        f"HORIZON writes PRD.md with acceptance criteria (given/when/then) + ticket seeds; commit; "
-        f"`{emit} artifact '{{\"title\":\"PRD\",\"path\":\"workspace/<repo>/PRD.md\",\"kind\":\"prd\"}}'`. "
-        f"Do NOT advance until `artifacts.prd_is_complete(PRD.md)` passes.\n\n"
-        f"When the PRD passes `prd_is_complete()`: "
-        f"`{emit} stage_done '{{\"stage\":1}}'` then STOP.\n\n"
-        f"Write run state and telemetry under {base}/.\n"
-        f"App: {req.description}{ctx}"
+        f"Use the **software-factory** skill ({stage_title}), FULLY AUTONOMOUSLY — never wait on a human.\n"
+        f"**Your contract is SKILL.md in this workspace (your cwd). Read it and follow it exactly.** "
+        f"Prior-stage artifacts are in context/.\n"
+        f"run_id={run_id}. runs_dir={runs_dir}. Run base: {os.path.join(runs_dir, run_id)} "
+        f"(your cwd is its workspace/). Budget ${budget:.0f} (HARD cutoff).\n\n"
+        f"ORCHESTRATOR-ONLY: you coordinate; the actual work is done by sub-agents you launch with the "
+        f"native **Task** tool (one per unit of work). Do NOT do the work in the main session.\n"
+        f"RECORD canvas state in the datastore (there are NO events): `{db} <verb> {runs_dir} {run_id} ...`\n"
+        f"  set-phase <name> [status]            — at each phase you enter\n"
+        f"  spawn-agent <id> <role> <model> <phase>   — when you launch a Task sub-agent\n"
+        f"  finish-agent <id> <outcome> [cost] [pr] [diff_lines]  — when it returns\n"
+        f"  record-artifact <title> <path> [kind] [agent]  — for each file produced\n"
+        f"  add-blocker <what> [blocks] / clear-blocker <what>\n"
+        f"Tickets go in the TicketStore; runstate is written by the host.\n"
+    )
+
+
+def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str) -> str:
+    ctx = f"\n\nContext / detailed input:\n{req.context}" if req.context else ""
+    return (
+        _orchestration_preamble("Stage 1 — Research", run_id, runs_dir, req.budget)
+        + "Goal: a validated PRD (PRD.md) that passes `artifacts.prd_is_complete` (≥3 real product "
+          "URLs + acceptance criteria + ticket seeds). The named research sub-agents and the done-gate "
+          "are in SKILL.md. Launch each as a Task sub-agent. When the PRD passes, STOP — the console "
+          "launches Stage 2.\n"
+          f"App: {req.description}{ctx}"
     )
 
 
 def make_prompt_stage2(req: RunRequest, run_id: str, runs_dir: str) -> str:
-    base = os.path.join(runs_dir, run_id)
-    emit = f"python3 -m software_factory.events emit {runs_dir} {run_id}"
     return (
-        f"Use the **software-factory** skill (Stage 2 — Design & Plan) to architect and plan "
-        f"this customer solution, FULLY AUTONOMOUSLY.\n"
-        f"run_id={run_id}. runs_dir={runs_dir}. Budget ${req.budget:.0f} (HARD cutoff).\n\n"
-        f"Read SKILL.md and context/ for Stage 1 artifacts (PRD.md, design spec).\n"
-        f"Read phases/ files. Emit `{emit} phase '{{\"name\":\"<phase>\"}}'` at each phase.\n"
-        f"1. architect — `swarm_init` + `agent_spawn` software-architect. From the PRD + design spec, "
-        f"produce architecture.md (fewest services; data model; dependency + required-token list with "
-        f"a `## Required Tokens` section using UPPER_SNAKE_CASE names) + Mermaid → architecture.svg via "
-        f"`diagram.render`. Commit + emit both artifacts.\n"
-        f"   The Stage 3 build agent will have the **Supabase MCP + Railway MCP** (and Railway/Supabase "
-        f"tokens in env) — design Supabase (DB/auth/storage) + Railway (compute) as agent-provisionable; "
-        f"do NOT require the operator to supply Supabase/Railway/NextAuth creds. External integrations "
-        f"(SSO/ERP/email) may be mocked for the demo. List every runtime token regardless; the console "
-        f"auto-classifies each as provide/mock/mcp.\n"
-        f"2. tickets — `TicketStore.create_ticket` in waves with acceptance + DoD (from PRD ticket seeds + "
-        f"architecture + design spec). Emit a node per ticket.\n\n"
-        f"Done-gate: `artifacts.verify(run_dir, [\"PRD.md\", \"architecture.md\", \"architecture.svg\"])` "
-        f"passes AND ≥1 ticket exists.\n"
-        f"When both gates pass: `{emit} stage_done '{{\"stage\":2}}'` then STOP.\n\n"
-        f"Write run state and telemetry under {base}/.\n"
-        f"App: {req.description}"
+        _orchestration_preamble("Stage 2 — Design & Plan", run_id, runs_dir, req.budget)
+        + "Goal (per SKILL.md): architecture.md + architecture.svg (fewest services; data model; a "
+          "`## Required Tokens` section, UPPER_SNAKE_CASE) AND PERSISTED buildable tickets — "
+          "`TicketStore.create_ticket` with real acceptance + DoD (an empty store dead-ends Stage 3). "
+          "The Stage 3 build agent has the Supabase + Railway MCP, so design Supabase/Railway/NextAuth as "
+          "agent-provisionable (don't require the operator for them); route every LLM/AI feature via "
+          "OpenRouter (OPENROUTER_API_KEY). When PRD+architecture+svg exist and the store has buildable "
+          "tickets, STOP — the console collects deps + launches Stage 3.\n"
+          f"App: {req.description}"
     )
 
 
@@ -152,27 +146,23 @@ def _disposition_guidance(dispositions: dict | None) -> str:
 
 
 def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions: dict | None = None) -> str:
-    base = os.path.join(runs_dir, run_id)
     service = f"sf-{run_id}"
-    emit = f"python3 -m software_factory.events emit {runs_dir} {run_id}"
     return (
-        f"Use the **software-factory** skill (Stage 3 — Build & Ship) to build, deploy, and "
-        f"browser-verify this customer solution, FULLY AUTONOMOUSLY.\n"
-        f"run_id={run_id}. runs_dir={runs_dir}. Budget ${req.budget:.0f} (HARD cutoff). "
-        f"Deploy target: {req.target}.\n\n"
-        f"{_disposition_guidance(dispositions)}"
-        f"Read SKILL.md and context/ for prior-stage artifacts (PRD.md, architecture.md, architecture.svg).\n"
-        f"Read phases/ files. Emit `{emit} phase '{{\"name\":\"<phase>\"}}'` at each phase.\n"
-        f"1. build — per ticket: spawn a build agent (pull from ruflo), merge only via "
-        f"`merge_if_green`, `mark_done`; record precedent. No-op = retry.\n"
-        f"2. deploy — DEPLOY ISOLATION (critical): create + deploy to dedicated service "
-        f"'{service}' (`railway add --service {service}` then `railway up --service {service}`). "
-        f"NEVER run a bare `railway up`. `deploy.healthy(url)` must pass.\n"
-        f"3. test — drive the live URL with Playwright; `gate.happy_flow_passed`. Green → "
-        f"`{emit} done` → DONE. Red → fix agents → redeploy → re-test.\n"
-        f"4. teardown — `workspace.destroy` on any terminal state; proof + events survive.\n\n"
-        f"Write run state and telemetry under {base}/.\n"
-        f"App: {req.description}"
+        _orchestration_preamble("Stage 3 — Build & Ship", run_id, runs_dir, req.budget)
+        + _disposition_guidance(dispositions)
+        + f"Deploy target: {req.target}. DEPLOY ISOLATION: create + deploy ONLY to the dedicated service "
+          f"'{service}' (`railway add --service {service}` then `railway up --service {service}`); NEVER a bare `railway up`.\n"
+          f"PHASE 0 — PLAN FIRST: before building, write `build-plan.md` (approach, wave/ticket order, "
+          f"mock/MCP decisions, the happy-flow you will verify) and `record-artifact 'Build Plan' build-plan.md plan`. "
+          f"THEN execute (no human approval — this is autonomous).\n"
+          f"BUILD: one native Task sub-agent PER ticket (orchestrator-only — never edit app code yourself); "
+          f"merge only via `merge_if_green`; `TicketStore.mark_done`. Serialize per wave.\n"
+          f"GATE (mandatory — the ONLY definition of done): after deploy, drive the LIVE url with the "
+          f"**Playwright MCP** through the primary journey, pass the structured result to "
+          f"`gate.happy_flow_passed`, and record it: `record-verification <url> <0|1> <result-json>`. "
+          f"A GREEN Playwright happy-flow on the live url is done; deploying/merging is NOT done. "
+          f"Red → fix (a Task sub-agent per bug) → redeploy → re-test. See SKILL.md for the full contract.\n"
+          f"App: {req.description}"
     )
 
 
@@ -181,13 +171,13 @@ def make_prompt(req: RunRequest, run_id: str, runs_dir: str) -> str:
     return make_prompt_stage1(req, run_id, runs_dir)
 
 
-def _default_launch(argv: list[str], env: dict, log_path: str | None = None) -> Any:
+def _default_launch(argv: list[str], env: dict, log_path: str | None = None, cwd: str | None = None) -> Any:
     import subprocess
     import sys
     import threading
 
     proc = subprocess.Popen(
-        argv, env={**os.environ, **env},
+        argv, env={**os.environ, **env}, cwd=cwd,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True,
     )
     prefix = f"[{os.path.basename(os.path.dirname(log_path))}] " if log_path else ""
@@ -227,7 +217,7 @@ class Console:
         return run_paths(self._runs_dir, run_id)
 
     def _load_state(self, run_id: str) -> RunState:
-        return RunState.load(run_id, JsonFileStore(self._paths(run_id)["state_dir"]))
+        return RunState.load(run_id, RunDB(self._paths(run_id)["db"]))
 
     def _launch_stage(self, run_id: str, stage: int, prompt: str, env: dict) -> Any:
         """Prepare workspace, health-check MCP, and launch a claude -p process for a stage."""
@@ -239,16 +229,18 @@ class Console:
         checks = check_mcp(mcp_path)
         unhealthy = [c for c in checks if not c.ok]
         if unhealthy:
+            db = RunDB(paths["db"])
             for c in unhealthy:
-                events.emit(self._runs_dir, run_id, "blocker",
-                            {"what": f"MCP:{c.name} — {c.detail}", "blocks": "mcp"})
+                db.add_blocker(f"MCP:{c.name} — {c.detail}", blocks="mcp")
             return None
 
         state = self._load_state(run_id)
         state.stage = stage
         state.save()
 
-        model = os.environ.get("SF_MODEL", "claude-sonnet-4-6")
+        # Per-stage model: research & design on Opus 4.8; build on Sonnet (cheaper for code volume).
+        # SF_MODEL (if set) overrides all stages.
+        model = os.environ.get("SF_MODEL") or _STAGE_MODEL.get(stage, "claude-sonnet-4-6")
         max_turns = os.environ.get("SF_MAX_TURNS", "200")
         argv = [
             "claude", "-p", prompt,
@@ -257,7 +249,8 @@ class Console:
             "--permission-mode", "bypassPermissions",
             "--output-format", "stream-json", "--verbose",
         ]
-        return self._launch(argv, env, os.path.join(paths["base"], "run.log"))
+        # cwd = the workspace so the stage's SKILL.md / phases/ / context/ (its contract) load.
+        return self._launch(argv, env, os.path.join(paths["base"], "run.log"), cwd=ws)
 
     def start_run(self, req: RunRequest) -> str:
         """Start a new run (Stage 1). Returns run_id."""
@@ -270,9 +263,9 @@ class Console:
             paths["input_dir"], req.description, req.context_files or [],
             extract=self._extract,
         )
+        input_db = RunDB(paths["db"])
         for name in written:
-            events.emit(self._runs_dir, run_id, "artifact",
-                        {"title": "input", "path": "input/" + name, "kind": "context"})
+            input_db.record_artifact("input", "input/" + name, kind="context")
 
         state = self._load_state(run_id)
         env = {k: v for k, v in (req.credentials or {}).items() if v}
@@ -289,14 +282,8 @@ class Console:
         return run_id
 
     def detect_stage1_done(self, run_id: str) -> bool:
-        """Check if Stage 1 is complete: stage_done event + PRD passes mechanical gate."""
-        evs = self.events(run_id)
-        has_event = any(
-            e["type"] == "stage_done" and e.get("payload", {}).get("stage") == 1
-            for e in evs
-        )
-        if not has_event:
-            return False
+        """Stage 1 is done when the PRD passes the mechanical gate (the artifact IS the proof —
+        no event needed; the datastore + the committed PRD are the source of truth)."""
         state = self._load_state(run_id)
         if state.stage1_done:
             return True
@@ -325,14 +312,8 @@ class Console:
         return run_id if result is not None else None
 
     def detect_stage2_done(self, run_id: str) -> bool:
-        """Check if Stage 2 is complete: stage_done event + artifacts + tickets."""
-        evs = self.events(run_id)
-        has_event = any(
-            e["type"] == "stage_done" and e.get("payload", {}).get("stage") == 2
-            for e in evs
-        )
-        if not has_event:
-            return False
+        """Stage 2 is done when PRD+architecture+svg exist AND the store holds buildable tickets
+        (the artifacts + the ticket DB are the proof — no event needed)."""
         state = self._load_state(run_id)
         if state.stage2_done:
             return True
@@ -359,6 +340,31 @@ class Console:
                     tokens = artifacts.parse_required_tokens(f.read())
                 state.deps_required = [t["name"] for t in tokens]
                 break
+        state.save()
+        return True
+
+    def detect_stage3_done(self, run_id: str) -> bool:
+        """Stage 3 is done ONLY when BOTH hard gates pass (no hollow done):
+        (a) the completed tickets trace to recorded native-Task agents — not a monolithic build, and
+        (b) a PASSING Playwright happy-flow against the live URL is recorded in run.db.
+        On success, record the deploy_url (from the passing verification) and mark phase=done."""
+        state = self._load_state(run_id)
+        if state.phase == "done":
+            return True
+        paths = self._paths(run_id)
+        db = RunDB(paths["db"])
+        # Gate (b): a real green browser test on the live url must be recorded.
+        if not db.has_passing_verification():
+            return False
+        # Gate (a): tickets were built by per-ticket agents, not one monolithic session.
+        done = TicketStore(paths["tickets_db"]).done_tickets()
+        spawned = len(AgentRegistry(paths["agents_db"]).agents_for(run_id))
+        if not done or spawned == 0 or any(t.agent is None for t in done):
+            return False
+        passing = [v for v in db.verifications() if v["passed"]]
+        if passing:
+            state.deploy_url = passing[-1]["url"]
+        state.phase = "done"
         state.save()
         return True
 
@@ -456,8 +462,7 @@ class Console:
             prompt = make_prompt_stage3(req, run_id, self._runs_dir, dispositions=state.deps_disposition)
         else:
             prompt = {1: make_prompt_stage1, 2: make_prompt_stage2}[stage](req, run_id, self._runs_dir)
-        events.emit(self._runs_dir, run_id, "phase",
-                    {"name": "retry-stage-%d" % stage, "status": "started"})
+        RunDB(self._paths(run_id)["db"]).set_phase("retry-stage-%d" % stage, "started")
         result = self._launch_stage(run_id, stage, prompt, env)
         return run_id if result is not None else None
 
@@ -519,8 +524,7 @@ class Console:
         runs = []
         for name in os.listdir(self._runs_dir):
             base = os.path.join(self._runs_dir, name)
-            state_json = os.path.join(base, f"{name}.json")
-            if not os.path.isdir(base) or not os.path.exists(state_json):
+            if not os.path.isdir(base) or not os.path.exists(os.path.join(base, "run.db")):
                 continue
             st = self._load_state(name)
             runs.append({
@@ -535,7 +539,25 @@ class Console:
         return runs
 
     def events(self, run_id: str) -> list:
-        return events.read_events(self._runs_dir, run_id)
+        """Recent run activity, projected from run.db for the live activity feed. Shaped like the
+        old event records ({type, payload, ts}) so the frontend renders unchanged — but the DATASTORE
+        is the source of truth; there is no event log."""
+        db = RunDB(self._paths(run_id)["db"])
+        items = []
+        for p in db.phases():
+            items.append({"ts": p["ts"], "type": "phase",
+                          "payload": {"name": p["name"], "status": p["status"]}})
+        for a in db.artifacts():
+            items.append({"ts": a["ts"], "type": "artifact",
+                          "payload": {"title": a["title"], "path": a["path"]}})
+        for b in db.blockers():
+            if not b["cleared"]:
+                items.append({"ts": b["ts"], "type": "blocker", "payload": {"what": b["what"]}})
+        for v in db.verifications():
+            if v["passed"]:
+                items.append({"ts": v["ts"], "type": "done", "payload": {"url": v["url"]}})
+        items.sort(key=lambda e: e["ts"])
+        return items
 
     def continue_run(self, run_id: str, gate: str) -> dict:
         gates.clear_gate(self._runs_dir, run_id, gate)
@@ -550,128 +572,90 @@ class Console:
             return {"path": path, "content": f.read()[:200000]}
 
     def graph(self, run_id: str) -> dict:
-        """Cytoscape elements: orchestrator + the pipeline phases + stage gates + deps node,
-        with agents, artifacts, blockers and the pending review gate folded in."""
-        d = self._runs_dir
-        evs = self.events(run_id)
+        """Cytoscape elements projected ENTIRELY from run.db (the single source of truth):
+        pipeline phases + stage gates + deps from runstate/phases; agents from the agents table;
+        artifacts/blockers from their tables; the pending review gate from the gates table.
+        No event log, no stream-log parsing — the canvas is a pure projection of the datastore."""
+        paths = self._paths(run_id)
+        db = RunDB(paths["db"])
         state = self._load_state(run_id)
         nodes = [{"data": {"id": "orchestrator", "label": "Claude · software-factory",
                            "kind": "orchestrator", "status": state.phase}}]
         edges = []
 
-        phase_status = {e["payload"].get("name"): e["payload"].get("status", "active")
-                        for e in evs if e["type"] == "phase"}
+        phase_status = db.phase_status()
         prev = "orchestrator"
         for name in PIPELINE:
             st = "active" if state.phase == name else phase_status.get(name, "pending")
             pid = "phase:" + name
             nodes.append({"data": {"id": pid, "label": PIPELINE_LABELS.get(name, name),
-                                   "kind": "phase", "status": st,
-                                   "stage": PHASE_STAGE.get(name)}})
+                                   "kind": "phase", "status": st, "stage": PHASE_STAGE.get(name)}})
             edges.append({"data": {"source": prev, "target": pid, "etype": "flow"}})
             prev = pid
-
-            # Insert stage gate nodes between stages
             if name == "research":
                 gid = "gate:stage1"
-                gst = "passed" if state.stage1_done else "pending"
-                nodes.append({"data": {"id": gid, "label": "Stage 1 Gate",
-                                       "kind": "gate", "status": gst}})
+                nodes.append({"data": {"id": gid, "label": "Stage 1 Gate", "kind": "gate",
+                                       "status": "passed" if state.stage1_done else "pending"}})
                 edges.append({"data": {"source": pid, "target": gid, "etype": "flow"}})
                 prev = gid
             elif name == "tickets":
                 gid = "gate:stage2"
-                gst = "passed" if state.stage2_done else "pending"
-                nodes.append({"data": {"id": gid, "label": "Stage 2 Gate",
-                                       "kind": "gate", "status": gst}})
+                nodes.append({"data": {"id": gid, "label": "Stage 2 Gate", "kind": "gate",
+                                       "status": "passed" if state.stage2_done else "pending"}})
                 edges.append({"data": {"source": pid, "target": gid, "etype": "flow"}})
-                # Deps node between stage 2 gate and build
                 did = "deps:wait"
-                dst = "satisfied" if state.deps_satisfied else "pending"
-                nodes.append({"data": {"id": did, "label": "wait for deps",
-                                       "kind": "deps", "status": dst,
+                nodes.append({"data": {"id": did, "label": "wait for deps", "kind": "deps",
+                                       "status": "satisfied" if state.deps_satisfied else "pending",
                                        "deps_required": state.deps_required,
                                        "deps_provided": state.deps_provided}})
                 edges.append({"data": {"source": gid, "target": did, "etype": "flow"}})
                 prev = did
 
-        # Fix-loop: dashed feedback edge from test back to build
         edges.append({"data": {"source": "phase:test", "target": "phase:build", "etype": "feedback"}})
 
-        # Agents: roster + events + stream
-        agent_info = {}
-        roster_keys = {label.lower(): aid for _ph, r in PHASE_AGENTS.items() for aid, label in r}
-        for ph, roster in PHASE_AGENTS.items():
-            for aid, role in roster:
-                agent_info[aid] = {"label": role, "phase": ph, "status": "planned"}
-
-        def _akey(p):
-            r = (p.get("role") or "").strip().lower()
-            if r in roster_keys:
-                return roster_keys[r]
-            return p.get("id") or p.get("role") or "agent"
-
-        for e in evs:
-            p = e.get("payload") or {}
-            if e["type"] == "agent_spawned":
-                k = _akey(p); cur = agent_info.get(k, {})
-                agent_info[k] = {"label": p.get("role") or cur.get("label") or k,
-                                 "phase": p.get("phase") or cur.get("phase"), "status": "running"}
-            elif e["type"] == "agent_done":
-                k = _akey(p)
-                if k in agent_info:
-                    out = p.get("outcome")
-                    agent_info[k]["status"] = "done" if out in (None, "real_diff", "success") else out
-
-        for a in streamlog.agents(self._full_log(run_id)):
-            lbl = (a.get("label") or "").lower()
-            matched = next((aid for labelkey, aid in roster_keys.items() if labelkey in lbl), None)
-            if matched:
-                agent_info[matched]["status"] = a["status"]
-                agent_info[matched]["real"] = True
-            else:
-                agent_info.setdefault(a["id"], {"label": a["label"], "phase": None,
-                                                "status": a["status"], "real": True})
+        # Agents — projected from the agents table (recorded native Task sub-agents)
+        reg = AgentRegistry(paths["agents_db"])
         agent_ids = set()
-        for aid, info in agent_info.items():
-            nid = "agent:" + aid; agent_ids.add(nid)
-            nodes.append({"data": {"id": nid, "label": info["label"], "kind": "agent",
-                                   "status": info["status"], "real": bool(info.get("real"))}})
-            src = "phase:" + info["phase"] if info.get("phase") in PIPELINE else "orchestrator"
+        for rec in reg.agents_for(run_id):
+            nid = "agent:" + rec.agent_id
+            agent_ids.add(nid)
+            nodes.append({"data": {"id": nid, "label": rec.role, "kind": "agent",
+                                   "status": rec.status, "real": True}})
+            src = "phase:" + rec.phase if rec.phase in PIPELINE else "orchestrator"
             edges.append({"data": {"source": src, "target": nid, "etype": "hierarchy"}})
 
-        for i, e in enumerate([e for e in evs if e["type"] == "artifact"]):
-            p = e["payload"]; aid = "artifact:%d" % i
-            path = p.get("path") or ""
+        # Artifacts — from the artifacts table
+        for i, a in enumerate(db.artifacts()):
+            path = a.get("path") or ""
             if path.startswith("http"):
                 status = "created"
             else:
                 status = "created" if (path and "content" in self.artifact(run_id, path)) else "missing"
-            nodes.append({"data": {"id": aid, "label": p.get("title", "artifact"), "kind": "artifact",
-                                   "path": path, "status": status, "url": path if path.startswith("http") else None}})
-            owner = "agent:" + p["agent"] if p.get("agent") and ("agent:" + p["agent"]) in agent_ids else "orchestrator"
+            aid = "artifact:%d" % i
+            nodes.append({"data": {"id": aid, "label": a.get("title") or "artifact", "kind": "artifact",
+                                   "path": path, "status": status,
+                                   "url": path if path.startswith("http") else None}})
+            owner = ("agent:" + a["agent"]) if a.get("agent") and ("agent:" + a["agent"]) in agent_ids else "orchestrator"
             edges.append({"data": {"source": owner, "target": aid, "etype": "hierarchy"}})
 
-        cleared = {e["payload"].get("what") for e in evs if e["type"] == "blocker_cleared"}
-        for i, e in enumerate([e for e in evs if e["type"] == "blocker"]):
-            p = e["payload"]
-            if p.get("what") in cleared:
-                continue
+        # Blockers — from the blockers table (uncleared)
+        for i, b in enumerate([b for b in db.blockers() if not b["cleared"]]):
             bid = "blocker:%d" % i
-            target = ("phase:" + p["blocks"]) if p.get("blocks") in PIPELINE else "orchestrator"
-            nodes.append({"data": {"id": bid, "label": p.get("what", "blocker"), "kind": "blocker",
-                                   "status": "open", "blocks": p.get("blocks")}})
+            target = ("phase:" + b["blocks"]) if b.get("blocks") in PIPELINE else "orchestrator"
+            nodes.append({"data": {"id": bid, "label": b.get("what") or "blocker", "kind": "blocker",
+                                   "status": "open", "blocks": b.get("blocks")}})
             edges.append({"data": {"source": bid, "target": target, "etype": "hierarchy"}})
 
-        g = gates.pending_gate(d, run_id)
-        if g:
-            gid = "gate:" + g
-            existing_ids = [n["data"]["id"] for n in nodes]
-            if gid not in existing_ids:
-                nodes.append({"data": {"id": gid, "label": "awaiting review: " + g, "kind": "gate",
-                                       "status": "awaiting", "gate": g}})
-                edges.append({"data": {"source": gid, "target": "phase:" + g if ("phase:" + g) in
-                                       existing_ids else "orchestrator", "etype": "flow"}})
+        # Pending review gate — from the gates table (status 'awaiting')
+        existing_ids = {n["data"]["id"] for n in nodes}
+        for gname, gstat in db.gate_status().items():
+            if gstat == "awaiting":
+                gid = "gate:" + gname
+                if gid not in existing_ids:
+                    nodes.append({"data": {"id": gid, "label": "awaiting review: " + gname,
+                                           "kind": "gate", "status": "awaiting", "gate": gname}})
+                    tgt = ("phase:" + gname) if ("phase:" + gname) in existing_ids else "orchestrator"
+                    edges.append({"data": {"source": gid, "target": tgt, "etype": "flow"}})
         return {"nodes": nodes, "edges": edges}
 
     def evidence(self, run_id: str) -> dict:

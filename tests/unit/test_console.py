@@ -18,10 +18,11 @@ class FakeLauncher:
         self.argv = None
         self.env = None
 
-    def __call__(self, argv, env=None, log_path=None):
+    def __call__(self, argv, env=None, log_path=None, cwd=None):
         self.argv = argv
         self.env = env or {}
         self.log_path = log_path
+        self.cwd = cwd
         return {"pid": 1234}
 
 
@@ -237,81 +238,71 @@ def test_list_runs_returns_launched_runs_for_reconnect(tmp_path):
 
 
 def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
-    from software_factory import events, gates
-    launcher = FakeLauncher()
-    c = console(tmp_path, launcher)
+    from software_factory.db import RunDB, db_path
+    from software_factory.agents import AgentRegistry
+    c = console(tmp_path, FakeLauncher())
     run_id = c.start_run(RunRequest(description="guestbook"))
     d = str(tmp_path)
-    # an agent (from the claude stream), an artifact, a blocker, and an open gate
-    with open(launcher.log_path, "w") as f:
-        f.write('{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Task","input":{"description":"build form","subagent_type":"general-purpose"}}]}}\n')
-    events.emit(d, run_id, "artifact", {"title": "PRD", "path": "PRD.md", "kind": "prd"})
-    events.emit(d, run_id, "blocker", {"what": "Supabase project not ready", "blocks": "wait-for-deps"})
-    events.emit(d, run_id, "awaiting_review", {"gate": "prd"})
+    # an agent, an artifact, a blocker, and an open gate — ALL recorded in run.db (no events)
+    AgentRegistry(db_path(d, run_id)).spawn("t1", run_id, None, "build form", "claude-sonnet-4-6", phase="build")
+    db = RunDB(db_path(d, run_id))
+    db.record_artifact("PRD", "PRD.md", kind="prd")
+    db.add_blocker("Supabase project not ready", blocks="wait-for-deps")
+    db.set_gate("prd", "awaiting")
 
     g = c.graph(run_id)
     kinds = {n["data"]["kind"] for n in g["nodes"]}
     assert {"orchestrator", "phase", "agent", "artifact", "blocker", "gate"} <= kinds
-    # the pipeline phases are present as phase nodes
     phase_labels = {n["data"]["label"] for n in g["nodes"] if n["data"]["kind"] == "phase"}
     assert {"research", "architect", "deploy"} <= phase_labels
-    # stage gates and deps node are present
     gate_ids = {n["data"]["id"] for n in g["nodes"] if n["data"]["kind"] == "gate"}
-    assert "gate:stage1" in gate_ids
-    assert "gate:stage2" in gate_ids
+    assert "gate:stage1" in gate_ids and "gate:stage2" in gate_ids
     deps_nodes = [n for n in g["nodes"] if n["data"]["kind"] == "deps"]
     assert len(deps_nodes) == 1 and deps_nodes[0]["data"]["id"] == "deps:wait"
-    # edges connect things (orchestrator -> first phase exists)
     assert any(e["data"]["source"] == "orchestrator" for e in g["edges"])
 
 
 def test_graph_marks_artifacts_missing_until_the_file_really_exists(tmp_path):
-    # The "no hollow done" scar at the artifact level: an emitted artifact whose file does not
+    # The "no hollow done" scar at the artifact level: a recorded artifact whose file does not
     # exist is status="missing" (red on the canvas), not a fake green "created".
     import os
-    from software_factory import events
+    from software_factory.db import RunDB, db_path
     c = console(tmp_path, FakeLauncher())
     rid = c.start_run(RunRequest(description="x"))
-    events.emit(str(tmp_path), rid, "artifact", {"title": "PRD", "path": "workspace/PRD.md", "kind": "prd"})
+    RunDB(db_path(str(tmp_path), rid)).record_artifact("PRD", "workspace/PRD.md", kind="prd")
     art = lambda: [n["data"] for n in c.graph(rid)["nodes"] if n["data"].get("path") == "workspace/PRD.md"][0]
-    assert art()["status"] == "missing"                     # emitted but no file -> hollow
+    assert art()["status"] == "missing"                     # recorded but no file -> hollow
     os.makedirs(os.path.join(str(tmp_path), rid, "workspace"), exist_ok=True)
     open(os.path.join(str(tmp_path), rid, "workspace", "PRD.md"), "w").write("a real PRD")
     assert art()["status"] == "created"                     # file now exists -> real
 
 
-def test_real_agent_tool_spawns_flag_the_roster_node(tmp_path):
-    # A genuine subagent spawn in the stream (Agent tool) marks the roster node real=True and sets
-    # its status — proof, vs an emitted event alone. No duplicate node.
-    import os, json
+def test_graph_agents_are_projected_from_the_agents_table(tmp_path):
+    # Agents appear on the canvas ONLY when recorded in run.db (no planned roster). A recorded
+    # agent hangs off its phase, is real=True, and its status comes from the agents table.
+    from software_factory.db import db_path
+    from software_factory.agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
     rid = c.start_run(RunRequest(description="x"))
-    with open(os.path.join(str(tmp_path), rid, "run.log"), "w") as f:
-        f.write(json.dumps({"type": "assistant", "message": {"content": [
-            {"type": "tool_use", "id": "a1", "name": "Agent",
-             "input": {"description": "HORIZON agent: context assembly", "subagent_type": "Explore"}}]}}) + "\n")
-    hs = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "agent" and n["data"]["label"] == "HORIZON"]
-    assert len(hs) == 1 and hs[0]["real"] is True and hs[0]["status"] == "running"
-    # a roster agent with NO real spawn stays planned + not real
-    av = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["label"] == "VANGUARD"][0]
-    assert av["status"] == "planned" and av["real"] is False
-
-
-def test_graph_always_shows_the_named_phase_agents(tmp_path):
-    from software_factory import events
-    c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
-    labels = lambda: {n["data"]["label"]: n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "agent"}
-    L = labels()
-    assert {"HORIZON", "ARCHIVIST", "VANGUARD", "CHROMA", "DESIGNER", "software-architect"} <= set(L)
-    assert L["HORIZON"]["status"] == "planned"                    # shown before any event
-    # an event with a MISMATCHED id but the same role upgrades the roster node (no duplicate)
-    events.emit(str(tmp_path), rid, "agent_spawned", {"id": "HORIZON", "role": "HORIZON", "phase": "research"})
-    g2 = c.graph(rid)
-    horizons = [n for n in g2["nodes"] if n["data"]["kind"] == "agent" and n["data"]["label"] == "HORIZON"]
-    assert len(horizons) == 1 and horizons[0]["data"]["status"] == "running"
+    assert not [n for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "agent"]  # nothing recorded yet
+    AgentRegistry(db_path(str(tmp_path), rid)).spawn("horizon", rid, None, "HORIZON", "claude-opus-4-8", phase="research")
     g = c.graph(rid)
+    hs = [n["data"] for n in g["nodes"] if n["data"]["kind"] == "agent" and n["data"]["label"] == "HORIZON"]
+    assert len(hs) == 1 and hs[0]["real"] is True and hs[0]["status"] == "running"
     assert any(e["data"]["source"] == "phase:research" and e["data"]["target"] == "agent:horizon" for e in g["edges"])
+
+
+def test_graph_agent_status_reflects_outcome(tmp_path):
+    from software_factory.db import db_path
+    from software_factory.agents import AgentRegistry
+    from software_factory.budget import Usage
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    reg = AgentRegistry(db_path(str(tmp_path), rid))
+    reg.spawn("a1", rid, 1, "builder", "claude-sonnet-4-6", phase="build")
+    reg.record("a1", outcome="real_diff", usage=Usage(model="claude-sonnet-4-6"), cost_usd=0.1, pr=7, diff_lines=10)
+    a = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "agent" and n["data"]["label"] == "builder"][0]
+    assert a["status"] == "done"
 
 
 def test_pasted_description_is_persisted_and_input_artifact_is_real(tmp_path):
@@ -326,44 +317,45 @@ def test_pasted_description_is_persisted_and_input_artifact_is_real(tmp_path):
 
 
 def test_url_artifacts_are_links_not_missing(tmp_path):
-    from software_factory import events
+    from software_factory.db import RunDB, db_path
     c = console(tmp_path, FakeLauncher())
     rid = c.start_run(RunRequest(description="x"))
-    events.emit(str(tmp_path), rid, "artifact", {"title": "GitHub Repo", "path": "https://github.com/a/b", "kind": "repo"})
+    RunDB(db_path(str(tmp_path), rid)).record_artifact("GitHub Repo", "https://github.com/a/b", kind="repo")
     repo = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["label"] == "GitHub Repo"][0]
     assert repo["status"] == "created" and repo["url"] == "https://github.com/a/b"
 
 
 def test_artifacts_are_children_of_the_agent_that_created_them(tmp_path):
     import os
-    from software_factory import events
+    from software_factory.db import RunDB, db_path
+    from software_factory.agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
     rid = c.start_run(RunRequest(description="x"))
     d = str(tmp_path)
-    events.emit(d, rid, "agent_spawned", {"id": "horizon", "role": "HORIZON", "phase": "research"})
+    AgentRegistry(db_path(d, rid)).spawn("horizon", rid, None, "HORIZON", "claude-opus-4-8", phase="research")
     os.makedirs(os.path.join(d, rid, "workspace"), exist_ok=True)
     open(os.path.join(d, rid, "workspace", "PRD.md"), "w").write("real")
-    events.emit(d, rid, "artifact", {"title": "PRD", "path": "workspace/PRD.md", "kind": "prd", "agent": "horizon"})
+    RunDB(db_path(d, rid)).record_artifact("PRD", "workspace/PRD.md", kind="prd", agent="horizon")
     g = c.graph(rid)
     ids = {n["data"]["id"]: n["data"] for n in g["nodes"]}
     assert "agent:horizon" in ids and ids["agent:horizon"]["label"] == "HORIZON"
     art_id = [n["data"]["id"] for n in g["nodes"] if n["data"].get("path") == "workspace/PRD.md"][0]
     # the PRD artifact's parent edge comes FROM the agent that made it
     assert any(e["data"]["source"] == "agent:horizon" and e["data"]["target"] == art_id for e in g["edges"])
-    # and the agent itself hangs off its phase (orchestrator spawns per-phase)
+    # and the agent itself hangs off its phase
     assert any(e["data"]["source"] == "phase:research" and e["data"]["target"] == "agent:horizon" for e in g["edges"])
 
 
-def test_events_continue_and_artifact(tmp_path):
-    from software_factory import events, gates
+def test_gate_continue_and_artifact(tmp_path):
+    from software_factory import gates
+    from software_factory.db import RunDB, db_path
     c = console(tmp_path, FakeLauncher())
     run_id = c.start_run(RunRequest(description="guestbook"))
     d = str(tmp_path)
-    events.emit(d, run_id, "awaiting_review", {"gate": "prd"})
+    RunDB(db_path(d, run_id)).set_gate("prd", "awaiting")
     assert gates.pending_gate(d, run_id) == "prd"
     c.continue_run(run_id, "prd")                       # dashboard "Continue"
     assert gates.pending_gate(d, run_id) is None
-    assert any(e["type"] == "awaiting_review" for e in c.events(run_id))
 
     # artifact read stays inside the run dir
     import os
@@ -373,14 +365,72 @@ def test_events_continue_and_artifact(tmp_path):
     assert "error" in c.artifact(run_id, "../../etc/passwd")  # traversal rejected
 
 
-def test_run_uses_sonnet_model_and_a_turn_cap_by_default(tmp_path):
-    # Cost controls, pinned: default model is Sonnet 4.6 and turns are bounded.
+def _model_of(launcher):
+    argv = launcher.argv
+    return argv[argv.index("--model") + 1]
+
+
+def test_stage3_done_requires_playwright_pass_and_real_agents(tmp_path):
+    # The two NON-NEGOTIABLE Stage-3 gates: (a) done tickets trace to recorded native-Task agents,
+    # (b) a PASSING Playwright happy-flow on the live url is recorded. No hollow done.
+    from software_factory.db import RunDB, db_path
+    from software_factory.tickets import TicketStore
+    from software_factory.agents import AgentRegistry
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    dbp = db_path(str(tmp_path), rid)
+    db = RunDB(dbp)
+    ts = TicketStore(dbp)
+    reg = AgentRegistry(dbp)
+
+    # A ticket built monolithically (no agent claimed it) -> done with agent=None
+    tid = ts.create_ticket("feature", acceptance="a", dod="d", wave=1)
+    ts.mark_done(tid, pr=1, diff_lines=10)
+    assert c.detect_stage3_done(rid) is False         # no Playwright pass yet
+
+    # Passing Playwright verification, but the done ticket has no agent -> still not done (gate a)
+    db.record_verification("https://sf-x.up.railway.app", True, {"flows": [{"ok": True}]})
+    assert c.detect_stage3_done(rid) is False
+
+    # Build it properly: a native Task agent claims THEN completes the ticket (agent retained on done)
+    reg.spawn("ag1", rid, tid, "builder", "claude-sonnet-4-6", phase="build")
+    ts.claim(tid, "ag1")
+    ts.mark_done(tid, pr=1, diff_lines=10)
+    assert c.detect_stage3_done(rid) is True
+    st = c.status(rid)
+    assert st["done"] is True and st["deploy_url"] == "https://sf-x.up.railway.app"
+
+
+def test_stage3_prompt_is_plan_first_orchestrator_only_with_playwright_gate(tmp_path):
+    from software_factory.console import make_prompt_stage3, make_prompt_stage1
+    p3 = make_prompt_stage3(RunRequest(description="x"), "run-z", "/tmp/r",
+                            dispositions={"ADP_CLIENT_ID": "mock", "SUPABASE_URL": "mcp"})
+    for needle in ["build-plan.md", "Playwright", "record-verification", "Task sub-agent",
+                   "software_factory.db", "sf-run-z", "ORCHESTRATOR-ONLY"]:
+        assert needle in p3, needle
+    # prompts defer to SKILL.md and carry NO event/ruflo instructions
+    for bad in ["events emit", "swarm_init", "agent_spawn ", "ruflo"]:
+        assert bad not in p3 and bad not in make_prompt_stage1(RunRequest(description="x"), "r", "/t")
+    assert "SKILL.md" in make_prompt_stage1(RunRequest(description="x"), "r", "/t")
+
+
+def test_per_stage_models_opus_for_1_and_2_sonnet_for_3(tmp_path):
+    # Stages 1 & 2 run on Opus 4.8; Stage 3 on Sonnet. Turns are bounded. cwd = the workspace.
+    import os
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    c.start_run(RunRequest(description="guestbook"))
-    argv = launcher.argv
-    assert "--model" in argv and argv[argv.index("--model") + 1] == "claude-sonnet-4-6"
-    assert "--max-turns" in argv
+    rid = c.start_run(RunRequest(description="guestbook"))           # Stage 1
+    assert _model_of(launcher) == "claude-opus-4-8"
+    assert "--max-turns" in launcher.argv
+    assert launcher.cwd == os.path.join(str(tmp_path), rid, "workspace")
+
+    st = c._load_state(rid); st.stage1_done = True; st.save()
+    c.start_stage2(rid)                                              # Stage 2
+    assert _model_of(launcher) == "claude-opus-4-8"
+
+    st = c._load_state(rid); st.stage2_done = True; st.deps_satisfied = True; st.save()
+    c.start_stage3(rid)                                             # Stage 3
+    assert _model_of(launcher) == "claude-sonnet-4-6"
 
 
 def test_read_log_tails_by_default_but_full_returns_everything(tmp_path):
@@ -462,16 +512,14 @@ def test_evidence_verifies_the_run_was_really_built_by_the_skill(tmp_path):
 def test_stage_handoff_stage1_done_enables_stage2(tmp_path):
     """Stage 1 events + PRD → detect_stage1_done → start_stage2."""
     import os
-    from software_factory import events, artifacts
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
     run_id = c.start_run(RunRequest(description="guestbook"))
 
     assert c.detect_stage1_done(run_id) is False
 
-    # Simulate Stage 1 completing: emit stage_done event + write a real PRD
+    # Simulate Stage 1 completing: write a real PRD (the mechanical proof — no event needed)
     d = str(tmp_path)
-    events.emit(d, run_id, "stage_done", {"stage": 1})
     base = os.path.join(d, run_id)
     ws = os.path.join(base, "workspace")
     os.makedirs(ws, exist_ok=True)
@@ -493,16 +541,14 @@ def test_stage_handoff_stage1_done_enables_stage2(tmp_path):
 
 
 def test_stage2_not_done_when_ticket_store_is_empty(tmp_path):
-    """Fix #1: emitting stage_done{2} + artifacts is NOT enough — if the agent only emitted
-    ticket EVENTS and never persisted them, the store is empty and Stage 2 is not done."""
+    """Fix #1: artifacts present is NOT enough — if tickets were never persisted to the store,
+    Stage 2 is not done (the buildable-tickets gate)."""
     import os
-    from software_factory import events
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
     run_id = c.start_run(RunRequest(description="x"))
     d = str(tmp_path); base = os.path.join(d, run_id)
     state = c._load_state(run_id); state.stage1_done = True; state.save()
-    events.emit(d, run_id, "stage_done", {"stage": 2})
     ws = os.path.join(base, "workspace"); os.makedirs(ws, exist_ok=True)
     for name, body in [("PRD.md", "# PRD"), ("architecture.md", "# A\n## Required Tokens\n- X_KEY — y\n"),
                        ("architecture.svg", "<svg/>")]:
@@ -515,7 +561,6 @@ def test_stage2_not_done_when_ticket_store_is_empty(tmp_path):
 def test_stage2_done_and_deps_flow(tmp_path):
     """Stage 2 artifacts + tickets → detect_stage2_done → submit_deps → start_stage3."""
     import os
-    from software_factory import events
     from software_factory.tickets import TicketStore
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
@@ -528,8 +573,7 @@ def test_stage2_done_and_deps_flow(tmp_path):
     state.stage1_done = True
     state.save()
 
-    # Simulate stage 2 completing
-    events.emit(d, run_id, "stage_done", {"stage": 2})
+    # Simulate stage 2 completing (artifacts on disk + buildable tickets — no event needed)
     ws = os.path.join(base, "workspace")
     os.makedirs(ws, exist_ok=True)
     with open(os.path.join(ws, "PRD.md"), "w") as f:
@@ -586,9 +630,9 @@ def test_submit_deps_dispositions_satisfy_without_values(tmp_path):
     })
     assert result["satisfied"] is True
     assert result["missing"] == []
-    # Disposition persisted (metadata), but the provided VALUE is NOT on disk.
-    saved = open(os.path.join(str(tmp_path), run_id, f"{run_id}.json")).read()
-    assert "sk-or-real" not in saved
+    # Disposition persisted (metadata), but the provided VALUE is NOT on disk (run.db).
+    saved = open(os.path.join(str(tmp_path), run_id, "run.db"), "rb").read()
+    assert b"sk-or-real" not in saved
     assert c._load_state(run_id).deps_disposition["SUPABASE_URL"] == "mcp"
 
 

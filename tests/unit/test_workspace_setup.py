@@ -42,8 +42,8 @@ def test_stage1_workspace_has_mcp_and_settings(tmp_path):
                            skills_dir=skills_dir, phase_dir=phase_dir)
 
     mcp = json.loads(open(os.path.join(ws, ".mcp.json")).read())
-    assert "ruflo" in mcp["mcpServers"]
     assert "playwright" in mcp["mcpServers"]
+    assert "ruflo" not in mcp["mcpServers"]   # ruflo/claude-flow removed; playwright is the only MCP
 
     settings = json.loads(open(os.path.join(ws, "claude-settings.json")).read())
     assert settings["enableAllProjectMcpServers"] is True
