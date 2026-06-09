@@ -516,6 +516,8 @@
         el.className = "msg assistant";
         el.innerHTML = `<div class="markdown">${marked.parse(m.content || "")}</div>`;
       }
+      // Chat links always open in a new tab — never navigate the console away.
+      for (const a of el.querySelectorAll("a")) { a.target = "_blank"; a.rel = "noopener"; }
       return el;
     }
 
