@@ -25,22 +25,27 @@ def _events(text: str):
 
 
 def cost_usd(text: str, prices: dict | None = None) -> float:
+    # run.log APPENDS every stage's claude -p session; each finished session emits one authoritative
+    # `result.total_cost_usd`. True cost = SUM of those, PLUS a token estimate for the in-flight
+    # session (events after the last result line). Taking only the last result lost earlier stages.
     prices = prices or PRICES
-    total_from_result = None
-    summed = 0.0
+    finished_total = 0.0            # Σ authoritative cost of completed sessions
+    tail_estimate = 0.0             # token estimate of the events since the last result line
     for ev in _events(text):
         if ev.get("type") == "result" and ev.get("total_cost_usd") is not None:
-            total_from_result = ev["total_cost_usd"]
+            finished_total += ev["total_cost_usd"]
+            tail_estimate = 0.0     # everything after this belongs to the next session
+            continue
         msg = ev.get("message") or {}
         usage = msg.get("usage")
         if usage:
             rate = prices.get(msg.get("model", ""), prices["claude-sonnet-4-6"])
-            summed += (
+            tail_estimate += (
                 usage.get("input_tokens", 0) * rate["input"]
                 + usage.get("cache_read_input_tokens", 0) * rate["cached"]
                 + usage.get("output_tokens", 0) * rate["output"]
             )
-    return round(total_from_result if total_from_result is not None else summed, 6)
+    return round(finished_total + tail_estimate, 6)
 
 
 def agents(text: str) -> list[dict]:

@@ -26,6 +26,21 @@ def test_cost_uses_result_total_when_present():
     assert cost_usd(stream(ASSIST_USAGE, RESULT)) == 0.0731
 
 
+def test_cost_sums_result_totals_across_appended_stages():
+    # run.log APPENDS each stage's claude -p session; each session emits its own authoritative
+    # result line. True run cost = SUM of every session's total_cost_usd, not just the last one
+    # (the old "last result wins" lost Stage 1's cost the moment Stage 2 finished).
+    two_stages = stream(ASSIST_USAGE, RESULT, ASSIST_USAGE, RESULT)
+    assert cost_usd(two_stages) == round(0.0731 * 2, 6)
+
+
+def test_cost_adds_inflight_stage_after_last_result():
+    # A finished stage (result line) plus an in-flight stage (usage, no result yet): the total is
+    # the finished session's authoritative cost PLUS the running session's token estimate.
+    c = cost_usd(stream(RESULT, ASSIST_USAGE))
+    assert c > 0.0731                      # 0.0731 (finished) + estimate of the in-flight usage
+
+
 def test_cost_falls_back_to_summing_usage_via_price_table():
     # No result event yet (run in progress) -> sum assistant usage with the model's prices.
     c = cost_usd(stream(ASSIST_USAGE))
