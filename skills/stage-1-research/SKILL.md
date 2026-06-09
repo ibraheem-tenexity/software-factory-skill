@@ -34,6 +34,8 @@ Read everything in `<base>/input/` (the console already extracted PDFs to markdo
 
 - `creds.check_all(target, env)` — any failure is a hard block (`add-blocker`), recorded, never guessed.
 - `GitHub.create_repo(name)`; seed `RunState`; `workspace.create` (the repo clones into your cwd's workspace).
+- **Record the repo IMMEDIATELY** so the operator sees the source link from the start — use the CLEAN
+  https url (NEVER a tokenized remote): `record-artifact "GitHub Repo" https://github.com/<org>/<repo> repo`.
 
 ## Phase 3: research — launch named Task sub-agents  (`set-phase research`)
 

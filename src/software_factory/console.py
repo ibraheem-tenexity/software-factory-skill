@@ -9,6 +9,7 @@ procedure, not inside any stage.
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -107,7 +108,9 @@ def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str) -> str:
         _orchestration_preamble("Stage 1 — Research", run_id, runs_dir, req.budget)
         + "Goal: a validated PRD (PRD.md) that passes `artifacts.prd_is_complete` (≥3 real product "
           "URLs + acceptance criteria + ticket seeds). The named research sub-agents and the done-gate "
-          "are in SKILL.md. Launch each as a Task sub-agent. When the PRD passes, STOP — the console "
+          "are in SKILL.md. Launch each as a Task sub-agent. THE MOMENT you create the GitHub repo, "
+          "record it (CLEAN token-free https url): `record-artifact 'GitHub Repo' <https-url> repo` — "
+          "the operator sees the repo link from the start. When the PRD passes, STOP — the console "
           "launches Stage 2.\n"
           f"App: {req.description}{ctx}"
     )
@@ -222,10 +225,95 @@ class Console:
         self._launch = launch
         self._new_id = new_id
         self._extract = extract
+        self._procs: dict = {}   # run_id -> last launched stage process (SPEC §1 handoff guard)
         os.makedirs(runs_dir, exist_ok=True)
 
     def _paths(self, run_id: str) -> dict:
         return run_paths(self._runs_dir, run_id)
+
+    # ---- SPEC §1: stage process lifecycle ------------------------------------------------
+    def _stage_process_alive(self, run_id: str) -> bool:
+        p = self._procs.get(run_id)
+        return p is not None and hasattr(p, "poll") and p.poll() is None
+
+    def stage_finished(self, run_id: str) -> bool:
+        """SPEC §1: the stage's orchestrator process has finished — the tracked process exited,
+        or (no usable handle, e.g. after a server restart) the run.log has been idle past a
+        2-minute grace (covers crash/OOM without wedging the run)."""
+        p = self._procs.get(run_id)
+        if p is not None and hasattr(p, "poll"):
+            return p.poll() is not None
+        log = os.path.join(self._paths(run_id)["base"], "run.log")
+        if not os.path.exists(log):
+            return True
+        return (time.time() - os.path.getmtime(log)) > 120
+
+    # ---- SPEC §1: host-derived phase state machine ----------------------------------------
+    _CLOSED = ("done", "passed", "completed")
+
+    def derive_phases(self, run_id: str) -> dict:
+        """Phase states derived from recorded signals (phases table + stage flags +
+        verifications) — agent set-phase calls are hints, never the source of truth.
+        States: pending | active | done | skipped. A phase can never stay pending/active
+        once the process has moved past it; bypassed phases read skipped."""
+        db = RunDB(self._paths(run_id)["db"])
+        state = self._load_state(run_id)
+        recorded = db.phase_status()                      # last write wins per name
+        implied_done = set()
+        if state.stage1_done:
+            implied_done.update(("extract", "provision", "research"))
+        if state.stage2_done:
+            implied_done.update(("architect", "tickets"))
+        if db.has_passing_verification():
+            implied_done.add("test")
+        activity = {n for n in PIPELINE if n in recorded} | implied_done
+        run_done = state.phase == "done"
+        idx = {n: i for i, n in enumerate(PIPELINE)}
+        furthest = max((idx[n] for n in activity), default=-1)
+        out = {}
+        for i, n in enumerate(PIPELINE):
+            if i > furthest:
+                out[n] = "pending"
+            elif n not in activity:
+                out[n] = "skipped"
+            elif i < furthest or run_done or recorded.get(n) in self._CLOSED or n in implied_done:
+                out[n] = "done"
+            else:
+                out[n] = "active"
+        return out
+
+    def current_phase(self, run_id: str) -> str:
+        """The derived current phase for the header/API — never the stale RunState value."""
+        state = self._load_state(run_id)
+        if state.phase == "done":
+            return "done"
+        db = RunDB(self._paths(run_id)["db"])
+        recorded = db.phase_status()
+        implied = set()
+        if state.stage2_done:
+            implied.add("tickets")
+        elif state.stage1_done:
+            implied.add("research")
+        idx = {n: i for i, n in enumerate(PIPELINE)}
+        active = [n for n in PIPELINE if n in recorded] + [n for n in implied]
+        if not active:
+            return state.phase
+        return max(active, key=lambda n: idx[n])
+
+    def maybe_autosatisfy_deps(self, run_id: str) -> bool:
+        """SPEC §3: if NO required token classifies as 'provide' (human secret), auto-satisfy
+        deps (mock/mcp defaults apply) so the deps gate never becomes a hidden manual pause.
+        Returns True iff deps are satisfied after the call."""
+        state = self._load_state(run_id)
+        if not state.stage2_done:
+            return False
+        if state.deps_satisfied:
+            return True
+        disp = deps_mod.default_dispositions(state.deps_required)
+        disp.update(state.deps_disposition or {})
+        if any(d == "provide" for d in disp.values()):
+            return False
+        return bool(self.submit_deps(run_id, {}).get("satisfied"))
 
     def _load_state(self, run_id: str) -> RunState:
         return RunState.load(run_id, RunDB(self._paths(run_id)["db"]))
@@ -236,14 +324,55 @@ class Console:
         back to the recorded runstate spend."""
         return streamlog.cost_usd(self._full_log(run_id)) or (self._load_state(run_id).spent_usd or 0)
 
+    def _budget_ceiling(self, run_id: str) -> float:
+        """SPEC §4: per-run ceiling — the run's own override, else SF_COST_CEILING (default 30)."""
+        state = self._load_state(run_id)
+        if state.budget_ceiling:
+            return float(state.budget_ceiling)
+        return float(os.environ.get("SF_COST_CEILING", "30") or 30)
+
+    def enforce_budget(self, run_id: str) -> bool:
+        """SPEC §4 mid-stage teeth: if this run's spend crossed its ceiling, terminate the live
+        stage process, record a recoverable 'budget' blocker, and finalize orphaned agents.
+        Returns True iff the run was (or already had been) stopped for budget this call."""
+        ceiling = self._budget_ceiling(run_id)
+        spend = self._run_spend(run_id)
+        if spend <= ceiling:
+            return False
+        p = self._procs.get(run_id)
+        killed = False
+        if p is not None and hasattr(p, "poll") and p.poll() is None and hasattr(p, "terminate"):
+            p.terminate()
+            killed = True
+        db = RunDB(self._paths(run_id)["db"])
+        already = any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers())
+        if not already:
+            db.add_blocker(
+                f"Budget cap ${ceiling:.2f} reached (spent ${spend:.2f}) — stage stopped. "
+                f"Raise the cap to continue.", blocks="budget")
+            AgentRegistry(self._paths(run_id)["agents_db"]).finalize_orphans(run_id, stage_ok=False)
+        return True   # over-ceiling: stopped now (killed) or already stopped
+
+    def raise_budget(self, run_id: str, ceiling: float) -> dict:
+        """SPEC §4 recovery: persist a higher per-run ceiling and clear the budget blocker(s);
+        the operator then resumes via /retry against the preserved workspace."""
+        state = self._load_state(run_id)
+        state.budget_ceiling = float(ceiling)
+        state.save()
+        db = RunDB(self._paths(run_id)["db"])
+        for b in db.blockers():
+            if b.get("blocks") == "budget" and not b["cleared"]:
+                db.clear_blocker(b["what"])
+        return {"run_id": run_id, "budget_ceiling": float(ceiling)}
+
     def _launch_stage(self, run_id: str, stage: int, prompt: str, env: dict) -> Any:
         """Prepare workspace, health-check MCP, and launch a claude -p process for a stage."""
         paths = self._paths(run_id)
 
         # Mechanical PER-RUN cost ceiling: the in-prompt budget is advisory-only and stages don't
         # share a counter, so refuse to launch the next stage when THIS run's own spend (+ a stage
-        # reserve) would cross SF_COST_CEILING. Per-run, not cumulative — each project gets a fresh cap.
-        ceiling = float(os.environ.get("SF_COST_CEILING", "30") or 30)
+        # reserve) would cross the run's ceiling (per-run override else SF_COST_CEILING).
+        ceiling = self._budget_ceiling(run_id)
         reserve = float(os.environ.get("SF_STAGE_RESERVE", "5") or 5)
         spend = self._run_spend(run_id)
         if spend + reserve > ceiling:
@@ -288,7 +417,10 @@ class Console:
             "--output-format", "stream-json", "--verbose",
         ]
         # cwd = the workspace so the stage's SKILL.md / phases/ / context/ (its contract) load.
-        return self._launch(argv, env, os.path.join(paths["base"], "run.log"), cwd=ws)
+        result = self._launch(argv, env, os.path.join(paths["base"], "run.log"), cwd=ws)
+        if result is not None:
+            self._procs[run_id] = result   # SPEC §1: tracked for the stage-handoff guard
+        return result
 
     def start_run(self, req: RunRequest) -> str:
         """Start a new run (Stage 1). Returns run_id."""
@@ -304,6 +436,10 @@ class Console:
         input_db = RunDB(paths["db"])
         for name in written:
             input_db.record_artifact("input", "input/" + name, kind="context")
+        # SPEC §1: the HOST performs extraction — record it (and provision opening) itself,
+        # so these phases are never trust-based and extract can never sit 'pending' forever.
+        input_db.set_phase("extract", "done")
+        input_db.set_phase("provision", "active")
 
         state = self._load_state(run_id)
         env = {k: v for k, v in (req.credentials or {}).items() if v}
@@ -332,6 +468,10 @@ class Console:
         state = self._load_state(run_id)
         if state.stage1_done:
             return True
+        # SPEC §1: a stage is done only when its gate passes AND its process finished —
+        # never flip (and so never let the poller launch S2) while S1 is still alive.
+        if not self.stage_finished(run_id):
+            return False
         base = self._paths(run_id)["base"]
         for root, _dirs, files in os.walk(base):
             if "PRD.md" in files:
@@ -341,14 +481,18 @@ class Console:
                 if ok:
                     state.stage1_done = True
                     state.save()
+                    # SPEC §5: the stage is over — close any agent rows it forgot to finish.
+                    AgentRegistry(self._paths(run_id)["agents_db"]).finalize_orphans(run_id, stage_ok=True)
                     return True
         return False
 
     def start_stage2(self, run_id: str) -> str | None:
-        """Launch Stage 2. Returns run_id or None if MCP unhealthy."""
+        """Launch Stage 2. Returns run_id or None if blocked (prior stage alive / MCP unhealthy)."""
         state = self._load_state(run_id)
         if not state.stage1_done:
             return None
+        if self._stage_process_alive(run_id):
+            return None   # SPEC §1: never two stage orchestrators for one run
         req = RunRequest(description=state.description or "", target=state.deploy_target or "railway")
         env = {k: v for k, v in os.environ.items()
                if k in (state.creds_provided or [])}
@@ -362,6 +506,8 @@ class Console:
         state = self._load_state(run_id)
         if state.stage2_done:
             return True
+        if not self.stage_finished(run_id):
+            return False   # SPEC §1: gate + finished process, never mid-flight
         base = self._paths(run_id)["base"]
         ok, _missing = artifacts.verify(base, ["PRD.md", "architecture.md", "architecture.svg"])
         if not ok:
@@ -386,6 +532,7 @@ class Console:
                 state.deps_required = [t["name"] for t in tokens]
                 break
         state.save()
+        AgentRegistry(self._paths(run_id)["agents_db"]).finalize_orphans(run_id, stage_ok=True)
         return True
 
     def detect_stage3_done(self, run_id: str) -> bool:
@@ -411,7 +558,26 @@ class Console:
             state.deploy_url = passing[-1]["url"]
         state.phase = "done"
         state.save()
+        AgentRegistry(paths["agents_db"]).finalize_orphans(run_id, stage_ok=True)
         return True
+
+    def run_links(self, run_id: str) -> dict:
+        """SPEC §6 delivery: the run's outward links from the artifacts table —
+        {'repo': <github url>|None, 'live': <deploy url>|None}."""
+        db = RunDB(self._paths(run_id)["db"])
+        repo = live = None
+        for a in db.artifacts():
+            path = a.get("path") or ""
+            if not path.startswith("http"):
+                continue
+            title = (a.get("title") or "").lower()
+            kind = (a.get("kind") or "").lower()
+            if repo is None and ("repo" in title or kind == "repo"):
+                repo = path
+            elif live is None and ("live" in title or kind == "deploy"):
+                live = path
+        state = self._load_state(run_id)
+        return {"repo": repo or state.repo_url, "live": live or state.deploy_url}
 
     def stage2_artifacts(self, run_id: str) -> dict:
         """Return Stage 2 artifact paths + parsed required tokens + default dispositions."""
@@ -468,6 +634,8 @@ class Console:
         state = self._load_state(run_id)
         if not state.stage2_done or not state.deps_satisfied:
             return None
+        if self._stage_process_alive(run_id):
+            return None   # SPEC §1: never two stage orchestrators for one run
         req = RunRequest(description=state.description or "", target=state.deploy_target or "railway")
         env = {k: v for k, v in os.environ.items()
                if k in (state.creds_provided or [])}
@@ -487,6 +655,8 @@ class Console:
         """
         if stage not in (1, 2, 3):
             return None
+        if self._stage_process_alive(run_id):
+            return None   # SPEC §1: never two stage orchestrators for one run
         state = self._load_state(run_id)
         if stage >= 2 and not state.stage1_done:
             return None
@@ -548,7 +718,7 @@ class Console:
             "skill_version": state.skill_version,
             "description": state.description,
             "deploy_target": state.deploy_target,
-            "phase": state.phase,
+            "phase": self.current_phase(run_id),
             "done": state.phase == "done",
             "deploy_url": state.deploy_url,
             "spent_usd": streamlog.cost_usd(self._full_log(run_id)) or state.spent_usd,
@@ -574,7 +744,7 @@ class Console:
             st = self._load_state(name)
             runs.append({
                 "run_id": name,
-                "phase": st.phase,
+                "phase": self.current_phase(name),
                 "description": st.description,
                 "deploy_url": st.deploy_url,
                 "spent_usd": streamlog.cost_usd(self._full_log(name)) or st.spent_usd,
@@ -629,13 +799,13 @@ class Console:
         db = RunDB(paths["db"])
         state = self._load_state(run_id)
         nodes = [{"data": {"id": "orchestrator", "label": "Claude · software-factory",
-                           "kind": "orchestrator", "status": state.phase}}]
+                           "kind": "orchestrator", "status": self.current_phase(run_id)}}]
         edges = []
 
-        phase_status = db.phase_status()
+        derived = self.derive_phases(run_id)
         prev = "orchestrator"
         for name in PIPELINE:
-            st = "active" if state.phase == name else phase_status.get(name, "pending")
+            st = derived.get(name, "pending")
             pid = "phase:" + name
             nodes.append({"data": {"id": pid, "label": PIPELINE_LABELS.get(name, name),
                                    "kind": "phase", "status": st, "stage": PHASE_STAGE.get(name)}})

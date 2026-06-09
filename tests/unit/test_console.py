@@ -262,6 +262,36 @@ def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
     assert any(e["data"]["source"] == "orchestrator" for e in g["edges"])
 
 
+def test_budget_kill_is_recoverable_raise_and_resume(tmp_path, monkeypatch):
+    # SPEC §4: at the per-run ceiling the poller kills the stage process and records a budget
+    # blocker — but the run is RECOVERABLE: raise_budget(ceiling) clears the blocker and the
+    # higher per-run ceiling lets the stage relaunch.
+    monkeypatch.setenv("SF_COST_CEILING", "10")
+    monkeypatch.setenv("SF_STAGE_RESERVE", "0")
+    class FakeProc:
+        def __init__(self): self.exit_code = None; self.terminated = False
+        def poll(self): return self.exit_code
+        def terminate(self): self.terminated = True; self.exit_code = -15
+    proc = FakeProc()
+    ids = iter(["run-bk"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
+    rid = c.start_run(RunRequest(description="x"))
+    st = c._load_state(rid); st.spent_usd = 11.0; st.save()       # over the $10 ceiling
+    assert c.enforce_budget(rid) is True                          # killed
+    assert proc.terminated is True
+    from software_factory.db import RunDB, db_path
+    db = RunDB(db_path(str(tmp_path), rid))
+    open_blockers = [b for b in db.blockers() if not b["cleared"]]
+    assert any(b.get("blocks") == "budget" for b in open_blockers)
+    # recovery: raise the per-run ceiling -> blocker cleared, persisted override honored
+    c.raise_budget(rid, 40.0)
+    assert c._load_state(rid).budget_ceiling == 40.0
+    assert not [b for b in db.blockers() if not b["cleared"]]
+    assert c.enforce_budget(rid) is False                         # under the new ceiling
+    st = c._load_state(rid); st.stage1_done = True; st.save()
+    assert c.start_stage2(rid) == rid                             # launch-gate honors the override
+
+
 def test_run_spend_is_per_run_not_cumulative(tmp_path):
     # Per-run budget: each run/project is capped independently. _run_spend reflects ONLY this run's
     # own spend; a prior run's spend does not count against another.
@@ -303,6 +333,75 @@ def test_launch_proceeds_when_under_ceiling(tmp_path, monkeypatch):
     assert launcher.argv is not None
 
 
+def test_next_stage_waits_for_prior_stage_process_to_exit(tmp_path):
+    # run-d329e57c scar: detect_stage1_done is mechanical (PRD passes -> poller launches S2)
+    # and did NOT wait for the S1 orchestrator PROCESS to exit — two opus orchestrators ran
+    # concurrently ~9 min (double burn + S2 reading a workspace S1 was still writing).
+    # start_stage2 must refuse while the prior stage's process is alive, then proceed once it exits.
+    class FakeProc:
+        def __init__(self): self.exit_code = None
+        def poll(self): return self.exit_code
+    proc = FakeProc()
+    launches = []
+    def launcher(argv, env=None, log_path=None, cwd=None):
+        launches.append(argv); return proc
+    ids = iter(["run-ov"])
+    c = Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids))
+    rid = c.start_run(RunRequest(description="x"))
+    st = c._load_state(rid); st.stage1_done = True; st.save()
+    assert c.start_stage2(rid) is None          # S1 process still alive -> refuse
+    assert len(launches) == 1                    # no second claude process spawned
+    proc.exit_code = 0                           # S1 exits
+    assert c.start_stage2(rid) == rid            # now it launches
+    assert len(launches) == 2
+
+
+def test_deps_auto_satisfy_when_no_human_secret_needed(tmp_path):
+    # SPEC §3: if NO required token classifies as 'provide', the host auto-satisfies deps
+    # (mock/mcp dispositions apply) — the deps gate must not be a hidden manual pause.
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    st = c._load_state(rid)
+    st.stage2_done = True
+    st.deps_required = ["SUPABASE_URL", "NEXTAUTH_SECRET"]   # both classify 'mcp' -> no human
+    st.save()
+    assert c.maybe_autosatisfy_deps(rid) is True
+    assert c._load_state(rid).deps_satisfied is True
+
+
+def test_deps_do_not_auto_satisfy_when_a_provide_token_is_required(tmp_path):
+    # SPEC §3: a token classified 'provide' (real human secret) pauses the run at the gate.
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    st = c._load_state(rid)
+    st.stage2_done = True
+    st.deps_required = ["OPENROUTER_API_KEY"]                # classifies 'provide'
+    st.save()
+    assert c.maybe_autosatisfy_deps(rid) is False
+    assert c._load_state(rid).deps_satisfied is False
+
+
+def test_stage_done_requires_the_orchestrator_process_to_have_finished(tmp_path):
+    # SPEC §1: a stage is done only when its artifact gate passes AND the process finished.
+    # run-d329e57c scar: the PRD passed while S1 was still alive -> S1+S2 ran concurrently.
+    import os
+    class FakeProc:
+        def __init__(self): self.exit_code = None
+        def poll(self): return self.exit_code
+    proc = FakeProc()
+    ids = iter(["run-sf"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
+    rid = c.start_run(RunRequest(description="x"))
+    ws = os.path.join(str(tmp_path), rid, "workspace"); os.makedirs(ws, exist_ok=True)
+    prd = ("# PRD\n" + "\n".join(f"- https://product{i}.example.com real product" for i in range(3))
+           + "\n## Acceptance Criteria\n- works\n## Ticket Seeds\n- t1\n")
+    open(os.path.join(ws, "PRD.md"), "w").write(prd)
+    assert c.detect_stage1_done(rid) is False                # gate passes but S1 still ALIVE -> not done
+    assert c._load_state(rid).stage1_done is False
+    proc.exit_code = 0                                       # S1 exits
+    assert c.detect_stage1_done(rid) is True                 # gate + finished process -> done
+
+
 def test_resurfaced_pre_redesign_run_is_not_a_pipeline_run(tmp_path):
     # Budget-bleed scar: an old run dir (PRD.md on disk, but never started by THIS pipeline)
     # must NOT auto-advance. start_run records an "input" artifact in run.db; a resurfaced dir
@@ -317,6 +416,78 @@ def test_resurfaced_pre_redesign_run_is_not_a_pipeline_run(tmp_path):
     os.makedirs(os.path.join(old, "workspace"), exist_ok=True)
     open(os.path.join(old, "workspace", "PRD.md"), "w").write("# PRD")
     assert c.is_pipeline_run("run-old") is False
+
+
+def test_run_links_surface_repo_and_live_urls(tmp_path):
+    # SPEC §6 delivery: repo + live urls projected from the artifacts table for the toolbar,
+    # chat narration and the done message.
+    from software_factory.db import RunDB, db_path
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    assert c.run_links(rid) == {"repo": None, "live": None}
+    db = RunDB(db_path(str(tmp_path), rid))
+    db.record_artifact("GitHub Repo", "https://github.com/acme/app", kind="repo")
+    db.record_artifact("Live URL", "https://sf-run.up.railway.app", kind="deploy")
+    links = c.run_links(rid)
+    assert links["repo"] == "https://github.com/acme/app"
+    assert links["live"] == "https://sf-run.up.railway.app"
+
+
+def test_stage1_prompt_records_repo_artifact_at_creation(tmp_path):
+    p1 = make_prompt_stage1(RunRequest(description="x"), "run-r", "/runs")
+    assert "GitHub Repo" in p1 and "repo" in p1            # surfaced from the start (SPEC §7)
+
+
+def test_derive_phases_start_of_run(tmp_path):
+    # SPEC §1: the host performs extraction at start_run and records it — extract=done,
+    # provision=active, everything later pending. No phase is trust-based.
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    ph = c.derive_phases(rid)
+    assert ph["extract"] == "done"
+    assert ph["provision"] == "active"
+    assert ph["build"] == "pending" and ph["test"] == "pending"
+
+
+def test_derive_phases_never_leaves_passed_phases_pending_or_active(tmp_path):
+    # run-d329e57c scar: provision painted 'active' during build; extract stuck 'pending'.
+    # Once a later phase has activity, earlier phases with activity are done; without -> skipped.
+    from software_factory.db import RunDB, db_path
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    db = RunDB(db_path(str(tmp_path), rid))
+    db.set_phase("research", "done")
+    db.set_phase("architect", "active")     # S2 mid-flight; never closed its row
+    db.set_phase("build", "active")         # S3 started later (architect forgot to close)
+    ph = c.derive_phases(rid)
+    assert ph["provision"] == "done"        # has activity, later phases started -> done, NOT active
+    assert ph["research"] == "done"
+    assert ph["architect"] == "done"        # left 'active' by the agent, but build moved past it
+    assert ph["tickets"] == "skipped"       # no recorded activity, process moved past -> skipped
+    assert ph["build"] == "active"          # the furthest phase with activity is the live one
+    assert ph["deploy"] == "pending"
+
+
+def test_derive_phases_done_run_and_header(tmp_path):
+    from software_factory.db import RunDB, db_path
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    db = RunDB(db_path(str(tmp_path), rid))
+    db.set_phase("build", "active")
+    st = c._load_state(rid); st.phase = "done"; st.save()
+    ph = c.derive_phases(rid)
+    assert ph["build"] == "done"            # terminal run closes everything with activity
+    assert ph["tickets"] == "skipped"
+    assert c.status(rid)["phase"] == "done"
+
+
+def test_status_phase_is_derived_not_stale_provision(tmp_path):
+    # The header must reflect the derived current phase, not RunState.phase's initial value.
+    from software_factory.db import RunDB, db_path
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    RunDB(db_path(str(tmp_path), rid)).set_phase("build", "active")
+    assert c.status(rid)["phase"] == "build"   # NOT "provision"
 
 
 def test_graph_resolves_workspace_relative_artifact_paths(tmp_path):

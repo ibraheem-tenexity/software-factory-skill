@@ -259,7 +259,7 @@
     function nodeColor(ele) {
       const k = ele.data("kind"), s = ele.data("status");
       if (k === "orchestrator") return "#002b5c";
-      if (k === "phase") return s === "done" ? "#059669" : s === "active" ? "#d97706" : "#aeb6c4";
+      if (k === "phase") return s === "done" ? "#059669" : s === "active" ? "#d97706" : s === "skipped" ? "#d7dbe2" : "#aeb6c4";
       if (k === "agent") return s === "done" ? "#059669" : (s === "no_op" || s === "failed") ? "#dc2626" : s === "planned" ? "#aeb6c4" : "#d97706";
       if (k === "artifact") return s === "missing" ? "#dc2626" : "#7c3aed";
       if (k === "blocker") return "#dc2626";
@@ -338,7 +338,13 @@
           if (a.content && d.path && !d.path.startsWith("http"))
             h += `<p><a href="/api/runs/${runId}/artifact?path=${encodeURIComponent(d.path)}&raw=1" target="_blank" rel="noopener">Open in new tab ↗</a></p>`;
           h += (d.path && d.path.endsWith(".svg") && a.content) ? `<div>${a.content}</div>` : `<div class="markdown">${marked.parse(a.content || a.error || "")}</div>`; }
-      } else if (d.kind === "blocker") { h += `<div class="markdown"><p><b>blocks:</b> ${d.blocks || "?"}</p><p>${d.label}</p></div>`; }
+      } else if (d.kind === "blocker") {
+        h += `<div class="markdown"><p><b>blocks:</b> ${d.blocks || "?"}</p><p>${d.label}</p></div>`;
+        if ((d.blocks || "") === "budget") {
+          h += `<p><input id="cap-input" type="number" step="5" placeholder="new cap $" style="width:90px"> ` +
+               `<button class="gate-go" onclick="raiseCap()">Raise cap & resume</button></p>`;
+        }
+      }
       else if (d.kind === "deps") {
         const deps = await (await fetch(`/api/runs/${runId}/deps`)).json();
         h += `<div class="markdown"><p><b>Dependencies required by architecture</b></p>`;
@@ -387,6 +393,14 @@
       else if (d.kind === "agent") { h += `<div class="markdown"><p>subagent · ${d.status}</p></div>`; }
       box.innerHTML = h; box.classList.add("open");
     }
+    window.raiseCap = async () => {
+      const v = parseFloat((document.getElementById("cap-input") || {}).value);
+      if (!v) return;
+      await fetch(`/api/runs/${runId}/budget`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ceiling: v }) });
+      const st = await (await fetch(`/api/runs/${runId}`)).json();
+      await fetch(`/api/runs/${runId}/retry`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage: st.stage || 3 }) });
+      $("inspect").classList.remove("open"); poll();
+    };
     window.continueRun = async (gate) => { await fetch(`/api/runs/${runId}/continue`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gate }) }); $("inspect").classList.remove("open"); poll(); };
     window.depDispChange = (sel) => {
       const row = sel.closest('.dep-row');
@@ -420,12 +434,29 @@
         else if (e.type === "blocker") lines.push(['a-block', `⛔ blocker: ${(e.payload || {}).what || ""}`]);
         else if (e.type === "done") lines.push(['a-phase', `✓ done`]);
       }
+      // SPEC §6: human lines only — tool name + its description; never raw JSON, prompt bodies,
+      // or absolute container paths.
+      const depath = (t) => (t || "").replace(/\/data\/runs\/[^/]+\/workspace\//g, "");
       for (const raw of (logText || "").split("\n")) {
         const s = raw.trim(); if (!s.startsWith("{")) continue;
         let ev; try { ev = JSON.parse(s); } catch { continue; }
         for (const c of ((ev.message || {}).content || [])) {
-          if (c.type === "text" && (c.text || "").trim()) lines.push(['a-text', "💬 " + c.text.slice(0, 200)]);
-          else if (c.type === "tool_use") lines.push(['a-tool', "🔧 " + c.name + " " + JSON.stringify(c.input || {}).slice(0, 120)]);
+          if (c.type === "text" && (c.text || "").trim()) {
+            const t = c.text.trim().split("\n")[0];                      // first line only, no prompt bodies
+            lines.push(['a-text', "💬 " + depath(t).slice(0, 160)]);
+          } else if (c.type === "tool_use") {
+            const inp = c.input || {};
+            let detail = inp.description || "";
+            if (!detail) {
+              if (c.name === "Task" || c.name === "Agent") detail = inp.description || (inp.prompt || "").split("\n")[0];
+              else if (inp.file_path) detail = inp.file_path;
+              else if (inp.command) detail = inp.command;
+              else if (inp.url) detail = inp.url;
+              else if (inp.query) detail = inp.query;
+            }
+            const icon = (c.name === "Task" || c.name === "Agent") ? "🤖" : "🔧";
+            lines.push(['a-tool', `${icon} ${c.name} — ${depath(detail).slice(0, 110)}`]);
+          }
         }
       }
       $("feed").innerHTML = lines.slice(-60).map(([cls, t]) => `<div class="${cls}">${t.replace(/</g, "&lt;")}</div>`).join("");

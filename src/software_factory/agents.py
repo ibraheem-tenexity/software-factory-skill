@@ -101,6 +101,18 @@ class AgentRegistry:
         ).fetchall()
         return [AgentRecord(**dict(r)) for r in rows]
 
+    def finalize_orphans(self, run_id: str, stage_ok: bool) -> int:
+        """SPEC §5 (no phantom agents): when a stage exits, close any still-running rows the
+        orchestrator forgot to finish — outcome 'unreported'; status done if the stage's gate
+        passed (its work evidently materialized), failed otherwise. Returns rows closed."""
+        cur = self._conn.execute(
+            "UPDATE agents SET status=?, outcome='unreported', ended_at=? "
+            "WHERE run_id=? AND status='running'",
+            ("done" if stage_ok else "failed", self._clock(), run_id),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
     def record(
         self,
         agent_id: str,
