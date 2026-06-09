@@ -5,9 +5,8 @@ the slice they need (never a pushed bundle). The ReasoningBank loop records each
 trajectory→verdict, recalls precedent by similarity (with confidence/success counts), and
 consolidates (distill + prune) between phases so memory stays small.
 
-In production this binds to ruflo over MCP (memory_usage / retrieveWithReasoning); here it is the
-namespace + precedent convention plus a local JSON fallback store, so the behaviour is
-deterministic and unit-testable and the skill degrades gracefully if ruflo is absent.
+This is the namespace + precedent convention with a local JSON store — deterministic and
+unit-testable. (ruflo/claude-flow was dropped; there is no external memory backend.)
 """
 from __future__ import annotations
 
@@ -31,7 +30,7 @@ def ticket_ns(tid) -> str:
 
 
 class MemoryStore:
-    """Local fallback brain: one JSON file per namespace. (ruflo AgentDB in production.)"""
+    """Local brain: one JSON file per namespace."""
 
     def __init__(self, path: str):
         self._dir = path
@@ -61,7 +60,7 @@ class MemoryStore:
         return self._load(namespace).get(key)
 
     def search(self, namespace: str, query: str) -> list:
-        """Relevance pull — substring fallback for ruflo's vector+BM25+RRF+rerank."""
+        """Relevance pull — simple substring match over the namespace."""
         q = query.lower()
         return [v for v in self._load(namespace).values() if q in json.dumps(v).lower()]
 

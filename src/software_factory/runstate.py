@@ -2,7 +2,7 @@
 
 The orchestrator is a `/loop` session: each re-entry loads state, does a slice of work,
 and saves. A crash or loop tick therefore resumes instead of restarting. The store is a
-small pluggable interface — JSON on disk for tests, ruflo memory (over MCP) in real runs.
+small pluggable interface — JSON on disk for tests, the per-run run.db (RunDB) in real runs.
 """
 from __future__ import annotations
 

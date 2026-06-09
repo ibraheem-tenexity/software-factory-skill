@@ -4,7 +4,7 @@ from software_factory.mcp_health import check_mcp, _INIT_REQUEST
 
 
 def _make_config(tmp_path, servers=None):
-    cfg = {"mcpServers": servers or {"ruflo": {"command": "echo", "args": ["hi"]}}}
+    cfg = {"mcpServers": servers or {"playwright": {"command": "echo", "args": ["hi"]}}}
     p = tmp_path / ".mcp.json"
     p.write_text(json.dumps(cfg))
     return str(p)
@@ -23,11 +23,11 @@ def _fake_runner(response_json=None, timeout=False, error=None):
 
 def test_healthy_mcp_returns_ok(tmp_path):
     cfg = _make_config(tmp_path)
-    resp = {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05", "serverInfo": {"name": "ruflo"}}}
+    resp = {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05", "serverInfo": {"name": "playwright"}}}
     checks = check_mcp(cfg, run=_fake_runner(response_json=resp))
     assert len(checks) == 1
     assert checks[0].ok is True
-    assert checks[0].name == "ruflo"
+    assert checks[0].name == "playwright"
     assert checks[0].detail == "connected"
 
 
@@ -61,7 +61,7 @@ def test_missing_config_returns_not_ok(tmp_path):
 
 def test_multiple_servers(tmp_path):
     servers = {
-        "ruflo": {"command": "claude-flow", "args": ["mcp", "start"]},
+        "railway": {"command": "railway", "args": ["mcp"]},
         "playwright": {"command": "npx", "args": ["-y", "@playwright/mcp"]},
     }
     cfg = _make_config(tmp_path, servers)

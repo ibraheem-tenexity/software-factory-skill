@@ -1,6 +1,6 @@
 """Run state must survive a crash or a /loop re-entry: load -> work -> save -> resume.
 
-The backend is pluggable (local JSON here; ruflo MCP in a real run) so the same
+The backend is pluggable (local JSON here; the per-run run.db in a real run) so the same
 resume contract is unit-testable without any live dependency.
 """
 from software_factory.runstate import RunState, JsonFileStore

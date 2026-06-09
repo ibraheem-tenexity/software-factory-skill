@@ -3,10 +3,6 @@
     "playwright": {
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest", "--headless", "--browser", "chromium"]
-    },
-    "ruflo": {
-      "command": "claude-flow",
-      "args": ["mcp", "start"]
     }
   }
 }

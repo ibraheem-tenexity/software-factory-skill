@@ -2,9 +2,8 @@
 
 Pull-not-push memory with the proposal's namespaces (project/<id>, run/<id>, tickets/<id>,
 coordination) and a ReasoningBank precedent loop (record trajectory→verdict, recall by
-similarity, consolidate = distill+prune between phases). In production these bind to ruflo over
-MCP; this module is the namespace + precedent CONVENTION plus a local fallback store so the
-behaviour is deterministic and unit-testable.
+similarity, consolidate = distill+prune between phases). This module is the namespace +
+precedent CONVENTION plus a local JSON store, so the behaviour is deterministic and unit-testable.
 """
 from software_factory import memory
 

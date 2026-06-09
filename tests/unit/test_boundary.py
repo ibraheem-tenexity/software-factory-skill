@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 CORE = ["budget", "runstate", "tickets", "repo", "deploy", "gate", "workspace", "creds", "streamlog", "db", "gates", "diagram", "memory", "artifacts"]
-HARNESS = ["agents", "sinks", "evidence", "console"]
+HARNESS = ["agents", "evidence", "console"]
 
 
 def test_core_modules_do_not_import_the_harness():

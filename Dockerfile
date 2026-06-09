@@ -13,7 +13,7 @@ ENV PUPPETEER_CACHE_DIR=/ms-puppeteer
 # whose postinstall must download a platform-native binary, which fails in this build
 # (omit=optional / no network for the optional dep) and leaves an unrunnable text stub.
 # We install it via the official native installer below instead.
-RUN npm install -g @railway/cli @playwright/mcp playwright @mermaid-js/mermaid-cli @claude-flow/cli
+RUN npm install -g @railway/cli @playwright/mcp playwright @mermaid-js/mermaid-cli @supabase/mcp-server-supabase
 RUN pip3 install --break-system-packages openai-agents 'markitdown[pdf]'
 
 # Chromium + OS libs into a SHARED path so the non-root runtime user can use them.
