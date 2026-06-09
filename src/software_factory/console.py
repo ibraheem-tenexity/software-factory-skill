@@ -219,9 +219,30 @@ class Console:
     def _load_state(self, run_id: str) -> RunState:
         return RunState.load(run_id, RunDB(self._paths(run_id)["db"]))
 
+    def _cumulative_spend(self) -> float:
+        """True cumulative spend across ALL runs + SF_COST_SUNK (money already spent on
+        wiped/off-surface runs, which /api/runs can no longer see). The basis for the hard cap."""
+        sunk = float(os.environ.get("SF_COST_SUNK", "0") or 0)
+        return sunk + sum((r.get("spent_usd") or 0) for r in self.list_runs())
+
     def _launch_stage(self, run_id: str, stage: int, prompt: str, env: dict) -> Any:
         """Prepare workspace, health-check MCP, and launch a claude -p process for a stage."""
         paths = self._paths(run_id)
+
+        # Mechanical cost ceiling: the per-run "$25 HARD cutoff" is only an advisory prompt and
+        # stages don't share a counter, so refuse to launch the next stage when cumulative spend
+        # (+ a stage reserve) would cross SF_COST_CEILING. This is the real hard stop.
+        ceiling = float(os.environ.get("SF_COST_CEILING", "50") or 50)
+        reserve = float(os.environ.get("SF_STAGE_RESERVE", "0") or 0)
+        cumulative = self._cumulative_spend()
+        if cumulative + reserve > ceiling:
+            RunDB(paths["db"]).add_blocker(
+                f"Cost ceiling: cumulative ${cumulative:.2f} + reserve ${reserve:.2f} "
+                f"> ceiling ${ceiling:.2f} — stage {stage} launch refused",
+                blocks="budget",
+            )
+            return None
+
         ws = prepare_workspace(
             self._runs_dir, run_id, stage,
         )

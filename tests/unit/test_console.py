@@ -262,6 +262,50 @@ def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
     assert any(e["data"]["source"] == "orchestrator" for e in g["edges"])
 
 
+def test_cumulative_spend_sums_runs_plus_sunk_offset(tmp_path, monkeypatch):
+    # The $50 ceiling must count money already spent on wiped/off-surface runs. SF_COST_SUNK
+    # carries that sunk total; _cumulative_spend = sum(spent_usd across live runs) + SF_COST_SUNK.
+    monkeypatch.setenv("SF_COST_SUNK", "10.16")
+    ids = iter(["run-a", "run-b"])
+    c = Console(str(tmp_path), launch=FakeLauncher(), new_id=lambda: next(ids))
+    assert c._cumulative_spend() == 10.16            # no runs yet -> just the sunk offset
+    a = c.start_run(RunRequest(description="x"))
+    st = c._load_state(a); st.spent_usd = 4.0; st.save()
+    b = c.start_run(RunRequest(description="y"))
+    st = c._load_state(b); st.spent_usd = 3.5; st.save()
+    assert abs(c._cumulative_spend() - (10.16 + 4.0 + 3.5)) < 1e-6
+
+
+def test_launch_refused_when_projected_cumulative_crosses_ceiling(tmp_path, monkeypatch):
+    # Mechanical hard stop: a stage launch is refused when cumulative + a stage reserve would
+    # cross the ceiling — so an advisory-only per-run budget can't silently blow past $50.
+    monkeypatch.setenv("SF_COST_CEILING", "10")
+    monkeypatch.setenv("SF_STAGE_RESERVE", "5")
+    monkeypatch.setenv("SF_COST_SUNK", "0")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="x"))
+    st = c._load_state(rid); st.spent_usd = 8.0; st.stage1_done = True; st.save()  # 8 + 5 reserve > 10
+    launcher.argv = None
+    assert c.start_stage2(rid) is None                   # refused
+    assert launcher.argv is None                          # no process launched
+    from software_factory.db import RunDB, db_path
+    blockers = " ".join(b.get("what", "") for b in RunDB(db_path(str(tmp_path), rid)).blockers())
+    assert "budget" in blockers.lower() or "ceiling" in blockers.lower()
+
+
+def test_launch_proceeds_when_under_ceiling(tmp_path, monkeypatch):
+    monkeypatch.setenv("SF_COST_CEILING", "50")
+    monkeypatch.setenv("SF_STAGE_RESERVE", "5")
+    monkeypatch.setenv("SF_COST_SUNK", "0")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="x"))
+    st = c._load_state(rid); st.spent_usd = 2.0; st.stage1_done = True; st.save()
+    assert c.start_stage2(rid) == rid                     # well under ceiling -> launches
+    assert launcher.argv is not None
+
+
 def test_resurfaced_pre_redesign_run_is_not_a_pipeline_run(tmp_path):
     # Budget-bleed scar: an old run dir (PRD.md on disk, but never started by THIS pipeline)
     # must NOT auto-advance. start_run records an "input" artifact in run.db; a resurfaced dir
