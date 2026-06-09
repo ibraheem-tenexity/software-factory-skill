@@ -322,7 +322,9 @@ class Console:
         """THIS run's own spend (the per-run budget basis). Prior runs/projects do NOT count —
         each run/project is independently capped. Authoritative cost from the run.log, falling
         back to the recorded runstate spend."""
-        return streamlog.cost_usd(self._full_log(run_id)) or (self._load_state(run_id).spent_usd or 0)
+        # max(): the log-derived figure normally leads, but the persisted runstate spend survives
+        # log loss / parser regressions — the budget guard must never silently under-count.
+        return max(streamlog.cost_usd(self._full_log(run_id)), self._load_state(run_id).spent_usd or 0)
 
     def _budget_ceiling(self, run_id: str) -> float:
         """SPEC §4: per-run ceiling — the run's own override, else SF_COST_CEILING (default 30)."""
@@ -557,6 +559,8 @@ class Console:
         if passing:
             state.deploy_url = passing[-1]["url"]
         state.phase = "done"
+        # Persist the final spend into run.db so cost survives log loss (SPEC §4 durability).
+        state.spent_usd = max(state.spent_usd or 0, streamlog.cost_usd(self._full_log(run_id)))
         state.save()
         AgentRegistry(paths["agents_db"]).finalize_orphans(run_id, stage_ok=True)
         return True

@@ -41,6 +41,18 @@ def test_cost_adds_inflight_stage_after_last_result():
     assert c > 0.0731                      # 0.0731 (finished) + estimate of the in-flight usage
 
 
+def test_cost_keeps_a_killed_sessions_estimate_when_a_later_session_finishes():
+    # run-d329e57c scar: the OOM-killed S3 session never emitted a result line; when the RETRY
+    # session's result landed, the killed session's ~$12 estimate was discarded (tail reset) and
+    # the run under-reported $28.37 as $16.31 — under-counting the budget guard. Cost must be
+    # session-aware: per session, a result is authoritative; without one, the estimate COUNTS.
+    s1 = '{"type":"result","subtype":"success","total_cost_usd":1.0,"session_id":"s1"}'
+    killed_usage = '{"type":"assistant","session_id":"killed","message":{"model":"claude-sonnet-4-6","content":[],"usage":{"input_tokens":100000,"output_tokens":50000}}}'
+    retry_result = '{"type":"result","subtype":"success","total_cost_usd":2.0,"session_id":"retry"}'
+    c = cost_usd(stream(s1, killed_usage, retry_result))
+    assert c > 3.0                      # 1.0 + 2.0 + the killed session's token estimate
+
+
 def test_cost_falls_back_to_summing_usage_via_price_table():
     # No result event yet (run in progress) -> sum assistant usage with the model's prices.
     c = cost_usd(stream(ASSIST_USAGE))

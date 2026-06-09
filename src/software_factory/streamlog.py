@@ -25,27 +25,29 @@ def _events(text: str):
 
 
 def cost_usd(text: str, prices: dict | None = None) -> float:
-    # run.log APPENDS every stage's claude -p session; each finished session emits one authoritative
-    # `result.total_cost_usd`. True cost = SUM of those, PLUS a token estimate for the in-flight
-    # session (events after the last result line). Taking only the last result lost earlier stages.
+    # run.log APPENDS every stage's claude -p session, keyed by session_id. Per session: its
+    # `result.total_cost_usd` is authoritative; usage after a session's result is the next logical
+    # session's estimate. A session that NEVER emitted a result (killed/OOM) keeps its token
+    # estimate — a later session's result must not discard it (the run-d329e57c under-count scar).
     prices = prices or PRICES
-    finished_total = 0.0            # Σ authoritative cost of completed sessions
-    tail_estimate = 0.0             # token estimate of the events since the last result line
+    finished: dict = {}             # session_id -> Σ authoritative result totals
+    tail: dict = {}                 # session_id -> token estimate since that session's last result
     for ev in _events(text):
+        sid = ev.get("session_id") or "?"
         if ev.get("type") == "result" and ev.get("total_cost_usd") is not None:
-            finished_total += ev["total_cost_usd"]
-            tail_estimate = 0.0     # everything after this belongs to the next session
+            finished[sid] = finished.get(sid, 0.0) + ev["total_cost_usd"]
+            tail[sid] = 0.0
             continue
         msg = ev.get("message") or {}
         usage = msg.get("usage")
         if usage:
             rate = prices.get(msg.get("model", ""), prices["claude-sonnet-4-6"])
-            tail_estimate += (
+            tail[sid] = tail.get(sid, 0.0) + (
                 usage.get("input_tokens", 0) * rate["input"]
                 + usage.get("cache_read_input_tokens", 0) * rate["cached"]
                 + usage.get("output_tokens", 0) * rate["output"]
             )
-    return round(finished_total + tail_estimate, 6)
+    return round(sum(finished.values()) + sum(tail.values()), 6)
 
 
 def agents(text: str) -> list[dict]:
