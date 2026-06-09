@@ -335,6 +335,8 @@
       if (d.kind === "artifact") {
         if (d.status === "missing") h += `<p class="chip bad" style="display:block;padding:.5rem">⚠ announced but the file does not exist — hollow, not real progress.</p>`;
         else { const a = await (await fetch(`/api/runs/${runId}/artifact?path=${encodeURIComponent(d.path)}`)).json();
+          if (a.content && d.path && !d.path.startsWith("http"))
+            h += `<p><a href="/api/runs/${runId}/artifact?path=${encodeURIComponent(d.path)}&raw=1" target="_blank" rel="noopener">Open in new tab ↗</a></p>`;
           h += (d.path && d.path.endsWith(".svg") && a.content) ? `<div>${a.content}</div>` : `<div class="markdown">${marked.parse(a.content || a.error || "")}</div>`; }
       } else if (d.kind === "blocker") { h += `<div class="markdown"><p><b>blocks:</b> ${d.blocks || "?"}</p><p>${d.label}</p></div>`; }
       else if (d.kind === "deps") {

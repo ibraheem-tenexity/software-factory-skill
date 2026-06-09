@@ -26,7 +26,7 @@ class NullSink:
 
 
 # outcome -> terminal status. A no-op produced nothing, so it is NOT 'done'.
-_STATUS_FOR = {"real_diff": "done", "no_op": "failed", "blocked": "blocked", "failed": "failed"}
+_STATUS_FOR = {"real_diff": "done", "success": "done", "no_op": "failed", "blocked": "blocked", "failed": "failed"}
 
 
 @dataclass

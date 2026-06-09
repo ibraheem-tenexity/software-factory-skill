@@ -47,6 +47,16 @@ def test_record_real_diff_marks_done_and_captures_cost(tmp_path):
     assert r.active() == []  # no longer running
 
 
+def test_success_outcome_is_a_done_synonym_not_failed(tmp_path):
+    # run-ce47692e scar: the Stage-3 orchestrator reported `finish-agent <id> success`; "success"
+    # wasn't in the outcome vocabulary so the .get(..., "failed") default mislabeled a SUCCESSFUL
+    # agent as failed (red on the canvas). "success" maps to done.
+    r = reg(tmp_path)
+    r.spawn("pm-lead", "run", None, "pm-lead", "claude-sonnet-4-6")
+    r.record("pm-lead", outcome="success", cost_usd=0.1)
+    assert r.get("pm-lead").status == "done"
+
+
 def test_no_op_turn_is_not_done_and_shows_in_no_op_rate(tmp_path):
     r = reg(tmp_path)
     r.spawn("a1", "run", 1, "build", "claude-opus-4-8")

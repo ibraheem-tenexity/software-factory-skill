@@ -181,7 +181,20 @@ class Handler(BaseHTTPRequestHandler):
             if rest.endswith("/events"):
                 return self._send(200, {"events": console.events(rest[:-len("/events")])})
             if rest.endswith("/artifact"):
-                return self._send(200, console.artifact(rest[:-len("/artifact")], qs.get("path", [""])[0]))
+                rid = rest[:-len("/artifact")]
+                apath = qs.get("path", [""])[0]
+                result = console.artifact(rid, apath)
+                if (qs.get("raw") or [None])[0] and "content" in result:
+                    # Raw mode: serve the file itself (right Content-Type) so e.g. the
+                    # architecture SVG opens full-size in its own browser tab.
+                    body = result["content"].encode()
+                    ctype = {"svg": "image/svg+xml", "html": "text/html", "json": "application/json",
+                             "md": "text/markdown"}.get(apath.rsplit(".", 1)[-1].lower(), "text/plain")
+                    self.send_response(200)
+                    self.send_header("Content-Type", f"{ctype}; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers(); self.wfile.write(body); return
+                return self._send(200, result)
             if rest.endswith("/log"):
                 rid = rest[:-len("/log")]
                 full = (qs.get("full") or [None])[0]
