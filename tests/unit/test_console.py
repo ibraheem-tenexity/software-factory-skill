@@ -302,6 +302,38 @@ def test_auto_resume_does_not_fire_at_the_deps_gate_or_when_budget_blocked(tmp_p
     assert c.auto_resume_dead_stage(rid) is False    # budget-stopped: waits for the operator
 
 
+def test_no_launch_path_can_resurrect_a_stopped_run(tmp_path):
+    # run-b71e06a3 scar: cancel marked phase='stopped', but the poller's auto-deps + auto-S3
+    # path didn't check phase — the canceled run auto-satisfied deps and LAUNCHED Stage 3.
+    # Every launch path must refuse terminal runs, and status must surface 'stopped'.
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="x"))
+    st = c._load_state(rid)
+    st.stage1_done = True; st.stage2_done = True; st.phase = "stopped"
+    st.deps_required = ["SUPABASE_URL"]                      # auto-satisfiable (mcp)
+    st.save()
+    launcher.argv = None
+    assert c.maybe_autosatisfy_deps(rid) is False            # terminal: deps never auto-resolve
+    st = c._load_state(rid); st.deps_satisfied = True; st.save()
+    assert c.start_stage3(rid) is None                       # refused
+    assert c.start_stage2(rid) is None                       # refused
+    assert c.retry_stage(rid, 3) is None                     # refused
+    assert launcher.argv is None                             # nothing launched
+    assert c.status(rid)["phase"] == "stopped"               # display tells the truth
+
+
+def test_auto_resume_never_resurrects_a_canceled_run(tmp_path):
+    # phase='stopped' (operator cancel) is terminal — auto-resume must not bring it back.
+    class DeadProc:
+        def poll(self): return -9
+    ids = iter(["run-cx"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: DeadProc(), new_id=lambda: next(ids))
+    rid = c.start_run(RunRequest(description="x"))
+    st = c._load_state(rid); st.phase = "stopped"; st.save()
+    assert c.auto_resume_dead_stage(rid) is False
+
+
 def test_budget_kill_is_recoverable_raise_and_resume(tmp_path, monkeypatch):
     # SPEC §4: at the per-run ceiling the poller kills the stage process and records a budget
     # blocker — but the run is RECOVERABLE: raise_budget(ceiling) clears the blocker and the
@@ -559,6 +591,28 @@ def test_graph_resolves_workspace_relative_artifact_paths(tmp_path):
     ws = os.path.join(str(tmp_path), rid, "workspace"); os.makedirs(ws, exist_ok=True)
     open(os.path.join(ws, "architecture.md"), "w").write("# Arch")
     assert art()["status"] == "created"                      # workspace-relative path now resolves
+
+
+def test_graph_resolves_project_subdir_relative_artifact_paths(tmp_path):
+    # run-1e17ea6a scar (3rd path variant): S1 agents work INSIDE the cloned repo
+    # (workspace/<project>/) and record paths relative to it ("PRD.md", "research/x.md").
+    # The resolver must try each first-level workspace subdir too — else real artifacts
+    # render 'missing' on the canvas.
+    import os
+    from software_factory.db import RunDB, db_path
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    proj = os.path.join(str(tmp_path), rid, "workspace", "autobuilder-singer")
+    os.makedirs(os.path.join(proj, "research"), exist_ok=True)
+    open(os.path.join(proj, "PRD.md"), "w").write("# PRD")
+    open(os.path.join(proj, "research", "horizon.md"), "w").write("# ctx")
+    db = RunDB(db_path(str(tmp_path), rid))
+    db.record_artifact("PRD", "PRD.md", kind="prd")
+    db.record_artifact("Context", "research/horizon.md", kind="doc")
+    statuses = {n["data"]["label"]: n["data"]["status"]
+                for n in c.graph(rid)["nodes"] if n["data"].get("kind") == "artifact"}
+    assert statuses["PRD"] == "created"
+    assert statuses["Context"] == "created"
 
 
 def test_graph_marks_artifacts_missing_until_the_file_really_exists(tmp_path):

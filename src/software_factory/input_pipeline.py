@@ -33,14 +33,27 @@ def persist_and_compose(
     description: str,
     files: list[dict],
     extract: Callable[[str], str] = extract_to_markdown,
+    extract_docx: Callable[[str], str] | None = None,
 ) -> list[str]:
-    """Write attached files into `input_dir`, converting PDFs to Markdown, then
-    write the composed Stage 1 input to `input_dir/context.txt`.
+    """Write attached files into `input_dir`, converting PDFs (markitdown) and Word docs
+    (pandoc) to Markdown, then write the composed Stage 1 input to `input_dir/context.txt`.
 
     Returns the input-relative paths written (for artifact emission).
     """
     written: list[str] = []
     docs: list[tuple[str, str]] = []
+
+    def _convert(raw: bytes, name: str, converter: Callable[[str], str]) -> None:
+        src_path = os.path.join(input_dir, name)
+        with open(src_path, "wb") as out:
+            out.write(raw)
+        md = converter(src_path)            # raises on empty/failed extraction
+        os.remove(src_path)                 # consumed by the conversion
+        md_name = name + ".md"
+        with open(os.path.join(input_dir, md_name), "w") as out:
+            out.write(md)
+        docs.append((name, md))
+        written.append(md_name)
 
     for f in (files or []):
         name = os.path.basename(f.get("name") or "")
@@ -51,16 +64,10 @@ def persist_and_compose(
         raw = base64.b64decode(b64)
 
         if name.lower().endswith(".pdf"):
-            pdf_path = os.path.join(input_dir, name)
-            with open(pdf_path, "wb") as out:
-                out.write(raw)
-            md = extract(pdf_path)          # raises on empty/failed extraction
-            os.remove(pdf_path)             # consumed by the conversion
-            md_name = name + ".md"
-            with open(os.path.join(input_dir, md_name), "w") as out:
-                out.write(md)
-            docs.append((name, md))
-            written.append(md_name)
+            _convert(raw, name, extract)
+        elif name.lower().endswith(".docx"):
+            from .docx_extract import extract_to_markdown as _docx_default
+            _convert(raw, name, extract_docx or _docx_default)
         else:
             with open(os.path.join(input_dir, name), "wb") as out:
                 out.write(raw)

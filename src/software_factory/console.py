@@ -375,8 +375,8 @@ class Console:
     def current_phase(self, run_id: str) -> str:
         """The derived current phase for the header/API — never the stale RunState value."""
         state = self._load_state(run_id)
-        if state.phase == "done":
-            return "done"
+        if state.phase in ("done", "stopped"):
+            return state.phase
         db = RunDB(self._paths(run_id)["db"])
         recorded = db.phase_status()
         implied = set()
@@ -390,12 +390,15 @@ class Console:
             return state.phase
         return max(active, key=lambda n: idx[n])
 
+    def _terminal(self, state) -> bool:
+        return state.phase in ("done", "stopped")
+
     def maybe_autosatisfy_deps(self, run_id: str) -> bool:
         """SPEC §3: if NO required token classifies as 'provide' (human secret), auto-satisfy
         deps (mock/mcp defaults apply) so the deps gate never becomes a hidden manual pause.
         Returns True iff deps are satisfied after the call."""
         state = self._load_state(run_id)
-        if not state.stage2_done:
+        if self._terminal(state) or not state.stage2_done:
             return False
         if state.deps_satisfied:
             return True
@@ -455,8 +458,8 @@ class Console:
         if not self.is_pipeline_run(run_id):
             return False
         state = self._load_state(run_id)
-        if state.phase == "done" or not self.stage_finished(run_id):
-            return False
+        if state.phase in ("done", "stopped") or not self.stage_finished(run_id):
+            return False   # terminal/canceled runs are never resurrected
         stage = state.stage
         db = RunDB(self._paths(run_id)["db"])
         if any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers()):
@@ -636,8 +639,8 @@ class Console:
     def start_stage2(self, run_id: str) -> str | None:
         """Launch Stage 2. Returns run_id or None if blocked (prior stage alive / MCP unhealthy)."""
         state = self._load_state(run_id)
-        if not state.stage1_done:
-            return None
+        if self._terminal(state) or not state.stage1_done:
+            return None   # terminal (done/stopped) runs are never relaunched
         if self._stage_process_alive(run_id):
             return None   # SPEC §1: never two stage orchestrators for one run
         req = RunRequest(description=state.description or "", target=state.deploy_target or "railway")
@@ -783,8 +786,8 @@ class Console:
     def start_stage3(self, run_id: str, extra_creds: dict | None = None) -> str | None:
         """Launch Stage 3. Returns run_id or None if blocked."""
         state = self._load_state(run_id)
-        if not state.stage2_done or not state.deps_satisfied:
-            return None
+        if self._terminal(state) or not state.stage2_done or not state.deps_satisfied:
+            return None   # terminal (done/stopped) runs are never relaunched
         if self._stage_process_alive(run_id):
             return None   # SPEC §1: never two stage orchestrators for one run
         req = RunRequest(description=state.description or "", target=state.deploy_target or "railway")
@@ -810,6 +813,8 @@ class Console:
         if self._stage_process_alive(run_id):
             return None   # SPEC §1: never two stage orchestrators for one run
         state = self._load_state(run_id)
+        if state.phase == "stopped":
+            return None   # canceled runs stay canceled (budget-paused runs are NOT 'stopped')
         if stage >= 2 and not state.stage1_done:
             return None
         if stage >= 3 and not state.stage2_done:
@@ -941,11 +946,19 @@ class Console:
         return {"cleared": gate}
 
     def artifact(self, run_id: str, path: str) -> dict:
-        # Stage agents run with cwd=workspace and record paths relative to it (e.g. "architecture.md"),
-        # while the host records base-relative paths (e.g. "input/..."). Resolve against BOTH — but
-        # the resolved file must stay under the run base (no traversal escape).
+        # Artifact paths arrive relative to wherever the recording agent worked: the run base
+        # (host: "input/..."), the workspace (orchestrator: "architecture.md"), or the cloned
+        # project repo INSIDE the workspace (S1 agents: "PRD.md", "research/x.md"). Resolve
+        # against all three levels — the file must still stay under the run base (no escape).
         base = os.path.realpath(self._paths(run_id)["base"])
-        for root in (base, os.path.join(base, "workspace")):
+        ws = os.path.join(base, "workspace")
+        roots = [base, ws]
+        try:
+            roots += [os.path.join(ws, d) for d in sorted(os.listdir(ws))
+                      if os.path.isdir(os.path.join(ws, d))]
+        except OSError:
+            pass
+        for root in roots:
             full = os.path.realpath(os.path.join(root, path))
             if os.path.commonpath([full, base]) == base and os.path.isfile(full):
                 with open(full, "r", errors="replace") as f:
