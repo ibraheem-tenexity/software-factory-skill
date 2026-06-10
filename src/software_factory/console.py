@@ -808,11 +808,19 @@ class Console:
         return {"cleared": gate}
 
     def artifact(self, run_id: str, path: str) -> dict:
-        # Stage agents run with cwd=workspace and record paths relative to it (e.g. "architecture.md"),
-        # while the host records base-relative paths (e.g. "input/..."). Resolve against BOTH — but
-        # the resolved file must stay under the run base (no traversal escape).
+        # Artifact paths arrive relative to wherever the recording agent worked: the run base
+        # (host: "input/..."), the workspace (orchestrator: "architecture.md"), or the cloned
+        # project repo INSIDE the workspace (S1 agents: "PRD.md", "research/x.md"). Resolve
+        # against all three levels — the file must still stay under the run base (no escape).
         base = os.path.realpath(self._paths(run_id)["base"])
-        for root in (base, os.path.join(base, "workspace")):
+        ws = os.path.join(base, "workspace")
+        roots = [base, ws]
+        try:
+            roots += [os.path.join(ws, d) for d in sorted(os.listdir(ws))
+                      if os.path.isdir(os.path.join(ws, d))]
+        except OSError:
+            pass
+        for root in roots:
             full = os.path.realpath(os.path.join(root, path))
             if os.path.commonpath([full, base]) == base and os.path.isfile(full):
                 with open(full, "r", errors="replace") as f:

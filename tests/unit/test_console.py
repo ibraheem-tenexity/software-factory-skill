@@ -580,6 +580,28 @@ def test_graph_resolves_workspace_relative_artifact_paths(tmp_path):
     assert art()["status"] == "created"                      # workspace-relative path now resolves
 
 
+def test_graph_resolves_project_subdir_relative_artifact_paths(tmp_path):
+    # run-1e17ea6a scar (3rd path variant): S1 agents work INSIDE the cloned repo
+    # (workspace/<project>/) and record paths relative to it ("PRD.md", "research/x.md").
+    # The resolver must try each first-level workspace subdir too — else real artifacts
+    # render 'missing' on the canvas.
+    import os
+    from software_factory.db import RunDB, db_path
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    proj = os.path.join(str(tmp_path), rid, "workspace", "autobuilder-singer")
+    os.makedirs(os.path.join(proj, "research"), exist_ok=True)
+    open(os.path.join(proj, "PRD.md"), "w").write("# PRD")
+    open(os.path.join(proj, "research", "horizon.md"), "w").write("# ctx")
+    db = RunDB(db_path(str(tmp_path), rid))
+    db.record_artifact("PRD", "PRD.md", kind="prd")
+    db.record_artifact("Context", "research/horizon.md", kind="doc")
+    statuses = {n["data"]["label"]: n["data"]["status"]
+                for n in c.graph(rid)["nodes"] if n["data"].get("kind") == "artifact"}
+    assert statuses["PRD"] == "created"
+    assert statuses["Context"] == "created"
+
+
 def test_graph_marks_artifacts_missing_until_the_file_really_exists(tmp_path):
     # The "no hollow done" scar at the artifact level: a recorded artifact whose file does not
     # exist is status="missing" (red on the canvas), not a fake green "created".
