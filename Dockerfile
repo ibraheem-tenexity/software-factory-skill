@@ -37,6 +37,15 @@ RUN curl -fsSL https://claude.ai/install.sh | bash \
     && ln -sf /home/node/.local/bin/claude /usr/local/bin/claude \
     && claude --version
 
+# OpenCode (the second runtime, SPEC §9) — PINNED to the version the stream-parser fixture
+# was captured against (tests/fixtures/opencode-run.jsonl); its event schema is not a stable
+# wire format, so an unpinned upgrade could silently break cost parsing. Lands in
+# $HOME/.opencode; symlink onto PATH. The container has no opencode auth.json, so
+# OPENROUTER_API_KEY (runtime env) is load-bearing for this runtime.
+RUN curl -fsSL https://opencode.ai/install | VERSION=1.16.0 bash \
+    && ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode \
+    && opencode --version
+
 WORKDIR /app
 COPY . /app
 
@@ -47,7 +56,9 @@ RUN mkdir -p /home/node/.claude/skills /ms-puppeteer \
     && chown -R node:node /app /home/node /ms-playwright /ms-puppeteer
 
 # Entrypoint drops to uid 1000 (node) even if the platform starts us as root.
-# Required at runtime (set on the service): ANTHROPIC_API_KEY, OPENAI_API_KEY, GH_TOKEN, RAILWAY_TOKEN, SUPABASE_ACCESS_TOKEN
+# Required at runtime (set on the service): ANTHROPIC_API_KEY, OPENAI_API_KEY, GH_TOKEN,
+# RAILWAY_TOKEN, SUPABASE_ACCESS_TOKEN, OPENROUTER_API_KEY (opencode runtime + concierge),
+# and optionally SF_RUNTIME / SF_CHAT_MODEL (runtime defaults; the UI picker overrides per-run).
 # PYTHONPATH so `import software_factory` works for any python invocation (the orchestrator
 # shells fresh python processes, not just the server).
 ENV PYTHONUNBUFFERED=1 SF_BIND=0.0.0.0 PYTHONPATH=/app/src
