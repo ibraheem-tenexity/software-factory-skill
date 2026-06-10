@@ -89,6 +89,9 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
 - MCP (stage-aware workspace `.mcp.json`): playwright (headless) for all stages; Stage 3 additionally
   `railway` (local `railway mcp`, project-token auth — project-scoped tools only) and `supabase`
   (`@supabase/mcp-server-supabase`, `SUPABASE_ACCESS_TOKEN` from env).
+- **Deploy project isolation:** built apps deploy into the `software-factory-projects` Railway
+  project only — never into the factory's own project. The runner env's project-scoped
+  `RAILWAY_TOKEN`/`RAILWAY_PROJECT_ID` define the target; agents never substitute another.
 - Stage-3 deploy playbook (the proven sequence): preflight `npm audit` + bump HIGH/CRITICAL CVEs +
   regen lockfile; Dockerfile with build-time placeholder env for module-load clients; build REMOTELY
   (never `npm run build` in the shared container); `create_service → set_variables → deploy →

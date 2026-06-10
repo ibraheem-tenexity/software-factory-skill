@@ -57,6 +57,12 @@ A no-op sub-agent turn (empty diff) is a retry/escalate signal, never a completi
 Deploy ONLY to this run's own dedicated service `sf-<run_id>` — **NEVER** a bare/un-named deploy
 (it would overwrite the factory console).
 
+**Project isolation:** built apps deploy into the **software-factory-projects** Railway project and
+NOWHERE else — never into the factory's own project (the one hosting the console). Your env's
+`RAILWAY_TOKEN`/`RAILWAY_PROJECT_ID` are already scoped to software-factory-projects: trust them,
+never substitute another token or project id, and if `environment_status` ever shows a different
+project, STOP and `add-blocker` instead of deploying.
+
 ### Use the local Railway MCP (`railway`) — wired into your workspace
 It is the local stdio MCP server (`railway mcp`) and authenticates with the container's
 `RAILWAY_TOKEN` (a **project** token). VERIFIED, rely on this:
