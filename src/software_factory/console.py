@@ -403,7 +403,12 @@ class Console:
     def auto_resume_dead_stage(self, run_id: str) -> bool:
         """SPEC §3 zero-touch: a stage whose process died without passing its gate (OOM/crash)
         is resumed by the HOST — a human noticing the stall is an intervention. Never fires at
-        the deps gate (stage complete, waiting by design) or on a budget stop (operator's call)."""
+        the deps gate (stage complete, waiting by design) or on a budget stop (operator's call).
+        Never resurrects a GHOST: a run.db with no recorded artifacts (e.g. created by a mere
+        status query after state loss) has no brief to build from — resuming it burns spend on
+        an empty prompt (the run-b594a5f4/run-0eb69fdd double-ghost scar)."""
+        if not self.is_pipeline_run(run_id):
+            return False
         state = self._load_state(run_id)
         if state.phase == "done" or not self.stage_finished(run_id):
             return False

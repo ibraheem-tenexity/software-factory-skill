@@ -984,3 +984,15 @@ def test_status_includes_stage_fields(tmp_path):
     assert st["stage1_done"] is False
     assert st["stage2_done"] is False
     assert st["deps_satisfied"] is False
+
+
+def test_auto_resume_never_resurrects_a_ghost_run(tmp_path):
+    # A run.db created by a mere status query (state lost, no artifacts) must NOT auto-resume:
+    # there is no brief to build from — resuming burns spend on an empty prompt
+    # (the run-b594a5f4/run-0eb69fdd double-ghost scar).
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    c.status("run-ghost")           # creates an empty run.db as a side effect
+    assert c.is_pipeline_run("run-ghost") is False
+    assert c.auto_resume_dead_stage("run-ghost") is False
+    assert launcher.argv is None    # nothing launched
