@@ -16,18 +16,16 @@ import os
 _MCP_PATTERNS = ("SUPABASE_", "DATABASE_URL", "RAILWAY_", "NEXTAUTH_")
 # LLM keys already present on the runner service.
 _FROM_ENV = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")
-# The app's LLM access standard — a human secret in principle, but SPEC §3 zero-touch applies:
-# present in the runner env -> just 'env' (inherit, don't pause); absent everywhere -> a
-# WORKING mock beats a silent pause. 'provide' must never become a hidden manual stop.
-_PROVIDE = ("OPENROUTER_API_KEY",)
+# The app's LLM standard. SPEC §3 zero-touch: if the real key sits in the runner env it
+# classifies 'env' (auto); if absent it classifies 'mock' (the SKILL builds a WORKING local
+# fake) — the pipeline never pauses for a human unless a token genuinely has no fallback.
+_LLM_KEYS = ("OPENROUTER_API_KEY",)
 
 
 def classify_dep(name: str) -> str:
     n = name.upper()
-    if n in _PROVIDE:
-        if os.environ.get(n):
-            return "env"     # runner already holds the real key — inherit it
-        return "mock"        # no key anywhere — working local fake, no hidden pause
+    if n in _LLM_KEYS:
+        return "env" if os.environ.get(n) else "mock"
     if n in _FROM_ENV:
         return "env"
     for pat in _MCP_PATTERNS:

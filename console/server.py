@@ -92,6 +92,7 @@ def _auto_advance(rid: str):
 
 
 _narrated: set = set()
+_auto_resumed: dict = {}   # run_id -> crash auto-resume attempts (bounded at 2 per server life)
 
 
 def _narrate(rid: str, key: str, text: str):
@@ -147,6 +148,13 @@ def _poll_transitions():
                         _narrate(rid, "budget-%d" % int(console._budget_ceiling(rid)),
                                  "⏸ Budget cap reached — stage stopped (state preserved). "
                                  "Raise the cap to continue.")
+                    # SPEC §3 zero-touch: resume a crashed stage automatically (bounded).
+                    if not st.get("done") and _auto_resumed.get(rid, 0) < 2:
+                        if console.auto_resume_dead_stage(rid):
+                            _auto_resumed[rid] = _auto_resumed.get(rid, 0) + 1
+                            _narrate(rid, "resume-%d" % _auto_resumed[rid],
+                                     "⚠️ Stage process died mid-flight — auto-resumed "
+                                     f"(attempt {_auto_resumed[rid]}/2).")
                     _narrate_run(rid, st)
                 except Exception:
                     pass

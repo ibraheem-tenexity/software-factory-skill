@@ -262,6 +262,46 @@ def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
     assert any(e["data"]["source"] == "orchestrator" for e in g["edges"])
 
 
+def test_auto_resume_relaunches_a_dead_incomplete_stage(tmp_path):
+    # SPEC §3 zero-touch: a stage that died mid-flight (OOM/crash — process gone, its gate not
+    # passed) is auto-resumed by the host. A human noticing the stall is an intervention.
+    class FakeProc:
+        def __init__(self): self.exit_code = None
+        def poll(self): return self.exit_code
+    proc = FakeProc(); argvs = []
+    def launcher(argv, env=None, log_path=None, cwd=None):
+        argvs.append(argv); return proc
+    ids = iter(["run-ar"])
+    c = Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids))
+    rid = c.start_run(RunRequest(description="x"))
+    st = c._load_state(rid)
+    st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True; st.stage = 3
+    st.save()
+    proc.exit_code = None
+    assert c.auto_resume_dead_stage(rid) is False    # process alive -> not dead, no resume
+    proc.exit_code = -9                              # killed mid-stage-3, no verification recorded
+    assert c.auto_resume_dead_stage(rid) is True     # host resumes stage 3 itself
+    assert "Stage 3" in argvs[-1][2]
+
+
+def test_auto_resume_does_not_fire_at_the_deps_gate_or_when_budget_blocked(tmp_path):
+    # A run waiting at the deps gate (stage complete) or stopped for budget is NOT a dead stage.
+    class FakeProc:
+        def __init__(self): self.exit_code = 0
+        def poll(self): return self.exit_code
+    ids = iter(["run-ng"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: FakeProc(), new_id=lambda: next(ids))
+    rid = c.start_run(RunRequest(description="x"))
+    st = c._load_state(rid)
+    st.stage1_done = True; st.stage2_done = True; st.stage = 2   # finished S2, waiting on deps
+    st.save()
+    assert c.auto_resume_dead_stage(rid) is False
+    from software_factory.db import RunDB, db_path
+    st = c._load_state(rid); st.stage = 3; st.deps_satisfied = True; st.save()
+    RunDB(db_path(str(tmp_path), rid)).add_blocker("Budget cap reached", blocks="budget")
+    assert c.auto_resume_dead_stage(rid) is False    # budget-stopped: waits for the operator
+
+
 def test_budget_kill_is_recoverable_raise_and_resume(tmp_path, monkeypatch):
     # SPEC §4: at the per-run ceiling the poller kills the stage process and records a budget
     # blocker — but the run is RECOVERABLE: raise_budget(ceiling) clears the blocker and the
@@ -369,14 +409,15 @@ def test_deps_auto_satisfy_when_no_human_secret_needed(tmp_path):
     assert c._load_state(rid).deps_satisfied is True
 
 
-def test_deps_do_not_auto_satisfy_when_operator_explicitly_chose_provide(tmp_path):
-    # SPEC §3: an EXPLICIT operator 'provide' disposition still pauses the run at the gate.
+def test_deps_do_not_auto_satisfy_when_a_provide_token_is_required(tmp_path):
+    # SPEC §3: 'provide' now ONLY happens when the operator explicitly sets it at the gate —
+    # and when they do, the run waits for the real secret instead of auto-launching.
     c = console(tmp_path, FakeLauncher())
     rid = c.start_run(RunRequest(description="x"))
     st = c._load_state(rid)
     st.stage2_done = True
-    st.deps_required = ["PARTNER_PORTAL_KEY"]
-    st.deps_disposition = {"PARTNER_PORTAL_KEY": "provide"}  # operator's explicit choice
+    st.deps_required = ["PARTNER_SSO_SECRET"]
+    st.deps_disposition = {"PARTNER_SSO_SECRET": "provide"}  # operator explicitly requires a human value
     st.save()
     assert c.maybe_autosatisfy_deps(rid) is False
     assert c._load_state(rid).deps_satisfied is False
