@@ -355,6 +355,26 @@ class Console:
             AgentRegistry(self._paths(run_id)["agents_db"]).finalize_orphans(run_id, stage_ok=False)
         return True   # over-ceiling: stopped now (killed) or already stopped
 
+    def auto_resume_dead_stage(self, run_id: str) -> bool:
+        """SPEC §3 zero-touch: a stage whose process died without passing its gate (OOM/crash)
+        is resumed by the HOST — a human noticing the stall is an intervention. Never fires at
+        the deps gate (stage complete, waiting by design) or on a budget stop (operator's call)."""
+        state = self._load_state(run_id)
+        if state.phase == "done" or not self.stage_finished(run_id):
+            return False
+        stage = state.stage
+        db = RunDB(self._paths(run_id)["db"])
+        if any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers()):
+            return False
+        incomplete = (
+            (stage == 1 and not state.stage1_done)
+            or (stage == 2 and not state.stage2_done)
+            or (stage == 3 and not db.has_passing_verification())
+        )
+        if not incomplete:
+            return False
+        return self.retry_stage(run_id, stage) is not None
+
     def raise_budget(self, run_id: str, ceiling: float) -> dict:
         """SPEC §4 recovery: persist a higher per-run ceiling and clear the budget blocker(s);
         the operator then resumes via /retry against the preserved workspace."""

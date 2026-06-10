@@ -476,7 +476,7 @@
       attach(sel.value);
     }
     $("runs").onchange = (e) => attach(e.target.value);
-    function attach(id) { runId = id; localStorage.setItem("sf_run", id); laidOut = false; cy.elements().remove(); if (timer) clearInterval(timer); poll(); timer = setInterval(poll, 2000); loadChatHistory(id); }
+    function attach(id) { runId = id; localStorage.setItem("sf_run", id); history.replaceState(null, "", `?run=${encodeURIComponent(id)}`); laidOut = false; cy.elements().remove(); if (timer) clearInterval(timer); poll(); timer = setInterval(poll, 2000); loadChatHistory(id); }
 
     // ---- Chat logic ----
     let chatRunId = null, pendingFiles = [], sseSource = null;
@@ -753,13 +753,27 @@
     window.showProjectsScreen = () => {
       if (timer) clearInterval(timer);
       if (sseSource) sseSource.close();
+      localStorage.removeItem("sf_run");                       // explicit back -> stay on projects after reload
+      history.replaceState(null, "", location.pathname);
       $("app-main").style.display = "none";
       $("projects-screen").classList.remove("hidden");
       loadProjectsScreen();
     };
 
-    // Boot: show projects screen, init graph lazily
-    loadProjectsScreen();
+    // Boot with state persistence: restore the run from ?run= (shareable) or the last-open
+    // run in localStorage — a reload must NEVER dump the operator back on the projects screen.
+    (async () => {
+      const fromUrl = new URLSearchParams(location.search).get("run");
+      const remembered = fromUrl || localStorage.getItem("sf_run");
+      if (remembered) {
+        try {
+          const st = await (await fetch(`/api/runs/${remembered}`)).json();
+          if (st && !st.error) { openProject(remembered); return; }
+        } catch {}
+        localStorage.removeItem("sf_run");                     // stale/deleted run -> fall through
+      }
+      loadProjectsScreen();
+    })();
   </script>
 </body>
 </html>

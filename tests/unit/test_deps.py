@@ -15,8 +15,11 @@ def test_classify_runner_llm_keys_are_env():
     assert classify_dep("ANTHROPIC_API_KEY") == "env"
 
 
-def test_classify_openrouter_is_provide():
-    assert classify_dep("OPENROUTER_API_KEY") == "provide"
+def test_classify_openrouter_never_auto_pauses(monkeypatch):
+    # SPEC §3: OPENROUTER classifies env (key present) or mock (absent) — never auto-'provide'.
+    # 'provide' only happens when the operator explicitly sets it at the gate.
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    assert classify_dep("OPENROUTER_API_KEY") == "mock"
 
 
 def test_classify_external_integrations_default_to_mock():
@@ -25,8 +28,8 @@ def test_classify_external_integrations_default_to_mock():
 
 
 def test_default_dispositions_maps_every_required():
-    d = default_dispositions(["OPENROUTER_API_KEY", "SUPABASE_URL", "ADP_CLIENT_ID"])
-    assert d == {"OPENROUTER_API_KEY": "provide", "SUPABASE_URL": "mcp", "ADP_CLIENT_ID": "mock"}
+    d = default_dispositions(["SUPABASE_URL", "ADP_CLIENT_ID", "NEXTAUTH_SECRET"])
+    assert d == {"SUPABASE_URL": "mcp", "ADP_CLIENT_ID": "mock", "NEXTAUTH_SECRET": "mcp"}
 
 
 def test_resolve_satisfied_mock_mcp_env_autosatisfy():
@@ -55,3 +58,17 @@ def test_extract_env_creds_handles_strings_and_dicts():
         "BLANK": {"disposition": "provide", "value": ""},   # empty → skipped
     }
     assert extract_env_creds(deps) == {"OPENROUTER_API_KEY": "sk-or-x", "LEGACY_KEY": "rawvalue"}
+
+
+def test_provide_token_present_in_env_auto_classifies_env(monkeypatch):
+    # SPEC §3 (zero-touch): a 'provide' token whose REAL value already sits in the runner env
+    # needs no human — it classifies 'env' and the gate auto-satisfies.
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-real")
+    assert classify_dep("OPENROUTER_API_KEY") == "env"
+
+
+def test_openrouter_absent_from_env_auto_classifies_mock(monkeypatch):
+    # SPEC §3 (zero-touch): when the LLM key is NOT available, the app ships with a WORKING
+    # mock (the SKILL's mock guidance) instead of pausing the pipeline for a human.
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    assert classify_dep("OPENROUTER_API_KEY") == "mock"
