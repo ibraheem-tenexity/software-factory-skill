@@ -47,6 +47,24 @@ def test_record_real_diff_marks_done_and_captures_cost(tmp_path):
     assert r.active() == []  # no longer running
 
 
+def test_finalize_orphans_closes_running_agents(tmp_path):
+    # SPEC §5: no phantom agents — when a stage exits, still-running rows are finalized:
+    # outcome 'unreported'; status done if the stage's gate passed, failed otherwise.
+    r = reg(tmp_path)
+    r.spawn("a1", "run", 1, "build", "m")
+    r.spawn("a2", "run", 2, "build", "m")
+    r.record("a1", outcome="real_diff", cost_usd=0.1, pr=1, diff_lines=10)   # properly finished
+    n = r.finalize_orphans("run", stage_ok=True)
+    assert n == 1                                            # only a2 was orphaned
+    a2 = r.get("a2")
+    assert a2.status == "done" and a2.outcome == "unreported"
+    assert r.get("a1").outcome == "real_diff"                # untouched
+
+    r.spawn("a3", "run", 3, "build", "m")
+    r.finalize_orphans("run", stage_ok=False)                # e.g. budget kill
+    assert r.get("a3").status == "failed"
+
+
 def test_success_outcome_is_a_done_synonym_not_failed(tmp_path):
     # run-ce47692e scar: the Stage-3 orchestrator reported `finish-agent <id> success`; "success"
     # wasn't in the outcome vocabulary so the .get(..., "failed") default mislabeled a SUCCESSFUL

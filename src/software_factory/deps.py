@@ -10,18 +10,24 @@ Only the disposition (metadata) is ever persisted; provided VALUES never touch d
 """
 from __future__ import annotations
 
+import os
+
 # Tokens the build agent can provision/derive itself via the Supabase + Railway MCP.
 _MCP_PATTERNS = ("SUPABASE_", "DATABASE_URL", "RAILWAY_", "NEXTAUTH_")
 # LLM keys already present on the runner service.
 _FROM_ENV = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")
-# The app's LLM access standard — operator must supply the real key (can't be mocked/generated).
+# The app's LLM access standard — a human secret in principle, but SPEC §3 zero-touch applies:
+# present in the runner env -> just 'env' (inherit, don't pause); absent everywhere -> a
+# WORKING mock beats a silent pause. 'provide' must never become a hidden manual stop.
 _PROVIDE = ("OPENROUTER_API_KEY",)
 
 
 def classify_dep(name: str) -> str:
     n = name.upper()
     if n in _PROVIDE:
-        return "provide"
+        if os.environ.get(n):
+            return "env"     # runner already holds the real key — inherit it
+        return "mock"        # no key anywhere — working local fake, no hidden pause
     if n in _FROM_ENV:
         return "env"
     for pat in _MCP_PATTERNS:

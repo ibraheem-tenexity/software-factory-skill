@@ -64,28 +64,75 @@ def _push_sse(run_id: str, msgs: list[ChatMessage]):
 
 
 _stage2_launched: set = set()
+_stage3_launched: set = set()
 
 
 def _auto_advance(rid: str):
-    """Fix #2: flip the stage-done flags + launch the next stage when ready, so runs advance
-    without a manual nudge or an open browser. detect_* set stage{1,2}_done and surface deps;
-    Stage 2 auto-launches once Stage 1 is done; Stage 3 still waits for the deps gate."""
+    """SPEC §1+§3: flip stage-done (gate + finished process) and launch the next stage, so runs
+    advance with no manual nudge. Stage 2 auto-launches when Stage 1 is done; deps auto-satisfy
+    when no human secret is needed; Stage 3 auto-launches once deps are satisfied. Launch guards
+    are marked ONLY on success so a refusal (e.g. prior process still alive) retries next tick."""
     try:
         if not console.is_pipeline_run(rid):
             return  # resurfaced pre-redesign dir (empty run.db) — never auto-advance/zombie-launch it
         if console.detect_stage1_done(rid):
             s = console.status(rid)
             if s.get("stage") == 1 and rid not in _stage2_launched:
-                _stage2_launched.add(rid)
-                console.start_stage2(rid)
-        console.detect_stage2_done(rid)  # flips stage2_done + parses required tokens
+                if console.start_stage2(rid):
+                    _stage2_launched.add(rid)
+        if console.detect_stage2_done(rid):  # flips stage2_done + parses required tokens
+            console.maybe_autosatisfy_deps(rid)   # SPEC §3: no 'provide' token -> no pause
+            s = console.status(rid)
+            if s.get("deps_satisfied") and s.get("stage") == 2 and rid not in _stage3_launched:
+                if console.start_stage3(rid):
+                    _stage3_launched.add(rid)
         console.detect_stage3_done(rid)  # marks done ONLY with a recorded passing Playwright verification
     except Exception:
         pass
 
 
+_narrated: set = set()
+
+
+def _narrate(rid: str, key: str, text: str):
+    """SPEC §6: deterministic chat-panel narration — one message per (run, event), no LLM.
+    Dedup survives server restarts by checking the persisted chat history, not just memory."""
+    if (rid, key) in _narrated:
+        return
+    _narrated.add((rid, key))
+    store = ChatStore(_chat_path(rid))
+    try:
+        if any(m.content == text for m in store.history()):
+            return  # already narrated in a previous server life
+    except Exception:
+        pass
+    msg = ChatMessage(role="assistant", content=text)
+    store.append(msg)
+    _push_sse(rid, [msg])
+
+
+def _narrate_run(rid: str, st: dict):
+    links = console.run_links(rid)
+    if links.get("repo"):
+        _narrate(rid, "repo", f"📦 Source repo: {links['repo']}")
+    if st.get("stage1_done"):
+        _narrate(rid, "s1", "✅ Research complete — design & architecture starting.")
+    if st.get("stage2_done"):
+        if st.get("deps_satisfied"):
+            _narrate(rid, "deps", "🔓 Design complete — dependencies satisfied, build starting.")
+        elif st.get("deps_required"):
+            need = [n for n in (st.get("deps_required") or [])]
+            _narrate(rid, "depswait", "⏸ Design complete — waiting for you to supply: " + ", ".join(need))
+    if links.get("live") and not st.get("done"):
+        _narrate(rid, "deployed", f"🚀 Deployed (verifying): {links['live']}")
+    if st.get("done"):
+        live = st.get("deploy_url") or links.get("live") or ""
+        repo = links.get("repo") or ""
+        _narrate(rid, "done", f"✅ Done — Live demo: {live}" + (f" · 📦 Repo: {repo}" if repo else ""))
+
+
 def _poll_transitions():
-    """Background thread: auto-advance stages + push chat notifications."""
+    """Background thread: auto-advance stages, enforce the per-run budget, narrate progress."""
     while True:
         time.sleep(3)
         try:
@@ -95,6 +142,14 @@ def _poll_transitions():
                     continue
                 _auto_advance(rid)
                 st = console.status(rid)
+                try:
+                    if not st.get("done") and console.enforce_budget(rid):
+                        _narrate(rid, "budget-%d" % int(console._budget_ceiling(rid)),
+                                 "⏸ Budget cap reached — stage stopped (state preserved). "
+                                 "Raise the cap to continue.")
+                    _narrate_run(rid, st)
+                except Exception:
+                    pass
                 if st.get("done") or st.get("phase") == "pending":
                     continue
                 prev = _run_stages.get(rid, 0)
@@ -309,6 +364,15 @@ class Handler(BaseHTTPRequestHandler):
             if result:
                 return self._send(200, {"run_id": result, "stage": 3})
             return self._send(409, {"error": "stage2 not done or deps not satisfied"})
+        if self.path.startswith("/api/runs/") and self.path.endswith("/budget"):
+            run_id = self.path[len("/api/runs/"):-len("/budget")]
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            try:
+                ceiling = float(body.get("ceiling"))
+            except (TypeError, ValueError):
+                return self._send(400, {"error": "ceiling (number) required"})
+            return self._send(200, console.raise_budget(run_id, ceiling))
         if self.path.startswith("/api/runs/") and self.path.endswith("/retry"):
             run_id = self.path[len("/api/runs/"):-len("/retry")]
             length = int(self.headers.get("Content-Length", 0))

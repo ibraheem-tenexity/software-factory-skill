@@ -15,8 +15,13 @@ def test_classify_runner_llm_keys_are_env():
     assert classify_dep("ANTHROPIC_API_KEY") == "env"
 
 
-def test_classify_openrouter_is_provide():
-    assert classify_dep("OPENROUTER_API_KEY") == "provide"
+def test_classify_openrouter_is_env_aware(monkeypatch):
+    # SPEC §3 zero-touch: present in the runner env -> inherit (env); absent -> working mock.
+    # 'provide' must never become a hidden manual pause on the default path.
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-x")
+    assert classify_dep("OPENROUTER_API_KEY") == "env"
+    monkeypatch.delenv("OPENROUTER_API_KEY")
+    assert classify_dep("OPENROUTER_API_KEY") == "mock"
 
 
 def test_classify_external_integrations_default_to_mock():
@@ -24,9 +29,10 @@ def test_classify_external_integrations_default_to_mock():
         assert classify_dep(n) == "mock", n
 
 
-def test_default_dispositions_maps_every_required():
+def test_default_dispositions_maps_every_required(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-x")
     d = default_dispositions(["OPENROUTER_API_KEY", "SUPABASE_URL", "ADP_CLIENT_ID"])
-    assert d == {"OPENROUTER_API_KEY": "provide", "SUPABASE_URL": "mcp", "ADP_CLIENT_ID": "mock"}
+    assert d == {"OPENROUTER_API_KEY": "env", "SUPABASE_URL": "mcp", "ADP_CLIENT_ID": "mock"}
 
 
 def test_resolve_satisfied_mock_mcp_env_autosatisfy():
