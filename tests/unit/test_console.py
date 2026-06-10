@@ -302,6 +302,27 @@ def test_auto_resume_does_not_fire_at_the_deps_gate_or_when_budget_blocked(tmp_p
     assert c.auto_resume_dead_stage(rid) is False    # budget-stopped: waits for the operator
 
 
+def test_no_launch_path_can_resurrect_a_stopped_run(tmp_path):
+    # run-b71e06a3 scar: cancel marked phase='stopped', but the poller's auto-deps + auto-S3
+    # path didn't check phase — the canceled run auto-satisfied deps and LAUNCHED Stage 3.
+    # Every launch path must refuse terminal runs, and status must surface 'stopped'.
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="x"))
+    st = c._load_state(rid)
+    st.stage1_done = True; st.stage2_done = True; st.phase = "stopped"
+    st.deps_required = ["SUPABASE_URL"]                      # auto-satisfiable (mcp)
+    st.save()
+    launcher.argv = None
+    assert c.maybe_autosatisfy_deps(rid) is False            # terminal: deps never auto-resolve
+    st = c._load_state(rid); st.deps_satisfied = True; st.save()
+    assert c.start_stage3(rid) is None                       # refused
+    assert c.start_stage2(rid) is None                       # refused
+    assert c.retry_stage(rid, 3) is None                     # refused
+    assert launcher.argv is None                             # nothing launched
+    assert c.status(rid)["phase"] == "stopped"               # display tells the truth
+
+
 def test_auto_resume_never_resurrects_a_canceled_run(tmp_path):
     # phase='stopped' (operator cancel) is terminal — auto-resume must not bring it back.
     class DeadProc:

@@ -285,8 +285,8 @@ class Console:
     def current_phase(self, run_id: str) -> str:
         """The derived current phase for the header/API — never the stale RunState value."""
         state = self._load_state(run_id)
-        if state.phase == "done":
-            return "done"
+        if state.phase in ("done", "stopped"):
+            return state.phase
         db = RunDB(self._paths(run_id)["db"])
         recorded = db.phase_status()
         implied = set()
@@ -300,12 +300,15 @@ class Console:
             return state.phase
         return max(active, key=lambda n: idx[n])
 
+    def _terminal(self, state) -> bool:
+        return state.phase in ("done", "stopped")
+
     def maybe_autosatisfy_deps(self, run_id: str) -> bool:
         """SPEC §3: if NO required token classifies as 'provide' (human secret), auto-satisfy
         deps (mock/mcp defaults apply) so the deps gate never becomes a hidden manual pause.
         Returns True iff deps are satisfied after the call."""
         state = self._load_state(run_id)
-        if not state.stage2_done:
+        if self._terminal(state) or not state.stage2_done:
             return False
         if state.deps_satisfied:
             return True
@@ -511,8 +514,8 @@ class Console:
     def start_stage2(self, run_id: str) -> str | None:
         """Launch Stage 2. Returns run_id or None if blocked (prior stage alive / MCP unhealthy)."""
         state = self._load_state(run_id)
-        if not state.stage1_done:
-            return None
+        if self._terminal(state) or not state.stage1_done:
+            return None   # terminal (done/stopped) runs are never relaunched
         if self._stage_process_alive(run_id):
             return None   # SPEC §1: never two stage orchestrators for one run
         req = RunRequest(description=state.description or "", target=state.deploy_target or "railway")
@@ -656,8 +659,8 @@ class Console:
     def start_stage3(self, run_id: str, extra_creds: dict | None = None) -> str | None:
         """Launch Stage 3. Returns run_id or None if blocked."""
         state = self._load_state(run_id)
-        if not state.stage2_done or not state.deps_satisfied:
-            return None
+        if self._terminal(state) or not state.stage2_done or not state.deps_satisfied:
+            return None   # terminal (done/stopped) runs are never relaunched
         if self._stage_process_alive(run_id):
             return None   # SPEC §1: never two stage orchestrators for one run
         req = RunRequest(description=state.description or "", target=state.deploy_target or "railway")
@@ -682,6 +685,8 @@ class Console:
         if self._stage_process_alive(run_id):
             return None   # SPEC §1: never two stage orchestrators for one run
         state = self._load_state(run_id)
+        if state.phase == "stopped":
+            return None   # canceled runs stay canceled (budget-paused runs are NOT 'stopped')
         if stage >= 2 and not state.stage1_done:
             return None
         if stage >= 3 and not state.stage2_done:
