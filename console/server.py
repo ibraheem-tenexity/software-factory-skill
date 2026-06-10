@@ -397,6 +397,7 @@ class Handler(BaseHTTPRequestHandler):
                 target=body.get("target", "railway"),
                 credentials=creds,
                 context_files=body.get("files", []),
+                runtime=body.get("runtime", ""),
             )
             return self._send(200, {"run_id": console.start_run(req)})
         return self._send(404, {"error": "not found"})
