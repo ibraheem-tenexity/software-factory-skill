@@ -151,3 +151,17 @@ def test_empty_request_runtime_falls_back_to_env(tmp_path, monkeypatch):
     c = console(tmp_path, launcher)
     run_id = c.start_run(RunRequest(description="guestbook"))
     assert c._load_state(run_id).runtime == "opencode"
+
+
+def test_list_runs_flags_budget_stopped(tmp_path):
+    # A budget-stopped run must surface as stopped, never as live/active (the
+    # frozen-ghosts-shown-green UI confusion).
+    from software_factory.db import RunDB
+    from software_factory.console import run_paths
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="x"))
+    RunDB(run_paths(str(tmp_path), rid)["db"]).add_blocker(
+        "Budget cap $0.01 reached (spent $2.66) — stage stopped.", blocks="budget")
+    runs = {r["run_id"]: r for r in c.list_runs()}
+    assert runs[rid]["budget_stopped"] is True

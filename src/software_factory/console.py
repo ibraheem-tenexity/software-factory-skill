@@ -851,6 +851,13 @@ class Console:
             if not os.path.isdir(base) or not os.path.exists(os.path.join(base, "run.db")):
                 continue
             st = self._load_state(name)
+            # A budget-stopped run is NOT active: surfacing it with a live/green status misled
+            # the operator into thinking frozen ghosts were consuming (the b594a5f4/0eb69fdd UI
+            # confusion). An uncleared budget blocker = stopped, full stop.
+            budget_stopped = any(
+                b.get("blocks") == "budget" and not b["cleared"]
+                for b in RunDB(self._paths(name)["db"]).blockers()
+            )
             runs.append({
                 "run_id": name,
                 "phase": self.current_phase(name),
@@ -858,6 +865,7 @@ class Console:
                 "deploy_url": st.deploy_url,
                 "spent_usd": streamlog.cost_usd(self._full_log(name)) or st.spent_usd,
                 "stage": st.stage,
+                "budget_stopped": budget_stopped,
             })
         runs.sort(key=lambda r: os.path.getmtime(os.path.join(self._runs_dir, r["run_id"])), reverse=True)
         return runs

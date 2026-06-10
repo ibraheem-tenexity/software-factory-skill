@@ -168,6 +168,7 @@
     .project-card .pc-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
     .project-card .pc-dot.active { background: var(--success); }
     .project-card .pc-dot.inactive { background: #b9c0cc; }
+    .project-card .pc-dot.stopped { background: var(--amber); }
     .project-card .pc-info { flex: 1; min-width: 0; }
     .project-card .pc-name { font: 600 .88rem var(--sans); color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .project-card .pc-meta { font: .72rem var(--mono); color: var(--muted-fg); margin-top: .1rem; }
@@ -727,20 +728,22 @@
     async function loadProjectsScreen() {
       let runs = [];
       try { runs = (await (await fetch("/api/runs")).json()).runs || []; } catch {}
-      const active = runs.filter(r => r.phase !== "done");
-      const inactive = runs.filter(r => r.phase === "done");
+      // budget-stopped runs are NOT active — green dots on frozen ghosts misled the operator
+      const active = runs.filter(r => r.phase !== "done" && !r.budget_stopped);
+      const inactive = runs.filter(r => r.phase === "done" || r.budget_stopped);
 
       const render = (list, container) => {
         container.innerHTML = "";
         for (const r of list) {
-          const isActive = r.phase !== "done";
+          const dot = r.budget_stopped ? "stopped" : (r.phase !== "done" ? "active" : "inactive");
+          const label = r.budget_stopped ? "⏸ budget-stopped · " + r.phase : r.phase;
           const card = document.createElement("div");
           card.className = "project-card";
           card.onclick = () => openProject(r.run_id);
-          card.innerHTML = `<div class="pc-dot ${isActive ? "active" : "inactive"}"></div>
+          card.innerHTML = `<div class="pc-dot ${dot}"></div>
             <div class="pc-info">
               <div class="pc-name">${r.run_id}</div>
-              <div class="pc-meta">${r.phase}${r.description ? " · " + r.description.slice(0, 60) : ""}</div>
+              <div class="pc-meta">${label}${r.description ? " · " + r.description.slice(0, 60) : ""}</div>
             </div>
             <div class="pc-cost">$${(r.spent_usd || 0).toFixed(2)}</div>`;
           container.appendChild(card);
