@@ -360,8 +360,8 @@ class Console:
         is resumed by the HOST — a human noticing the stall is an intervention. Never fires at
         the deps gate (stage complete, waiting by design) or on a budget stop (operator's call)."""
         state = self._load_state(run_id)
-        if state.phase == "done" or not self.stage_finished(run_id):
-            return False
+        if state.phase in ("done", "stopped") or not self.stage_finished(run_id):
+            return False   # terminal/canceled runs are never resurrected
         stage = state.stage
         db = RunDB(self._paths(run_id)["db"])
         if any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers()):

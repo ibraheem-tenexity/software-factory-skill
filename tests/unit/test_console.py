@@ -302,6 +302,17 @@ def test_auto_resume_does_not_fire_at_the_deps_gate_or_when_budget_blocked(tmp_p
     assert c.auto_resume_dead_stage(rid) is False    # budget-stopped: waits for the operator
 
 
+def test_auto_resume_never_resurrects_a_canceled_run(tmp_path):
+    # phase='stopped' (operator cancel) is terminal — auto-resume must not bring it back.
+    class DeadProc:
+        def poll(self): return -9
+    ids = iter(["run-cx"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: DeadProc(), new_id=lambda: next(ids))
+    rid = c.start_run(RunRequest(description="x"))
+    st = c._load_state(rid); st.phase = "stopped"; st.save()
+    assert c.auto_resume_dead_stage(rid) is False
+
+
 def test_budget_kill_is_recoverable_raise_and_resume(tmp_path, monkeypatch):
     # SPEC §4: at the per-run ceiling the poller kills the stage process and records a budget
     # blocker — but the run is RECOVERABLE: raise_budget(ceiling) clears the blocker and the
