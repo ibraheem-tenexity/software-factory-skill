@@ -86,6 +86,13 @@ It is the local stdio MCP server (`railway mcp`) and authenticates with the cont
 7. `record-artifact "Live URL" <url> deploy`.
 
 ### Deploy preflight — Railway BLOCKS the build if you skip these
+- **Fail locally, not on Railway (notification discipline):** every FAILED Railway deploy
+  emails the whole team. Before EVERY deploy: verify module resolution locally — every package
+  referenced by configs (postcss.config, tailwind, next.config, tsconfig paths) must
+  `require.resolve`/`npm ls` cleanly ("Cannot find module X" must NEVER reach Railway). This is
+  dependency RESOLUTION only — still never run the full `npm run build` locally (OOM).
+- **Batch fixes per failed deploy:** when a deploy DOES fail, read the FULL build log, fix ALL
+  errors it shows in one pass, then ONE redeploy — never one redeploy per error.
 - **Dependency security gate:** Railway refuses builds with HIGH/CRITICAL dependency CVEs (the build
   dies at "scheduling build" with the reason only in the FULL build logs). Run `npm audit`, bump every
   flagged package to its patched version (e.g. `npm install next@^14.2.35`), regenerate the lockfile,
