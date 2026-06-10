@@ -165,3 +165,51 @@ def test_list_runs_flags_budget_stopped(tmp_path):
         "Budget cap $0.01 reached (spent $2.66) — stage stopped.", blocks="budget")
     runs = {r["run_id"]: r for r in c.list_runs()}
     assert runs[rid]["budget_stopped"] is True
+
+
+def test_lingering_opencode_proc_with_completed_session_counts_as_finished(tmp_path, monkeypatch):
+    # run-45b8c4d5 wedge: opencode procs LINGER after session-complete; a live handle must not
+    # block auto-resume when the log shows step_finish reason=stop and 5+ min of silence.
+    import json as _json, os as _os, time as _time
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+
+    class LiveProc:
+        def poll(self): return None   # zombie: never exits
+
+    ids = iter(["run-zz"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: LiveProc(), new_id=lambda: next(ids),
+                extract=lambda p: "# x")
+    rid = c.start_run(RunRequest(description="x"))
+    log = _os.path.join(str(tmp_path), rid, "run.log")
+    with open(log, "w") as f:
+        f.write(_json.dumps({"type": "step_finish", "part": {"type": "step-finish",
+                "reason": "stop", "cost": 0.1}}) + "\n")
+    old = _time.time() - 400
+    _os.utime(log, (old, old))
+    assert c.stage_finished(rid) is True
+
+    # mid-flight pause (reason=tool-calls) must NOT count as finished even when idle
+    with open(log, "w") as f:
+        f.write(_json.dumps({"type": "step_finish", "part": {"type": "step-finish",
+                "reason": "tool-calls", "cost": 0.1}}) + "\n")
+    _os.utime(log, (old, old))
+    assert c.stage_finished(rid) is False
+
+
+def test_claude_runtime_live_handle_never_false_finishes(tmp_path):
+    # A claude stage quietly inside a long tool call must never false-finish into a
+    # concurrent relaunch (SPEC §1 double-orchestrator race).
+    import os as _os, time as _time
+
+    class LiveProc:
+        def poll(self): return None
+
+    ids = iter(["run-cl"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: LiveProc(), new_id=lambda: next(ids),
+                extract=lambda p: "# x")
+    rid = c.start_run(RunRequest(description="x"))
+    log = _os.path.join(str(tmp_path), rid, "run.log")
+    open(log, "w").write("{}\n")
+    old = _time.time() - 4000
+    _os.utime(log, (old, old))
+    assert c.stage_finished(rid) is False

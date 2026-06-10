@@ -8,6 +8,7 @@ procedure, not inside any stage.
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 import uuid
@@ -284,14 +285,58 @@ class Console:
     def stage_finished(self, run_id: str) -> bool:
         """SPEC §1: the stage's orchestrator process has finished — the tracked process exited,
         or (no usable handle, e.g. after a server restart) the run.log has been idle past a
-        2-minute grace (covers crash/OOM without wedging the run)."""
+        2-minute grace (covers crash/OOM without wedging the run).
+
+        Opencode-runtime exception: a LIVE handle is not proof of life — opencode processes
+        LINGER after their session completes (run-45b8c4d5 wedged with a working app, a cleanly
+        ended session, and a zombie proc blocking auto-resume). When the log's LAST event is the
+        session-terminal `step_finish reason=stop` AND the log has been idle past a 5-minute
+        grace, the stage is finished regardless of the handle. Claude stages are exempt: their
+        long quiet tool calls (health-waits, builds) must never false-finish into a concurrent
+        relaunch (the §1 double-orchestrator race)."""
+        log = os.path.join(self._paths(run_id)["base"], "run.log")
         p = self._procs.get(run_id)
         if p is not None and hasattr(p, "poll"):
-            return p.poll() is not None
-        log = os.path.join(self._paths(run_id)["base"], "run.log")
+            if p.poll() is not None:
+                return True
+            if (self._load_state(run_id).runtime == "opencode"
+                    and os.path.exists(log)
+                    and (time.time() - os.path.getmtime(log)) > 300
+                    and self._log_session_completed(log)):
+                return True
+            return False
         if not os.path.exists(log):
             return True
         return (time.time() - os.path.getmtime(log)) > 120
+
+    @staticmethod
+    def _log_session_completed(log_path: str) -> bool:
+        """True when the log's last parseable event is opencode's session-terminal
+        step_finish with reason=stop (a finished session, not a mid-flight pause)."""
+        try:
+            with open(log_path, "rb") as f:
+                f.seek(0, 2)
+                f.seek(max(0, f.tell() - 65536))
+                tail = f.read().decode("utf-8", "replace")
+        except OSError:
+            return False
+        last = None
+        for line in tail.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if ev.get("type") in ("step_start", "step_finish", "error"):
+                last = ev
+        if not last:
+            return False
+        if last.get("type") == "error":
+            return True   # crashed session — finished by definition
+        return (last.get("type") == "step_finish"
+                and (last.get("part") or {}).get("reason") == "stop")
 
     # ---- SPEC §1: host-derived phase state machine ----------------------------------------
     _CLOSED = ("done", "passed", "completed")

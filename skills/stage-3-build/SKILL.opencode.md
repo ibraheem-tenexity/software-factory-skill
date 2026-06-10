@@ -93,7 +93,7 @@ It is the local stdio MCP server (`railway mcp`) and authenticates with the cont
    `until curl health` loop. If it does not go healthy in that window the deploy FAILED → call
    `get_logs` (build AND deploy), READ the real error, fix it yourself (recorded as a logical fix
    agent), redeploy.
-7. `record-artifact "Live URL" <url> deploy`.
+7. **IMMEDIATELY** `record-artifact "Live URL" <url> deploy` — the INSTANT generate_domain returns, BEFORE health-waits or testing. Skipping this blinds ALL monitoring (operator, verifier, console) to a successful deploy: run-45b8c4d5's deploy was live for 30+ minutes while every observer believed it had never converged.
 
 ### Deploy preflight — Railway BLOCKS the build if you skip these
 - **Fail locally, not on Railway (notification discipline):** every FAILED Railway deploy
