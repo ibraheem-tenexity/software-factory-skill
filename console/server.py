@@ -92,7 +92,12 @@ def _auto_advance(rid: str):
 
 
 _narrated: set = set()
-_auto_resumed: dict = {}   # run_id -> crash auto-resume attempts (bounded at 2 per server life)
+# run_id -> crash auto-resume attempts, bounded per server life. Configurable: long opencode
+# sessions (multi-hour Kimi build/test loops) crash more often than claude's — run-b594a5f4
+# exhausted 2 resumes mid-test-phase and stalled 12h. The bound exists to stop crash loops,
+# not to ration recovery; budget enforcement is the real spend brake.
+_AUTO_RESUME_MAX = int(os.environ.get("SF_AUTO_RESUME_MAX", "2") or 2)
+_auto_resumed: dict = {}
 
 
 def _narrate(rid: str, key: str, text: str):
@@ -149,12 +154,12 @@ def _poll_transitions():
                                  "⏸ Budget cap reached — stage stopped (state preserved). "
                                  "Raise the cap to continue.")
                     # SPEC §3 zero-touch: resume a crashed stage automatically (bounded).
-                    if not st.get("done") and _auto_resumed.get(rid, 0) < 2:
+                    if not st.get("done") and _auto_resumed.get(rid, 0) < _AUTO_RESUME_MAX:
                         if console.auto_resume_dead_stage(rid):
                             _auto_resumed[rid] = _auto_resumed.get(rid, 0) + 1
                             _narrate(rid, "resume-%d" % _auto_resumed[rid],
                                      "⚠️ Stage process died mid-flight — auto-resumed "
-                                     f"(attempt {_auto_resumed[rid]}/2).")
+                                     f"(attempt {_auto_resumed[rid]}/{_AUTO_RESUME_MAX}).")
                     _narrate_run(rid, st)
                 except Exception:
                     pass
