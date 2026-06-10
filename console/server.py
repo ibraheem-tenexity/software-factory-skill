@@ -191,11 +191,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        if self.path == "/" or self.path == "/index.html":
-            with open(os.path.join(HERE, "index.html"), "rb") as f:
-                return self._send(200, f.read(), "text/html")
         parsed = urlparse(self.path)
         path, qs = parsed.path, parse_qs(parsed.query)
+        # Match on the PATH only — self.path carries the query string, so "/?run=x" must still
+        # serve the console (the ?run= restore link 404'd as raw JSON when matched verbatim).
+        if path == "/" or path == "/index.html":
+            with open(os.path.join(HERE, "index.html"), "rb") as f:
+                return self._send(200, f.read(), "text/html")
         if path in ("/api/runs", "/api/runs/"):
             return self._send(200, {"runs": console.list_runs()})
 
