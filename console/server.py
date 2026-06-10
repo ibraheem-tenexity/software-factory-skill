@@ -225,6 +225,7 @@ class Handler(BaseHTTPRequestHandler):
             message = body.get("message", "")
             files = body.get("files", [])
             images = body.get("images", [])
+            runtime = body.get("runtime", "")  # claude | opencode from the UI picker
 
             store = ChatStore(_chat_path(run_id)) if run_id else None
             user_msg = ChatMessage(role="user", content=message, msg_type="text",
@@ -236,7 +237,7 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 result_run_id, response_msgs = _run_async(
-                    _chat_runner.handle_message(run_id, message, files, images)
+                    _chat_runner.handle_message(run_id, message, files, images, runtime=runtime)
                 )
             except Exception as e:
                 return self._send(500, {"error": str(e)})

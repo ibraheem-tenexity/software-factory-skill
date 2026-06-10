@@ -69,17 +69,20 @@ software factory pipeline.
 """
 
 
-def make_tools(console: Console, attachments=lambda: []) -> list[FunctionTool]:
+def make_tools(console: Console, attachments=lambda: [],
+               runtime=lambda: "") -> list[FunctionTool]:
     """Create agent tools that delegate to Console methods.
 
     `attachments` returns the files attached to the message currently being
-    handled, so start_pipeline can thread them into the run.
+    handled, so start_pipeline can thread them into the run. `runtime` returns
+    the runtime the operator picked in the UI (claude | opencode | "").
     """
 
     async def _start_pipeline(description: str, context: str = "",
                               budget: float = 25.0, target: str = "railway") -> str:
         req = RunRequest(description=description, context=context,
-                         budget=budget, target=target, context_files=attachments())
+                         budget=budget, target=target, context_files=attachments(),
+                         runtime=runtime())
         run_id = console.start_run(req)
         return json.dumps({"run_id": run_id, "status": "started"})
 
@@ -164,7 +167,9 @@ class ChatAgentRunner:
     def __init__(self, console: Console):
         self._console = console
         self._pending_files: list = []
-        tools = make_tools(console, attachments=lambda: self._pending_files)
+        self._pending_runtime: str = ""
+        tools = make_tools(console, attachments=lambda: self._pending_files,
+                           runtime=lambda: self._pending_runtime)
         self._agent = Agent(
             name="Factory Concierge",
             instructions=CONCIERGE_INSTRUCTIONS,
@@ -174,7 +179,8 @@ class ChatAgentRunner:
         self._conversations: dict[str, list] = {}
 
     async def handle_message(self, run_id: str | None, user_msg: str,
-                              files: list, images: list) -> tuple[str | None, list[ChatMessage]]:
+                              files: list, images: list,
+                              runtime: str = "") -> tuple[str | None, list[ChatMessage]]:
         """Process a user message through the agent. Returns (run_id, response_messages)."""
         from agents import Runner
 
@@ -198,12 +204,15 @@ class ChatAgentRunner:
 
         history.append({"role": "user", "content": user_input})
 
-        # Make attachments available to start_pipeline, which fires inside Runner.run.
+        # Make attachments + the picked runtime available to start_pipeline, which fires
+        # inside Runner.run.
         self._pending_files = files or []
+        self._pending_runtime = runtime or ""
         try:
             result = await Runner.run(self._agent, input=history)
         finally:
             self._pending_files = []
+            self._pending_runtime = ""
 
         response_msgs = []
         now = time.time()

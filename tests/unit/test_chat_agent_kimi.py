@@ -83,3 +83,18 @@ def test_wellformed_tool_call_still_fires(monkeypatch):
             runner.handle_message("run-1", "hi", [], []))
     dep = next(m for m in msgs if m.msg_type == "dep_request")
     assert dep.metadata["dep_names"] == ["RAILWAY_TOKEN"]
+
+
+def test_picker_runtime_threads_into_start_pipeline(monkeypatch):
+    import json
+    from unittest.mock import MagicMock
+    from software_factory.chat_agent import make_tools
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
+    captured = {}
+    mock_console = MagicMock()
+    mock_console.start_run = lambda req: captured.update(runtime=req.runtime) or "run-x"
+    tools = make_tools(mock_console, runtime=lambda: "opencode")
+    start = next(t for t in tools if t.name == "start_pipeline")
+    asyncio.get_event_loop().run_until_complete(
+        start.on_invoke_tool(None, json.dumps({"description": "x"})))
+    assert captured["runtime"] == "opencode"

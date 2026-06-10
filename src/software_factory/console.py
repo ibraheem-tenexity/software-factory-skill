@@ -65,6 +65,7 @@ class RunRequest:
     target: str = "railway"
     credentials: dict = field(default_factory=dict)
     context_files: list = field(default_factory=list)
+    runtime: str = ""  # claude | opencode; empty -> SF_RUNTIME env (default claude)
 
 
 def run_paths(runs_dir: str, run_id: str) -> dict:
@@ -384,7 +385,8 @@ class Console:
         state.creds_provided = sorted(env.keys())
         state.stage = 1
         # Pin the agent runtime for the whole run (all stages + retries) at start.
-        state.runtime = os.environ.get("SF_RUNTIME", "claude")
+        # Per-request choice (the UI's Claude/Kimi picker) wins over the SF_RUNTIME env default.
+        state.runtime = req.runtime or os.environ.get("SF_RUNTIME", "claude")
         state.save()
 
         prompt = make_prompt_stage1(req, run_id, self._runs_dir, runtime=state.runtime)

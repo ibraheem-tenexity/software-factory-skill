@@ -133,3 +133,21 @@ def test_graph_orchestrator_label_reflects_runtime(tmp_path, monkeypatch):
     g = c.graph(run_id)
     orch = next(n for n in g["nodes"] if n["data"]["id"] == "orchestrator")
     assert orch["data"]["label"].startswith("Kimi")
+
+
+def test_request_runtime_overrides_env_default(tmp_path, monkeypatch):
+    # The UI picker sends runtime per-request; it must beat the server's SF_RUNTIME default.
+    monkeypatch.setenv("SF_RUNTIME", "claude")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="guestbook", runtime="opencode"))
+    assert c._load_state(run_id).runtime == "opencode"
+    assert launcher.argv[0] == "opencode"
+
+
+def test_empty_request_runtime_falls_back_to_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    run_id = c.start_run(RunRequest(description="guestbook"))
+    assert c._load_state(run_id).runtime == "opencode"

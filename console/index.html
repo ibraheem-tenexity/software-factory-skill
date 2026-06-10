@@ -187,11 +187,11 @@
         <div class="model-row">
           <div class="model-opt selected" data-model="claude" onclick="selectModel(this)">
             <div class="model-name">Claude</div>
-            <div class="model-sub">Anthropic Sonnet 4</div>
+            <div class="model-sub">Claude Code · Opus/Sonnet</div>
           </div>
           <div class="model-opt" data-model="kimi" onclick="selectModel(this)">
             <div class="model-name">Kimi K 2.6</div>
-            <div class="model-sub">Moonshot AI</div>
+            <div class="model-sub">OpenCode · Moonshot AI</div>
           </div>
         </div>
         <button class="new-project-go" onclick="createNewProject()">Create Project &rarr;</button>
@@ -526,7 +526,8 @@
       try {
         const res = await fetch("/api/chat", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ run_id: chatRunId, message: text, files, images })
+          body: JSON.stringify({ run_id: chatRunId, message: text, files, images,
+            runtime: selectedModel === "kimi" ? "opencode" : "claude" })
         });
         const data = await res.json();
         hideTyping();
