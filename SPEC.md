@@ -90,6 +90,12 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
 - The activity feed renders human-readable lines (tool name + its description), never raw JSON,
   never prompt bodies, never absolute container paths.
 
+- **Console auth** (env-gated: `SF_GOOGLE_CLIENT_ID` + `SF_AUTH_EMAILS`, optional
+  `SF_AUTH_SECRET` for restart-surviving sessions): when enabled, the root serves a Google
+  sign-in page and every other route requires a valid HMAC-signed session cookie; the ID token
+  is validated server-side (audience + verified email + allowlist). Either var absent = the
+  console is open (local dev/tests unchanged).
+
 ## 7. Models, MCP, deploy contract
 
 - Models (claude runtime): Stage 1 & 2 orchestrators `claude-opus-4-8`; Stage 3 `claude-sonnet-4-6`;

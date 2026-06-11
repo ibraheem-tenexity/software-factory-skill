@@ -27,6 +27,7 @@ from software_factory.chat_store import ChatStore, ChatMessage  # noqa: E402
 from software_factory.chat_agent import ChatAgentRunner  # noqa: E402
 from software_factory.deps import extract_env_creds  # noqa: E402
 from software_factory import notify  # noqa: E402
+from software_factory import auth  # noqa: E402
 
 RUNS_DIR = os.environ.get("SF_RUNS_DIR", os.path.join(os.path.dirname(__file__), "..", ".runs"))
 HERE = os.path.dirname(__file__)
@@ -214,9 +215,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _authed(self) -> bool:
+        """True when auth is disabled (env-gated) or the request carries a valid session."""
+        if not auth.enabled():
+            return True
+        cookies = self.headers.get("Cookie", "")
+        for part in cookies.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == auth.COOKIE and auth.session_valid(v):
+                return True
+        return False
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path, qs = parsed.path, parse_qs(parsed.query)
+        if not self._authed():
+            # The root serves the Google sign-in page; every API route refuses outright.
+            if path == "/" or path == "/index.html":
+                with open(os.path.join(HERE, "login.html")) as f:
+                    page = f.read().replace("{{CLIENT_ID}}", auth.client_id())
+                return self._send(200, page.encode(), "text/html")
+            return self._send(401, {"error": "unauthorized"})
         # Match on the PATH only — self.path carries the query string, so "/?run=x" must still
         # serve the console (the ?run= restore link 404'd as raw JSON when matched verbatim).
         if path == "/" or path == "/index.html":
@@ -303,6 +322,26 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        # The login exchange is the ONLY route reachable without a session.
+        if urlparse(self.path).path == "/api/auth/google":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            token = auth.login(body.get("credential", ""))
+            if not token:
+                return self._send(403, {"error": "not authorized"})
+            data = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header(
+                "Set-Cookie",
+                f"{auth.COOKIE}={token}; Path=/; Max-Age={auth.SESSION_TTL}; "
+                f"HttpOnly; SameSite=Lax")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if not self._authed():
+            return self._send(401, {"error": "unauthorized"})
         # Chat message
         if self.path == "/api/chat":
             if not _chat_runner:
