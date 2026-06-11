@@ -140,6 +140,12 @@ def main(argv: list[str]) -> int:
     signal.signal(signal.SIGINT, _terminate)
 
     base = os.path.join(runs_dir, run_id)
+    # Restart-survivable liveness: a console that lost its process handle (server restart,
+    # port eviction) must not read a mid-swarm quiet log as "stage finished" and relaunch a
+    # second orchestrator (§1 race — happened live on run-5b7aef7a). The pid survives the
+    # exec below, so this one file covers the whole stage.
+    with open(os.path.join(base, "stage3.pid"), "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
     spent = run_swarm_waves(base, run_id, ws, model, budget, max_concurrent=max_concurrent)
     sys.stderr.write(f"[swarm_stage3] swarm phase done: ${spent:.4f}; exec stage-3 agent\n")
     sys.stderr.flush()

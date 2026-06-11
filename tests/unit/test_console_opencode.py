@@ -314,3 +314,41 @@ def test_without_sf_swarm_stage3_launches_opencode_directly(tmp_path, monkeypatc
     c.start_stage3(rid)
     assert launcher.argv[0] == "opencode"
     assert "software_factory.swarm_stage3" not in launcher.argv
+
+
+def test_stage_finished_respects_a_live_stage3_pidfile_over_an_idle_log(tmp_path):
+    # run-5b7aef7a live scar: server restart loses the process handle; the swarm driver
+    # sits quiet in run.log for >2min mid-Kimi-turn; log-idle fallback said "finished" and
+    # the poller relaunched a second orchestrator. A live stage3.pid must win.
+    import subprocess
+    import time as _time
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = "run-pid"
+    base = os.path.join(str(tmp_path), rid)
+    os.makedirs(base, exist_ok=True)
+    log = os.path.join(base, "run.log")
+    with open(log, "w") as f:
+        f.write("{}\n")
+    idle = _time.time() - 600
+    os.utime(log, (idle, idle))                      # idle far past the 2-min grace
+    p = subprocess.Popen(["bash", "-c", f"# {rid}\nsleep 30"])
+    with open(os.path.join(base, "stage3.pid"), "w") as f:
+        f.write(str(p.pid))
+    try:
+        assert c.stage_finished(rid) is False        # live driver pid = proof of life
+    finally:
+        p.kill()
+        p.wait()
+    assert c.stage_finished(rid) is True             # dead pid -> log-idle fallback
+
+
+def test_stage_pid_alive_rejects_recycled_pids(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = "run-pid2"
+    base = os.path.join(str(tmp_path), rid)
+    os.makedirs(base, exist_ok=True)
+    with open(os.path.join(base, "stage3.pid"), "w") as f:
+        f.write(str(os.getpid()))                    # alive, but cmdline lacks the run id
+    assert c._stage_pid_alive(rid) is False

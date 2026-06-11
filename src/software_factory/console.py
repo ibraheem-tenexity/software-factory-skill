@@ -328,7 +328,25 @@ class Console:
             return False
         if not os.path.exists(log):
             return True
+        # No handle (server restart / port eviction): a live stage3.pid is proof of life —
+        # the swarm driver can sit quiet in run.log for >2min mid-Kimi-turn, and treating
+        # that as finished relaunched a second orchestrator on run-5b7aef7a (§1 race).
+        if self._stage_pid_alive(run_id):
+            return False
         return (time.time() - os.path.getmtime(log)) > 120
+
+    def _stage_pid_alive(self, run_id: str) -> bool:
+        """True iff the run's stage3.pid names a live process whose cmdline mentions this
+        run (pid-recycling guard). The pid survives the driver's exec into the agent, so
+        one file covers the whole stage."""
+        pid_path = os.path.join(self._paths(run_id)["base"], "stage3.pid")
+        try:
+            with open(pid_path, encoding="utf-8") as f:
+                pid = int(f.read().strip())
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                return run_id.encode() in f.read()
+        except (OSError, ValueError):
+            return False
 
     @staticmethod
     def _log_session_completed(log_path: str) -> bool:
