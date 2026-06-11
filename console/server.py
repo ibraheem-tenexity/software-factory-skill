@@ -161,7 +161,15 @@ def _narrate_run(rid: str, st: dict):
     if st.get("done"):
         live = st.get("deploy_url") or links.get("live") or ""
         repo = links.get("repo") or ""
-        _narrate(rid, "done", f"✅ Done — Live demo: {live}" + (f" · 📦 Repo: {repo}" if repo else ""))
+        msg = f"✅ Done — Live demo: {live}" + (f" · 📦 Repo: {repo}" if repo else "")
+        try:
+            creds = console.demo_credentials(rid)
+        except Exception:
+            creds = None
+        if creds:
+            # The seeded throwaway demo login (SPEC §6) — without it an auth'd app can't be demoed.
+            msg += "\n🔑 Demo login:\n" + creds
+        _narrate(rid, "done", msg)
 
 
 def _poll_transitions():

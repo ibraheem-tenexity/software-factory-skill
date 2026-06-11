@@ -81,6 +81,13 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
 - **Result delivery is in the console only:** toolbar `demo ↗` / `repo ↗` links, the done banner, and
   **chat-panel messages** — the repo URL as soon as the repo exists, the deploy URL when deployed, and
   a final "✅ Live demo + 📦 repo" message at done. Never popups; all verification browsers headless.
+- **Demo login:** an app with ANY sign-in seeds a throwaway demo account (never a real secret),
+  records it as a `demo-creds` artifact (`demo_credentials.md`), runs the happy-flow signed in with
+  it, and the done chat message (and its email) includes the demo login — an auth'd app the
+  operator can't open is not delivered.
+- The toolbar cost pill renders `spent $X / $Y cap` from `status.budget_ceiling` and is clickable
+  at ANY time to raise the cap; raises and refused resumes give visible feedback (a state change
+  the UI doesn't show is a bug by contract).
 - The chat panel narrates progress: run started, stage transitions, deps auto-resolved (or what's
   needed from the operator), deployed-verifying, done, budget pauses, blockers. One message per event.
 - **Operator email** (env-gated: `RESEND_API_KEY` + `SF_NOTIFY_EMAIL`, via Resend): the four

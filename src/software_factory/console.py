@@ -232,6 +232,11 @@ def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions
           f"`gate.happy_flow_passed`, and record it: `record-verification <url> <0|1> <result-json>`. "
           f"A GREEN Playwright happy-flow on the live url is done; deploying/merging is NOT done. "
           f"Red → fix ({fix_bug}) → redeploy → re-test. See SKILL.md for the full contract.\n"
+          f"DEMO LOGIN (how the operator demos the app): if the app has ANY sign-in, seed a demo "
+          f"account (throwaway values — e.g. demo@example.com / a generated phrase, NEVER a real "
+          f"secret), write it to `demo_credentials.md` (user + password, one per line), record it "
+          f"(`record-artifact 'Demo credentials' demo_credentials.md demo-creds`), and run the "
+          f"Playwright happy-flow signed in WITH those credentials.\n"
           f"App: {req.description}"
     )
 
@@ -282,6 +287,9 @@ class Console:
         self._new_id = new_id
         self._extract = extract
         self._procs: dict = {}   # run_id -> last launched stage process (SPEC §1 handoff guard)
+        # run_id -> ((mtime_ns, size), cost): the full-log cost reparse on EVERY status/poll
+        # was the console's dominant CPU+IO — two pollers × every run × multi-MB stream logs.
+        self._cost_cache: dict = {}
         os.makedirs(runs_dir, exist_ok=True)
 
     def _paths(self, run_id: str) -> dict:
@@ -461,7 +469,7 @@ class Console:
         back to the recorded runstate spend."""
         # max(): the log-derived figure normally leads, but the persisted runstate spend survives
         # log loss / parser regressions — the budget guard must never silently under-count.
-        return max(streamlog.cost_usd(self._full_log(run_id)), self._load_state(run_id).spent_usd or 0)
+        return max(self._cost(run_id), self._load_state(run_id).spent_usd or 0)
 
     def _budget_ceiling(self, run_id: str) -> float:
         """SPEC §4: per-run ceiling — the run's own override, else SF_COST_CEILING (default 30)."""
@@ -688,7 +696,7 @@ class Console:
                 if ok:
                     state.stage1_done = True
                     state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
-                    state.spent_usd = streamlog.cost_usd(self._full_log(run_id)) or state.spent_usd
+                    state.spent_usd = self._cost(run_id) or state.spent_usd
                     state.save()
                     # SPEC §5: the stage is over — close any agent rows it forgot to finish.
                     AgentRegistry(self._paths(run_id)["agents_db"]).finalize_orphans(run_id, stage_ok=True)
@@ -734,7 +742,7 @@ class Console:
             return False
         state.stage2_done = True
         state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
-        state.spent_usd = streamlog.cost_usd(self._full_log(run_id)) or state.spent_usd
+        state.spent_usd = self._cost(run_id) or state.spent_usd
         # Parse required tokens from architecture.md
         for root, _dirs, files in os.walk(base):
             if "architecture.md" in files:
@@ -771,7 +779,7 @@ class Console:
         state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
         # Persist the final spend into run.db so cost survives log loss (SPEC §4 durability),
         # and so verify_evidence's spent_usd comparison has a real basis.
-        state.spent_usd = max(state.spent_usd or 0, streamlog.cost_usd(self._full_log(run_id)))
+        state.spent_usd = max(state.spent_usd or 0, self._cost(run_id))
         state.save()
         AgentRegistry(paths["agents_db"]).finalize_orphans(run_id, stage_ok=True)
         return True
@@ -793,6 +801,18 @@ class Console:
                 live = path
         state = self._load_state(run_id)
         return {"repo": repo or state.repo_url, "live": live or state.deploy_url}
+
+    def demo_credentials(self, run_id: str) -> str | None:
+        """SPEC §6 delivery: the seeded demo login (recorded by Stage 3 as a 'demo-creds'
+        artifact) — an app with a sign-in is only demo-able if this reaches the operator.
+        These are throwaway demo values by contract, never operator secrets."""
+        db = RunDB(self._paths(run_id)["db"])
+        for a in db.artifacts():
+            if (a.get("kind") or "").lower() == "demo-creds":
+                content = self.artifact(run_id, a.get("path") or "").get("content")
+                if content:
+                    return content.strip()
+        return None
 
     def stage2_artifacts(self, run_id: str) -> dict:
         """Return Stage 2 artifact paths + parsed required tokens + default dispositions."""
@@ -903,6 +923,23 @@ class Console:
         result = self._launch_stage(run_id, stage, prompt, env)
         return run_id if result is not None else None
 
+    def _cost(self, run_id: str) -> float:
+        """streamlog.cost_usd with an (mtime,size)-keyed cache — an unchanged run.log always
+        yields the same cost, so the multi-MB reparse only happens when the log actually grew.
+        Safe for the budget teeth: a stale hit is impossible (any append changes the key)."""
+        p = os.path.join(self._paths(run_id)["base"], "run.log")
+        try:
+            st = os.stat(p)
+            key = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return 0.0
+        hit = self._cost_cache.get(run_id)
+        if hit and hit[0] == key:
+            return hit[1]
+        val = streamlog.cost_usd(self._full_log(run_id))
+        self._cost_cache[run_id] = (key, val)
+        return val
+
     def _full_log(self, run_id: str) -> str:
         p = os.path.join(self._paths(run_id)["base"], "run.log")
         if not os.path.exists(p):
@@ -944,7 +981,7 @@ class Console:
             "phase": self.current_phase(run_id),
             "done": state.phase == "done",
             "deploy_url": state.deploy_url,
-            "spent_usd": streamlog.cost_usd(self._full_log(run_id)) or state.spent_usd,
+            "spent_usd": self._cost(run_id) or state.spent_usd,
             "creds_provided": state.creds_provided,
             "byo_railway": "RAILWAY_TOKEN" in (state.creds_provided or []),
             "workspace": self._workspace_state(run_id, state.phase),
@@ -958,6 +995,7 @@ class Console:
             "deps_satisfied": state.deps_satisfied,
             "planning_model": state.planning_model,
             "impl_model": state.impl_model,
+            "budget_ceiling": self._budget_ceiling(run_id),
         }
 
     def list_runs(self) -> list[dict]:
@@ -980,7 +1018,7 @@ class Console:
                 "description": st.description,
                 "name": st.name,
                 "deploy_url": st.deploy_url,
-                "spent_usd": streamlog.cost_usd(self._full_log(name)) or st.spent_usd,
+                "spent_usd": self._cost(name) or st.spent_usd,
                 "stage": st.stage,
                 "budget_stopped": budget_stopped,
             })

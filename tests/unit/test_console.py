@@ -1131,3 +1131,47 @@ def test_project_name_is_pinned_and_surfaces_in_status_and_list(tmp_path):
     rid = c.start_run(RunRequest(description="a crm for plumbers", name="Acme CRM"))
     assert c.status(rid)["name"] == "Acme CRM"
     assert [r["name"] for r in c.list_runs()] == ["Acme CRM"]
+
+
+def test_status_carries_the_effective_budget_ceiling(tmp_path, monkeypatch):
+    # The cap pill can only reflect a raise if status() exposes the ceiling — the operator
+    # raised the cap and the UI showed nothing (state changed invisibly).
+    monkeypatch.setenv("SF_COST_CEILING", "30")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="app"))
+    assert c.status(rid)["budget_ceiling"] == 30.0
+    c.raise_budget(rid, 55)
+    assert c.status(rid)["budget_ceiling"] == 55.0
+
+
+def test_demo_credentials_surface_from_the_recorded_artifact(tmp_path):
+    # SPEC §6 delivery: an app with a sign-in is demo-able only if the seeded demo login
+    # reaches the operator — the chat done-message reads it from the demo-creds artifact.
+    import os
+    from software_factory.db import RunDB, db_path
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="app"))
+    ws = os.path.join(str(tmp_path), rid)
+    with open(os.path.join(ws, "demo_credentials.md"), "w") as f:
+        f.write("user: demo@acme.test\npassword: factory-demo-1")
+    RunDB(db_path(str(tmp_path), rid)).record_artifact(
+        "Demo credentials", "demo_credentials.md", kind="demo-creds")
+    creds = c.demo_credentials(rid)
+    assert "demo@acme.test" in creds and "factory-demo-1" in creds
+
+
+def test_demo_credentials_none_when_absent(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="app"))
+    assert c.demo_credentials(rid) is None
+
+
+def test_stage3_prompt_mandates_demo_credentials_recording(tmp_path):
+    req = RunRequest(description="a crm", target="railway")
+    for rt in ("claude", "opencode"):
+        p = make_prompt_stage3(req, "run-xyz", runs_dir="/runs", runtime=rt)
+        assert "demo_credentials.md" in p, rt
+        assert "demo-creds" in p, rt

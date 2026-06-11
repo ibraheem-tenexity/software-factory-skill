@@ -413,12 +413,43 @@
       else if (d.kind === "agent") { h += `<div class="markdown"><p>subagent · ${d.status}</p></div>`; }
       box.innerHTML = h; box.classList.add("open");
     }
+    function feedBanner(text) {
+      const b = document.createElement("div"); b.className = "a-phase";
+      b.textContent = text; $("feed").appendChild(b);
+    }
+    function renderCostPill(s) {
+      const cap = s.budget_ceiling;
+      $("cost").innerHTML = "spent <b>$" + (s.spent_usd || 0).toFixed(2) + "</b>" +
+        (cap ? ` / $${(+cap).toFixed(0)} cap ✎` : "");
+      $("cost").style.cursor = "pointer";
+      $("cost").title = "Click to raise this run's budget cap";
+      $("cost").onclick = () => editCap(cap || 30);
+    }
+    window.editCap = async (cur) => {
+      const v = parseFloat(prompt(`New budget cap for this run (current $${cur}):`, cur));
+      if (!v || v <= 0) return;
+      const r = await fetch(`/api/runs/${runId}/budget`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ceiling: v }) });
+      if (r.ok) {
+        // Reflect IMMEDIATELY — the raise was invisible before (status lacked the ceiling).
+        $("cost").innerHTML = $("cost").innerHTML.replace(/\/ \$\d+ cap/, `/ $${v.toFixed(0)} cap`);
+        feedBanner(`▸ Budget cap raised to $${v.toFixed(0)}.`);
+      } else {
+        const out = await r.json().catch(() => ({}));
+        feedBanner(`▸ Cap raise FAILED: ${out.error || r.status}`);
+      }
+      poll();
+    };
     window.raiseCap = async () => {
       const v = parseFloat((document.getElementById("cap-input") || {}).value);
       if (!v) return;
-      await fetch(`/api/runs/${runId}/budget`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ceiling: v }) });
+      const br = await fetch(`/api/runs/${runId}/budget`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ceiling: v }) });
       const st = await (await fetch(`/api/runs/${runId}`)).json();
-      await fetch(`/api/runs/${runId}/retry`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage: st.stage || 3 }) });
+      const rr = await fetch(`/api/runs/${runId}/retry`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage: st.stage || 3 }) });
+      const out = await rr.json().catch(() => ({}));
+      // Say what actually happened — a refused resume looked identical to success before.
+      feedBanner(br.ok && rr.ok
+        ? `▸ Cap raised to $${v.toFixed(0)} — stage ${st.stage || 3} resuming.`
+        : `▸ Cap ${br.ok ? "raised" : "raise FAILED"}; resume ${rr.ok ? "ok" : "refused: " + (out.error || rr.status)}`);
       $("inspect").classList.remove("open"); poll();
     };
     window.continueRun = async (gate) => { await fetch(`/api/runs/${runId}/continue`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gate }) }); $("inspect").classList.remove("open"); poll(); };
@@ -684,15 +715,22 @@
       if (!runId || !cy) return;
       let s, g, log = "", evs = [];
       try {
-        s = await (await fetch(`/api/runs/${runId}`)).json();
-        g = await (await fetch(`/api/runs/${runId}/graph`)).json();
-        log = (await (await fetch(`/api/runs/${runId}/log`)).json()).log || "";
-        evs = (await (await fetch(`/api/runs/${runId}/events`)).json()).events || [];
+        // Parallel — these were sequential, stacking 4 round-trips into every 2s tick.
+        const [rs, rg, rl, re] = await Promise.all([
+          fetch(`/api/runs/${runId}`), fetch(`/api/runs/${runId}/graph`),
+          fetch(`/api/runs/${runId}/log`), fetch(`/api/runs/${runId}/events`)]);
+        s = await rs.json(); g = await rg.json();
+        log = (await rl.json()).log || "";
+        evs = (await re.json()).events || [];
       } catch { return; }
       $("phase").innerHTML = "phase <b>" + s.phase + "</b>" + (s.done ? " ✓" : "");
       $("stage-pill").innerHTML = "stage <b>" + (s.stage || 1) + "</b>" +
         (s.stage1_done ? (s.stage2_done ? (s.deps_satisfied ? " ✓✓✓" : " ✓✓") : " ✓") : "");
-      $("cost").innerHTML = "spent <b>$" + (s.spent_usd || 0).toFixed(4) + "</b>";
+      // spent/$cap — clickable any time; the raise must be VISIBLE (the pill re-renders
+      // from status.budget_ceiling, so a raise shows on the next tick + immediately on success).
+      renderCostPill(s);
+      // A finished run never changes again — stop burning a 4-fetch tick every 2s on it.
+      if (s.done && timer) { clearInterval(timer); timer = null; }
       // Surface the live demo + source-repo links (repo comes from the run.db "GitHub Repo" artifact)
       let linksHtml = "";
       if (s.deploy_url) linksHtml += `<a href="${s.deploy_url}" target="_blank" rel="noopener">demo ↗</a>`;
