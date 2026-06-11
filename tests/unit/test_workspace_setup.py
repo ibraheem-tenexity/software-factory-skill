@@ -205,3 +205,12 @@ def test_stage_contracts_reference_the_canon():
     for rel in ("stage-3-build/SKILL.md", "stage-3-build/SKILL.opencode.md"):
         text = open(os.path.join(base, rel)).read()
         assert "--brand: 214 100% 55%" in text     # gate brand-check instruction
+
+
+def test_opencode_config_pins_provider_key_to_the_env_var():
+    # run-d81f37da scar: SDK-spawned `opencode serve` fell back to the host's global
+    # auth.json (spend-limited key) — the workspace config must pin the env key so every
+    # opencode entrypoint (run AND serve) uses the run's credential.
+    from software_factory.workspace_setup import opencode_config
+    cfg = opencode_config(stage=3, steps=100)
+    assert cfg["provider"]["openrouter"]["options"]["apiKey"] == "{env:OPENROUTER_API_KEY}"
