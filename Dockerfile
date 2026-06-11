@@ -50,9 +50,9 @@ RUN curl -fsSL https://opencode.ai/install | VERSION=1.16.0 bash \
 # compiled binary + bundled plugin, so no bun in the image. The runner finds the plugin
 # next to the executable, but containers move things: OPENCODE_SWARM_PLUGIN is explicit.
 RUN mkdir -p /opt/swarm \
-    && curl -fsSL https://github.com/ibraheem-111/opencode-swarm/releases/download/v0.2.0/opencode-swarm-0.2.0-linux-x64.tar.gz \
+    && curl -fsSL https://github.com/ibraheem-111/opencode-swarm/releases/download/v0.2.1/opencode-swarm-0.2.1-linux-x64.tar.gz \
        | tar -xz -C /opt/swarm \
-    && /opt/swarm/swarm --help 2>&1 | grep -q "usage: swarm" \
+    && /opt/swarm/swarm --version \
     && test -f /opt/swarm/swarm-plugin.js
 ENV SF_SWARM_BIN=/opt/swarm/swarm OPENCODE_SWARM_PLUGIN=/opt/swarm/swarm-plugin.js
 
