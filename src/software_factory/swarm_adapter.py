@@ -125,6 +125,9 @@ def swarm_env(ws: str, base_env: Optional[dict] = None) -> dict:
     env = dict(base_env if base_env is not None else os.environ)
     env["PWD"] = ws
     env["XDG_CONFIG_HOME"] = os.path.join(ws, ".oc-config")
+    # Hide the host's global auth.json (spend-limited key) — the env key is authoritative,
+    # exactly as in the container. Live scar: run-d81f37da, all swarm agents credit-refused.
+    env["XDG_DATA_HOME"] = os.path.join(ws, ".oc-data")
     env["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"] = "1"
     env["OPENCODE_DISABLE_EXTERNAL_SKILLS"] = "1"
     env["OPENCODE_SWARM_DB"] = os.path.join(ws, ".swarm", "swarm.db")

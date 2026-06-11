@@ -54,6 +54,7 @@ def test_opencode_launch_env_isolates_global_config_and_external_skills(tmp_path
 
     # ~/.config/opencode (peer MCPs, global instructions) must NEVER leak into stage runs
     assert launcher.env["XDG_CONFIG_HOME"].startswith(launcher.cwd)
+    assert launcher.env["XDG_DATA_HOME"].startswith(launcher.cwd)   # global auth.json hidden
     assert launcher.env["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"] == "1"
     assert launcher.env["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1"
     # Popen doesn't update PWD; OpenCode trusts it for project resolution (live-debugged:

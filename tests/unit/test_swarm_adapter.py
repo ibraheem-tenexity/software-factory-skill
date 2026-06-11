@@ -130,6 +130,7 @@ def test_env_sets_pwd_xdg_isolation_and_db_inside_workspace():
     env = swarm_env("/ws", base_env={"PATH": "/bin", "PWD": "/somewhere/else"})
     assert env["PWD"] == "/ws"
     assert env["XDG_CONFIG_HOME"] == "/ws/.oc-config"
+    assert env["XDG_DATA_HOME"] == "/ws/.oc-data"   # hides global auth.json (spend-limited key)
     assert env["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"] == "1"
     assert env["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1"
     assert env["OPENCODE_SWARM_DB"] == "/ws/.swarm/swarm.db"

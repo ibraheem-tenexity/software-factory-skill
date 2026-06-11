@@ -618,6 +618,11 @@ class Console:
             env = {
                 **env,
                 "XDG_CONFIG_HOME": os.path.join(ws, ".oc-config"),
+                # XDG_DATA_HOME hides the host's global auth.json so OPENROUTER_API_KEY (env)
+                # is the ONLY credential — same as the container, where this is load-bearing.
+                # Live scar (run-d81f37da): auth.json held a spend-limited key; every stage-3
+                # swarm agent died "requires more credits" while the env key had $350+.
+                "XDG_DATA_HOME": os.path.join(ws, ".oc-data"),
                 "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS": "1",
                 "OPENCODE_DISABLE_EXTERNAL_SKILLS": "1",
                 # Popen(cwd=ws) changes the real cwd but NOT the inherited PWD env var, and
