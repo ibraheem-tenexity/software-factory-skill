@@ -384,3 +384,16 @@ def test_budget_kill_escalates_to_sigkill_when_terminate_is_ignored(tmp_path):
                             "part": {"type": "step-finish", "cost": 5.0}}) + "\n")
     assert c.enforce_budget(rid) is True
     assert p.killed, "SIGTERM-immune process must be SIGKILLed"
+
+
+def test_default_launch_child_owns_the_log_file_not_a_server_pipe(tmp_path):
+    # run-5b7aef7a live scar: stdout piped through a server pump thread dies with the
+    # server — run.log freezes and the §4 brake goes spend-blind while the orchestrator
+    # keeps working. The child must write run.log through its OWN fd.
+    from software_factory.console import _default_launch
+    log = str(tmp_path / "run.log")
+    p = _default_launch(["bash", "-c", "echo from-child; echo err-too >&2"], {}, log_path=log)
+    p.wait(timeout=10)
+    text = open(log).read()
+    assert "from-child" in text          # stdout reaches the log with no pump alive
+    assert "err-too" in text             # stderr merged, as the parsers expect

@@ -250,31 +250,24 @@ def make_prompt(req: RunRequest, run_id: str, runs_dir: str) -> str:
 
 
 def _default_launch(argv: list[str], env: dict, log_path: str | None = None, cwd: str | None = None) -> Any:
+    """Launch a stage with stdout appended DIRECTLY to run.log — never through a pipe
+    pumped by this server. A pump thread dies with the server, leaving the orchestrator
+    writing into a readerless pipe: run.log freezes, the §4 brake goes spend-blind, and
+    the child can wedge on the full pipe buffer (run-5b7aef7a live scar — the monolithic
+    agent built for an hour with zero log visibility after a server restart). The child
+    owning its own log fd survives any number of server deaths."""
     import subprocess
-    import sys
-    import threading
 
-    proc = subprocess.Popen(
+    if log_path:
+        with open(log_path, "ab") as logf:
+            return subprocess.Popen(
+                argv, env={**os.environ, **env}, cwd=cwd,
+                stdout=logf, stderr=subprocess.STDOUT,
+            )
+    return subprocess.Popen(
         argv, env={**os.environ, **env}, cwd=cwd,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
     )
-    prefix = f"[{os.path.basename(os.path.dirname(log_path))}] " if log_path else ""
-
-    def _pump():
-        logf = open(log_path, "a") if log_path else None
-        try:
-            for line in proc.stdout:
-                sys.stdout.write(prefix + line)
-                sys.stdout.flush()
-                if logf:
-                    logf.write(line)
-                    logf.flush()
-        finally:
-            if logf:
-                logf.close()
-
-    threading.Thread(target=_pump, daemon=True).start()
-    return proc
 
 
 class Console:
