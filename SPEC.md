@@ -24,10 +24,14 @@ Rules:
   run concurrently (double spend + workspace races).
 - **Phase status is derived by the host from recorded signals** (phases table, stage flags, tickets,
   agents, artifacts, verifications) — agent `set-phase` calls are hints, never the source of truth:
-  - the furthest phase with activity is `active` (or `done` when its closing signal exists);
-  - every earlier phase with activity is `done`;
-  - earlier phases with NO activity are `skipped` (gray on the canvas), never stuck `pending`;
-  - later phases are `pending`.
+  - activity is inferred from EVIDENCE, not just set-phase rows: a deploy-kind artifact is deploy
+    activity; a recorded verification is test activity;
+  - a phase with its CLOSING SIGNAL is `done` regardless of position (deploy: deploy artifact;
+    test: passing verification; stage phases: their stage flags);
+  - the phase with the MOST RECENT unclosed activity is `active` — a test→build fix loop
+    truthfully bounces the canvas back to build;
+  - later phases that ran without closing are `pending` (they will run again);
+  - earlier phases with NO activity are `skipped` (gray on the canvas), never stuck `pending`.
 - The host records `extract: done` itself at `start_run` (the host performs extraction).
 - The header/API `phase` is the derived current phase; `state.phase` persists only the terminal `done`.
 

@@ -213,3 +213,35 @@ def test_claude_runtime_live_handle_never_false_finishes(tmp_path):
     old = _time.time() - 4000
     _os.utime(log, (old, old))
     assert c.stage_finished(rid) is False
+
+
+def test_deploy_phase_never_skipped_when_deploy_artifact_exists(tmp_path):
+    # run-45b8c4d5 canvas lie #1: the app was LIVE while 'deploy' rendered skipped —
+    # a deploy-kind artifact IS deploy activity AND deploy's closing signal.
+    from software_factory.db import RunDB
+    from software_factory.console import run_paths
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    db = RunDB(run_paths(str(tmp_path), rid)["db"])
+    db.set_phase("build", "active")
+    db.record_artifact("Live URL", "https://app.example.up.railway.app", kind="deploy")
+    phases = c.derive_phases(rid)
+    assert phases["deploy"] == "done"          # not 'skipped'
+    assert phases["build"] == "active"
+
+
+def test_fix_loop_bounces_active_back_to_build(tmp_path):
+    # canvas lie #2: during a test->build fix loop the canvas must show build active again,
+    # with test pending (it will re-run), not frozen on the furthest index.
+    import time as _t
+    from software_factory.db import RunDB
+    from software_factory.console import run_paths
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_run(RunRequest(description="x"))
+    db = RunDB(run_paths(str(tmp_path), rid)["db"])
+    db.set_phase("build", "active"); _t.sleep(0.01)
+    db.set_phase("test", "active"); _t.sleep(0.01)
+    db.set_phase("build", "active")            # the loop: back to build
+    phases = c.derive_phases(rid)
+    assert phases["build"] == "active"
+    assert phases["test"] == "pending"         # ran, didn't close, will run again

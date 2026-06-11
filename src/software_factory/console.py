@@ -342,34 +342,68 @@ class Console:
     _CLOSED = ("done", "passed", "completed")
 
     def derive_phases(self, run_id: str) -> dict:
-        """Phase states derived from recorded signals (phases table + stage flags +
-        verifications) — agent set-phase calls are hints, never the source of truth.
-        States: pending | active | done | skipped. A phase can never stay pending/active
-        once the process has moved past it; bypassed phases read skipped."""
+        """Phase states derived from recorded signals — agent set-phase calls are hints,
+        never the source of truth. States: pending | active | done | skipped.
+
+        Truthfulness rules (the run-45b8c4d5 canvas lies):
+        - Activity is inferred from EVIDENCE, not just set-phase rows: a deploy-kind artifact
+          is deploy activity (the app was live while 'deploy' rendered skipped), a recorded
+          verification is test activity.
+        - A phase with its CLOSING SIGNAL is done regardless of position: deploy closes on a
+          deploy artifact, test on a passing verification, stage phases on their stage flags.
+        - 'active' is the phase with the MOST RECENT activity (not the furthest index): a
+          test→build fix loop truthfully bounces the canvas back to build.
+        - Later phases that ran but didn't close render pending (they will run again);
+          bypassed phases read skipped."""
         db = RunDB(self._paths(run_id)["db"])
         state = self._load_state(run_id)
-        recorded = db.phase_status()                      # last write wins per name
-        implied_done = set()
+        rows = db.phases()                                # append-only, ts-ordered
+        last_ts = {}
+        for r in rows:
+            if r["name"] in PIPELINE:
+                last_ts[r["name"]] = r["ts"]
+        for a in db.artifacts():                          # evidence-implied activity
+            if (a.get("kind") or "").lower() == "deploy":
+                last_ts["deploy"] = max(last_ts.get("deploy", 0), a.get("ts") or 0)
+        verifs = db.verifications()
+        if verifs:
+            last_ts["test"] = max(last_ts.get("test", 0), max(v.get("ts") or 0 for v in verifs))
+
+        closed = set()
         if state.stage1_done:
-            implied_done.update(("extract", "provision", "research"))
+            closed.update(("extract", "provision", "research"))
         if state.stage2_done:
-            implied_done.update(("architect", "tickets"))
+            closed.update(("architect", "tickets"))
+        if any((a.get("kind") or "").lower() == "deploy" for a in db.artifacts()):
+            closed.add("deploy")
         if db.has_passing_verification():
-            implied_done.add("test")
-        activity = {n for n in PIPELINE if n in recorded} | implied_done
+            closed.add("test")
+        recorded = db.phase_status()
+        closed.update(n for n in PIPELINE if recorded.get(n) in self._CLOSED)
+
+        activity = set(last_ts) | closed
         run_done = state.phase == "done"
         idx = {n: i for i, n in enumerate(PIPELINE)}
         furthest = max((idx[n] for n in activity), default=-1)
+        active = None
+        if not run_done:
+            open_with_ts = {n: t for n, t in last_ts.items() if n not in closed}
+            if open_with_ts:
+                active = max(open_with_ts, key=open_with_ts.get)
         out = {}
         for i, n in enumerate(PIPELINE):
-            if i > furthest:
-                out[n] = "pending"
-            elif n not in activity:
-                out[n] = "skipped"
-            elif i < furthest or run_done or recorded.get(n) in self._CLOSED or n in implied_done:
-                out[n] = "done"
-            else:
+            if n == active:
                 out[n] = "active"
+            elif n in closed or (run_done and n in activity):
+                out[n] = "done"
+            elif n in activity:
+                # ran without closing: behind the active phase it's spent (done); ahead of it
+                # it will run again (pending) — the honest render of a fix loop.
+                out[n] = "done" if active is not None and i < idx.get(active, -1) else "pending"
+            elif i > furthest:
+                out[n] = "pending"
+            else:
+                out[n] = "skipped"
         return out
 
     def current_phase(self, run_id: str) -> str:

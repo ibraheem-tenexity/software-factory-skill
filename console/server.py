@@ -100,6 +100,22 @@ _AUTO_RESUME_MAX = int(os.environ.get("SF_AUTO_RESUME_MAX", "2") or 2)
 _auto_resumed: dict = {}
 
 
+def _append_notifications(rid: str, msgs):
+    """Persist + push stage notifications, deduped against the persisted chat history —
+    a restarted server re-walks stage transitions and re-fired old notifications AFTER
+    newer messages, scrambling the chat panel's chronology (run-45b8c4d5)."""
+    store = ChatStore(_chat_path(rid))
+    try:
+        seen = {m.content for m in store.history()}
+    except Exception:
+        seen = set()
+    fresh = [m for m in msgs if m.content not in seen]
+    for m in fresh:
+        store.append(m)
+    if fresh:
+        _push_sse(rid, fresh)
+
+
 def _narrate(rid: str, key: str, text: str):
     """SPEC §6: deterministic chat-panel narration — one message per (run, event), no LLM.
     Dedup survives server restarts by checking the persisted chat history, not just memory."""
@@ -170,18 +186,10 @@ def _poll_transitions():
                 if cur != prev:
                     _run_stages[rid] = cur
                     if _chat_runner:
-                        msgs = _chat_runner.check_and_notify(rid, prev_stage=prev)
-                        store = ChatStore(_chat_path(rid))
-                        for m in msgs:
-                            store.append(m)
-                        _push_sse(rid, msgs)
+                        _append_notifications(rid, _chat_runner.check_and_notify(rid, prev_stage=prev))
                 if st.get("done") and prev > 0:
                     if _chat_runner:
-                        msgs = _chat_runner.check_and_notify(rid, prev_stage=cur)
-                        store = ChatStore(_chat_path(rid))
-                        for m in msgs:
-                            store.append(m)
-                        _push_sse(rid, msgs)
+                        _append_notifications(rid, _chat_runner.check_and_notify(rid, prev_stage=cur))
                     _run_stages.pop(rid, None)
         except Exception:
             pass
