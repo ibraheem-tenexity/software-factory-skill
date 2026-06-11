@@ -74,6 +74,7 @@ class RunRequest:
     runtime: str = ""  # claude | opencode; empty -> SF_RUNTIME env (default claude)
     planning_model: str = ""  # S1/S2 orchestrator model (claude runtime); empty -> stage default
     impl_model: str = ""      # S3 model (claude runtime); empty -> stage default
+    name: str = ""            # operator-chosen project name (display label)
 
 
 def run_paths(runs_dir: str, run_id: str) -> dict:
@@ -644,6 +645,7 @@ class Console:
         state.skill = "software-factory"
         state.skill_version = SKILL_VERSION
         state.description = req.description
+        state.name = req.name or ""
         state.deploy_target = req.target
         state.creds_provided = sorted(env.keys())
         state.stage = 1
@@ -937,6 +939,7 @@ class Console:
             "skill": state.skill,
             "skill_version": state.skill_version,
             "description": state.description,
+            "name": state.name,
             "deploy_target": state.deploy_target,
             "phase": self.current_phase(run_id),
             "done": state.phase == "done",
@@ -975,6 +978,7 @@ class Console:
                 "run_id": name,
                 "phase": self.current_phase(name),
                 "description": st.description,
+                "name": st.name,
                 "deploy_url": st.deploy_url,
                 "spent_usd": streamlog.cost_usd(self._full_log(name)) or st.spent_usd,
                 "stage": st.stage,

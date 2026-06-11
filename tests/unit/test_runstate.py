@@ -77,3 +77,11 @@ def test_per_run_model_picks_persist_across_reload(tmp_path):
     resumed = RunState.load("run-m", store(tmp_path))
     assert resumed.planning_model == "claude-fable-5"
     assert resumed.impl_model == "claude-opus-4-8"
+
+
+def test_project_name_persists_across_reload(tmp_path):
+    st = store(tmp_path)
+    s = RunState.load("run-n", st)
+    s.name = "Acme CRM"
+    s.save()
+    assert RunState.load("run-n", store(tmp_path)).name == "Acme CRM"

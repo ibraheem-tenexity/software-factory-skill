@@ -83,6 +83,10 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
   a final "✅ Live demo + 📦 repo" message at done. Never popups; all verification browsers headless.
 - The chat panel narrates progress: run started, stage transitions, deps auto-resolved (or what's
   needed from the operator), deployed-verifying, done, budget pauses, blockers. One message per event.
+- **Operator email** (env-gated: `RESEND_API_KEY` + `SF_NOTIFY_EMAIL`, via Resend): the four
+  operator-relevant events — run done, waiting-on-input at the deps gate, budget-stop, stage
+  crash/auto-resume — also send an email, at most once per (run, event) (same dedup as the chat
+  narration). Absent env = silent no-op; a send failure never breaks the poller.
 - The activity feed renders human-readable lines (tool name + its description), never raw JSON,
   never prompt bodies, never absolute container paths.
 

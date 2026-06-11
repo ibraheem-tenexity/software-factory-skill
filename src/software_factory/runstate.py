@@ -41,7 +41,7 @@ class JsonFileStore:
 
 _PERSISTED = {
     "run_id", "phase", "spent_usd", "repo_url", "deploy_url",
-    "skill", "skill_version", "description", "deploy_target", "creds_provided",
+    "skill", "skill_version", "description", "name", "deploy_target", "creds_provided",
     "stage", "stage1_done", "stage2_done", "runtime",
     "planning_model", "impl_model",
     "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
@@ -60,6 +60,7 @@ class RunState:
     skill: Optional[str] = None
     skill_version: Optional[str] = None
     description: Optional[str] = None
+    name: str = ""  # operator-chosen project name (display label; run_id stays the key)
     deploy_target: Optional[str] = None
     creds_provided: list = field(default_factory=list)  # cred NAMES only, never values
     stage: int = 1

@@ -156,6 +156,8 @@
     .model-opt.selected { border-color: var(--primary); box-shadow: 0 0 0 3px rgb(0 43 92 / .12); background: #f0f4fa; }
     .model-opt .model-name { font-weight: 600; font-size: .9rem; }
     .model-opt .model-sub { font-size: .7rem; color: var(--muted-fg); margin-top: .15rem; }
+    .project-name-input { width: 100%; box-sizing: border-box; padding: .55rem .7rem; margin-bottom: .8rem;
+      border: 1px solid var(--input); border-radius: var(--radius); background: var(--card); font-size: .85rem; }
     .model-picks { display: flex; gap: .6rem; margin-bottom: 1rem; }
     .model-picks label { flex: 1; font-size: .7rem; color: var(--muted-fg); display: flex; flex-direction: column; gap: .25rem; }
     .model-picks select { padding: .45rem; border: 1px solid var(--input); border-radius: var(--radius); background: var(--card); font-size: .8rem; }
@@ -188,6 +190,7 @@
     <div class="projects-body">
       <div class="new-project-card">
         <h3>New Project</h3>
+        <input type="text" id="project-name" class="project-name-input" placeholder="Project name" maxlength="80">
         <div class="model-row">
           <div class="model-opt selected" data-model="claude" onclick="selectModel(this)">
             <div class="model-name">Claude</div>
@@ -579,7 +582,8 @@
           body: JSON.stringify({ run_id: chatRunId, message: text, files, images,
             runtime: selectedModel === "kimi" ? "opencode" : "claude",
             planning_model: selectedModel === "kimi" ? "" : $("planning-model").value,
-            impl_model: selectedModel === "kimi" ? "" : $("impl-model").value })
+            impl_model: selectedModel === "kimi" ? "" : $("impl-model").value,
+            project_name: $("project-name").value.trim() })
         });
         const data = await res.json();
         hideTyping();
@@ -762,8 +766,8 @@
           card.onclick = () => openProject(r.run_id);
           card.innerHTML = `<div class="pc-dot ${dot}"></div>
             <div class="pc-info">
-              <div class="pc-name">${r.run_id}</div>
-              <div class="pc-meta">${label}${r.description ? " · " + r.description.slice(0, 60) : ""}</div>
+              <div class="pc-name">${r.name || r.run_id}</div>
+              <div class="pc-meta">${r.name ? r.run_id + " · " : ""}${label}${r.description ? " · " + r.description.slice(0, 60) : ""}</div>
             </div>
             <div class="pc-cost">$${(r.spent_usd || 0).toFixed(2)}</div>`;
           container.appendChild(card);

@@ -1123,3 +1123,11 @@ def test_per_run_model_pick_beats_the_SF_MODEL_env_override(tmp_path, monkeypatc
     c = console(tmp_path, launcher)
     c.start_run(RunRequest(description="app", planning_model="claude-fable-5"))
     assert _argv_model(launcher.argv) == "claude-fable-5"
+
+
+def test_project_name_is_pinned_and_surfaces_in_status_and_list(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="a crm for plumbers", name="Acme CRM"))
+    assert c.status(rid)["name"] == "Acme CRM"
+    assert [r["name"] for r in c.list_runs()] == ["Acme CRM"]

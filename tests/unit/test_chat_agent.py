@@ -276,3 +276,11 @@ class TestModelPickThreading:
         req = mock_console.start_run.call_args[0][0]
         assert req.planning_model == "claude-fable-5"
         assert req.impl_model == "claude-opus-4-8"
+
+    def test_start_pipeline_threads_project_name(self, mock_console):
+        tools = make_tools(mock_console, project_name=lambda: "Acme CRM")
+        start = next(t for t in tools if t.name == "start_pipeline")
+        asyncio.get_event_loop().run_until_complete(
+            start.on_invoke_tool(None, json.dumps({"description": "Build it"}))
+        )
+        assert mock_console.start_run.call_args[0][0].name == "Acme CRM"

@@ -26,6 +26,7 @@ from software_factory.console import Console, RunRequest  # noqa: E402
 from software_factory.chat_store import ChatStore, ChatMessage  # noqa: E402
 from software_factory.chat_agent import ChatAgentRunner  # noqa: E402
 from software_factory.deps import extract_env_creds  # noqa: E402
+from software_factory import notify  # noqa: E402
 
 RUNS_DIR = os.environ.get("SF_RUNS_DIR", os.path.join(os.path.dirname(__file__), "..", ".runs"))
 HERE = os.path.dirname(__file__)
@@ -131,6 +132,15 @@ def _narrate(rid: str, key: str, text: str):
     msg = ChatMessage(role="assistant", content=text)
     store.append(msg)
     _push_sse(rid, [msg])
+    # Operator email on the four operator-relevant events (done / depswait / budget / crash) —
+    # placed AFTER the dedup so an email fires at most once per (run, event). Fire-and-forget:
+    # notify.send never raises and must never block the poller.
+    if notify.should_email(key):
+        threading.Thread(
+            target=notify.send,
+            args=(f"[factory] {rid}: {text[:90]}", f"{text}\n\nrun: {rid}"),
+            daemon=True,
+        ).start()
 
 
 def _narrate_run(rid: str, st: dict):
@@ -306,6 +316,7 @@ class Handler(BaseHTTPRequestHandler):
             runtime = body.get("runtime", "")  # claude | opencode from the UI picker
             planning_model = body.get("planning_model", "")  # per-run model picks (claude runtime)
             impl_model = body.get("impl_model", "")
+            project_name = body.get("project_name", "")
 
             store = ChatStore(_chat_path(run_id)) if run_id else None
             user_msg = ChatMessage(role="user", content=message, msg_type="text",
@@ -319,7 +330,8 @@ class Handler(BaseHTTPRequestHandler):
                 result_run_id, response_msgs = _run_async(
                     _chat_runner.handle_message(run_id, message, files, images, runtime=runtime,
                                                 planning_model=planning_model,
-                                                impl_model=impl_model)
+                                                impl_model=impl_model,
+                                                project_name=project_name)
                 )
             except Exception as e:
                 return self._send(500, {"error": str(e)})
@@ -427,6 +439,7 @@ class Handler(BaseHTTPRequestHandler):
                 runtime=body.get("runtime", ""),
                 planning_model=body.get("planning_model", ""),
                 impl_model=body.get("impl_model", ""),
+                name=body.get("project_name", ""),
             )
             return self._send(200, {"run_id": console.start_run(req)})
         return self._send(404, {"error": "not found"})
