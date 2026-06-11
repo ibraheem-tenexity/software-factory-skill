@@ -663,7 +663,7 @@ class Console:
                 ok, _reasons = artifacts.prd_is_complete(text)
                 if ok:
                     state.stage1_done = True
-        state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
+                    state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
                     state.spent_usd = streamlog.cost_usd(self._full_log(run_id)) or state.spent_usd
                     state.save()
                     # SPEC §5: the stage is over — close any agent rows it forgot to finish.
@@ -744,8 +744,8 @@ class Console:
         if passing:
             state.deploy_url = passing[-1]["url"]
         state.phase = "done"
-        # Persist the final spend
-        state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file) into run.db so cost survives log loss (SPEC §4 durability),
+        state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
+        # Persist the final spend into run.db so cost survives log loss (SPEC §4 durability),
         # and so verify_evidence's spent_usd comparison has a real basis.
         state.spent_usd = max(state.spent_usd or 0, streamlog.cost_usd(self._full_log(run_id)))
         state.save()
