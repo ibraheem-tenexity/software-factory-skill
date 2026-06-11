@@ -6,7 +6,8 @@ An empty agent turn therefore cannot be laundered into "complete".
 """
 from __future__ import annotations
 
-import sqlite3
+
+from . import dbshim
 from dataclasses import dataclass
 from typing import Optional
 
@@ -30,8 +31,7 @@ class Ticket:
 
 class TicketStore:
     def __init__(self, path: str):
-        self._conn = sqlite3.connect(path)
-        self._conn.row_factory = sqlite3.Row
+        self._conn = dbshim.connect(path)  # sqlite today, pg when SF_DB=postgres
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS tickets (

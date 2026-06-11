@@ -6,7 +6,8 @@ The headline health metric is the no-op rate: agents that produced no real chang
 """
 from __future__ import annotations
 
-import sqlite3
+
+from . import dbshim
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
@@ -52,8 +53,7 @@ class AgentRecord:
 
 class AgentRegistry:
     def __init__(self, path: str, sink: Sink = NullSink(), clock: Callable[[], float] = time.time):
-        self._conn = sqlite3.connect(path)
-        self._conn.row_factory = sqlite3.Row
+        self._conn = dbshim.connect(path)  # sqlite today, pg when SF_DB=postgres
         self._sink = sink
         self._clock = clock
         self._conn.execute(

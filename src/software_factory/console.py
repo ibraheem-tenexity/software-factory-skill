@@ -24,6 +24,7 @@ from . import deps as deps_mod
 from .mcp_health import check_mcp
 from .runstate import RunState
 from .db import RunDB
+from . import dbshim
 from .tickets import TicketStore
 from .workspace_setup import prepare_workspace
 
@@ -1000,10 +1001,16 @@ class Console:
 
     def list_runs(self) -> list[dict]:
         runs = []
-        for name in os.listdir(self._runs_dir):
-            base = os.path.join(self._runs_dir, name)
-            if not os.path.isdir(base) or not os.path.exists(os.path.join(base, "run.db")):
-                continue
+        # Local dirs ∪ the pg registry (pg mode): a run can exist only in the registry —
+        # fresh container, wiped volume — and must still surface. Local wins the dedupe.
+        local = [n for n in os.listdir(self._runs_dir)
+                 if os.path.isdir(os.path.join(self._runs_dir, n))
+                 and os.path.exists(os.path.join(self._runs_dir, n, "run.db"))]
+        created = {}
+        for r in dbshim.registry_runs():
+            created[r["run_id"]] = r.get("created") or 0
+        names = local + [rid for rid in created if rid not in set(local)]
+        for name in names:
             st = self._load_state(name)
             # A budget-stopped run is NOT active: surfacing it with a live/green status misled
             # the operator into thinking frozen ghosts were consuming (the b594a5f4/0eb69fdd UI
@@ -1022,7 +1029,13 @@ class Console:
                 "stage": st.stage,
                 "budget_stopped": budget_stopped,
             })
-        runs.sort(key=lambda r: os.path.getmtime(os.path.join(self._runs_dir, r["run_id"])), reverse=True)
+        def _sort_key(r):
+            p = os.path.join(self._runs_dir, r["run_id"])
+            try:
+                return os.path.getmtime(p)
+            except OSError:  # registry-only run, no local dir yet
+                return created.get(r["run_id"], 0)
+        runs.sort(key=_sort_key, reverse=True)
         return runs
 
     def events(self, run_id: str) -> list:

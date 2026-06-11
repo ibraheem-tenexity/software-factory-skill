@@ -78,6 +78,11 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
 
 - The canvas/graph/header are a **pure projection of run.db**. Artifact paths resolve against both the
   run base and the workspace. Recorded-but-missing files render `missing` (hollow), never green.
+- **Run STATE lives in Postgres when `SF_DB=postgres`** (`DATABASE_URL`, Supabase transaction
+  pooler): one schema per run (`sf_run_<id>`) + a `public.sf_runs` registry for discovery; every
+  boot self-backfills any sqlite-only runs from the volume (idempotent). Logs (`run.log`),
+  chat (`chat.jsonl`) and workspaces STAY on the volume. Unset `SF_DB` = sqlite, exactly as before
+  (rollback path; tests run hermetic on sqlite).
 - **Result delivery is in the console only:** toolbar `demo ↗` / `repo ↗` links, the done banner, and
   **chat-panel messages** — the repo URL as soon as the repo exists, the deploy URL when deployed, and
   a final "✅ Live demo + 📦 repo" message at done. Never popups; all verification browsers headless.

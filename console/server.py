@@ -502,6 +502,15 @@ if __name__ == "__main__":
     print(f"[runner] uid={os.getuid()} user={getpass.getuser()} home={os.environ.get('HOME')}", flush=True)
     if not _has_chat_key:
         print("[warn] no OPENAI_API_KEY or OPENROUTER_API_KEY — chat agent disabled, API-only mode")
+    if (os.environ.get("SF_DB") or "").lower() == "postgres":
+        # Self-backfilling flip: runs that exist only as sqlite files on the volume are
+        # copied into pg at boot (idempotent — registered runs skip in one registry read).
+        try:
+            from software_factory.backfill import backfill_all
+            for rid, res in backfill_all(RUNS_DIR).items():
+                print(f"[backfill] {rid}: {res}", flush=True)
+        except Exception as e:
+            print(f"[backfill] FAILED: {e}", flush=True)
     t = threading.Thread(target=_poll_transitions, daemon=True)
     t.start()
     print(f"software-factory console on http://{host}:{port}  (runs in {os.path.abspath(RUNS_DIR)})")

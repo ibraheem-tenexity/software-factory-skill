@@ -1175,3 +1175,18 @@ def test_stage3_prompt_mandates_demo_credentials_recording(tmp_path):
         p = make_prompt_stage3(req, "run-xyz", runs_dir="/runs", runtime=rt)
         assert "demo_credentials.md" in p, rt
         assert "demo-creds" in p, rt
+
+
+def test_list_runs_unions_pg_registry_with_local_dirs(tmp_path, monkeypatch):
+    # pg mode: a run can exist ONLY in the registry (fresh container, empty volume) —
+    # discovery must surface it; local dirs win the dedupe (richer mtime ordering).
+    from software_factory import console as console_mod
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid_local = c.start_run(RunRequest(description="local run"))
+    monkeypatch.setattr(console_mod.dbshim, "registry_runs",
+                        lambda: [{"run_id": rid_local, "created": 1.0},
+                                 {"run_id": "run-pgonly", "created": 2.0}])
+    ids = [r["run_id"] for r in c.list_runs()]
+    assert ids.count(rid_local) == 1            # deduped
+    assert "run-pgonly" in ids                  # registry-only run surfaced

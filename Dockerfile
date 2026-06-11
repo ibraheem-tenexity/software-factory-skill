@@ -14,7 +14,7 @@ ENV PUPPETEER_CACHE_DIR=/ms-puppeteer
 # (omit=optional / no network for the optional dep) and leaves an unrunnable text stub.
 # We install it via the official native installer below instead.
 RUN npm install -g @railway/cli @playwright/mcp playwright @mermaid-js/mermaid-cli @supabase/mcp-server-supabase
-RUN pip3 install --break-system-packages openai-agents 'markitdown[pdf,docx]' pypandoc_binary mammoth
+RUN pip3 install --break-system-packages openai-agents 'markitdown[pdf,docx]' pypandoc_binary mammoth 'psycopg[binary]>=3.1'
 
 # Chromium + OS libs into a SHARED path so the non-root runtime user can use them.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright

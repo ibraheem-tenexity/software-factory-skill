@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
+
+from . import dbshim
 import sys
 import time
 from typing import Optional
@@ -29,8 +30,7 @@ class RunDB:
 
     def __init__(self, path: str):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        self._conn = sqlite3.connect(path)
-        self._conn.row_factory = sqlite3.Row
+        self._conn = dbshim.connect(path)  # sqlite today, pg when SF_DB=postgres
         self._init()
 
     def _init(self) -> None:
