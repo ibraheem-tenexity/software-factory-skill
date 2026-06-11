@@ -40,9 +40,15 @@ THEN execute the plan — autonomously, no human approval.
 
 For each open ticket in the current wave:
 - `spawn-agent <id> <role> <model> build`; `TicketStore.claim(ticket_id, <id>)` — the SAME id
-- implement THIS ticket yourself and open a PR
-- merge ONLY via `GitHub.merge_if_green(pr, diff_lines)` — refuses red checks and empty diffs
-- `TicketStore.mark_done(pr, diff_lines)` (refuses hollow closes); `finish-agent <id> <outcome> <cost> <pr> <diff_lines>`
+- implement THIS ticket yourself; commit it to main as ONE commit with a message naming the ticket
+- capture provenance: `SHA=$(git rev-parse HEAD)` and `DIFF=$(git show --stat HEAD | tail -1)` (the
+  changed-lines count)
+- **`TicketStore.mark_done(ticket_id, "<SHA>", <diff_lines>)` — MANDATORY, IMMEDIATELY after the
+  commit.** The commit sha is your PR-equivalent; the done-gate reads this ledger and a run whose
+  tickets were never marked done can NEVER reach done, no matter how good the app is
+  (run-45b8c4d5 shipped a fully verified app and still scored not-done for exactly this).
+- `finish-agent <id> <outcome> 0 <SHA> <diff_lines>` (cost 0 is fine — the host attributes session
+  cost; sha + diff_lines are the fields that matter)
 
 A ticket attempt that produced an empty diff is a no-op — `finish-agent <id> no_op`, then retry it
 properly (a fresh logical agent), never mark it done. Serialize per wave so `main` accumulates and

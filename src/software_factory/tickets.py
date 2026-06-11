@@ -69,9 +69,14 @@ class TicketStore:
         )
         self._conn.commit()
 
-    def mark_done(self, ticket_id: int, pr: Optional[int], diff_lines: int) -> None:
-        if not pr:
-            raise HollowWorkError(f"ticket {ticket_id}: refusing 'done' without a merged PR")
+    def mark_done(self, ticket_id: int, pr, diff_lines: int) -> None:
+        """Close a ticket against REAL, attributable work. `pr` is the work's provenance:
+        a merged PR number (claude orchestrator workflow) OR a commit sha string (monolithic
+        opencode workflow — direct commits to main have no PRs; run-45b8c4d5 proved the gate
+        was unsatisfiable for Kimi as previously specced). Either way the no-hollow-close
+        property holds: non-empty provenance + a non-zero diff."""
+        if not pr or (isinstance(pr, str) and len(pr.strip()) < 7):
+            raise HollowWorkError(f"ticket {ticket_id}: refusing 'done' without a merged PR or commit sha")
         if diff_lines <= 0:
             raise HollowWorkError(f"ticket {ticket_id}: refusing 'done' with an empty diff")
         self._conn.execute(

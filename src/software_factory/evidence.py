@@ -21,6 +21,7 @@ def build_evidence(state: RunState, registry: AgentRegistry, tickets: TicketStor
     total_cost = sum(registry.cost_by_ticket(run_id).values())
     return {
         "run_id": run_id,
+        "runtime": getattr(state, "runtime", "claude"),
         "skill": state.skill,
         "skill_version": state.skill_version,
         "description": state.description,
@@ -55,14 +56,20 @@ def verify_evidence(bundle: dict) -> tuple[bool, list[str]]:
     if spawned == 0:
         reasons.append("no agents recorded — the outcome is uncorroborated")
     elif total_cost <= 0:
-        reasons.append("agent cost is zero — no real model work was recorded")
+        # Monolithic opencode agents cannot see their own cost (it lives in the host-owned
+        # run.log stream); the run-level spend is the model-work corroboration there.
+        if bundle.get("runtime") == "opencode":
+            if spent <= 0:
+                reasons.append("no spend recorded — no real model work was recorded")
+        else:
+            reasons.append("agent cost is zero — no real model work was recorded")
 
     if total_cost > spent + _EPS:
         reasons.append("recorded agent cost exceeds budget spend — accounting is inconsistent")
 
     for t in bundle.get("done_tickets", []):
         if not t.get("pr") or t.get("diff_lines", 0) <= 0:
-            reasons.append(f"ticket {t.get('id')} marked done without a merged PR / real diff")
+            reasons.append(f"ticket {t.get('id')} marked done without provenance (PR or commit sha) / real diff")
 
     if bundle.get("deploy_url") and not bundle.get("done_tickets"):
         reasons.append("deployed URL with no completed tickets — fabrication")
