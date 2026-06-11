@@ -261,3 +261,18 @@ class TestChatAgentRunner:
         complete_msg = next(m for m in msgs if m.msg_type == "complete")
         assert "sf-test123" in complete_msg.content
         assert complete_msg.metadata["url"] == "https://sf-test123.up.railway.app"
+
+
+class TestModelPickThreading:
+    def test_start_pipeline_threads_model_picks_into_runrequest(self, mock_console):
+        """The UI's planning/impl model picks ride the chat body (like runtime) and must
+        reach the RunRequest, or the pick silently evaporates at the chat layer."""
+        tools = make_tools(mock_console,
+                           models=lambda: ("claude-fable-5", "claude-opus-4-8"))
+        start = next(t for t in tools if t.name == "start_pipeline")
+        asyncio.get_event_loop().run_until_complete(
+            start.on_invoke_tool(None, json.dumps({"description": "Build it"}))
+        )
+        req = mock_console.start_run.call_args[0][0]
+        assert req.planning_model == "claude-fable-5"
+        assert req.impl_model == "claude-opus-4-8"

@@ -304,6 +304,8 @@ class Handler(BaseHTTPRequestHandler):
             files = body.get("files", [])
             images = body.get("images", [])
             runtime = body.get("runtime", "")  # claude | opencode from the UI picker
+            planning_model = body.get("planning_model", "")  # per-run model picks (claude runtime)
+            impl_model = body.get("impl_model", "")
 
             store = ChatStore(_chat_path(run_id)) if run_id else None
             user_msg = ChatMessage(role="user", content=message, msg_type="text",
@@ -315,7 +317,9 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 result_run_id, response_msgs = _run_async(
-                    _chat_runner.handle_message(run_id, message, files, images, runtime=runtime)
+                    _chat_runner.handle_message(run_id, message, files, images, runtime=runtime,
+                                                planning_model=planning_model,
+                                                impl_model=impl_model)
                 )
             except Exception as e:
                 return self._send(500, {"error": str(e)})
@@ -421,6 +425,8 @@ class Handler(BaseHTTPRequestHandler):
                 credentials=creds,
                 context_files=body.get("files", []),
                 runtime=body.get("runtime", ""),
+                planning_model=body.get("planning_model", ""),
+                impl_model=body.get("impl_model", ""),
             )
             return self._send(200, {"run_id": console.start_run(req)})
         return self._send(404, {"error": "not found"})

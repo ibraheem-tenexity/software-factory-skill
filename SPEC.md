@@ -89,7 +89,12 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
 ## 7. Models, MCP, deploy contract
 
 - Models (claude runtime): Stage 1 & 2 orchestrators `claude-opus-4-8`; Stage 3 `claude-sonnet-4-6`;
-  Task subagents sonnet. Opencode runtime: all stages `openrouter/moonshotai/kimi-k2.6` (§9).
+  Task subagents sonnet. **Per-run picks:** the operator may pin a run's planning model
+  (S1/S2: `claude-opus-4-8` | `claude-fable-5`) and implementation model (S3:
+  `claude-sonnet-4-6` | `claude-opus-4-8`) at start; picks persist in RunState (retries keep
+  them), beat the `SF_MODEL` env knob, and anything outside the offered sets is dropped. A
+  non-default S3 pick is also mandated in-prompt for Task subagents (overriding the SKILL's
+  sonnet pin). Opencode runtime: all stages `openrouter/moonshotai/kimi-k2.6` (§9).
 - MCP (stage-aware workspace `.mcp.json`): playwright (headless) for all stages; Stage 3 additionally
   `railway` (local `railway mcp`, project-token auth — project-scoped tools only) and `supabase`
   (`@supabase/mcp-server-supabase`, `SUPABASE_ACCESS_TOKEN` from env).

@@ -57,6 +57,10 @@ for _p in STAGE_3:
 _STAGE_MODEL = {1: "claude-opus-4-8", 2: "claude-opus-4-8", 3: "claude-sonnet-4-6"}
 # opencode runtime: one model for all stages (monolithic v1 — no per-stage split).
 _STAGE_MODEL_OPENCODE = {s: "openrouter/moonshotai/kimi-k2.6" for s in (1, 2, 3)}
+# Operator-pickable per-run models (claude runtime). The UI offers exactly these; anything
+# else is ignored at start_run so a bad request can never launch an unknown/unpriced model.
+PLANNING_MODELS = {"claude-opus-4-8", "claude-fable-5"}
+IMPL_MODELS = {"claude-sonnet-4-6", "claude-opus-4-8"}
 
 
 @dataclass
@@ -68,6 +72,8 @@ class RunRequest:
     credentials: dict = field(default_factory=dict)
     context_files: list = field(default_factory=list)
     runtime: str = ""  # claude | opencode; empty -> SF_RUNTIME env (default claude)
+    planning_model: str = ""  # S1/S2 orchestrator model (claude runtime); empty -> stage default
+    impl_model: str = ""      # S3 model (claude runtime); empty -> stage default
 
 
 def run_paths(runs_dir: str, run_id: str) -> dict:
@@ -585,9 +591,18 @@ class Console:
                 "PWD": ws,
             }
         else:
-            # Per-stage model: research & design on Opus 4.8; build on Sonnet (cheaper for code
-            # volume). SF_MODEL (if set) overrides all stages.
-            model = os.environ.get("SF_MODEL") or _STAGE_MODEL.get(stage, "claude-sonnet-4-6")
+            # Model precedence: the operator's per-run pick (most specific — pinned in state at
+            # start_run, so retries keep it) > SF_MODEL env (deploy-wide knob) > stage defaults
+            # (research & design on Opus 4.8; build on Sonnet, cheaper for code volume).
+            pick = state.planning_model if stage in (1, 2) else state.impl_model
+            model = pick or os.environ.get("SF_MODEL") \
+                or _STAGE_MODEL.get(stage, "claude-sonnet-4-6")
+            if stage == 3 and state.impl_model:
+                # The stage-3 SKILL contract pins sonnet for Task subagents; an explicit
+                # operator pick must override that in-prompt or the orchestrator fights it.
+                prompt = (f"{prompt}\n\nMODEL OVERRIDE (operator-pinned): this stage and every "
+                          f"Task subagent run on {model} — this overrides any model named in "
+                          f"SKILL.md.")
             max_turns = os.environ.get("SF_MAX_TURNS", "200")
             argv = [
                 "claude", "-p", prompt,
@@ -632,6 +647,10 @@ class Console:
         # Pin the agent runtime for the whole run (all stages + retries) at start.
         # Per-request choice (the UI's Claude/Kimi picker) wins over the SF_RUNTIME env default.
         state.runtime = req.runtime or os.environ.get("SF_RUNTIME", "claude")
+        # Pin the operator's model picks (claude runtime); unknown values are dropped so only
+        # the offered choices can ever launch. Empty = stage defaults.
+        state.planning_model = req.planning_model if req.planning_model in PLANNING_MODELS else ""
+        state.impl_model = req.impl_model if req.impl_model in IMPL_MODELS else ""
         state.save()
 
         prompt = make_prompt_stage1(req, run_id, self._runs_dir, runtime=state.runtime)
@@ -929,6 +948,8 @@ class Console:
             "deps_required": state.deps_required,
             "deps_provided": state.deps_provided,
             "deps_satisfied": state.deps_satisfied,
+            "planning_model": state.planning_model,
+            "impl_model": state.impl_model,
         }
 
     def list_runs(self) -> list[dict]:

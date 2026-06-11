@@ -64,3 +64,16 @@ def test_runs_are_isolated_by_id(tmp_path):
     a.save()
     b = RunState.load("b", store(tmp_path))
     assert b.phase == "provision"  # 'a' did not leak into 'b'
+
+
+def test_per_run_model_picks_persist_across_reload(tmp_path):
+    # Operator-picked models (planning = S1/S2 orchestrators, impl = S3) are pinned at
+    # start_run and must survive crashes/retries like every other run-scoped decision.
+    st = store(tmp_path)
+    s = RunState.load("run-m", st)
+    s.planning_model = "claude-fable-5"
+    s.impl_model = "claude-opus-4-8"
+    s.save()
+    resumed = RunState.load("run-m", store(tmp_path))
+    assert resumed.planning_model == "claude-fable-5"
+    assert resumed.impl_model == "claude-opus-4-8"

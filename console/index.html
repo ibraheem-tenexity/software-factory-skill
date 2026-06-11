@@ -156,6 +156,9 @@
     .model-opt.selected { border-color: var(--primary); box-shadow: 0 0 0 3px rgb(0 43 92 / .12); background: #f0f4fa; }
     .model-opt .model-name { font-weight: 600; font-size: .9rem; }
     .model-opt .model-sub { font-size: .7rem; color: var(--muted-fg); margin-top: .15rem; }
+    .model-picks { display: flex; gap: .6rem; margin-bottom: 1rem; }
+    .model-picks label { flex: 1; font-size: .7rem; color: var(--muted-fg); display: flex; flex-direction: column; gap: .25rem; }
+    .model-picks select { padding: .45rem; border: 1px solid var(--input); border-radius: var(--radius); background: var(--card); font-size: .8rem; }
     .new-project-go { width: 100%; padding: .65rem; border: 0; border-radius: var(--radius); background: var(--primary);
       color: var(--primary-fg); font: 600 .88rem var(--sans); cursor: pointer; }
     .new-project-go:hover { opacity: .9; }
@@ -194,6 +197,20 @@
             <div class="model-name">Kimi K 2.6</div>
             <div class="model-sub">OpenCode · Moonshot AI</div>
           </div>
+        </div>
+        <div class="model-picks" id="claude-model-picks">
+          <label>Planning (S1+S2)
+            <select id="planning-model">
+              <option value="claude-opus-4-8" selected>Opus 4.8</option>
+              <option value="claude-fable-5">Fable 5</option>
+            </select>
+          </label>
+          <label>Implementation (S3)
+            <select id="impl-model">
+              <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
+              <option value="claude-opus-4-8">Opus 4.8</option>
+            </select>
+          </label>
         </div>
         <button class="new-project-go" onclick="createNewProject()">Create Project &rarr;</button>
       </div>
@@ -561,7 +578,9 @@
         const res = await fetch("/api/chat", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ run_id: chatRunId, message: text, files, images,
-            runtime: selectedModel === "kimi" ? "opencode" : "claude" })
+            runtime: selectedModel === "kimi" ? "opencode" : "claude",
+            planning_model: selectedModel === "kimi" ? "" : $("planning-model").value,
+            impl_model: selectedModel === "kimi" ? "" : $("impl-model").value })
         });
         const data = await res.json();
         hideTyping();
@@ -703,6 +722,8 @@
       document.querySelectorAll(".model-opt").forEach(o => o.classList.remove("selected"));
       el.classList.add("selected");
       selectedModel = el.dataset.model;
+      // The planning/impl picks only apply to the Claude pipeline (Kimi: single model, for now).
+      $("claude-model-picks").style.display = selectedModel === "kimi" ? "none" : "";
     };
 
     window.createNewProject = () => {

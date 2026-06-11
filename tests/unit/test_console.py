@@ -1050,3 +1050,76 @@ def test_auto_resume_never_resurrects_a_ghost_run(tmp_path):
     assert c.is_pipeline_run("run-ghost") is False
     assert c.auto_resume_dead_stage("run-ghost") is False
     assert launcher.argv is None    # nothing launched
+
+
+# ---- Per-run model picks (claude runtime): planning = S1/S2, implementation = S3 ----
+
+def _argv_model(argv):
+    return argv[argv.index("--model") + 1]
+
+
+def test_start_run_launches_stage1_on_the_chosen_planning_model(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="app", planning_model="claude-fable-5",
+                                 impl_model="claude-opus-4-8"))
+    assert _argv_model(launcher.argv) == "claude-fable-5"
+    st = c.status(rid)
+    assert st["planning_model"] == "claude-fable-5"
+    assert st["impl_model"] == "claude-opus-4-8"
+
+
+def test_model_defaults_unchanged_when_nothing_picked(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="app"))
+    assert _argv_model(launcher.argv) == "claude-opus-4-8"
+    st = c.status(rid)
+    assert st["planning_model"] == ""
+    assert st["impl_model"] == ""
+
+
+def test_stage3_uses_the_chosen_impl_model_and_mandates_it_for_subagents(tmp_path):
+    # The stage-3 SKILL contract pins sonnet for subagents; an explicit operator pick must
+    # override that in-prompt, or the orchestrator would fight its own contract.
+    class FakeProc:
+        def __init__(self): self.exit_code = None
+        def poll(self): return self.exit_code
+    proc = FakeProc(); argvs = []
+    def launcher(argv, env=None, log_path=None, cwd=None):
+        argvs.append(argv); return proc
+    ids = iter(["run-im"])
+    c = Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids))
+    rid = c.start_run(RunRequest(description="x", impl_model="claude-opus-4-8"))
+    st = c._load_state(rid)
+    st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True; st.stage = 3
+    st.save()
+    proc.exit_code = -9
+    assert c.auto_resume_dead_stage(rid) is True
+    argv = argvs[-1]
+    assert _argv_model(argv) == "claude-opus-4-8"
+    prompt = argv[2]
+    assert "claude-opus-4-8" in prompt and "subagent" in prompt.lower()
+
+
+def test_unknown_model_picks_are_ignored(tmp_path):
+    # Only the operator-offered choices are valid (planning: opus-4-8|fable-5;
+    # impl: sonnet-4-6|opus-4-8). Anything else falls back to the defaults.
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="app", planning_model="gpt-5o-mega",
+                                 impl_model="claude-haiku-4-5"))
+    assert _argv_model(launcher.argv) == "claude-opus-4-8"
+    st = c.status(rid)
+    assert st["planning_model"] == ""
+    assert st["impl_model"] == ""
+
+
+def test_per_run_model_pick_beats_the_SF_MODEL_env_override(tmp_path, monkeypatch):
+    # SF_MODEL is a deploy-wide default knob; an explicit per-run operator pick is more
+    # specific and must win (the env var once silently forced wrong models — never again).
+    monkeypatch.setenv("SF_MODEL", "claude-sonnet-4-6")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    c.start_run(RunRequest(description="app", planning_model="claude-fable-5"))
+    assert _argv_model(launcher.argv) == "claude-fable-5"
