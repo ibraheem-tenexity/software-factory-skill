@@ -511,6 +511,15 @@ class Console:
         killed = False
         if p is not None and hasattr(p, "poll") and p.poll() is None and hasattr(p, "terminate"):
             p.terminate()
+            # opencode processes SURVIVE a plain SIGTERM (confirmed in production by the
+            # opencode-swarm session: serve ignored SIGTERM and even pkill). A budget-stopped
+            # run that keeps spending is the worst failure mode this brake exists to prevent —
+            # escalate to SIGKILL if the process is still alive after a short grace.
+            if hasattr(p, "wait") and hasattr(p, "kill"):
+                try:
+                    p.wait(timeout=5)
+                except Exception:
+                    p.kill()
             killed = True
         db = RunDB(self._paths(run_id)["db"])
         already = any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers())

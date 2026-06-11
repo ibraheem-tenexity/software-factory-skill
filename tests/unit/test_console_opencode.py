@@ -352,3 +352,35 @@ def test_stage_pid_alive_rejects_recycled_pids(tmp_path):
     with open(os.path.join(base, "stage3.pid"), "w") as f:
         f.write(str(os.getpid()))                    # alive, but cmdline lacks the run id
     assert c._stage_pid_alive(rid) is False
+
+
+def test_budget_kill_escalates_to_sigkill_when_terminate_is_ignored(tmp_path):
+    # opencode processes survive plain SIGTERM (production-confirmed by the swarm session:
+    # `opencode serve` ignored SIGTERM and pkill). A budget-stopped run that keeps spending
+    # is the failure mode the brake exists for — enforce_budget must escalate to kill().
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="x", target="railway"))
+
+    class StubbornProc:
+        def __init__(self):
+            self.killed = False
+        def poll(self):
+            return None
+        def terminate(self):
+            pass                                  # ignores SIGTERM, like opencode
+        def wait(self, timeout=None):
+            raise TimeoutError("still alive")
+        def kill(self):
+            self.killed = True
+
+    p = StubbornProc()
+    c._procs[rid] = p
+    st = c._load_state(rid)
+    st.budget_ceiling = 0.01
+    st.save()
+    with open(os.path.join(str(tmp_path), rid, "run.log"), "w") as f:
+        f.write(json.dumps({"type": "step_finish", "sessionID": "s",
+                            "part": {"type": "step-finish", "cost": 5.0}}) + "\n")
+    assert c.enforce_budget(rid) is True
+    assert p.killed, "SIGTERM-immune process must be SIGKILLed"

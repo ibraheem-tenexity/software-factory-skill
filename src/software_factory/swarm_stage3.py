@@ -133,6 +133,11 @@ def _terminate(signum, frame):
     p = _CURRENT.get("proc")
     if p is not None and p.poll() is None:
         p.terminate()
+        # opencode-family children survive plain SIGTERM (production-confirmed) — escalate.
+        try:
+            p.wait(timeout=3)
+        except Exception:
+            p.kill()
     sys.exit(143)
 
 
