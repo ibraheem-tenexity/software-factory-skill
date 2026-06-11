@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -604,6 +605,23 @@ class Console:
                 # makes it bind the session to the wrong directory and crash createUserMessage.
                 "PWD": ws,
             }
+            if stage == 3 and os.environ.get("SF_SWARM") == "1":
+                # §9 swarm build mode: the tracked process becomes the swarm driver, which
+                # runs the open tickets as parallel swarm agents and then EXECS this exact
+                # opencode argv (same PID — handle, run.log and budget teeth carry through).
+                swarm_budget = max(0.0, ceiling - spend - reserve)
+                src_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                env["PYTHONPATH"] = (
+                    src_root + os.pathsep + env["PYTHONPATH"]
+                    if env.get("PYTHONPATH") else src_root
+                )
+                argv = [
+                    sys.executable, "-m", "software_factory.swarm_stage3",
+                    os.path.abspath(self._runs_dir), run_id, ws,
+                    "--budget", f"{swarm_budget:.2f}",
+                    "--model", model,
+                    "--",
+                ] + argv
         else:
             # Model precedence: the operator's per-run pick (most specific — pinned in state at
             # start_run, so retries keep it) > SF_MODEL env (deploy-wide knob) > stage defaults

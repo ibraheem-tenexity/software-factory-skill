@@ -193,8 +193,11 @@ def spend_usd(events: list[dict], prices: dict = PRICES) -> float:
     return max(turned, reported)
 
 
-# swarm terminal event -> AgentRegistry outcome (§5 vocabulary)
+# swarm terminal event -> AgentRegistry outcome (§5 vocabulary). agent-settled (emitted
+# after the sweep, opencode-swarm >= df0a10d) supersedes these when present: its costUsd
+# and status include sweep activity, which agent-done's do not.
 _OUTCOME_FOR = {"agent-done": "success", "agent-failed": "failed"}
+_SETTLED_OUTCOME = {"done": "success", "failed": "failed"}
 
 
 def bridge_events(events: list[dict], registry, run_id: str, model: str,
@@ -209,10 +212,14 @@ def bridge_events(events: list[dict], registry, run_id: str, model: str,
         if not name:
             continue
         a = per_agent.setdefault(
-            name, {"usage": Usage(model=model), "cost": 0.0, "outcome": None}
+            name, {"usage": Usage(model=model), "cost": 0.0, "outcome": None, "settled": False}
         )
         kind = ev.get("type")
-        if kind == "agent-turn-done":
+        if kind == "agent-settled":
+            a["settled"] = True
+            a["cost"] = float(ev.get("costUsd", 0) or 0) or a["cost"]
+            a["outcome"] = _SETTLED_OUTCOME.get(ev.get("status"), "failed")
+        elif kind == "agent-turn-done":
             u = _turn_usage(ev)
             t = a["usage"]
             a["usage"] = Usage(
@@ -222,8 +229,9 @@ def bridge_events(events: list[dict], registry, run_id: str, model: str,
                 output_tokens=t.output_tokens + u.output_tokens,
                 reasoning_tokens=t.reasoning_tokens + u.reasoning_tokens,
             )
-            a["cost"] += _turn_cost(ev, prices)
-        elif kind in _OUTCOME_FOR:
+            if not a["settled"]:
+                a["cost"] += _turn_cost(ev, prices)
+        elif kind in _OUTCOME_FOR and not a["settled"]:
             a["outcome"] = _OUTCOME_FOR[kind]
 
     known = {r.agent_id for r in registry.agents_for(run_id)}

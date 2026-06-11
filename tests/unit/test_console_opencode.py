@@ -274,3 +274,43 @@ def test_evidence_opencode_run_corroborated_by_spend_not_agent_cost(tmp_path):
     ok, reasons = verify_evidence(bundle)
     assert not any("cost is zero" in r for r in reasons)
     assert not any("without provenance" in r for r in reasons)
+
+
+def test_sf_swarm_wraps_stage3_in_the_driver_but_not_stages_1_2(tmp_path, monkeypatch):
+    # §9 swarm build mode: stage 3's tracked process is the swarm driver, which receives
+    # the EXACT opencode argv after `--` to exec once the swarm phase ends. Stages 1-2
+    # (and SF_SWARM unset) launch opencode directly, unchanged.
+    import sys as _sys
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    monkeypatch.setenv("SF_SWARM", "1")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="guestbook", target="railway"))
+    assert launcher.argv[0] == "opencode"                    # stage 1: no driver wrap
+
+    st = c._load_state(rid)
+    st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True
+    st.save()
+    c.start_stage3(rid)
+    argv = launcher.argv
+    assert argv[0] == _sys.executable
+    assert argv[1:3] == ["-m", "software_factory.swarm_stage3"]
+    assert "--budget" in argv and "--model" in argv
+    tail = argv[argv.index("--") + 1:]
+    assert tail[0] == "opencode" and "--dangerously-skip-permissions" in tail
+    assert launcher.env.get("PYTHONPATH")                    # driver importable as a child
+    assert launcher.env["PWD"] == launcher.cwd               # §9 hygiene still applies
+
+
+def test_without_sf_swarm_stage3_launches_opencode_directly(tmp_path, monkeypatch):
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    monkeypatch.delenv("SF_SWARM", raising=False)
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="guestbook", target="railway"))
+    st = c._load_state(rid)
+    st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True
+    st.save()
+    c.start_stage3(rid)
+    assert launcher.argv[0] == "opencode"
+    assert "software_factory.swarm_stage3" not in launcher.argv

@@ -182,3 +182,77 @@ def test_bridge_maps_ticket_agents_to_ticket_ids_and_failures(tmp_path):
     assert row.role == "swarm-ticket"
     assert row.status == "failed" and row.outcome == "failed"
     assert abs(row.cost_usd - 0.01) < 1e-9
+
+
+def test_bridge_agent_settled_supersedes_agent_done(tmp_path):
+    # opencode-swarm >= df0a10d emits agent-settled AFTER the sweep with the true final
+    # cost/status; agent-done remains the realtime (pre-sweep) signal.
+    reg = AgentRegistry(str(tmp_path / "run.db"))
+    tok = {"input": 100, "output": 10, "reasoning": 0, "cache": {"read": 0, "write": 0}}
+    events = [
+        {"type": "agent-spawned", "agent": "ticket-9", "sessionId": "s"},
+        {"type": "agent-turn-done", "agent": "ticket-9", "round": 0, "model": KIMI,
+         "costUsd": 0.01, "tokens": tok, "totalCostUsd": 0.01},
+        {"type": "agent-done", "agent": "ticket-9", "result": "ok", "costUsd": 0.01},
+        {"type": "agent-turn-done", "agent": "ticket-9", "round": 1, "model": KIMI,
+         "costUsd": 0.005, "tokens": tok, "totalCostUsd": 0.015},  # sweep turn
+        {"type": "agent-settled", "agent": "ticket-9", "status": "done",
+         "costUsd": 0.015, "result": "ok"},
+    ]
+    bridge_events(events, reg, "run-x", KIMI)
+    (row,) = reg.agents_for("run-x")
+    assert abs(row.cost_usd - 0.015) < 1e-9      # settled cost, not agent-done's 0.01
+    assert row.status == "done" and row.outcome == "success"
+
+
+def test_bridge_settled_failure_wins_over_earlier_done(tmp_path):
+    reg = AgentRegistry(str(tmp_path / "run.db"))
+    events = [
+        {"type": "agent-spawned", "agent": "a", "sessionId": "s"},
+        {"type": "agent-done", "agent": "a", "result": "ok", "costUsd": 0.01},
+        {"type": "agent-settled", "agent": "a", "status": "failed", "costUsd": 0.01,
+         "result": "boom"},
+    ]
+    bridge_events(events, reg, "run-x", KIMI)
+    (row,) = reg.agents_for("run-x")
+    assert row.status == "failed" and row.outcome == "failed"
+
+
+# ---- v0.2.0 release-binary fixture (agent-settled + monotonic ordinals) -----------------
+
+FIXTURE_V020 = os.path.join(os.path.dirname(__file__), "..", "fixtures",
+                            "swarm-events-v020.jsonl")
+
+
+def test_v020_fixture_settled_costs_match_turn_sums_and_swarm_total():
+    events = read_events(FIXTURE_V020)
+    settled = {e["agent"]: e["costUsd"] for e in events if e["type"] == "agent-settled"}
+    assert settled, "v0.2.0 fixture must carry agent-settled events"
+    for agent, cost in settled.items():
+        turns = sum(e["costUsd"] for e in events
+                    if e["type"] == "agent-turn-done" and e["agent"] == agent)
+        assert abs(cost - turns) < 1e-9
+    total = next(e["totalCostUsd"] for e in events if e["type"] == "swarm-done")
+    assert abs(sum(settled.values()) - total) < 1e-9
+    assert abs(spend_usd(events) - total) < 1e-9
+
+
+def test_v020_fixture_rounds_are_monotonic_ordinals():
+    events = read_events(FIXTURE_V020)
+    per_agent: dict = {}
+    for e in events:
+        if e["type"] == "agent-turn-done":
+            per_agent.setdefault(e["agent"], []).append(e["round"])
+    for rounds in per_agent.values():
+        assert rounds == sorted(rounds) and -1 not in rounds
+
+
+def test_v020_fixture_bridge_settles_to_the_settled_costs(tmp_path):
+    reg = AgentRegistry(str(tmp_path / "run.db"))
+    events = read_events(FIXTURE_V020)
+    bridge_events(events, reg, "run-x", KIMI)
+    settled = {e["agent"]: e["costUsd"] for e in events if e["type"] == "agent-settled"}
+    rows = {r.agent_id: r for r in reg.agents_for("run-x")}
+    for agent, cost in settled.items():
+        assert abs(rows[agent].cost_usd - cost) < 1e-9
+        assert rows[agent].status == "done"
