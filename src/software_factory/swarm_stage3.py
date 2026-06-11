@@ -67,7 +67,7 @@ def fold_once(events_path: str, emitted: int, registry: AgentRegistry, run_id: s
 
 def run_swarm_waves(base: str, run_id: str, ws: str, model: str, budget_usd: float,
                     max_concurrent: int = 2, spawn=subprocess.Popen, poll_s: float = 10.0,
-                    out=sys.stdout) -> float:
+                    settle_grace_s: float = 120.0, out=sys.stdout) -> float:
     """Run every open wave as a swarm. Returns total swarm spend. Never raises on a
     failed wave — the monolithic agent after exec is the recovery path."""
     run_db = os.path.join(base, "run.db")
@@ -96,9 +96,24 @@ def run_swarm_waves(base: str, run_id: str, ws: str, model: str, budget_usd: flo
         proc = spawn(argv, env=swarm_env(ws), cwd=ws, stdout=sys.stderr, stderr=sys.stderr)
         _CURRENT["proc"] = proc
         emitted = 0
+        settled_at = None
         while proc.poll() is None:
             time.sleep(poll_s)
             emitted = fold_once(events_path, emitted, registry, run_id, model, out=out)
+            # The swarm CLI can LINGER after swarm-done (live scar: wave-2 of run-5b7aef7a
+            # finished cleanly but the CLI + its opencode serve never exited, wedging this
+            # loop for 2h). A ledger-finished swarm whose process outlives the grace is
+            # terminated — same philosophy as the opencode zombie-session override (§9).
+            if settled_at is None:
+                if any(e.get("type") == "swarm-done" for e in read_events(events_path)):
+                    settled_at = time.time()
+            elif time.time() - settled_at > settle_grace_s:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=30)
+                except Exception:
+                    proc.kill()
+                break
         fold_once(events_path, emitted, registry, run_id, model, out=out)
         _CURRENT["proc"] = None
 

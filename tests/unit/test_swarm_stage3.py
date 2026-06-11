@@ -120,3 +120,36 @@ def test_run_swarm_waves_skips_swarm_when_budget_is_exhausted(tmp_path):
 
 def test_main_without_separator_is_a_usage_error():
     assert main(["runs", "r", "/ws"]) == 2
+
+
+def test_lingering_swarm_cli_is_terminated_after_swarm_done(tmp_path):
+    # live scar (run-5b7aef7a wave 2): the swarm CLI never exited after swarm-done; the
+    # wave loop must terminate a ledger-finished swarm whose process outlives the grace.
+    base, ws = str(tmp_path / "base"), str(tmp_path / "ws")
+    os.makedirs(base), os.makedirs(ws)
+    TicketStore(os.path.join(base, "run.db")).create_ticket("a", "acc", "dod", 1)
+    fixture_text = open(FIXTURE).read()   # ends with swarm-done
+
+    class LingeringProc:
+        def __init__(self):
+            self.terminated = False
+        def poll(self):
+            return 143 if self.terminated else None   # never exits on its own
+        def terminate(self):
+            self.terminated = True
+        def wait(self, timeout=None):
+            return 143
+
+    procs = []
+    def spawn(argv, env=None, cwd=None, stdout=None, stderr=None):
+        with open(argv[argv.index("--events") + 1], "w") as f:
+            f.write(fixture_text)
+        p = LingeringProc()
+        procs.append(p)
+        return p
+
+    spent = run_swarm_waves(base, "r", ws, KIMI, 10.0, spawn=spawn,
+                            poll_s=0.01, settle_grace_s=0.05)
+    (p,) = procs
+    assert p.terminated, "ledger-finished lingering swarm must be terminated"
+    assert spent > 0   # the wave's spend still folded
