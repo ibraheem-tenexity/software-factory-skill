@@ -1,33 +1,25 @@
 """Dependency disposition — how each required token is satisfied at the deps gate.
 
-Four dispositions, with smart defaults by token name:
+Three dispositions (SPEC §3), with smart defaults by token name:
   provide — operator supplies a real value (value -> Stage 3 env, NEVER written to disk)
   mock    — Stage 3 builds a WORKING LOCAL FAKE for that capability
   mcp     — Stage 3 provisions it itself via the Supabase/Railway MCP (or generates it)
-  env     — inherited from the runner service environment
+
+There is deliberately NO 'env' disposition: a built app must never inherit the runner's
+own keys (operator security rule). LLM keys default to mock; a real key is only ever
+'provide'd explicitly. Runs persisted before the removal may still carry 'env' — it
+degrades to mock (stays satisfied, never re-pauses, never signals runner-key use).
 
 Only the disposition (metadata) is ever persisted; provided VALUES never touch disk.
 """
 from __future__ import annotations
 
-import os
-
 # Tokens the build agent can provision/derive itself via the Supabase + Railway MCP.
 _MCP_PATTERNS = ("SUPABASE_", "DATABASE_URL", "RAILWAY_", "NEXTAUTH_")
-# LLM keys already present on the runner service.
-_FROM_ENV = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")
-# The app's LLM standard. SPEC §3 zero-touch: if the real key sits in the runner env it
-# classifies 'env' (auto); if absent it classifies 'mock' (the SKILL builds a WORKING local
-# fake) — the pipeline never pauses for a human unless a token genuinely has no fallback.
-_LLM_KEYS = ("OPENROUTER_API_KEY",)
 
 
 def classify_dep(name: str) -> str:
     n = name.upper()
-    if n in _LLM_KEYS:
-        return "env" if os.environ.get(n) else "mock"
-    if n in _FROM_ENV:
-        return "env"
     for pat in _MCP_PATTERNS:
         if n == pat or n.startswith(pat):
             return "mcp"
@@ -39,8 +31,8 @@ def default_dispositions(required: list) -> dict:
 
 
 def resolve_satisfied(required: list, disposition: dict, provided_names: list) -> bool:
-    """Satisfied when every required dep is resolved: mock/mcp/env outright, or
-    provide with a value present."""
+    """Satisfied when every required dep is resolved: mock/mcp outright, or provide with
+    a value present. Legacy 'env' (pre-removal runs) degrades to mock — still satisfied."""
     provided = set(provided_names)
     for name in required:
         d = disposition.get(name) or classify_dep(name)

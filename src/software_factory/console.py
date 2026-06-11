@@ -169,7 +169,9 @@ def make_prompt_stage2(req: RunRequest, run_id: str, runs_dir: str, runtime: str
 
 def _disposition_guidance(dispositions: dict | None) -> str:
     disp = dispositions or {}
-    mock = sorted(n for n, d in disp.items() if d == "mock")
+    # Legacy 'env' (pre-removal runs) degrades to mock: a built app NEVER inherits the
+    # runner's own keys (operator security rule).
+    mock = sorted(n for n, d in disp.items() if d in ("mock", "env"))
     mcp = sorted(n for n, d in disp.items() if d == "mcp")
     if not disp:
         return ""
@@ -181,7 +183,8 @@ def _disposition_guidance(dispositions: dict | None) -> str:
         f"- **PROVISION VIA MCP** (you have the Supabase + Railway MCP — create the Supabase project "
         f"and read URL/anon/service-role keys; generate NEXTAUTH_SECRET; set NEXTAUTH_URL from the "
         f"deploy URL; set vars on the sf-<run_id> service): {mcp or 'none'}\n"
-        f"- All other required tokens with real values are already in your environment.\n"
+        f"- Operator-PROVIDED tokens ride in your environment with real values; NEVER copy any "
+        f"other key from your own environment into the app (your keys are not the app's keys).\n"
         f"Do NOT block on a real third-party integration when its token is marked MOCK — build the fake.\n"
     )
 
@@ -818,6 +821,8 @@ class Console:
         for name, spec in deps.items():
             if isinstance(spec, dict):
                 disposition[name] = spec.get("disposition") or deps_mod.classify_dep(name)
+                if disposition[name] == "env":   # removed option (stale UI/state) -> mock
+                    disposition[name] = "mock"
                 if disposition[name] == "provide" and spec.get("value") not in (None, ""):
                     provided.add(name)
             else:  # legacy: a bare value string => provide
