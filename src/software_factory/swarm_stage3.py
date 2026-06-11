@@ -92,8 +92,14 @@ def run_swarm_waves(base: str, run_id: str, ws: str, model: str, budget_usd: flo
         # Events live under the run base (accounting evidence survives workspace teardown).
         events_path = os.path.join(base, f"swarm-wave{wave}.events.jsonl")
 
-        argv = swarm_argv(cfg_path, ws, os.path.join(ws, ".swarm", "swarm.db"), events_path)
-        proc = spawn(argv, env=swarm_env(ws), cwd=ws, stdout=sys.stderr, stderr=sys.stderr)
+        # Per-WAVE db: waves are independent swarms, and a shared swarm.db is a blast-radius
+        # hazard — on run-5b7aef7a, killing a lingering prior-wave serve while the next wave
+        # shared its WAL took the live wave's serve down with it (socket-closed agent failures).
+        db_path = os.path.join(ws, ".swarm", f"swarm-wave{wave}.db")
+        argv = swarm_argv(cfg_path, ws, db_path, events_path)
+        env = swarm_env(ws)
+        env["OPENCODE_SWARM_DB"] = db_path
+        proc = spawn(argv, env=env, cwd=ws, stdout=sys.stderr, stderr=sys.stderr)
         _CURRENT["proc"] = proc
         emitted = 0
         settled_at = None

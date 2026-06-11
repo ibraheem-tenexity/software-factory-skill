@@ -104,7 +104,10 @@ def test_run_swarm_waves_serializes_waves_and_decrements_budget(tmp_path):
     assert abs(spent - 2 * wave_cost) < 1e-6
     assert os.path.exists(os.path.join(base, "swarm-wave1.events.jsonl"))  # evidence survives ws teardown
     assert calls[0][1]["PWD"] == ws                          # §9 hygiene rode along
-    assert calls[0][1]["OPENCODE_SWARM_DB"] == os.path.join(ws, ".swarm", "swarm.db")
+    # per-WAVE dbs: a shared swarm.db let a dying prior-wave serve take the live wave down
+    assert calls[0][1]["OPENCODE_SWARM_DB"] == os.path.join(ws, ".swarm", "swarm-wave1.db")
+    assert calls[1][1]["OPENCODE_SWARM_DB"] == os.path.join(ws, ".swarm", "swarm-wave2.db")
+    assert calls[0][0][calls[0][0].index("--db") + 1] != calls[1][0][calls[1][0].index("--db") + 1]
     assert '"step_finish"' in out.getvalue()                 # spend reached run.log
 
 
