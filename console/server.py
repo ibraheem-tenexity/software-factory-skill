@@ -571,6 +571,20 @@ if __name__ == "__main__":
     print(f"[runner] uid={os.getuid()} user={getpass.getuser()} home={os.environ.get('HOME')}", flush=True)
     if not _has_chat_key:
         print("[warn] no OPENAI_API_KEY or OPENROUTER_API_KEY — chat agent disabled, API-only mode")
+    # Quarantine debris under runs_dir: agents misusing db verbs once created dirs like
+    # "build-plan.md/run.db" on the volume — moved aside (never deleted), so discovery and
+    # the boot backfill only ever see real runs.
+    try:
+        from software_factory.console import RUN_ID_RE
+        qdir = os.path.join(RUNS_DIR, "_quarantine")
+        for name in os.listdir(RUNS_DIR):
+            p = os.path.join(RUNS_DIR, name)
+            if os.path.isdir(p) and name != "_quarantine" and not RUN_ID_RE.fullmatch(name):
+                os.makedirs(qdir, exist_ok=True)
+                os.rename(p, os.path.join(qdir, f"{name}.{int(time.time())}"))
+                print(f"[janitor] quarantined {name}", flush=True)
+    except Exception as e:
+        print(f"[janitor] FAILED: {e}", flush=True)
     if (os.environ.get("SF_DB") or "").lower() == "postgres":
         # Self-backfilling flip: runs that exist only as sqlite files on the volume are
         # copied into pg at boot (idempotent — registered runs skip in one registry read).

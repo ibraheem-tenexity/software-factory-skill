@@ -1190,3 +1190,19 @@ def test_list_runs_unions_pg_registry_with_local_dirs(tmp_path, monkeypatch):
     ids = [r["run_id"] for r in c.list_runs()]
     assert ids.count(rid_local) == 1            # deduped
     assert "run-pgonly" in ids                  # registry-only run surfaced
+
+
+def test_list_runs_ignores_debris_dirs(tmp_path, monkeypatch):
+    # Volume debris ("build-plan.md/run.db" from agents misusing db verbs) must never
+    # list as a run — local AND registry arms enforce the run-id shape.
+    from software_factory import console as console_mod
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="real run"))
+    junk = tmp_path / "build-plan.md"
+    junk.mkdir()
+    (junk / "run.db").write_bytes(b"")
+    monkeypatch.setattr(console_mod.dbshim, "registry_runs",
+                        lambda: [{"run_id": "demo_credentials.md", "created": 1.0}])
+    ids = [r["run_id"] for r in c.list_runs()]
+    assert ids == [rid]

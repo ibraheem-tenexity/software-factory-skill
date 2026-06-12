@@ -10,11 +10,18 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+# The factory's run-id shape — discovery (local dirs AND the pg registry) only trusts
+# ids that look like this; anything else under runs_dir is debris, not a run ("build-plan.md",
+# "tenexity-guestbook", a deploy URL…). Loose on the suffix (tests mint run-xyz style ids);
+# the pg registry's write guard (dbshim._ensure) stays strict 8-hex.
+RUN_ID_RE = re.compile(r"run-[A-Za-z0-9-]+")
 
 from . import artifacts, gates, streamlog
 from .agents import AgentRegistry
@@ -1088,12 +1095,17 @@ class Console:
         runs = []
         # Local dirs ∪ the pg registry (pg mode): a run can exist only in the registry —
         # fresh container, wiped volume — and must still surface. Local wins the dedupe.
+        # Only factory-shaped ids list (same rule as the pg registry guard): agents calling
+        # db verbs with garbage args once littered the volume with dirs like
+        # "build-plan.md"/run.db, and discovery showed them as runs.
         local = [n for n in os.listdir(self._runs_dir)
-                 if os.path.isdir(os.path.join(self._runs_dir, n))
+                 if RUN_ID_RE.fullmatch(n)
+                 and os.path.isdir(os.path.join(self._runs_dir, n))
                  and os.path.exists(os.path.join(self._runs_dir, n, "run.db"))]
         created = {}
         for r in dbshim.registry_runs():
-            created[r["run_id"]] = r.get("created") or 0
+            if RUN_ID_RE.fullmatch(r["run_id"]):
+                created[r["run_id"]] = r.get("created") or 0
         names = local + [rid for rid in created if rid not in set(local)]
         for name in names:
             st = self._load_state(name)
