@@ -56,6 +56,12 @@ def opencode_config(stage: int, steps: int) -> dict:
     cfg = {
         "$schema": "https://opencode.ai/config.json",
         "mcp": servers,
+        # The env key is the run's ONLY OpenRouter credential — pinned explicitly because
+        # auth resolution differs by entrypoint: `opencode run` honors the env key under
+        # XDG_DATA_HOME isolation, but SDK-spawned `opencode serve` (the swarm path) fell
+        # back to the host's global auth.json, whose spend-limited key credit-refused every
+        # swarm agent on run-d81f37da while the env key had headroom.
+        "provider": {"openrouter": {"options": {"apiKey": "{env:OPENROUTER_API_KEY}"}}},
         "permission": {"doom_loop": "allow", "external_directory": {"*": "allow"}},
         "instructions": ["SKILL.md"],
         "agent": {

@@ -46,6 +46,16 @@ RUN curl -fsSL https://opencode.ai/install | VERSION=1.16.0 bash \
     && ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode \
     && opencode --version
 
+# opencode-swarm (SF_SWARM=1 stage-3 build mode, SPEC §9) — the pinned release ships a
+# compiled binary + bundled plugin, so no bun in the image. The runner finds the plugin
+# next to the executable, but containers move things: OPENCODE_SWARM_PLUGIN is explicit.
+RUN mkdir -p /opt/swarm \
+    && curl -fsSL https://github.com/ibraheem-111/opencode-swarm/releases/download/v0.2.2/opencode-swarm-0.2.2-linux-x64.tar.gz \
+       | tar -xz -C /opt/swarm \
+    && /opt/swarm/swarm --version \
+    && test -f /opt/swarm/swarm-plugin.js
+ENV SF_SWARM_BIN=/opt/swarm/swarm OPENCODE_SWARM_PLUGIN=/opt/swarm/swarm-plugin.js
+
 WORKDIR /app
 COPY . /app
 

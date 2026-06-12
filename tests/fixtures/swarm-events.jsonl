@@ -1,0 +1,13 @@
+{"ts":1781156727658,"type":"agent-spawned","agent":"asker","sessionId":"ses_14ac934b4ffev5DS7nj2rE73yn"}
+{"ts":1781156727658,"type":"agent-turn","agent":"asker","round":0}
+{"ts":1781156727666,"type":"agent-spawned","agent":"oracle","sessionId":"ses_14ac9349bffeQ0jqPHdL06OPQA"}
+{"ts":1781156727666,"type":"agent-turn","agent":"oracle","round":0}
+{"ts":1781156749545,"type":"agent-turn-done","agent":"oracle","round":0,"model":"openrouter/moonshotai/kimi-k2.6","costUsd":0.00478023,"tokens":{"total":6825,"input":6774,"output":15,"reasoning":36,"cache":{"write":0,"read":0}},"totalCostUsd":0.00478023}
+{"ts":1781156749551,"type":"agent-done","agent":"oracle","result":" No messages have arrived yet. Ending my turn and waiting for the asker.","costUsd":0.00478023}
+{"ts":1781156785860,"type":"agent-turn-done","agent":"asker","round":0,"model":"openrouter/moonshotai/kimi-k2.6","costUsd":0.0048873,"tokens":{"total":6858,"input":6776,"output":23,"reasoning":59,"cache":{"write":0,"read":0}},"totalCostUsd":0.00966753}
+{"ts":1781156785865,"type":"agent-done","agent":"asker","result":" I have asked the **oracle** for the secret word.\nMy turn ends here, awaiting the oracle’s reply.","costUsd":0.0048873}
+{"ts":1781156785870,"type":"messages-delivered","agent":"oracle","count":1}
+{"ts":1781156792544,"type":"agent-turn-done","agent":"oracle","round":-1,"model":"openrouter/moonshotai/kimi-k2.6","costUsd":0.00486178,"tokens":{"total":6973,"input":6911,"output":17,"reasoning":29,"cache":{"write":0,"read":16}},"totalCostUsd":0.01452931}
+{"ts":1781156792554,"type":"messages-delivered","agent":"asker","count":1}
+{"ts":1781156816064,"type":"agent-turn-done","agent":"asker","round":-1,"model":"openrouter/moonshotai/kimi-k2.6","costUsd":0.00515705,"tokens":{"total":7055,"input":6937,"output":0,"reasoning":129,"cache":{"write":0,"read":0}},"totalCostUsd":0.01968636}
+{"ts":1781156816074,"type":"swarm-done","swarmId":"sw_9197f5184c35406e","status":"completed","totalCostUsd":0.01968636}

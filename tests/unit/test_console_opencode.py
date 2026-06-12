@@ -54,6 +54,7 @@ def test_opencode_launch_env_isolates_global_config_and_external_skills(tmp_path
 
     # ~/.config/opencode (peer MCPs, global instructions) must NEVER leak into stage runs
     assert launcher.env["XDG_CONFIG_HOME"].startswith(launcher.cwd)
+    assert launcher.env["XDG_DATA_HOME"].startswith(launcher.cwd)   # global auth.json hidden
     assert launcher.env["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"] == "1"
     assert launcher.env["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1"
     # Popen doesn't update PWD; OpenCode trusts it for project resolution (live-debugged:
@@ -274,3 +275,126 @@ def test_evidence_opencode_run_corroborated_by_spend_not_agent_cost(tmp_path):
     ok, reasons = verify_evidence(bundle)
     assert not any("cost is zero" in r for r in reasons)
     assert not any("without provenance" in r for r in reasons)
+
+
+def test_sf_swarm_wraps_stage3_in_the_driver_but_not_stages_1_2(tmp_path, monkeypatch):
+    # §9 swarm build mode: stage 3's tracked process is the swarm driver, which receives
+    # the EXACT opencode argv after `--` to exec once the swarm phase ends. Stages 1-2
+    # (and SF_SWARM unset) launch opencode directly, unchanged.
+    import sys as _sys
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    monkeypatch.setenv("SF_SWARM", "1")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="guestbook", target="railway"))
+    assert launcher.argv[0] == "opencode"                    # stage 1: no driver wrap
+
+    st = c._load_state(rid)
+    st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True
+    st.save()
+    c.start_stage3(rid)
+    argv = launcher.argv
+    assert argv[0] == _sys.executable
+    assert argv[1:3] == ["-m", "software_factory.swarm_stage3"]
+    assert "--budget" in argv and "--model" in argv
+    tail = argv[argv.index("--") + 1:]
+    assert tail[0] == "opencode" and "--dangerously-skip-permissions" in tail
+    assert launcher.env.get("PYTHONPATH")                    # driver importable as a child
+    assert launcher.env["PWD"] == launcher.cwd               # §9 hygiene still applies
+
+
+def test_without_sf_swarm_stage3_launches_opencode_directly(tmp_path, monkeypatch):
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    monkeypatch.delenv("SF_SWARM", raising=False)
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="guestbook", target="railway"))
+    st = c._load_state(rid)
+    st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True
+    st.save()
+    c.start_stage3(rid)
+    assert launcher.argv[0] == "opencode"
+    assert "software_factory.swarm_stage3" not in launcher.argv
+
+
+def test_stage_finished_respects_a_live_stage3_pidfile_over_an_idle_log(tmp_path):
+    # run-5b7aef7a live scar: server restart loses the process handle; the swarm driver
+    # sits quiet in run.log for >2min mid-Kimi-turn; log-idle fallback said "finished" and
+    # the poller relaunched a second orchestrator. A live stage3.pid must win.
+    import subprocess
+    import time as _time
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = "run-pid"
+    base = os.path.join(str(tmp_path), rid)
+    os.makedirs(base, exist_ok=True)
+    log = os.path.join(base, "run.log")
+    with open(log, "w") as f:
+        f.write("{}\n")
+    idle = _time.time() - 600
+    os.utime(log, (idle, idle))                      # idle far past the 2-min grace
+    p = subprocess.Popen(["bash", "-c", f"# {rid}\nsleep 30"])
+    with open(os.path.join(base, "stage3.pid"), "w") as f:
+        f.write(str(p.pid))
+    try:
+        assert c.stage_finished(rid) is False        # live driver pid = proof of life
+    finally:
+        p.kill()
+        p.wait()
+    assert c.stage_finished(rid) is True             # dead pid -> log-idle fallback
+
+
+def test_stage_pid_alive_rejects_recycled_pids(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = "run-pid2"
+    base = os.path.join(str(tmp_path), rid)
+    os.makedirs(base, exist_ok=True)
+    with open(os.path.join(base, "stage3.pid"), "w") as f:
+        f.write(str(os.getpid()))                    # alive, but cmdline lacks the run id
+    assert c._stage_pid_alive(rid) is False
+
+
+def test_budget_kill_escalates_to_sigkill_when_terminate_is_ignored(tmp_path):
+    # opencode processes survive plain SIGTERM (production-confirmed by the swarm session:
+    # `opencode serve` ignored SIGTERM and pkill). A budget-stopped run that keeps spending
+    # is the failure mode the brake exists for — enforce_budget must escalate to kill().
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_run(RunRequest(description="x", target="railway"))
+
+    class StubbornProc:
+        def __init__(self):
+            self.killed = False
+        def poll(self):
+            return None
+        def terminate(self):
+            pass                                  # ignores SIGTERM, like opencode
+        def wait(self, timeout=None):
+            raise TimeoutError("still alive")
+        def kill(self):
+            self.killed = True
+
+    p = StubbornProc()
+    c._procs[rid] = p
+    st = c._load_state(rid)
+    st.budget_ceiling = 0.01
+    st.save()
+    with open(os.path.join(str(tmp_path), rid, "run.log"), "w") as f:
+        f.write(json.dumps({"type": "step_finish", "sessionID": "s",
+                            "part": {"type": "step-finish", "cost": 5.0}}) + "\n")
+    assert c.enforce_budget(rid) is True
+    assert p.killed, "SIGTERM-immune process must be SIGKILLed"
+
+
+def test_default_launch_child_owns_the_log_file_not_a_server_pipe(tmp_path):
+    # run-5b7aef7a live scar: stdout piped through a server pump thread dies with the
+    # server — run.log freezes and the §4 brake goes spend-blind while the orchestrator
+    # keeps working. The child must write run.log through its OWN fd.
+    from software_factory.console import _default_launch
+    log = str(tmp_path / "run.log")
+    p = _default_launch(["bash", "-c", "echo from-child; echo err-too >&2"], {}, log_path=log)
+    p.wait(timeout=10)
+    text = open(log).read()
+    assert "from-child" in text          # stdout reaches the log with no pump alive
+    assert "err-too" in text             # stderr merged, as the parsers expect

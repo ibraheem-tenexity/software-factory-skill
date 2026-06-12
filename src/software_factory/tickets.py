@@ -85,6 +85,14 @@ class TicketStore:
         )
         self._conn.commit()
 
+    def open_waves(self) -> list[int]:
+        """Waves that still have not-done tickets, ascending — the swarm driver's
+        wave-serialization order (parallel within a wave, waves in sequence)."""
+        rows = self._conn.execute(
+            "SELECT DISTINCT wave FROM tickets WHERE status != 'done' ORDER BY wave"
+        ).fetchall()
+        return [r["wave"] for r in rows]
+
     def open_tickets(self, wave: int) -> list[Ticket]:
         rows = self._conn.execute(
             "SELECT * FROM tickets WHERE wave = ? AND status != 'done' ORDER BY id", (wave,)

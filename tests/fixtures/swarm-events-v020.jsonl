@@ -1,0 +1,17 @@
+{"ts":1781158065945,"type":"agent-spawned","agent":"asker","sessionId":"ses_14ab4c8feffeysM09Sgr5kx0WP"}
+{"ts":1781158065945,"type":"agent-turn","agent":"asker","round":0}
+{"ts":1781158065951,"type":"agent-spawned","agent":"oracle","sessionId":"ses_14ab4c8ebffeRqOIvaFFup6ewR"}
+{"ts":1781158065951,"type":"agent-turn","agent":"oracle","round":0}
+{"ts":1781158083602,"type":"agent-turn-done","agent":"oracle","round":0,"model":"openrouter/moonshotai/kimi-k2.6","costUsd":0.00254723,"tokens":{"total":6837,"input":86,"output":17,"reasoning":46,"cache":{"write":0,"read":6688}},"totalCostUsd":0.00254723}
+{"ts":1781158083610,"type":"messages-delivered","agent":"oracle","count":1}
+{"ts":1781158083610,"type":"agent-turn","agent":"oracle","round":1}
+{"ts":1781158088145,"type":"agent-turn-done","agent":"oracle","round":1,"model":"openrouter/moonshotai/kimi-k2.6","costUsd":0.00256479,"tokens":{"total":6951,"input":132,"output":12,"reasoning":39,"cache":{"write":0,"read":6768}},"totalCostUsd":0.00511202}
+{"ts":1781158088150,"type":"agent-done","agent":"oracle","result":" Done. I replied to asker with the secret word.","costUsd":0.00511202}
+{"ts":1781158100072,"type":"agent-turn-done","agent":"asker","round":0,"model":"openrouter/moonshotai/kimi-k2.6","costUsd":0.00531969,"tokens":{"total":6981,"input":6775,"output":0,"reasoning":209,"cache":{"write":0,"read":0}},"totalCostUsd":0.01043171}
+{"ts":1781158100077,"type":"messages-delivered","agent":"asker","count":1}
+{"ts":1781158100077,"type":"agent-turn","agent":"asker","round":1}
+{"ts":1781158131920,"type":"agent-turn-done","agent":"asker","round":1,"model":"openrouter/moonshotai/kimi-k2.6","costUsd":0.00509911,"tokens":{"total":7045,"input":6914,"output":14,"reasoning":101,"cache":{"write":0,"read":16}},"totalCostUsd":0.015530819999999999}
+{"ts":1781158131926,"type":"agent-done","agent":"asker","result":" I have stored the secret word in shared memory under the key **'secret'**.\n\n**Final answer:** tangerine ✅","costUsd":0.010418799999999999}
+{"ts":1781158131927,"type":"agent-settled","agent":"asker","status":"done","costUsd":0.010418799999999999,"result":" I have stored the secret word in shared memory under the key **'secret'**.\n\n**Final answer:** tangerine ✅"}
+{"ts":1781158131927,"type":"agent-settled","agent":"oracle","status":"done","costUsd":0.00511202,"result":" Done. I replied to asker with the secret word."}
+{"ts":1781158131932,"type":"swarm-done","swarmId":"sw_5544d1c21b15412f","status":"completed","totalCostUsd":0.015530819999999999}

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -249,31 +250,24 @@ def make_prompt(req: RunRequest, run_id: str, runs_dir: str) -> str:
 
 
 def _default_launch(argv: list[str], env: dict, log_path: str | None = None, cwd: str | None = None) -> Any:
+    """Launch a stage with stdout appended DIRECTLY to run.log — never through a pipe
+    pumped by this server. A pump thread dies with the server, leaving the orchestrator
+    writing into a readerless pipe: run.log freezes, the §4 brake goes spend-blind, and
+    the child can wedge on the full pipe buffer (run-5b7aef7a live scar — the monolithic
+    agent built for an hour with zero log visibility after a server restart). The child
+    owning its own log fd survives any number of server deaths."""
     import subprocess
-    import sys
-    import threading
 
-    proc = subprocess.Popen(
+    if log_path:
+        with open(log_path, "ab") as logf:
+            return subprocess.Popen(
+                argv, env={**os.environ, **env}, cwd=cwd,
+                stdout=logf, stderr=subprocess.STDOUT,
+            )
+    return subprocess.Popen(
         argv, env={**os.environ, **env}, cwd=cwd,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, text=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
     )
-    prefix = f"[{os.path.basename(os.path.dirname(log_path))}] " if log_path else ""
-
-    def _pump():
-        logf = open(log_path, "a") if log_path else None
-        try:
-            for line in proc.stdout:
-                sys.stdout.write(prefix + line)
-                sys.stdout.flush()
-                if logf:
-                    logf.write(line)
-                    logf.flush()
-        finally:
-            if logf:
-                logf.close()
-
-    threading.Thread(target=_pump, daemon=True).start()
-    return proc
 
 
 class Console:
@@ -327,7 +321,25 @@ class Console:
             return False
         if not os.path.exists(log):
             return True
+        # No handle (server restart / port eviction): a live stage3.pid is proof of life —
+        # the swarm driver can sit quiet in run.log for >2min mid-Kimi-turn, and treating
+        # that as finished relaunched a second orchestrator on run-5b7aef7a (§1 race).
+        if self._stage_pid_alive(run_id):
+            return False
         return (time.time() - os.path.getmtime(log)) > 120
+
+    def _stage_pid_alive(self, run_id: str) -> bool:
+        """True iff the run's stage3.pid names a live process whose cmdline mentions this
+        run (pid-recycling guard). The pid survives the driver's exec into the agent, so
+        one file covers the whole stage."""
+        pid_path = os.path.join(self._paths(run_id)["base"], "stage3.pid")
+        try:
+            with open(pid_path, encoding="utf-8") as f:
+                pid = int(f.read().strip())
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                return run_id.encode() in f.read()
+        except (OSError, ValueError):
+            return False
 
     @staticmethod
     def _log_session_completed(log_path: str) -> bool:
@@ -492,6 +504,15 @@ class Console:
         killed = False
         if p is not None and hasattr(p, "poll") and p.poll() is None and hasattr(p, "terminate"):
             p.terminate()
+            # opencode processes SURVIVE a plain SIGTERM (confirmed in production by the
+            # opencode-swarm session: serve ignored SIGTERM and even pkill). A budget-stopped
+            # run that keeps spending is the worst failure mode this brake exists to prevent —
+            # escalate to SIGKILL if the process is still alive after a short grace.
+            if hasattr(p, "wait") and hasattr(p, "kill"):
+                try:
+                    p.wait(timeout=5)
+                except Exception:
+                    p.kill()
             killed = True
         db = RunDB(self._paths(run_id)["db"])
         already = any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers())
@@ -597,6 +618,11 @@ class Console:
             env = {
                 **env,
                 "XDG_CONFIG_HOME": os.path.join(ws, ".oc-config"),
+                # XDG_DATA_HOME hides the host's global auth.json so OPENROUTER_API_KEY (env)
+                # is the ONLY credential — same as the container, where this is load-bearing.
+                # Live scar (run-d81f37da): auth.json held a spend-limited key; every stage-3
+                # swarm agent died "requires more credits" while the env key had $350+.
+                "XDG_DATA_HOME": os.path.join(ws, ".oc-data"),
                 "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS": "1",
                 "OPENCODE_DISABLE_EXTERNAL_SKILLS": "1",
                 # Popen(cwd=ws) changes the real cwd but NOT the inherited PWD env var, and
@@ -604,6 +630,23 @@ class Console:
                 # makes it bind the session to the wrong directory and crash createUserMessage.
                 "PWD": ws,
             }
+            if stage == 3 and os.environ.get("SF_SWARM") == "1":
+                # §9 swarm build mode: the tracked process becomes the swarm driver, which
+                # runs the open tickets as parallel swarm agents and then EXECS this exact
+                # opencode argv (same PID — handle, run.log and budget teeth carry through).
+                swarm_budget = max(0.0, ceiling - spend - reserve)
+                src_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                env["PYTHONPATH"] = (
+                    src_root + os.pathsep + env["PYTHONPATH"]
+                    if env.get("PYTHONPATH") else src_root
+                )
+                argv = [
+                    sys.executable, "-m", "software_factory.swarm_stage3",
+                    os.path.abspath(self._runs_dir), run_id, ws,
+                    "--budget", f"{swarm_budget:.2f}",
+                    "--model", model,
+                    "--",
+                ] + argv
         else:
             # Model precedence: the operator's per-run pick (most specific — pinned in state at
             # start_run, so retries keep it) > SF_MODEL env (deploy-wide knob) > stage defaults

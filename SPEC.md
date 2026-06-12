@@ -160,3 +160,14 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
 - Cost (§4) parses BOTH stream vocabularies per session: claude `result.total_cost_usd` +
   usage-tail; opencode per-`step_finish` `part.cost` (token-priced fallback at the Kimi rate).
   Both runtimes' gates are identical — gate 3(b)'s Playwright happy-flow is runtime-independent.
+- **Swarm build mode (opencode runtime, `SF_SWARM=1`):** stage 3's tracked process is the
+  swarm driver (`swarm_stage3`), which runs open tickets as PARALLEL opencode-swarm agents —
+  one agent per ticket, waves in sequence, `SF_SWARM_CONCURRENCY` (default 2) within a wave —
+  then EXECS the standard monolithic stage-3 agent (same PID) to finish failed/unclaimed
+  tickets, deploy, test and fix-loop. Swarm agents claim/mark_done their own tickets (claim id
+  = agent name `ticket-<id>`); the HOST records their agent rows from the swarm's `--events`
+  stream — swarm agents never call spawn-agent/finish-agent. Every swarm turn re-emits into
+  run.log as a `step_finish` line (never `reason=stop`), so §4's brake sees one spend stream
+  and the zombie detector can't read a mid-swarm log as a finished session. The swarm's
+  `budgetUsd` (remaining run budget at launch) is the inner soft brake; §4's poller stays the
+  outer hard one. Launch hygiene is the §9 set plus `OPENCODE_SWARM_DB=<ws>/.swarm/swarm.db`.
