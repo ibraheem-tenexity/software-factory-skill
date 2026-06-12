@@ -142,3 +142,23 @@ def test_schema_name_sanitized(monkeypatch, tmp_path):
     conn = dbshim.connect(str(tmp_path / "run-AB.C-9" / "run.db"))
     conn.execute("SELECT 1")
     assert any('sf_run_ab_c_9' in s for s, _ in fake.statements)       # [a-z0-9_] only
+
+
+def test_registry_rejects_non_factory_run_ids(monkeypatch, tmp_path):
+    # A stray local process pointed at prod once registered 53 junk "runs" — only
+    # run-XXXXXXXX ids may land in public.sf_runs (the schema is still created).
+    monkeypatch.setenv("SF_DB", "postgres")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@x:6543/postgres")
+    fake = FakePgConn()
+    monkeypatch.setattr(dbshim, "_pg_connect", lambda url: fake)
+    conn = dbshim.connect(str(tmp_path / "guestbook-builder" / "run.db"))
+    conn.execute("SELECT 1")
+    sqls = [s for s, _ in fake.statements]
+    assert any("CREATE SCHEMA" in s for s in sqls)                  # schema still created
+    assert not any("INSERT INTO public.sf_runs" in s for s in sqls)  # but never registered
+
+    fake2 = FakePgConn()
+    monkeypatch.setattr(dbshim, "_pg_connect", lambda url: fake2)
+    conn2 = dbshim.connect(str(tmp_path / "run-abcd1234" / "run.db"))
+    conn2.execute("SELECT 1")
+    assert any("INSERT INTO public.sf_runs" in s for s, _ in fake2.statements)

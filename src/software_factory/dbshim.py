@@ -158,7 +158,13 @@ class PgConn:
 
     def _ensure(self):
         """Create the run's schema + registry row once per connection. Advisory-locked:
-        concurrent db-CLI writers race CREATE SCHEMA on a brand-new run."""
+        concurrent db-CLI writers race CREATE SCHEMA on a brand-new run.
+
+        Only factory-shaped ids (run-XXXXXXXX) REGISTER in public.sf_runs: a stray local
+        process pointed at the prod DATABASE_URL once registered 53 junk "runs"
+        (\"guestbook-builder\", \"deploy\", …) that the deployed console then listed —
+        discovery trusts the registry, so the registry only accepts real run ids. The
+        schema itself is still created (refusing the write would lose data instead)."""
         if self._ready:
             return
         last_err = None
@@ -172,9 +178,10 @@ class PgConn:
                         "CREATE TABLE IF NOT EXISTS public.sf_runs ("
                         "run_id text PRIMARY KEY, schema_name text NOT NULL, "
                         "created_at timestamptz NOT NULL DEFAULT now())")
-                    cur.execute(
-                        "INSERT INTO public.sf_runs (run_id, schema_name) VALUES (%s, %s) "
-                        "ON CONFLICT DO NOTHING", (self._run_id, self._schema))
+                    if re.fullmatch(r"run-[0-9a-f]{8}", self._run_id):
+                        cur.execute(
+                            "INSERT INTO public.sf_runs (run_id, schema_name) VALUES (%s, %s) "
+                            "ON CONFLICT DO NOTHING", (self._run_id, self._schema))
                 self._ready = True
                 return
             except Exception as e:
