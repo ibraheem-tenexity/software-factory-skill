@@ -76,6 +76,7 @@ class RunRequest:
     planning_model: str = ""  # S1/S2 orchestrator model (claude runtime); empty -> stage default
     impl_model: str = ""      # S3 model (claude runtime); empty -> stage default
     name: str = ""            # operator-chosen project name (display label)
+    gated: bool = False       # create held: registered + visible at $0, stage 1 launches on release
 
 
 def run_paths(runs_dir: str, run_id: str) -> dict:
@@ -647,7 +648,8 @@ class Console:
         # SPEC §1: the HOST performs extraction — record it (and provision opening) itself,
         # so these phases are never trust-based and extract can never sit 'pending' forever.
         input_db.set_phase("extract", "done")
-        input_db.set_phase("provision", "active")
+        if not req.gated:
+            input_db.set_phase("provision", "active")
 
         state = self._load_state(run_id)
         env = {k: v for k, v in (req.credentials or {}).items() if v}
@@ -665,11 +667,37 @@ class Console:
         # the offered choices can ever launch. Empty = stage defaults.
         state.planning_model = req.planning_model if req.planning_model in PLANNING_MODELS else ""
         state.impl_model = req.impl_model if req.impl_model in IMPL_MODELS else ""
+        state.held = bool(req.gated)
         state.save()
 
+        if req.gated:
+            # Held: registered + visible at $0; stage 1 launches on release_run. Create-time
+            # credential VALUES are not persisted (names only), so gated runs rely on the
+            # stage-3 deps flow for app credentials.
+            return run_id
         prompt = make_prompt_stage1(req, run_id, self._runs_dir, runtime=state.runtime)
         self._launch_stage(run_id, 1, prompt, env)
         return run_id
+
+    def release_run(self, run_id: str) -> bool:
+        """Release a gated hold: launch Stage 1. False if not held (double-release refuses)."""
+        state = self._load_state(run_id)
+        if not state.held:
+            return False
+        state.held = False
+        state.save()
+        RunDB(self._paths(run_id)["db"]).set_phase("provision", "active")
+        req = RunRequest(
+            description=state.description or "",
+            target=state.deploy_target or "railway",
+            runtime=state.runtime,
+            planning_model=state.planning_model,
+            impl_model=state.impl_model,
+            name=state.name,
+        )
+        prompt = make_prompt_stage1(req, run_id, self._runs_dir, runtime=state.runtime)
+        self._launch_stage(run_id, 1, prompt, {})
+        return True
 
     def is_pipeline_run(self, run_id: str) -> bool:
         """True only if this run was actually started by THIS pipeline (start_run records ≥1
@@ -953,6 +981,19 @@ class Console:
             return self._full_log(run_id)
         return self._read_log_tail(run_id, max_bytes)
 
+    def read_log_envelope(self, run_id: str, max_bytes: int = 20000) -> dict:
+        """Tail of run.log with honesty about truncation — the UI must never present a
+        partial log as the whole thing."""
+        p = os.path.join(self._paths(run_id)["base"], "run.log")
+        total = os.path.getsize(p) if os.path.exists(p) else 0
+        log = self._read_log_tail(run_id, max_bytes)
+        return {
+            "log": log,
+            "capped": total > max_bytes,
+            "returned_bytes": min(total, max_bytes),
+            "total_bytes": total,
+        }
+
     def _read_log_tail(self, run_id: str, max_bytes: int) -> str:
         p = os.path.join(self._paths(run_id)["base"], "run.log")
         if not os.path.exists(p):
@@ -997,6 +1038,7 @@ class Console:
             "planning_model": state.planning_model,
             "impl_model": state.impl_model,
             "budget_ceiling": self._budget_ceiling(run_id),
+            "held": state.held,
         }
 
     def list_runs(self) -> list[dict]:
@@ -1028,6 +1070,7 @@ class Console:
                 "spent_usd": self._cost(name) or st.spent_usd,
                 "stage": st.stage,
                 "budget_stopped": budget_stopped,
+                "held": st.held,
             })
         def _sort_key(r):
             p = os.path.join(self._runs_dir, r["run_id"])

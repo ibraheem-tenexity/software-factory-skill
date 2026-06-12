@@ -71,7 +71,7 @@ software factory pipeline.
 
 def make_tools(console: Console, attachments=lambda: [],
                runtime=lambda: "", models=lambda: ("", ""),
-               project_name=lambda: "") -> list[FunctionTool]:
+               project_name=lambda: "", gated=lambda: False) -> list[FunctionTool]:
     """Create agent tools that delegate to Console methods.
 
     `attachments` returns the files attached to the message currently being
@@ -87,9 +87,11 @@ def make_tools(console: Console, attachments=lambda: [],
         req = RunRequest(description=description, context=context,
                          budget=budget, target=target, context_files=attachments(),
                          runtime=runtime(), name=project_name(),
-                         planning_model=planning_model, impl_model=impl_model)
+                         planning_model=planning_model, impl_model=impl_model,
+                         gated=gated())
         run_id = console.start_run(req)
-        return json.dumps({"run_id": run_id, "status": "started"})
+        status = "held" if gated() else "started"
+        return json.dumps({"run_id": run_id, "status": status})
 
     async def _check_status(run_id: str) -> str:
         return json.dumps(console.status(run_id))
@@ -175,10 +177,12 @@ class ChatAgentRunner:
         self._pending_runtime: str = ""
         self._pending_models: tuple = ("", "")
         self._pending_name: str = ""
+        self._pending_gated: bool = False
         tools = make_tools(console, attachments=lambda: self._pending_files,
                            runtime=lambda: self._pending_runtime,
                            models=lambda: self._pending_models,
-                           project_name=lambda: self._pending_name)
+                           project_name=lambda: self._pending_name,
+                           gated=lambda: self._pending_gated)
         self._agent = Agent(
             name="Factory Concierge",
             instructions=CONCIERGE_INSTRUCTIONS,
@@ -191,7 +195,8 @@ class ChatAgentRunner:
                               files: list, images: list,
                               runtime: str = "", planning_model: str = "",
                               impl_model: str = "",
-                              project_name: str = "") -> tuple[str | None, list[ChatMessage]]:
+                              project_name: str = "",
+                              gated: bool = False) -> tuple[str | None, list[ChatMessage]]:
         """Process a user message through the agent. Returns (run_id, response_messages)."""
         from agents import Runner
 
@@ -221,6 +226,7 @@ class ChatAgentRunner:
         self._pending_runtime = runtime or ""
         self._pending_models = (planning_model or "", impl_model or "")
         self._pending_name = project_name or ""
+        self._pending_gated = bool(gated)
         try:
             result = await Runner.run(self._agent, input=history)
         finally:
@@ -228,6 +234,7 @@ class ChatAgentRunner:
             self._pending_runtime = ""
             self._pending_models = ("", "")
             self._pending_name = ""
+            self._pending_gated = False
 
         response_msgs = []
         now = time.time()

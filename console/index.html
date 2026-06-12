@@ -191,6 +191,9 @@
       <div class="new-project-card">
         <h3>New Project</h3>
         <input type="text" id="project-name" class="project-name-input" placeholder="Project name" maxlength="80">
+        <label class="hint" style="display:block;margin:-.3rem 0 .6rem;cursor:pointer">
+          <input type="checkbox" id="gated-hold"> hold — create but don't start until I release
+        </label>
         <div class="model-row">
           <div class="model-opt selected" data-model="claude" onclick="selectModel(this)">
             <div class="model-name">Claude</div>
@@ -275,7 +278,7 @@
 
   <script>
     const $ = (id) => document.getElementById(id);
-    let cy = null, runId = null, timer = null, cola = null, laidOut = false;
+    let cy = null, runId = null, timer = null, cola = null, laidOut = false, logCapped = null;
 
     function nodeColor(ele) {
       const k = ele.data("kind"), s = ele.data("status");
@@ -453,6 +456,7 @@
       $("inspect").classList.remove("open"); poll();
     };
     window.continueRun = async (gate) => { await fetch(`/api/runs/${runId}/continue`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gate }) }); $("inspect").classList.remove("open"); poll(); };
+    window.releaseRun = async () => { await fetch(`/api/runs/${runId}/release`, { method: "POST" }); poll(); };
     window.depDispChange = (sel) => {
       const row = sel.closest('.dep-row');
       const val = row && row.querySelector('.dep-val');
@@ -510,7 +514,11 @@
           }
         }
       }
-      $("feed").innerHTML = lines.slice(-60).map(([cls, t]) => `<div class="${cls}">${t.replace(/</g, "&lt;")}</div>`).join("");
+      // /log honesty: never present a truncated tail as the whole history.
+      const capNote = (typeof logCapped === "object" && logCapped)
+        ? [["a-cap", `… feed from the last ${Math.round(logCapped.shown / 1024)} KB of ` +
+            `${(logCapped.total / 1048576).toFixed(1)} MB — open the orchestrator node for the full transcript`]] : [];
+      $("feed").innerHTML = capNote.concat(lines.slice(-60)).map(([cls, t]) => `<div class="${cls}">${t.replace(/</g, "&lt;")}</div>`).join("");
       $("feed").scrollTop = $("feed").scrollHeight;
       $("livedot").className = "live-dot" + (done ? " idle" : "");
       $("activity-title").textContent = done ? "run finished" : "live activity";
@@ -614,7 +622,8 @@
             runtime: selectedModel === "kimi" ? "opencode" : "claude",
             planning_model: selectedModel === "kimi" ? "" : $("planning-model").value,
             impl_model: selectedModel === "kimi" ? "" : $("impl-model").value,
-            project_name: $("project-name").value.trim() })
+            project_name: $("project-name").value.trim(),
+            gated: !!($("gated-hold") && $("gated-hold").checked) })
         });
         const data = await res.json();
         hideTyping();
@@ -720,10 +729,13 @@
           fetch(`/api/runs/${runId}`), fetch(`/api/runs/${runId}/graph`),
           fetch(`/api/runs/${runId}/log`), fetch(`/api/runs/${runId}/events`)]);
         s = await rs.json(); g = await rg.json();
-        log = (await rl.json()).log || "";
+        const lenv = await rl.json();
+        log = lenv.log || "";
+        logCapped = lenv.capped ? { shown: lenv.returned_bytes, total: lenv.total_bytes } : null;
         evs = (await re.json()).events || [];
       } catch { return; }
-      $("phase").innerHTML = "phase <b>" + s.phase + "</b>" + (s.done ? " ✓" : "");
+      $("phase").innerHTML = "phase <b>" + s.phase + "</b>" + (s.done ? " ✓" : "") +
+        (s.held ? ' · ⏸ held <button class="gate-go" style="margin-left:.4rem" onclick="releaseRun()">▶ Release</button>' : "");
       $("stage-pill").innerHTML = "stage <b>" + (s.stage || 1) + "</b>" +
         (s.stage1_done ? (s.stage2_done ? (s.deps_satisfied ? " ✓✓✓" : " ✓✓") : " ✓") : "");
       // spent/$cap — clickable any time; the raise must be VISIBLE (the pill re-renders
@@ -791,14 +803,15 @@
       let runs = [];
       try { runs = (await (await fetch("/api/runs")).json()).runs || []; } catch {}
       // budget-stopped runs are NOT active — green dots on frozen ghosts misled the operator
-      const active = runs.filter(r => r.phase !== "done" && !r.budget_stopped);
-      const inactive = runs.filter(r => r.phase === "done" || r.budget_stopped);
+      const active = runs.filter(r => r.phase !== "done" && !r.budget_stopped && !r.held);
+      const inactive = runs.filter(r => r.phase === "done" || r.budget_stopped || r.held);
 
       const render = (list, container) => {
         container.innerHTML = "";
         for (const r of list) {
-          const dot = r.budget_stopped ? "stopped" : (r.phase !== "done" ? "active" : "inactive");
-          const label = r.budget_stopped ? "⏸ budget-stopped · " + r.phase : r.phase;
+          const dot = (r.budget_stopped || r.held) ? "stopped" : (r.phase !== "done" ? "active" : "inactive");
+          const label = r.held ? "⏸ held — not started"
+            : (r.budget_stopped ? "⏸ budget-stopped · " + r.phase : r.phase);
           const card = document.createElement("div");
           card.className = "project-card";
           card.onclick = () => openProject(r.run_id);

@@ -7,3 +7,4 @@ __pycache__/
 .env
 env_text.txt
 open-ai-key.txt
+client_secret_*.json

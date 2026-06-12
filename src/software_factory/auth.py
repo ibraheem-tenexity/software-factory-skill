@@ -36,6 +36,18 @@ def client_id() -> str:
     return os.environ.get("SF_GOOGLE_CLIENT_ID", "")
 
 
+SERVICE_HEADER = "X-SF-Service-Token"
+
+
+def service_token_ok(value) -> bool:
+    """Machine-caller credential: header == SF_SERVICE_TOKEN env (babysitter sessions,
+    scripts, CI). Env unset = feature off, never a bypass."""
+    expected = os.environ.get("SF_SERVICE_TOKEN", "")
+    if not expected or not value:
+        return False
+    return hmac.compare_digest(str(value), expected)
+
+
 def _secret() -> bytes:
     return (os.environ.get("SF_AUTH_SECRET") or _BOOT_SECRET).encode()
 

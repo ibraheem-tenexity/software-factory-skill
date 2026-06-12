@@ -181,6 +181,8 @@ def _poll_transitions():
                 rid = run_info.get("id") or run_info.get("run_id", "")
                 if not rid:
                     continue
+                if run_info.get("held"):  # gated hold: nothing to advance/enforce/narrate
+                    continue
                 _auto_advance(rid)
                 st = console.status(rid)
                 try:
@@ -224,8 +226,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _authed(self) -> bool:
-        """True when auth is disabled (env-gated) or the request carries a valid session."""
+        """True when auth is disabled (env-gated), the request carries a valid session, or a
+        machine caller presents the service token (babysitter sessions, scripts)."""
         if not auth.enabled():
+            return True
+        if auth.service_token_ok(self.headers.get(auth.SERVICE_HEADER)):
             return True
         cookies = self.headers.get("Cookie", "")
         for part in cookies.split(";"):
@@ -323,7 +328,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_header("Content-Disposition", f'attachment; filename="{rid}.log"')
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers(); self.wfile.write(body); return
-                return self._send(200, {"log": console.read_log(rid)})
+                return self._send(200, console.read_log_envelope(rid))
             if rest.endswith("/deps"):
                 return self._send(200, console.stage2_artifacts(rest[:-len("/deps")]))
             return self._send(200, console.status(rest))
@@ -364,6 +369,7 @@ class Handler(BaseHTTPRequestHandler):
             planning_model = body.get("planning_model", "")  # per-run model picks (claude runtime)
             impl_model = body.get("impl_model", "")
             project_name = body.get("project_name", "")
+            gated = bool(body.get("gated"))
 
             store = ChatStore(_chat_path(run_id)) if run_id else None
             user_msg = ChatMessage(role="user", content=message, msg_type="text",
@@ -378,7 +384,8 @@ class Handler(BaseHTTPRequestHandler):
                     _chat_runner.handle_message(run_id, message, files, images, runtime=runtime,
                                                 planning_model=planning_model,
                                                 impl_model=impl_model,
-                                                project_name=project_name)
+                                                project_name=project_name,
+                                                gated=gated)
                 )
             except Exception as e:
                 return self._send(500, {"error": str(e)})
@@ -487,8 +494,14 @@ class Handler(BaseHTTPRequestHandler):
                 planning_model=body.get("planning_model", ""),
                 impl_model=body.get("impl_model", ""),
                 name=body.get("project_name", ""),
+                gated=bool(body.get("gated")),
             )
             return self._send(200, {"run_id": console.start_run(req)})
+        if self.path.startswith("/api/runs/") and self.path.endswith("/release"):
+            run_id = self.path[len("/api/runs/"):-len("/release")]
+            if console.release_run(run_id):
+                return self._send(200, {"run_id": run_id, "released": True})
+            return self._send(409, {"error": "not held"})
         return self._send(404, {"error": "not found"})
 
     def log_message(self, *args):
