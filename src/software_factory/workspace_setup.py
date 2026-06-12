@@ -15,7 +15,10 @@ from . import workspace
 
 SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "skills")
 PHASE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "phases")
-DESIGN_SKILL_NAMES = ("frontend-design", "ui-ux-pro-max")
+DESIGN_SKILL_NAMES = ("frontend-design", "ui-ux-pro-max", "tenexity-design")
+# The brand canon ships to EVERY stage: S1 reads it for the PRD's design guidance, S2's
+# design doc must speak in its tokens/archetypes, S3 vendors tokens.css into the app.
+BUILD_SKILL_NAMES = ("tenexity-design",)
 
 # Playwright everywhere (the happy-flow gate drives the live app with it). Stage 3 ALSO gets the
 # Railway + Supabase MCP for deploy/provisioning. Both auth from env tokens already in the workspace
@@ -115,13 +118,12 @@ def prepare_workspace(
         if not os.path.exists(dst_phases):
             shutil.copytree(src_phases, dst_phases)
 
-    if stage == 1:
-        base = skills_dir or SKILLS_DIR
-        for name in DESIGN_SKILL_NAMES:
-            src = os.path.join(base, name)
-            if os.path.isdir(src):
-                dst = os.path.join(ws, "skills", name)
-                shutil.copytree(src, dst, dirs_exist_ok=True)
+    base = skills_dir or SKILLS_DIR
+    for name in (DESIGN_SKILL_NAMES if stage == 1 else BUILD_SKILL_NAMES):
+        src = os.path.join(base, name)
+        if os.path.isdir(src):
+            dst = os.path.join(ws, "skills", name)
+            shutil.copytree(src, dst, dirs_exist_ok=True)
 
     if stage >= 2:
         _copy_prior_artifacts(runs_dir, run_id, ws, ["PRD.md", "design-spec.md"])

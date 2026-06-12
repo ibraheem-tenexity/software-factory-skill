@@ -180,3 +180,28 @@ def test_workspace_copies_phase_files(tmp_path):
                            skills_dir=skills_dir, phase_dir=phase_dir)
 
     assert os.path.isfile(os.path.join(ws, "phases", "00-provision.md"))
+
+
+def test_tenexity_design_canon_ships_to_every_stage(tmp_path):
+    # The REAL skills dir: the canon must exist (tokens + SKILL) and land in S1/S2/S3
+    # workspaces — S3 vendors tokens.css into the app, so build especially needs it.
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    for stage in (1, 2, 3):
+        ws = prepare_workspace(str(runs), "run-tnx%d" % stage, stage)
+        canon = os.path.join(ws, "skills", "tenexity-design")
+        assert os.path.isfile(os.path.join(canon, "SKILL.md")), f"stage {stage} missing canon"
+        tokens = open(os.path.join(canon, "tokens.css")).read()
+        assert "--brand: 214 100% 55%" in tokens   # the gate's literal brand marker
+        assert os.path.isfile(os.path.join(canon, "tailwind.config.ts"))
+
+
+def test_stage_contracts_reference_the_canon():
+    base = os.path.join(os.path.dirname(__file__), "..", "..", "skills")
+    for rel in ("stage-1-research/SKILL.md", "stage-1-research/SKILL.opencode.md",
+                "stage-3-build/SKILL.md", "stage-3-build/SKILL.opencode.md"):
+        text = open(os.path.join(base, rel)).read()
+        assert "tenexity-design" in text, f"{rel} lost the canon wiring"
+    for rel in ("stage-3-build/SKILL.md", "stage-3-build/SKILL.opencode.md"):
+        text = open(os.path.join(base, rel)).read()
+        assert "--brand: 214 100% 55%" in text     # gate brand-check instruction

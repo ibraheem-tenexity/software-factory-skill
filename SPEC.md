@@ -45,6 +45,9 @@ Rules:
 
 Deploying is NOT done. Merging is NOT done. A run reaches `done` only via gate 3(a)+(b).
 The ONLY human pause in the pipeline: a required token whose disposition is `provide` (§3).
+- **Brand canon:** `skills/tenexity-design/` (vendored from tenexity-design-master @624b8e4)
+  ships into every stage workspace; built apps vendor its `tokens.css` and the stage-3 gate's
+  result includes a `brand_tokens` check — deployed CSS must contain `--brand: 214 100% 55%`.
 
 ## 3. Autonomy
 

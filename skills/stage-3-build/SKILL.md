@@ -34,6 +34,12 @@ BEFORE building, write `build-plan.md` (approach; the wave/ticket order; mock/MC
 disposition; the exact happy-flow you will verify). Then `record-artifact "Build Plan" build-plan.md plan`.
 THEN execute the plan — autonomously, no human approval.
 
+**Brand canon (every UI ticket):** `skills/tenexity-design/` is the visual source of truth.
+Ship its `tokens.css` into the app verbatim (additions ok, edits/deletions of existing tokens
+are not) and use its `tailwind.config.ts` theme; colors only via tokens (`hsl(var(--brand))`),
+never raw hex. The gate checks the deployed CSS for the literal `--brand: 214 100% 55%` —
+a restyled brand FAILS the happy-flow gate. Include this rule in every UI ticket's sub-agent prompt.
+
 ## Phase 1: build  (`set-phase build`)  — orchestrator-only, ONE Task sub-agent per ticket
 
 For each open ticket in the current wave:
@@ -121,6 +127,9 @@ embedded `ghp_` token — use a credential helper / `GH_TOKEN`, never bake the t
 Drive the LIVE deployed URL through the primary journey with the **Playwright MCP**. Build a structured
 result and pass it to `gate.happy_flow_passed(result)`. RECORD it: `record-verification <url> <0|1> <result-json>`
 (include per-flow pass/fail + screenshot/console-error refs).
+**Brand check (part of the gate):** fetch the deployed app's CSS and confirm it contains the literal
+`--brand: 214 100% 55%` (the Tenexity token). Include `{"brand_tokens": true|false}` in the result —
+false is a failed flow like any other: fix, redeploy, re-test.
 - **Green** → the run is DONE (the host records `deploy_url` + marks done).
 - **Red** → `gate.bugs_from(result)` → one fix Task sub-agent per failed flow → redeploy → re-test.
 

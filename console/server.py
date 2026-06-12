@@ -28,6 +28,7 @@ from software_factory.chat_agent import ChatAgentRunner  # noqa: E402
 from software_factory.deps import extract_env_creds  # noqa: E402
 from software_factory import notify  # noqa: E402
 from software_factory import auth  # noqa: E402
+from software_factory import tracing  # noqa: E402
 
 RUNS_DIR = os.environ.get("SF_RUNS_DIR", os.path.join(os.path.dirname(__file__), "..", ".runs"))
 HERE = os.path.dirname(__file__)
@@ -172,10 +173,46 @@ def _narrate_run(rid: str, st: dict):
         _narrate(rid, "done", msg)
 
 
+_tracer = tracing.Tracer()
+_health_bad_since = [None]  # [-]: None = healthy; float = first failure ts (alert once)
+
+
+def _health() -> dict:
+    """Liveness for probes + the console dot. pg=None means sqlite mode (nothing to check)."""
+    import shutil as _sh
+    pg = None
+    if (os.environ.get("SF_DB") or "").lower() == "postgres":
+        from software_factory import dbshim
+        try:
+            dbshim.registry_runs()
+            pg = True
+        except Exception:
+            pg = False
+    try:
+        free_mb = int(_sh.disk_usage(RUNS_DIR).free / 1048576)
+    except OSError:
+        free_mb = -1
+    ok = (pg is not False) and free_mb > 200
+    return {"ok": ok, "pg": pg, "disk_free_mb": free_mb}
+
+
 def _poll_transitions():
     """Background thread: auto-advance stages, enforce the per-run budget, narrate progress."""
+    tick = 0
     while True:
         time.sleep(3)
+        tick += 1
+        if tick % 10 == 0:  # health every ~30s; email once per unhealthy episode
+            try:
+                h = _health()
+                if not h["ok"] and _health_bad_since[0] is None:
+                    _health_bad_since[0] = time.time()
+                    notify.send("factory-console UNHEALTHY",
+                                f"health: {json.dumps(h)} — pg unreachable or disk low.")
+                elif h["ok"]:
+                    _health_bad_since[0] = None
+            except Exception:
+                pass
         try:
             for run_info in console.list_runs():
                 rid = run_info.get("id") or run_info.get("run_id", "")
@@ -185,6 +222,9 @@ def _poll_transitions():
                     continue
                 _auto_advance(rid)
                 st = console.status(rid)
+                # LLM traces: ship this run's new log lines to Langfuse (no-op without keys).
+                _tracer.tick(rid, os.path.join(RUNS_DIR, rid, "run.log"),
+                             meta={"runtime": st.get("runtime", "")})
                 try:
                     if not st.get("done") and console.enforce_budget(rid):
                         _narrate(rid, "budget-%d" % int(console._budget_ceiling(rid)),
@@ -224,6 +264,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+        # Structured server log: one JSON line per response on stdout — Railway captures
+        # stdout natively, so `railway logs` becomes greppable by route/status/run_id.
+        try:
+            path = urlparse(self.path).path
+            rid = path.split("/api/runs/")[1].split("/")[0] if "/api/runs/" in path else ""
+            ms = int((time.time() - getattr(self, "_t0", time.time())) * 1000)
+            print(json.dumps({"ts": round(time.time(), 3), "method": self.command,
+                              "path": path, "status": code, "run_id": rid, "ms": ms}),
+                  flush=True)
+        except Exception:
+            pass
 
     def _authed(self) -> bool:
         """True when auth is disabled (env-gated), the request carries a valid session, or a
@@ -240,8 +291,12 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self):
+        self._t0 = time.time()
         parsed = urlparse(self.path)
         path, qs = parsed.path, parse_qs(parsed.query)
+        # Health is OPEN (platform probes don't authenticate) and carries no secrets.
+        if path == "/api/health":
+            return self._send(200, _health())
         if not self._authed():
             # The root serves the Google sign-in page; every API route refuses outright.
             if path == "/" or path == "/index.html":
@@ -335,6 +390,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        self._t0 = time.time()
         # The login exchange is the ONLY route reachable without a session.
         if urlparse(self.path).path == "/api/auth/google":
             length = int(self.headers.get("Content-Length", 0))

@@ -108,6 +108,7 @@
     .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); animation: pulse 1.3s infinite; }
     @keyframes pulse { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 rgb(5 150 105 / .5); } 50% { opacity: .5; box-shadow: 0 0 0 5px rgb(5 150 105 / 0); } }
     .live-dot.idle { background: #b9c0cc; animation: none; }
+    .live-dot.bad { background: var(--danger, #e5484d); animation: none; }
     .activity .feed { flex: 1; overflow-y: auto; padding: .4rem .8rem; font: .74rem/1.5 var(--mono); }
     .activity .feed div { white-space: pre-wrap; overflow-wrap: anywhere; }
     .a-tool { color: var(--primary); } .a-text { color: var(--fg); } .a-phase { color: var(--blue); font-weight: 600; }
@@ -234,6 +235,7 @@
   <div class="app" id="app-main" style="display:none">
     <header class="toolbar rise">
       <span class="brand" style="cursor:pointer" onclick="showProjectsScreen()" title="Back to projects">&larr; Software Factory <small>console</small></span>
+      <span class="live-dot idle" id="healthdot" title="factory health"></span>
       <select id="runs"></select>
       <span class="pill" id="phase">—</span>
       <span class="pill" id="stage-pill">stage 1</span>
@@ -853,6 +855,17 @@
       }
       loadProjectsScreen();
     })();
+
+    // Factory health dot: green pulsing = ok, red = pg unreachable / disk low.
+    async function checkHealth() {
+      try {
+        const h = await (await fetch("/api/health")).json();
+        $("healthdot").className = "live-dot" + (h.ok ? "" : " bad");
+        $("healthdot").title = h.ok ? "factory healthy" :
+          `UNHEALTHY — pg: ${h.pg}, disk free: ${h.disk_free_mb} MB`;
+      } catch { $("healthdot").className = "live-dot bad"; $("healthdot").title = "console unreachable"; }
+    }
+    checkHealth(); setInterval(checkHealth, 30000);
   </script>
 </body>
 </html>

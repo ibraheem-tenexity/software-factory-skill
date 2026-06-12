@@ -51,7 +51,9 @@ For EACH named unit: `spawn-agent <id> <role> <model> research`, do its work YOU
 4. **CHROMA** (design.lead) — journeys, screens, states, a11y; define the primary happy-flow click-path
    the Stage-3 Playwright gate will verify.
 5. **DESIGNER** (frontend-design) — visual design guidance using the `frontend-design` + `ui-ux-pro-max`
-   skills in `skills/`: palette, typography, layout, component style.
+   skills in `skills/`: palette, typography, layout, component style. **`skills/tenexity-design/` is
+   the BRAND CANON and overrides both where they conflict:** speak in its token names (its SKILL.md),
+   pick layouts from its PATTERN_MATRIX.md — the app must look like a Tenexity product.
 6. **HORIZON** — write `PRD.md` in the repo: product thesis; users/JTBD; journeys; competitor landscape
    (every product with URL); MVP scope; features; NFRs; acceptance criteria (given/when/then/verification);
    out-of-scope; ticket seeds. Commit + push, then `record-artifact PRD <repo>/PRD.md prd HORIZON`.

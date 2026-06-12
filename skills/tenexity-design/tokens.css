@@ -1,0 +1,316 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   TENEXITY DESIGN SYSTEM — tokens.css
+   All colors HSL. Light-first. Dark is opt-in.
+   See: tenexity-design-system v1 §5.
+   ============================================================ */
+
+@layer base {
+  :root {
+    /* ---------- Surfaces ---------- */
+    --background: 0 0% 98%;            /* page #FAFAFA */
+    --foreground: 240 6% 10%;          /* text primary #18181B */
+
+    --raised: 0 0% 100%;               /* #FFFFFF */
+    --raised-foreground: 240 6% 10%;
+    --sunken: 240 5% 96%;              /* #F4F4F5 */
+    --sunken-foreground: 240 6% 10%;
+    --ink: 222 18% 3%;                 /* #060709 dark slate */
+    --ink-foreground: 0 0% 98%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 6% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 6% 10%;
+
+    /* ---------- Text ---------- */
+    --text-primary: 240 6% 10%;        /* #18181B */
+    --text-secondary: 240 4% 34%;      /* #52525B */
+    --text-tertiary: 240 4% 56%;       /* #8A8A92 */
+
+    /* ---------- Borders ---------- */
+    --border: 240 5% 91%;              /* default-ish #E7E7E9 */
+    --border-subtle: 240 5% 91%;       /* #E7E7E9 */
+    --border-default: 240 5% 84%;      /* #D4D4D8 */
+    --input: 240 5% 84%;
+
+    /* ---------- Brand ---------- */
+    --brand: 214 100% 55%;             /* Tenexity Blue #1A7BFF */
+    --brand-foreground: 0 0% 100%;
+    --brand-soft: 214 100% 95%;        /* #E8F1FF halo */
+    --brand-deep: 214 91% 41%;         /* #0958C9 */
+
+    --primary: 214 100% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 6% 10%;
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 34%;
+    --accent: 214 100% 95%;
+    --accent-foreground: 214 91% 41%;
+    --destructive: 0 74% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --ring: 214 100% 55%;
+
+    /* ---------- Status ---------- */
+    --success: 159 94% 30%;            /* #059669 */
+    --success-foreground: 0 0% 100%;
+    --success-soft: 152 76% 94%;
+    --warning: 27 96% 43%;             /* #D97706 */
+    --warning-foreground: 0 0% 100%;
+    --warning-soft: 38 92% 92%;
+    --danger: 0 74% 50%;               /* #DC2626 */
+    --danger-foreground: 0 0% 100%;
+    --danger-soft: 0 86% 95%;
+    --info: 214 100% 55%;
+    --info-foreground: 0 0% 100%;
+    --info-soft: 214 100% 95%;
+
+    /* ---------- Confidence cascade ---------- */
+    --conf-exact: 159 94% 30%;
+    --conf-exact-soft: 152 76% 94%;
+    --conf-high: 188 86% 38%;
+    --conf-high-soft: 187 71% 93%;
+    --conf-medium: 38 92% 50%;
+    --conf-medium-soft: 38 92% 92%;
+    --conf-low: 0 74% 50%;
+    --conf-low-soft: 0 86% 95%;
+    --conf-none: 240 4% 56%;
+    --conf-none-soft: 240 5% 94%;
+
+    /* ---------- Data viz (Okabe-Ito rebased on brand) ---------- */
+    --viz-1: 214 100% 55%;             /* Tenexity Blue */
+    --viz-2: 26 100% 50%;              /* orange */
+    --viz-3: 174 52% 47%;              /* bluish green */
+    --viz-4: 47 100% 50%;              /* yellow */
+    --viz-5: 202 100% 35%;             /* blue */
+    --viz-6: 9 87% 56%;                /* vermillion */
+    --viz-7: 322 67% 50%;              /* reddish purple */
+
+    /* ---------- Radius ---------- */
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    --radius-full: 9999px;
+    --radius: var(--radius-md);
+
+    /* ---------- Shadow ---------- */
+    --shadow-xs: 0 1px 2px 0 hsl(240 6% 10% / 0.04);
+    --shadow-sm: 0 2px 6px -2px hsl(240 6% 10% / 0.06), 0 1px 2px hsl(240 6% 10% / 0.04);
+    --shadow-md: 0 8px 24px -8px hsl(240 6% 10% / 0.10), 0 2px 6px -2px hsl(240 6% 10% / 0.06);
+    --shadow-lg: 0 24px 48px -12px hsl(240 6% 10% / 0.18), 0 4px 12px -4px hsl(240 6% 10% / 0.08);
+    --shadow-focus: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--brand));
+
+    /* ---------- Motion ---------- */
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --duration-fast: 120ms;
+    --duration-base: 180ms;
+    --duration-slow: 240ms;
+    --duration-slower: 320ms;
+
+    /* ---------- Density ---------- */
+    --row-h: 44px;
+    --pad-x: 16px;
+    --pad-y: 12px;
+    --row-font: 14px;
+
+    /* ---------- Sidebar (shadcn shim) ---------- */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 240 6% 10%;
+    --sidebar-primary: 214 100% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 214 100% 95%;
+    --sidebar-accent-foreground: 214 91% 41%;
+    --sidebar-border: 240 5% 91%;
+    --sidebar-ring: 214 100% 55%;
+
+    /* ---------- Brand override surface (white-label) ---------- */
+    --tenant-brand: var(--brand);
+    --tenant-brand-soft: var(--brand-soft);
+    --tenant-name: "Tenexity";
+
+    /* ---------- Type families ---------- */
+    --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-display: Georgia, "Times New Roman", serif;
+    --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+  }
+
+  [data-density="compact"] {
+    --row-h: 32px;
+    --pad-x: 10px;
+    --pad-y: 6px;
+    --row-font: 13px;
+  }
+
+  .dark {
+    --background: 222 18% 3%;          /* #060709 */
+    --foreground: 0 0% 98%;
+
+    --raised: 225 14% 8%;              /* #111318 */
+    --raised-foreground: 0 0% 98%;
+    --sunken: 217 33% 17%;             /* #1E293B */
+    --sunken-foreground: 0 0% 98%;
+    --ink: 0 0% 98%;
+    --ink-foreground: 222 18% 3%;
+
+    --card: 225 14% 8%;
+    --card-foreground: 0 0% 98%;
+    --popover: 225 14% 8%;
+    --popover-foreground: 0 0% 98%;
+
+    --text-primary: 0 0% 98%;
+    --text-secondary: 240 5% 65%;
+    --text-tertiary: 240 5% 47%;
+
+    --border: 240 4% 16%;
+    --border-subtle: 240 4% 16%;
+    --border-default: 240 5% 26%;
+    --input: 240 4% 16%;
+
+    --brand: 214 100% 65%;             /* #4F9AFF */
+    --brand-foreground: 222 18% 3%;
+    --brand-soft: 214 75% 15%;
+    --brand-deep: 214 100% 75%;
+
+    --primary: 214 100% 65%;
+    --primary-foreground: 222 18% 3%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 214 75% 15%;
+    --accent-foreground: 214 100% 75%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 98%;
+    --ring: 214 100% 65%;
+
+    --success: 159 70% 40%;
+    --success-soft: 152 50% 14%;
+    --warning: 38 92% 55%;
+    --warning-soft: 27 60% 14%;
+    --danger: 0 75% 60%;
+    --danger-soft: 0 50% 16%;
+    --info: 214 100% 65%;
+    --info-soft: 214 75% 15%;
+
+    --conf-exact: 159 70% 40%;
+    --conf-exact-soft: 152 50% 14%;
+    --conf-high: 188 70% 50%;
+    --conf-high-soft: 187 50% 14%;
+    --conf-medium: 38 92% 55%;
+    --conf-medium-soft: 27 60% 14%;
+    --conf-low: 0 75% 60%;
+    --conf-low-soft: 0 50% 16%;
+    --conf-none: 240 5% 47%;
+    --conf-none-soft: 240 4% 14%;
+
+    --shadow-focus: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--brand));
+
+    --sidebar-background: 222 18% 3%;
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-primary: 214 100% 65%;
+    --sidebar-primary-foreground: 222 18% 3%;
+    --sidebar-accent: 214 75% 15%;
+    --sidebar-accent-foreground: 214 100% 75%;
+    --sidebar-border: 240 4% 16%;
+    --sidebar-ring: 214 100% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "cv11";
+  }
+
+  /* Focus ring — the most important visual in the system */
+  :where(button, [role="button"], a, input, select, textarea, [tabindex]):focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+    border-radius: var(--radius-md);
+  }
+
+  ::selection {
+    background: hsl(var(--brand) / 0.25);
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.015em;
+  }
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Category label — the tell */
+  .category-label {
+    font-size: 11px;
+    line-height: 1;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: hsl(var(--text-tertiary));
+  }
+
+  .text-secondary { color: hsl(var(--text-secondary)); }
+  .text-tertiary { color: hsl(var(--text-tertiary)); }
+
+  .surface-raised { background: hsl(var(--raised)); color: hsl(var(--raised-foreground)); }
+  .surface-sunken { background: hsl(var(--sunken)); color: hsl(var(--sunken-foreground)); }
+  .surface-ink    { background: hsl(var(--ink));    color: hsl(var(--ink-foreground)); }
+
+  .hairline { border: 1px solid hsl(var(--border-subtle)); }
+
+  /* Signature: agent-at-work cell — quiet brand sweep across an AI-derived value
+     until it's confirmed. Pair with subtle brand tint background. */
+  .agent-at-work {
+    background-image: linear-gradient(
+      90deg,
+      hsl(var(--brand) / 0) 0%,
+      hsl(var(--brand) / 0.10) 45%,
+      hsl(var(--brand) / 0.18) 50%,
+      hsl(var(--brand) / 0.10) 55%,
+      hsl(var(--brand) / 0) 100%
+    );
+    background-size: 200% 100%;
+    animation: agent-shimmer 2s linear infinite;
+  }
+
+  /* Signature: faint brand tint for unconfirmed AI-derived values */
+  .ai-tint {
+    background: hsl(var(--brand) / 0.06);
+    box-shadow: inset 2px 0 0 0 hsl(var(--brand) / 0.4);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
