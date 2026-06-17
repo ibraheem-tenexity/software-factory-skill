@@ -1,0 +1,203 @@
+# Software Factory — Architecture (current state)
+
+**As of:** integration tip `5083d89` (roles/ownership + Kimi K2.7 + dev/prod env isolation),
+pending deploy to `main`. Live console currently runs `ee6aad4` (pre-roles).
+**One-line:** an autonomous pipeline that turns a product description (+ attachments) into a
+deployed, browser-verified demo app — research → design → build → deploy — with a web console to
+drive and watch it.
+
+---
+
+## 1. Top-level topology
+
+```
+                                   ┌──────────────────── operators ────────────────────┐
+                                   │  browser (Google sign-in)      local CLI / scripts │
+                                   │        │ cookie                  │ X-SF-Service-Token│
+                                   └────────┼──────────────────────────┼─────────────────┘
+                                            ▼                          ▼
+┌─ Railway project: softwarefactory ─────────────────────────────────────────────────────────┐
+│                                                                                              │
+│   ┌──────────────── factory-console (the ONE long-lived service) ────────────────────────┐  │
+│   │  console/server.py   stdlib HTTP + SSE + a 3s background poller                       │  │
+│   │     • auth gate (Google OAuth → HMAC cookie · service token · roles)                  │  │
+│   │     • REST/JSON API + /api/chat (concierge) + SSE stream                              │  │
+│   │     • poller: auto-advance stages, enforce budget, narrate, export traces             │  │
+│   │  software_factory.console.Console   the orchestrator (start_run, stage launches,      │  │
+│   │     gates, deploy, status/graph projection)                                           │  │
+│   │        │ subprocess.Popen (per stage)                                                 │  │
+│   │        ▼                                                                              │  │
+│   │   stage agent process  ── claude -p  (Opus/Sonnet, native Task subagents)             │  │
+│   │                        └─ opencode run (Kimi K2.7-code, monolithic)  [SF_RUNTIME]     │  │
+│   │        │ writes run.log (stdout)         │ bash: python3 -m software_factory.db …     │  │
+│   │        │ MCP: playwright (+ railway, supabase for stage 3)                            │  │
+│   │        ▼                                  ▼                                           │  │
+│   │   /data volume                       dbshim ─► Postgres (run STATE)                   │  │
+│   │     runs/<id>/ input/ run.log chat.jsonl workspace/                                   │  │
+│   └────────────────────────────────────────────────────────────────────────────────────┘  │
+│                                            │ stage 3 deploys the built app                  │
+│   ┌─ built demo apps (one Railway service per run) ─ sf-<run_id>  (+ its own Postgres) ──┐  │
+│   └────────────────────────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────────────────┘
+        │                              │                                  │
+        ▼                              ▼                                  ▼
+  Supabase Postgres            Langfuse Cloud                    Resend (email)
+  software-factory-state       LLM traces                       operator notifications
+  (factory run STATE)          (per-run, per-turn)
+        ▲
+        └── (PLANNED) Supabase Storage bucket — durable blob storage for uploaded files,
+            run.log, chat.jsonl (today these live only on the /data volume; see §6)
+```
+
+Other infra: GitHub (the factory pushes each built app to a repo), the Railway + Supabase MCP
+servers (used by stage-3 agents to provision/deploy), OpenAI/OpenRouter (the chat concierge model).
+
+---
+
+## 2. The pipeline (the product)
+
+A **run** moves through three stages, each a separate agent subprocess launched by the console,
+gated mechanically (no human review except a required secret):
+
+```
+Stage 1 RESEARCH   description+attachments → PRD.md          gate: PRD complete (≥3 real product URLs,
+                                                                    acceptance criteria, ticket seeds)
+Stage 2 DESIGN     PRD → architecture.md + architecture.svg  gate: artifacts exist AND ≥1 buildable
+                          + tickets (TicketStore)                  ticket; then the deps gate
+Stage 3 BUILD      tickets → built app → deploy → verify     gate: done tickets trace to agents AND a
+                                                                    recorded PASSING Playwright happy-flow
+```
+
+- **Autonomy (poller, every 3s):** flips a stage to done only when its gate passes *and* its process
+  has exited; auto-launches the next stage; auto-satisfies dependencies when no human secret is
+  needed. The **only** human pause is a required credential whose disposition is "provide".
+- **Budget brake:** per-run ceiling (`SF_COST_CEILING`, per-run override). The poller watches each
+  live run's spend; at the ceiling it terminates the stage process (SIGTERM→SIGKILL), records a
+  `budget` blocker, preserves state. Operator raises the cap to resume.
+- **Definition of done:** a recorded passing Playwright happy-flow against the live URL — deploying
+  or merging is NOT done.
+
+---
+
+## 3. Components (`src/software_factory/`)
+
+| Module | Responsibility |
+|---|---|
+| `console.py` | The orchestrator: `Console` class — `start_run`, `_launch_stage`, stage gates (`detect_stage{1,2,3}_done`), budget, `list_runs`/`status`/`graph` projection, ownership. `RunRequest` dataclass. |
+| `console/server.py` | stdlib HTTP shell: auth gate + REST/JSON + `/api/chat` + SSE + the background poller + `/api/health`, `/api/me`, `/api/users`. |
+| `runstate.py` | `RunState` dataclass (run metadata) + the `Store` protocol; persisted as JSON in the `runstate` table. |
+| `db.py` | `RunDB` — the per-run datastore (runstate + canvas tables) + the `python3 -m software_factory.db` CLI the stage agents call to record state. |
+| `tickets.py`, `agents.py` | `TicketStore` (work units, per-wave) and `AgentRegistry` (per-agent telemetry/cost). |
+| `dbshim.py` | The storage seam: `connect(path)` → sqlite (default) or Postgres (schema-per-run). All three stores go through it. |
+| `env.py` | dev/prod tiering (`SF_ENVIRONMENT`): `db_backend()` (dev→sqlite, postgres only in prod/test), `stage_env_baseline()` (scrubs console secrets from stage child processes), Railway project allowlist. |
+| `auth.py` + `users.py` | Google-OAuth login + HMAC session cookie + service token; `UserStore` directory (roles: admin/member) backing membership + per-run ownership. |
+| `chat_agent.py` | The "Factory Concierge" — an OpenAI-Agents-SDK agent that turns a chat conversation into a `start_run` (and answers status/deps questions). |
+| `input_pipeline.py`, `pdf_extract.py`, `docx_extract.py` | Ingest: attachments → Markdown, compose the Stage-1 input (`context.txt`). |
+| `workspace_setup.py`, `workspace.py` | Per-stage ephemeral workspace: SKILL contract, `.mcp.json`, prior-stage artifacts, vendored design skills. |
+| `deploy.py` | Railway deploy + health-check helpers (stage 3). |
+| `gate.py` | Happy-flow verdict from the Playwright result. |
+| `streamlog.py` | Parses `run.log` (claude stream-json / opencode JSON) → authoritative cost + agent graph. |
+| `tracing.py` | Langfuse exporter (run.log → traces); env-gated no-op. |
+| `notify.py` | Resend email on the four operator events; env-gated no-op. |
+| `swarm_adapter.py`, `swarm_stage3.py` | `SF_SWARM=1` parallel-ticket stage-3 driver (opencode swarm). |
+| `skills/stage-{1,2,3}-*` | The stage contracts (SKILL.md + .opencode.md variants) the agents follow; `skills/tenexity-design/` is the vendored brand canon. |
+
+---
+
+## 4. Runtimes
+
+A run is pinned at start to one runtime:
+- **claude** (default): `claude -p`, Opus 4.8 for Stage 1/2 orchestration, Sonnet 4.6 for Stage 3,
+  native **Task subagents** per ticket. Bills the Anthropic key.
+- **opencode** (`SF_RUNTIME=opencode`): `opencode run`, **Kimi K2.7-code** via OpenRouter,
+  monolithic (one session does all the work; "logical agents" recorded for accounting). Optional
+  `SF_SWARM=1` runs stage-3 tickets in parallel via the opencode swarm.
+
+Both write the same `run.log` shape and call the same `db` CLI, so everything downstream is
+runtime-agnostic.
+
+---
+
+## 5. Data model & where state lives
+
+**Run STATE → Postgres** (Supabase project `software-factory-state`, when `SF_DB=postgres`):
+- `public.sf_runs` — the run registry (discovery).
+- `public.users` — the user directory (roles).
+- one **schema per run** `sf_run_<id>` containing: `runstate` (the `RunState` JSON, incl.
+  description, name, **owner**, models, budget, deploy_url), `phases`, `artifacts` (metadata: title
+  + path + kind, not the bytes), `blockers`, `gates`, `verifications`, `tickets`, `agents`.
+- `dbshim` translates the stores' SQLite SQL to Postgres (schema-per-run via `SET LOCAL
+  search_path`, `?`→`%s`, DDL deltas, `RETURNING id`). Unset `SF_DB` = plain SQLite (local/dev/tests).
+
+**Files → the `/data` volume** (NOT in the database today):
+- `runs/<id>/input/` — `context.txt` (composed Stage-1 input) + converted attachments + raw uploads
+  (incl. **wireframe images**).
+- `runs/<id>/run.log` — full agent transcript (cost is parsed from here).
+- `runs/<id>/chat.jsonl` — the concierge chat history.
+- `runs/<id>/workspace/` — ephemeral checkout the stage agent builds in (deleted on teardown).
+
+So: **short structured metadata is in Postgres; everything a user uploads + all logs/chat are files
+on the volume.** Deleting the volume keeps the run list/status/cost (Postgres) but loses uploaded
+inputs, logs, and chat — and the factory cannot run without a volume to write to.
+
+---
+
+## 6. PLANNED — Supabase Storage as durable file storage
+
+Today the volume is a single point of data loss for files. Direction: **a Supabase Storage bucket
+becomes the durable home for blobs** — uploaded attachments/images, `run.log`, `chat.jsonl`, and
+artifact bytes — keyed by `run_id`. The volume becomes a cache/scratch space, not the source of
+truth. This makes the volume disposable (lose it → re-hydrate from the bucket + Postgres) and is a
+prerequisite for the spec-to-demo harness, which needs durable, addressable wireframe images for the
+S1 vision pass and the S5 screenshot-diff. (Scope: a storage adapter alongside `dbshim`; write-through
+on ingest + log flush; read on demand. Not yet built.)
+
+---
+
+## 7. Auth, roles & multi-tenancy (current, combined tip)
+
+- **Login:** Google OAuth → server validates the ID token → issues an HMAC-signed session cookie.
+  Allowlist = `SF_AUTH_EMAILS` ∪ the `public.users` directory. Machine callers use the
+  `X-SF-Service-Token` header. `/api/health` is open; everything else gated.
+- **Roles:** `admin` | `member`. `SF_ADMIN_EMAILS` are bootstrap admins (can't be locked out) and
+  seed the directory. Admins manage the team in-console (`/api/users`, the Team panel).
+- **Ownership:** every run has an `owner` (creating user's email). **Admins see all projects;
+  members see only their own** — enforced on *every* run-scoped route, not just the list.
+- **Project identity:** the user-chosen **name** is unique (enforced at creation) and is what the
+  console displays — never the run id.
+
+---
+
+## 8. Observability & infra
+
+- **Langfuse** — LLM traces (trace=run, generation=turn, event=tool), exported from `run.log`.
+- **Structured logs** — one JSON line per request to stdout (Railway logs).
+- **`/api/health`** — pg reachability + disk free + active runs; console health dot + one-shot
+  unhealthy email.
+- **Railway services:** `factory-console` (the orchestrator + volume), `sf-<run_id>` (each built
+  demo app), `autobuilder`/`factory-api` (legacy). **Supabase:** `software-factory-state` (factory
+  state) + per-app databases the builds provision. **Secrets** are Railway service env vars
+  (Anthropic, OpenRouter, OpenAI, Resend, Langfuse, Google client id, service token, `DATABASE_URL`).
+
+---
+
+## 9. Key request flows
+
+- **Create a run:** `POST /api/runs` (or chat→concierge) → `start_run` writes `input/`, stamps
+  `owner`, persists `RunState`, launches Stage 1.
+- **Advance:** poller detects stage done → launches next stage → auto-satisfies deps or pauses for a
+  secret → stage 3 builds, deploys to `sf-<run_id>`, drives Playwright, records verification.
+- **Watch:** the console polls `status`/`graph`/`events`/`log` (a pure projection of the datastore)
+  and streams chat over SSE; cost pill + canvas update live.
+
+---
+
+## 10. Determinism / boundaries (design invariants)
+
+- The canvas/graph/status are a **pure projection of the datastore** — no separate event log.
+- A stage is done only on gate-pass **and** process-exit (a crash can't wedge a run; the poller
+  bounded-auto-resumes).
+- Run *state* is in the DB; *files/logs* are on the volume (→ Supabase Storage, §6).
+- The model is used only where judgment is needed (research, design, code, verification); lint,
+  parsing, scaffolding, migrations, deploy stay deterministic — the principle the spec-to-demo
+  harness (separate plan) extends.
