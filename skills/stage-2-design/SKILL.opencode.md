@@ -19,8 +19,9 @@ Read the Stage 1 artifacts from `context/` (PRD.md and the design spec).
 ```bash
 python3 -m software_factory.db <verb> <runs_dir> <run_id> ...
 ```
-`set-phase <name>` per phase; `spawn-agent <id> <role> <model> <phase>` / `finish-agent <id> <outcome>`
-per unit of work; `record-artifact <title> <path> <kind> [agent]` per file. No events — the datastore is the source of truth.
+`<runs_dir> <run_id>` ALWAYS come first, before the verb's own args:
+`set-phase <runs_dir> <run_id> <name>` per phase; `spawn-agent <runs_dir> <run_id> <id> <role> <model> <phase>` / `finish-agent <runs_dir> <run_id> <id> <outcome>`
+per unit of work; `record-artifact <runs_dir> <run_id> <title> <path> <kind> [agent]` per file. No events — the datastore is the source of truth.
 
 ## Phase 1: architect  (`set-phase architect`)
 

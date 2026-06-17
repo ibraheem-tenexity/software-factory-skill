@@ -36,6 +36,42 @@ def client_id() -> str:
     return os.environ.get("SF_GOOGLE_CLIENT_ID", "")
 
 
+# --- Roles & membership ------------------------------------------------------------------
+# auth stays dependency-free (env + crypto only) so the suite runs hermetic. The server
+# injects a DB-backed user directory at startup via register_user_store(); without it,
+# membership/roles fall back to the env lists (SF_AUTH_EMAILS / SF_ADMIN_EMAILS) — the
+# bootstrap path that can never lock the env-named admins out.
+_member_fn = None   # callable(email)->bool   (is this email allowed to log in?)
+_role_fn = None     # callable(email)->str|None  ('admin'|'member'|None)
+
+
+def register_user_store(member_fn, role_fn) -> None:
+    global _member_fn, _role_fn
+    _member_fn, _role_fn = member_fn, role_fn
+
+
+def _env_list(name: str) -> list:
+    return [e.strip().lower() for e in os.environ.get(name, "").split(",") if e.strip()]
+
+
+def role_for(email: str) -> str | None:
+    """'admin' | 'member' | None (not allowed). Env SF_ADMIN_EMAILS always wins (bootstrap),
+    then the injected DB role, then membership implies 'member'."""
+    if not email:
+        return None
+    if email.lower() in _env_list("SF_ADMIN_EMAILS"):
+        return "admin"
+    if _role_fn:
+        r = _role_fn(email)
+        if r in ("admin", "member"):
+            return r
+    return "member" if _allowed(email) else None
+
+
+def is_admin(email: str) -> bool:
+    return role_for(email) == "admin"
+
+
 SERVICE_HEADER = "X-SF-Service-Token"
 
 
@@ -53,9 +89,13 @@ def _secret() -> bytes:
 
 
 def _allowed(email: str) -> bool:
-    allow = [e.strip().lower() for e in os.environ.get("SF_AUTH_EMAILS", "").split(",")
-             if e.strip()]
-    return bool(email) and email.lower() in allow
+    """Allowed to log in: on the env allowlist OR in the injected DB directory (invited
+    in-console). Env is the bootstrap that survives an empty/unreachable directory."""
+    if not email:
+        return False
+    if email.lower() in _env_list("SF_AUTH_EMAILS"):
+        return True
+    return bool(_member_fn and _member_fn(email))
 
 
 def _fetch_claims(id_token: str) -> dict:
@@ -89,12 +129,20 @@ def _sign(payload: str) -> str:
 
 def session_valid(token: str) -> bool:
     """Constant-time HMAC check + expiry + the email must STILL be allowlisted."""
+    return session_email(token) is not None
+
+
+def session_email(token: str) -> str | None:
+    """The email behind a valid session token, or None if the token is forged, expired,
+    or the email is no longer allowed. The identity the server gates ownership on."""
     try:
         b, sig = token.split(".", 1)
         payload = base64.urlsafe_b64decode(b + "=" * (-len(b) % 4)).decode()
         if not hmac.compare_digest(_sign(payload), sig):
-            return False
+            return None
         email, exp = payload.rsplit("|", 1)
-        return _allowed(email) and time.time() < int(exp)
+        if _allowed(email) and time.time() < int(exp):
+            return email
+        return None
     except Exception:
-        return False
+        return None

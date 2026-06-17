@@ -29,10 +29,16 @@ from software_factory.deps import extract_env_creds  # noqa: E402
 from software_factory import notify  # noqa: E402
 from software_factory import auth  # noqa: E402
 from software_factory import tracing  # noqa: E402
+from software_factory.users import UserStore  # noqa: E402
 
 RUNS_DIR = os.environ.get("SF_RUNS_DIR", os.path.join(os.path.dirname(__file__), "..", ".runs"))
 HERE = os.path.dirname(__file__)
 console = Console(RUNS_DIR)
+
+# User directory (roles + login membership). Seeds env SF_ADMIN_EMAILS as admins and backs
+# auth's role/membership decisions; without it auth falls back to the env lists.
+users = UserStore(os.path.join(RUNS_DIR, "users.db"))
+auth.register_user_store(users.is_member, users.get_role)
 
 # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
 _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
@@ -276,19 +282,42 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
-    def _authed(self) -> bool:
-        """True when auth is disabled (env-gated), the request carries a valid session, or a
-        machine caller presents the service token (babysitter sessions, scripts)."""
+    def _viewer(self) -> tuple:
+        """(email, role, ok). ok = authorized to use the API at all. Auth disabled (local/dev)
+        or a valid service token = full admin access; a session cookie = that user's role."""
         if not auth.enabled():
-            return True
+            return (None, "admin", True)
         if auth.service_token_ok(self.headers.get(auth.SERVICE_HEADER)):
-            return True
-        cookies = self.headers.get("Cookie", "")
-        for part in cookies.split(";"):
+            return (None, "admin", True)
+        for part in self.headers.get("Cookie", "").split(";"):
             k, _, v = part.strip().partition("=")
-            if k == auth.COOKIE and auth.session_valid(v):
-                return True
-        return False
+            if k == auth.COOKIE:
+                email = auth.session_email(v)
+                if email:
+                    return (email, auth.role_for(email) or "member", True)
+        return (None, None, False)
+
+    def _authed(self) -> bool:
+        return self._viewer()[2]
+
+    @staticmethod
+    def _path_run_id(path: str) -> str | None:
+        """The run id a run-scoped path targets (/api/runs/<id>/… or /api/chat/<id>/…),
+        else None. The list endpoint (/api/runs) and creates return None — handled separately."""
+        for pre in ("/api/runs/", "/api/chat/"):
+            if path.startswith(pre):
+                return path[len(pre):].split("/")[0] or None
+        return None
+
+    def _can_see(self, viewer: tuple, run_id: str) -> bool:
+        """Ownership gate enforced on EVERY run-scoped route — filtering the list is not enough,
+        a member could fetch another's run by URL. Admin/service = all; member = own only."""
+        email, role, ok = viewer
+        if not ok:
+            return False
+        if role == "admin":
+            return True
+        return bool(run_id) and console.run_owner(run_id) == (email or "").lower()
 
     def do_GET(self):
         self._t0 = time.time()
@@ -297,20 +326,35 @@ class Handler(BaseHTTPRequestHandler):
         # Health is OPEN (platform probes don't authenticate) and carries no secrets.
         if path == "/api/health":
             return self._send(200, _health())
-        if not self._authed():
+        viewer = self._viewer()
+        if not viewer[2]:
             # The root serves the Google sign-in page; every API route refuses outright.
             if path == "/" or path == "/index.html":
                 with open(os.path.join(HERE, "login.html")) as f:
                     page = f.read().replace("{{CLIENT_ID}}", auth.client_id())
                 return self._send(200, page.encode(), "text/html")
             return self._send(401, {"error": "unauthorized"})
+        # Who am I — drives the console's role-aware UI (Team panel, owner labels).
+        if path == "/api/me":
+            return self._send(200, {"email": viewer[0], "role": viewer[1],
+                                    "auth": auth.enabled()})
+        # Team directory (admin only).
+        if path == "/api/users":
+            if viewer[1] != "admin":
+                return self._send(403, {"error": "admin only"})
+            return self._send(200, {"users": users.list_users()})
+        # Run-scoped routes: enforce ownership before dispatching (members see only their own).
+        rid = self._path_run_id(path)
+        if rid and not self._can_see(viewer, rid):
+            return self._send(403, {"error": "forbidden"})
         # Match on the PATH only — self.path carries the query string, so "/?run=x" must still
         # serve the console (the ?run= restore link 404'd as raw JSON when matched verbatim).
         if path == "/" or path == "/index.html":
             with open(os.path.join(HERE, "index.html"), "rb") as f:
                 return self._send(200, f.read(), "text/html")
         if path in ("/api/runs", "/api/runs/"):
-            return self._send(200, {"runs": console.list_runs()})
+            owner = None if viewer[1] == "admin" else viewer[0]
+            return self._send(200, {"runs": console.list_runs(owner=owner)})
 
         # Chat history
         if path.startswith("/api/chat/") and path.endswith("/history"):
@@ -409,8 +453,28 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
-        if not self._authed():
+        viewer = self._viewer()
+        if not viewer[2]:
             return self._send(401, {"error": "unauthorized"})
+        # Run-scoped POSTs (/api/runs/<id>/*, /api/chat/<id>/deps): ownership gate.
+        prid = self._path_run_id(urlparse(self.path).path)
+        if prid and not self._can_see(viewer, prid):
+            return self._send(403, {"error": "forbidden"})
+        # Team management (admin only): POST {email, role} where role = admin|member|remove.
+        if self.path == "/api/users":
+            if viewer[1] != "admin":
+                return self._send(403, {"error": "admin only"})
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            email = (body.get("email") or "").strip().lower()
+            role = body.get("role")
+            if not email or role not in ("admin", "member", "remove"):
+                return self._send(400, {"error": "email + role (admin|member|remove) required"})
+            if role == "remove":
+                users.remove(email)
+            else:
+                users.upsert(email, role, by=viewer[0] or "admin")
+            return self._send(200, {"users": users.list_users()})
         # Chat message
         if self.path == "/api/chat":
             if not _chat_runner:
@@ -418,6 +482,9 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length) or b"{}")
             run_id = body.get("run_id")
+            # Messaging an EXISTING run requires ownership; a new run (no run_id) is a create.
+            if run_id and not self._can_see(viewer, run_id):
+                return self._send(403, {"error": "forbidden"})
             message = body.get("message", "")
             files = body.get("files", [])
             images = body.get("images", [])
@@ -441,7 +508,7 @@ class Handler(BaseHTTPRequestHandler):
                                                 planning_model=planning_model,
                                                 impl_model=impl_model,
                                                 project_name=project_name,
-                                                gated=gated)
+                                                gated=gated, owner=viewer[0] or "")
                 )
             except Exception as e:
                 return self._send(500, {"error": str(e)})
@@ -551,8 +618,12 @@ class Handler(BaseHTTPRequestHandler):
                 impl_model=body.get("impl_model", ""),
                 name=body.get("project_name", ""),
                 gated=bool(body.get("gated")),
+                owner=viewer[0] or "",
             )
-            return self._send(200, {"run_id": console.start_run(req)})
+            try:
+                return self._send(200, {"run_id": console.start_run(req)})
+            except ValueError as e:           # duplicate project name
+                return self._send(409, {"error": str(e)})
         if self.path.startswith("/api/runs/") and self.path.endswith("/release"):
             run_id = self.path[len("/api/runs/"):-len("/release")]
             if console.release_run(run_id):
@@ -594,6 +665,15 @@ if __name__ == "__main__":
                 print(f"[backfill] {rid}: {res}", flush=True)
         except Exception as e:
             print(f"[backfill] FAILED: {e}", flush=True)
+    # Backfill ownership on pre-multitenancy runs → the first bootstrap admin (idempotent).
+    _admins = [e.strip() for e in os.environ.get("SF_ADMIN_EMAILS", "").split(",") if e.strip()]
+    if _admins:
+        try:
+            n = console.assign_unowned(_admins[0])
+            if n:
+                print(f"[owners] assigned {n} unowned run(s) to {_admins[0]}", flush=True)
+        except Exception as e:
+            print(f"[owners] backfill FAILED: {e}", flush=True)
     t = threading.Thread(target=_poll_transitions, daemon=True)
     t.start()
     print(f"software-factory console on http://{host}:{port}  (runs in {os.path.abspath(RUNS_DIR)})")

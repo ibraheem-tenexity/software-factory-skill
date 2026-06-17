@@ -110,6 +110,15 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
   sign-in page and every other route requires a valid HMAC-signed session cookie; the ID token
   is validated server-side (audience + verified email + allowlist). Either var absent = the
   console is open (local dev/tests unchanged).
+- **Roles & ownership (multi-tenant):** every run has an `owner` (the creating user's email).
+  Users have a role — `admin` or `member` — held in a directory (`public.users` in pg, a sqlite
+  file otherwise); `SF_ADMIN_EMAILS` are always admins (bootstrap, can't be locked out) and seed
+  the directory. **Admins see all projects; members see only their own.** Enforced on EVERY
+  run-scoped route (not just the list) — a member fetching another's run by URL gets 403. The
+  service token = admin-equivalent (machine callers see all). Login membership = `SF_AUTH_EMAILS`
+  ∪ the directory, so admins can invite users in-console (a Team panel) without a redeploy. A
+  project's NAME is its user-facing identity and is **unique** (enforced at creation); the console
+  displays the name, never the run id (run id only as a fallback for unnamed/legacy runs).
 
 ## 7. Models, MCP, deploy contract
 

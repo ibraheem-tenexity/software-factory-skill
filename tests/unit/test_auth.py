@@ -86,3 +86,51 @@ def test_session_dies_when_email_leaves_the_allowlist(enabled, monkeypatch):
     token = auth.login("tok")
     monkeypatch.setenv("SF_AUTH_EMAILS", "someone-else@tenexity.ai")
     assert auth.session_valid(token) is False
+
+
+# ---------- roles & ownership identity (multi-tenant) ----------
+
+def test_role_for_env_admin_member_and_none(monkeypatch):
+    monkeypatch.setenv("SF_GOOGLE_CLIENT_ID", "cid")
+    monkeypatch.setenv("SF_AUTH_EMAILS", "member@t.ai")
+    monkeypatch.setenv("SF_ADMIN_EMAILS", "boss@t.ai")
+    auth.register_user_store(lambda e: False, lambda e: None)
+    try:
+        assert auth.role_for("boss@t.ai") == "admin"      # env admin
+        assert auth.role_for("member@t.ai") == "member"   # allowlisted, no admin
+        assert auth.role_for("stranger@t.ai") is None     # not allowed
+        assert auth.is_admin("boss@t.ai") and not auth.is_admin("member@t.ai")
+    finally:
+        auth.register_user_store(None, None)
+
+
+def test_db_store_grants_membership_and_role(monkeypatch):
+    monkeypatch.setenv("SF_GOOGLE_CLIENT_ID", "cid")
+    monkeypatch.setenv("SF_AUTH_EMAILS", "")              # NOT on env allowlist
+    monkeypatch.setenv("SF_ADMIN_EMAILS", "")
+    members = {"invited@t.ai": "member"}
+    auth.register_user_store(lambda e: e.lower() in members,
+                             lambda e: members.get(e.lower()))
+    try:
+        assert auth._allowed("invited@t.ai")              # invited in-console
+        assert auth.role_for("invited@t.ai") == "member"
+        assert not auth._allowed("stranger@t.ai")
+    finally:
+        auth.register_user_store(None, None)
+
+
+def test_session_email_roundtrip_and_forgery(monkeypatch):
+    import base64
+    import time as _t
+    monkeypatch.setenv("SF_GOOGLE_CLIENT_ID", "cid")
+    monkeypatch.setenv("SF_AUTH_EMAILS", "u@t.ai")
+    monkeypatch.setenv("SF_AUTH_SECRET", "fixed")
+    auth.register_user_store(None, None)
+    payload = f"u@t.ai|{int(_t.time()) + 3600}"
+    tok = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=") + "." + auth._sign(payload)
+    assert auth.session_email(tok) == "u@t.ai"
+    assert auth.session_valid(tok)
+    assert auth.session_email(tok.rsplit(".", 1)[0] + ".deadbeef") is None   # forged sig
+    expired = f"u@t.ai|{int(_t.time()) - 1}"
+    etok = base64.urlsafe_b64encode(expired.encode()).decode().rstrip("=") + "." + auth._sign(expired)
+    assert auth.session_email(etok) is None                                  # expired

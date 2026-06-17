@@ -78,6 +78,15 @@ def schema_for(run_id: str) -> str:
     return "sf_run_" + re.sub(r"[^a-z0-9_]", "_", base.lower())
 
 
+# Path/shell junk that can never be a legitimate run id (a wrong db-CLI arg order once
+# landed values like "/data/runs" in the run_id slot). Defense in depth: refuse to
+# CREATE SCHEMA for these even if a caller bypasses the CLI guard. Kept deliberately
+# narrow (separators/whitespace/empty) so real sanitization cases like "run-AB.C-9"
+# still create their schema.
+def _is_malformed_run_id(run_id: str) -> bool:
+    return (not run_id) or bool(re.search(r"[/\\\s]", run_id))
+
+
 def _translate(sql: str) -> str:
     sql = sql.replace("?", "%s")
     sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT",
@@ -167,6 +176,10 @@ class PgConn:
         schema itself is still created (refusing the write would lose data instead)."""
         if self._ready:
             return
+        if _is_malformed_run_id(self._run_id):
+            raise ValueError(
+                f"refusing to create a pg schema for malformed run id {self._run_id!r} "
+                "(looks like a path/shell fragment, not a run id)")
         last_err = None
         for attempt in range(_TRIES):
             try:
