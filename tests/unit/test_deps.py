@@ -4,9 +4,11 @@ from software_factory.deps import (
 )
 
 
-def test_classify_supabase_and_db_and_railway_and_nextauth_are_mcp():
-    for n in ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "DATABASE_URL",
-              "RAILWAY_TOKEN", "NEXTAUTH_SECRET", "NEXTAUTH_URL"]:
+def test_classify_db_tokens_deploy_db_and_railway_nextauth_mcp():
+    # DB/Supabase tokens are now factory-provided (deploy-db), NOT agent-provisioned via Supabase.
+    for n in ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "DATABASE_URL"]:
+        assert classify_dep(n) == "deploy-db", n
+    for n in ["RAILWAY_TOKEN", "NEXTAUTH_SECRET", "NEXTAUTH_URL"]:
         assert classify_dep(n) == "mcp", n
 
 
@@ -34,7 +36,7 @@ def test_classify_external_integrations_default_to_mock():
 def test_default_dispositions_maps_every_required(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-x")
     d = default_dispositions(["OPENROUTER_API_KEY", "SUPABASE_URL", "ADP_CLIENT_ID", "NEXTAUTH_SECRET"])
-    assert d == {"OPENROUTER_API_KEY": "mock", "SUPABASE_URL": "mcp",
+    assert d == {"OPENROUTER_API_KEY": "mock", "SUPABASE_URL": "deploy-db",
                  "ADP_CLIENT_ID": "mock", "NEXTAUTH_SECRET": "mcp"}
 
 
@@ -78,3 +80,20 @@ def test_openrouter_absent_from_env_auto_classifies_mock(monkeypatch):
     # mock (the SKILL's mock guidance) instead of pausing the pipeline for a human.
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     assert classify_dep("OPENROUTER_API_KEY") == "mock"
+
+
+# ---------- deploy-db disposition (no agent Supabase access) ----------
+
+def test_db_tokens_classify_as_deploy_db():
+    from software_factory import deps
+    for t in ("DATABASE_URL", "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY",
+              "POSTGRES_PASSWORD", "DB_URL", "PG_HOST"):
+        assert deps.classify_dep(t) == "deploy-db", t
+    assert deps.classify_dep("NEXTAUTH_SECRET") == "mcp"
+    assert deps.classify_dep("RAILWAY_TOKEN") == "mcp"
+    assert deps.classify_dep("OPENROUTER_API_KEY") == "mock"
+
+
+def test_deploy_db_is_auto_satisfied():
+    from software_factory import deps
+    assert deps.resolve_satisfied(["DATABASE_URL"], {"DATABASE_URL": "deploy-db"}, [])

@@ -15,7 +15,7 @@ from software_factory.console import Console, RunRequest
 
 
 def select_chat_model():
-    """Concierge model: gpt-4o (OpenAI) or Kimi K2.6 via OpenRouter's OpenAI-compatible API.
+    """Concierge model: gpt-4o (OpenAI) or Kimi K2.7 Code via OpenRouter's OpenAI-compatible API.
 
     SF_CHAT_MODEL=kimi forces Kimi; SF_CHAT_MODEL=gpt-4o forces OpenAI; unset picks gpt-4o when
     OPENAI_API_KEY exists, else Kimi when only OPENROUTER_API_KEY does. The env flag IS the
@@ -33,7 +33,7 @@ def select_chat_model():
             base_url="https://openrouter.ai/api/v1",
             api_key=os.environ.get("OPENROUTER_API_KEY", ""),
         )
-        return OpenAIChatCompletionsModel(model="moonshotai/kimi-k2.6", openai_client=client)
+        return OpenAIChatCompletionsModel(model="moonshotai/kimi-k2.7-code", openai_client=client)
     return "gpt-4o"
 
 
@@ -71,7 +71,8 @@ software factory pipeline.
 
 def make_tools(console: Console, attachments=lambda: [],
                runtime=lambda: "", models=lambda: ("", ""),
-               project_name=lambda: "", gated=lambda: False) -> list[FunctionTool]:
+               project_name=lambda: "", gated=lambda: False,
+               owner=lambda: "") -> list[FunctionTool]:
     """Create agent tools that delegate to Console methods.
 
     `attachments` returns the files attached to the message currently being
@@ -88,8 +89,11 @@ def make_tools(console: Console, attachments=lambda: [],
                          budget=budget, target=target, context_files=attachments(),
                          runtime=runtime(), name=project_name(),
                          planning_model=planning_model, impl_model=impl_model,
-                         gated=gated())
-        run_id = console.start_run(req)
+                         gated=gated(), owner=owner())
+        try:
+            run_id = console.start_run(req)
+        except ValueError as e:               # duplicate project name — tell the user
+            return json.dumps({"error": str(e)})
         status = "held" if gated() else "started"
         return json.dumps({"run_id": run_id, "status": status})
 
@@ -178,11 +182,13 @@ class ChatAgentRunner:
         self._pending_models: tuple = ("", "")
         self._pending_name: str = ""
         self._pending_gated: bool = False
+        self._pending_owner: str = ""
         tools = make_tools(console, attachments=lambda: self._pending_files,
                            runtime=lambda: self._pending_runtime,
                            models=lambda: self._pending_models,
                            project_name=lambda: self._pending_name,
-                           gated=lambda: self._pending_gated)
+                           gated=lambda: self._pending_gated,
+                           owner=lambda: self._pending_owner)
         self._agent = Agent(
             name="Factory Concierge",
             instructions=CONCIERGE_INSTRUCTIONS,
@@ -196,7 +202,8 @@ class ChatAgentRunner:
                               runtime: str = "", planning_model: str = "",
                               impl_model: str = "",
                               project_name: str = "",
-                              gated: bool = False) -> tuple[str | None, list[ChatMessage]]:
+                              gated: bool = False,
+                              owner: str = "") -> tuple[str | None, list[ChatMessage]]:
         """Process a user message through the agent. Returns (run_id, response_messages)."""
         from agents import Runner
 
@@ -227,6 +234,7 @@ class ChatAgentRunner:
         self._pending_models = (planning_model or "", impl_model or "")
         self._pending_name = project_name or ""
         self._pending_gated = bool(gated)
+        self._pending_owner = owner or ""
         try:
             result = await Runner.run(self._agent, input=history)
         finally:
@@ -235,6 +243,7 @@ class ChatAgentRunner:
             self._pending_models = ("", "")
             self._pending_name = ""
             self._pending_gated = False
+            self._pending_owner = ""
 
         response_msgs = []
         now = time.time()

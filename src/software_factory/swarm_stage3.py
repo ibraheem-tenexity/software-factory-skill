@@ -157,7 +157,7 @@ def main(argv: list[str]) -> int:
     head, agent_argv = argv[:split], argv[split + 1:]
     runs_dir, run_id, ws = head[0], head[1], head[2]
     opts = dict(zip(head[3::2], head[4::2]))
-    model = opts.get("--model", "openrouter/moonshotai/kimi-k2.6")
+    model = opts.get("--model", "openrouter/moonshotai/kimi-k2.7-code")
     budget = float(opts.get("--budget", "0"))
     max_concurrent = int(opts.get("--max-concurrent",
                                   os.environ.get("SF_SWARM_CONCURRENCY", "2")))

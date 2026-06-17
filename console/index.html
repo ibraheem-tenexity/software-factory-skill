@@ -179,6 +179,28 @@
     .project-card .pc-name { font: 600 .88rem var(--sans); color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .project-card .pc-meta { font: .72rem var(--mono); color: var(--muted-fg); margin-top: .1rem; }
     .project-card .pc-cost { font: 500 .78rem var(--mono); color: var(--success); flex: none; }
+    /* loading skeleton — an in-flight runs fetch must look different from "no projects" */
+    .skel-row { height: 46px; border-radius: var(--radius); margin-bottom: .5rem;
+      background: linear-gradient(90deg, var(--card) 25%, var(--input) 50%, var(--card) 75%);
+      background-size: 200% 100%; animation: skel 1.2s ease-in-out infinite; }
+    @keyframes skel { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    .projects-empty { text-align: center; color: var(--muted-fg); font-size: .85rem; padding: 1.5rem 0; }
+    .pc-owner { font: .68rem var(--mono); color: var(--muted-fg); flex: none; opacity: .8; }
+    .id-chip { font: .72rem var(--mono); color: var(--muted-fg); margin-left: .5rem; }
+    .id-chip .role { color: var(--primary); font-weight: 600; }
+    /* Team panel (admins) */
+    .team-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 1rem 1.2rem; margin-top: 1.2rem; }
+    .team-card h3 { font-family: var(--display); font-size: 1.05rem; margin: 0 0 .2rem; }
+    .team-row { display: flex; align-items: center; gap: .6rem; padding: .4rem 0; border-top: 1px solid var(--border); }
+    .team-row:first-of-type { border-top: 0; }
+    .team-row .tr-email { flex: 1; font: .82rem var(--sans); color: var(--fg); }
+    .team-row .tr-role { font: .7rem var(--mono); padding: .1rem .4rem; border-radius: 4px; background: var(--input); }
+    .team-row .tr-role.admin { background: var(--accent, #e8f1ff); color: var(--primary); }
+    .team-row button, .team-add button { font: .72rem var(--sans); padding: .25rem .5rem; border: 1px solid var(--border);
+      border-radius: 5px; background: var(--bg); cursor: pointer; color: var(--fg); }
+    .team-add { display: flex; gap: .4rem; margin-top: .6rem; }
+    .team-add input { flex: 1; padding: .4rem .5rem; border: 1px solid var(--input); border-radius: 6px; font-size: .8rem; }
   </style>
 </head>
 <body>
@@ -186,7 +208,7 @@
   <div class="projects-screen" id="projects-screen">
     <div class="projects-header">
       <h1>Software Factory</h1>
-      <p>Select a project or create a new one</p>
+      <p>Select a project or create a new one <span id="id-chip" class="id-chip"></span></p>
     </div>
     <div class="projects-body">
       <div class="new-project-card">
@@ -201,7 +223,7 @@
             <div class="model-sub">Claude Code · Opus/Sonnet</div>
           </div>
           <div class="model-opt" data-model="kimi" onclick="selectModel(this)">
-            <div class="model-name">Kimi K 2.6</div>
+            <div class="model-name">Kimi K 2.7 Code</div>
             <div class="model-sub">OpenCode · Moonshot AI</div>
           </div>
         </div>
@@ -221,6 +243,10 @@
         </div>
         <button class="new-project-go" onclick="createNewProject()">Create Project &rarr;</button>
       </div>
+      <div id="projects-loading" style="display:none; margin-top:1.2rem">
+        <div class="skel-row"></div><div class="skel-row"></div><div class="skel-row"></div>
+      </div>
+      <div id="projects-empty" class="projects-empty" style="display:none">No projects yet — create one above.</div>
       <div id="active-section" style="display:none">
         <div class="section-label">Active</div>
         <div class="project-list" id="active-projects"></div>
@@ -228,6 +254,16 @@
       <div id="inactive-section" style="display:none; margin-top:1.2rem">
         <div class="section-label">Completed</div>
         <div class="project-list" id="inactive-projects"></div>
+      </div>
+      <div id="team-card" class="team-card" style="display:none">
+        <h3>Team</h3>
+        <p class="projects-empty" style="text-align:left;padding:.2rem 0 .6rem">Admins see all projects; members see only their own.</p>
+        <div id="team-list"></div>
+        <div class="team-add">
+          <input type="email" id="team-email" placeholder="invite email (tenexity.ai)">
+          <button onclick="addTeamMember('member')">Add member</button>
+          <button onclick="addTeamMember('admin')">Add admin</button>
+        </div>
       </div>
     </div>
   </div>
@@ -530,8 +566,14 @@
       const { runs } = await (await fetch("/api/runs")).json();
       const sel = $("runs"); sel.innerHTML = "";
       if (!runs.length) { sel.innerHTML = "<option>(no runs yet)</option>"; return; }
+      // Display the user-chosen NAME (the project's identity), never the run id — unless a
+      // name is missing (legacy) or collides (disambiguate with a short id suffix).
+      const counts = {};
+      for (const r of runs) { const n = (r.name || "").toLowerCase(); if (n) counts[n] = (counts[n] || 0) + 1; }
+      const projLabel = (r) => !r.name ? r.run_id
+        : (counts[r.name.toLowerCase()] > 1 ? `${r.name} (${r.run_id.slice(4, 10)})` : r.name);
       for (const r of runs) { const o = document.createElement("option"); o.value = r.run_id;
-        o.textContent = `${r.run_id} · ${r.phase} · $${(r.spent_usd || 0).toFixed(2)}`; sel.appendChild(o); }
+        o.textContent = `${projLabel(r)} · ${r.phase} · $${(r.spent_usd || 0).toFixed(2)}`; sel.appendChild(o); }
       const want = select || localStorage.getItem("sf_run") || runs[0].run_id;
       if ([...sel.options].some((o) => o.value === want)) sel.value = want;
       attach(sel.value);
@@ -782,6 +824,12 @@
     };
 
     window.createNewProject = () => {
+      // Names are the unique project identity — pre-check client-side for instant feedback
+      // (the server enforces it authoritatively too).
+      const nm = ($("project-name").value || "").trim();
+      if (nm && window._projectNames && window._projectNames.has(nm.toLowerCase())) {
+        alert(`A project named "${nm}" already exists — names must be unique.`); return;
+      }
       $("projects-screen").classList.add("hidden");
       $("app-main").style.display = "";
       initCy();
@@ -801,35 +849,103 @@
       initCy(); loadRuns(rid);
     }
 
+    const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    let _me = null;
+    async function fetchMe() {
+      if (_me) return _me;
+      try { _me = await (await fetch("/api/me")).json(); }
+      catch { _me = { email: null, role: "member", auth: false }; }
+      return _me;
+    }
+    function renderIdChip(me) {
+      const el = $("id-chip"); if (!el) return;
+      el.innerHTML = (me && me.auth && me.email)
+        ? `${esc(me.email)} <span class="role">${esc(me.role)}</span>` : "";
+    }
+
     async function loadProjectsScreen() {
+      // An in-flight fetch must look distinct from "no projects": show skeleton, then resolve.
+      for (const id of ["active-section", "inactive-section", "projects-empty", "team-card"])
+        $(id).style.display = "none";
+      $("projects-loading").style.display = "";
+      const me = await fetchMe();
       let runs = [];
       try { runs = (await (await fetch("/api/runs")).json()).runs || []; } catch {}
-      // budget-stopped runs are NOT active — green dots on frozen ghosts misled the operator
+      $("projects-loading").style.display = "none";
+      renderIdChip(me);
+      if (me.role === "admin" && me.auth) { $("team-card").style.display = ""; loadTeam(); }
+
+      if (!runs.length) { $("projects-empty").style.display = ""; return; }
+
+      // Display the user-chosen NAME; only disambiguate with a short id when names collide
+      // (creation enforces uniqueness, so collisions are only legacy data), and fall back to
+      // the run id when a run has no name at all. Never show the run id otherwise.
+      const counts = {};
+      for (const r of runs) { const n = (r.name || "").toLowerCase(); if (n) counts[n] = (counts[n] || 0) + 1; }
+      window._projectNames = new Set(Object.keys(counts));   // for the create-time dup check
+      const projLabel = (r) => !r.name ? r.run_id
+        : (counts[r.name.toLowerCase()] > 1 ? `${r.name} (${r.run_id.slice(4, 10)})` : r.name);
+
       const active = runs.filter(r => r.phase !== "done" && !r.budget_stopped && !r.held);
       const inactive = runs.filter(r => r.phase === "done" || r.budget_stopped || r.held);
-
       const render = (list, container) => {
         container.innerHTML = "";
         for (const r of list) {
           const dot = (r.budget_stopped || r.held) ? "stopped" : (r.phase !== "done" ? "active" : "inactive");
           const label = r.held ? "⏸ held — not started"
             : (r.budget_stopped ? "⏸ budget-stopped · " + r.phase : r.phase);
+          const ownerBit = (me.role === "admin" && r.owner) ? `<div class="pc-owner">${esc(r.owner)}</div>` : "";
           const card = document.createElement("div");
           card.className = "project-card";
           card.onclick = () => openProject(r.run_id);
           card.innerHTML = `<div class="pc-dot ${dot}"></div>
             <div class="pc-info">
-              <div class="pc-name">${r.name || r.run_id}</div>
-              <div class="pc-meta">${r.name ? r.run_id + " · " : ""}${label}${r.description ? " · " + r.description.slice(0, 60) : ""}</div>
+              <div class="pc-name">${esc(projLabel(r))}</div>
+              <div class="pc-meta">${esc(label)}${r.description ? " · " + esc(r.description.slice(0, 60)) : ""}</div>
             </div>
+            ${ownerBit}
             <div class="pc-cost">$${(r.spent_usd || 0).toFixed(2)}</div>`;
           container.appendChild(card);
         }
       };
-
       if (active.length) { $("active-section").style.display = ""; render(active, $("active-projects")); }
       if (inactive.length) { $("inactive-section").style.display = ""; render(inactive, $("inactive-projects")); }
     }
+
+    // ---- Team panel (admins) ----
+    async function loadTeam() {
+      let users = [];
+      try { users = (await (await fetch("/api/users")).json()).users || []; } catch { return; }
+      const me = _me || {};
+      const list = $("team-list"); list.innerHTML = "";
+      for (const u of users) {
+        const isSelf = me.email && u.email.toLowerCase() === me.email.toLowerCase();
+        const toggle = u.role === "admin"
+          ? `<button onclick="setRole('${esc(u.email)}','member')">make member</button>`
+          : `<button onclick="setRole('${esc(u.email)}','admin')">make admin</button>`;
+        const row = document.createElement("div");
+        row.className = "team-row";
+        row.innerHTML = `<span class="tr-email">${esc(u.email)}${isSelf ? " (you)" : ""}</span>
+          <span class="tr-role ${u.role === "admin" ? "admin" : ""}">${esc(u.role)}</span>
+          ${isSelf ? "" : toggle}
+          ${isSelf ? "" : `<button onclick="setRole('${esc(u.email)}','remove')">remove</button>`}`;
+        list.appendChild(row);
+      }
+    }
+    async function postUser(email, role) {
+      const r = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, role }) });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.error || "failed"); return; }
+      loadTeam();
+    }
+    window.setRole = (email, role) => postUser(email, role);
+    window.addTeamMember = (role) => {
+      const email = ($("team-email").value || "").trim();
+      if (!email) return;
+      $("team-email").value = "";
+      postUser(email, role);
+    };
 
     window.showProjectsScreen = () => {
       if (timer) clearInterval(timer);

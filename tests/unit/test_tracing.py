@@ -53,7 +53,7 @@ def test_maps_both_runtimes_and_ships_incrementally(tmp_path, sink):
     flat2 = [e for b in sink for e in b]
     new = flat2[before:]
     assert all(e["type"] != "trace-create" for e in new)          # trace only once
-    assert any(e["body"].get("model") == "kimi-k2.6" for e in new
+    assert any(e["body"].get("model") == "kimi-k2.7-code" for e in new
                if e["type"] == "generation-create")
 
 

@@ -52,9 +52,14 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
 ## 3. Autonomy
 
 - The poller auto-launches Stage 2 when Stage 1 is `done` (§1 definition).
-- After Stage 2, the host classifies required tokens (`provide | mock | mcp`). If **no token requires
-  `provide`**, the host auto-satisfies deps and launches Stage 3 — no pause. If any token requires a
-  human secret, the run waits at the deps gate until the operator submits it.
+- After Stage 2, the host classifies required tokens (`provide | mock | deploy-db | mcp`). If **no
+  token requires `provide`**, the host auto-satisfies deps and launches Stage 3 — no pause. If any
+  token requires a human secret, the run waits at the deps gate until the operator submits it.
+- **Databases are factory-provided, never agent-provisioned.** Any database token (`DATABASE_URL`,
+  `SUPABASE_*`, `POSTGRES*`, …) is `deploy-db`: at Stage 3 launch the FACTORY provisions a per-run
+  Railway Postgres and writes its `DATABASE_URL` into the workspace as `context/deploy-db.json`; the
+  agent reads that file. **Stage-3 agents have NO Supabase MCP and no Supabase token** — they can
+  never create/delete a Supabase project (the account-wide-PAT blast-radius rule).
 - No other human checkpoints exist anywhere in the pipeline.
 
 ## 4. Budget
@@ -110,6 +115,15 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
   sign-in page and every other route requires a valid HMAC-signed session cookie; the ID token
   is validated server-side (audience + verified email + allowlist). Either var absent = the
   console is open (local dev/tests unchanged).
+- **Roles & ownership (multi-tenant):** every run has an `owner` (the creating user's email).
+  Users have a role — `admin` or `member` — held in a directory (`public.users` in pg, a sqlite
+  file otherwise); `SF_ADMIN_EMAILS` are always admins (bootstrap, can't be locked out) and seed
+  the directory. **Admins see all projects; members see only their own.** Enforced on EVERY
+  run-scoped route (not just the list) — a member fetching another's run by URL gets 403. The
+  service token = admin-equivalent (machine callers see all). Login membership = `SF_AUTH_EMAILS`
+  ∪ the directory, so admins can invite users in-console (a Team panel) without a redeploy. A
+  project's NAME is its user-facing identity and is **unique** (enforced at creation); the console
+  displays the name, never the run id (run id only as a fallback for unnamed/legacy runs).
 
 ## 7. Models, MCP, deploy contract
 
@@ -119,7 +133,7 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
   `claude-sonnet-4-6` | `claude-opus-4-8`) at start; picks persist in RunState (retries keep
   them), beat the `SF_MODEL` env knob, and anything outside the offered sets is dropped. A
   non-default S3 pick is also mandated in-prompt for Task subagents (overriding the SKILL's
-  sonnet pin). Opencode runtime: all stages `openrouter/moonshotai/kimi-k2.6` (§9).
+  sonnet pin). Opencode runtime: all stages `openrouter/moonshotai/kimi-k2.7-code` (§9).
 - MCP (stage-aware workspace `.mcp.json`): playwright (headless) for all stages; Stage 3 additionally
   `railway` (local `railway mcp`, project-token auth — project-scoped tools only) and `supabase`
   (`@supabase/mcp-server-supabase`, `SUPABASE_ACCESS_TOKEN` from env).

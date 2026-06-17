@@ -8,7 +8,7 @@ from software_factory.console import (
     Console, RunRequest, make_prompt_stage1, make_prompt_stage3,
 )
 
-KIMI = "openrouter/moonshotai/kimi-k2.6"
+KIMI = "openrouter/moonshotai/kimi-k2.7-code"
 SECRET = "rwt_super_secret_token_value_123"
 
 

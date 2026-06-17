@@ -25,7 +25,7 @@ def _events(text: str):
 
 
 # OpenCode events carry no model id, so the token-pricing fallback uses the run's model.
-OPENCODE_FALLBACK_MODEL = "openrouter/moonshotai/kimi-k2.6"
+OPENCODE_FALLBACK_MODEL = "openrouter/moonshotai/kimi-k2.7-code"
 
 
 def cost_usd(text: str, prices: dict | None = None) -> float:

@@ -23,7 +23,7 @@ from typing import Any, Callable
 # the pg registry's write guard (dbshim._ensure) stays strict 8-hex.
 RUN_ID_RE = re.compile(r"run-[A-Za-z0-9-]+")
 
-from . import artifacts, gates, streamlog
+from . import artifacts, deploy_db, env as _env, gates, streamlog
 from .agents import AgentRegistry
 from .evidence import build_evidence, verify_evidence
 from .input_pipeline import persist_and_compose
@@ -65,7 +65,11 @@ for _p in STAGE_3:
 # high-volume code edits). SF_MODEL env overrides all stages if set.
 _STAGE_MODEL = {1: "claude-opus-4-8", 2: "claude-opus-4-8", 3: "claude-sonnet-4-6"}
 # opencode runtime: one model for all stages (monolithic v1 — no per-stage split).
-_STAGE_MODEL_OPENCODE = {s: "openrouter/moonshotai/kimi-k2.6" for s in (1, 2, 3)}
+_STAGE_MODEL_OPENCODE = {
+    1: "openrouter/moonshotai/kimi-k2.7-code",
+    2: "openrouter/moonshotai/kimi-k2.7-code",
+    3: "openrouter/moonshotai/kimi-k2.7-code",
+}
 # Operator-pickable per-run models (claude runtime). The UI offers exactly these; anything
 # else is ignored at start_run so a bad request can never launch an unknown/unpriced model.
 PLANNING_MODELS = {"claude-opus-4-8", "claude-fable-5"}
@@ -85,6 +89,7 @@ class RunRequest:
     impl_model: str = ""      # S3 model (claude runtime); empty -> stage default
     name: str = ""            # operator-chosen project name (display label)
     gated: bool = False       # create held: registered + visible at $0, stage 1 launches on release
+    owner: str = ""           # email of the creating user (multi-tenant: members see only their own)
 
 
 def run_paths(runs_dir: str, run_id: str) -> dict:
@@ -170,9 +175,10 @@ def make_prompt_stage2(req: RunRequest, run_id: str, runs_dir: str, runtime: str
         + "Goal (per SKILL.md): architecture.md + architecture.svg (fewest services; data model; a "
           "`## Required Tokens` section, UPPER_SNAKE_CASE) AND PERSISTED buildable tickets — "
           "`TicketStore.create_ticket` with real acceptance + DoD (an empty store dead-ends Stage 3). "
-          "The Stage 3 build agent has the Supabase + Railway MCP, so design Supabase/Railway/NextAuth as "
-          "agent-provisionable (don't require the operator for them); route every LLM/AI feature via "
-          "OpenRouter (OPENROUTER_API_KEY). When PRD+architecture+svg exist and the store has buildable "
+          "The app's DATABASE is provisioned BY THE FACTORY (a per-run Postgres handed to Stage 3 as "
+          "context/deploy-db.json) — design the data model on plain Postgres via DATABASE_URL; do NOT "
+          "design around Supabase (Stage 3 has no Supabase access). Use demo/mock auth, not a real IdP; "
+          "route every LLM/AI feature via OpenRouter (OPENROUTER_API_KEY). When PRD+architecture+svg exist and the store has buildable "
           "tickets, STOP — the console collects deps + launches Stage 3.\n"
           f"App: {req.description}"
     )
@@ -184,6 +190,7 @@ def _disposition_guidance(dispositions: dict | None) -> str:
     # runner's own keys (operator security rule).
     mock = sorted(n for n, d in disp.items() if d in ("mock", "env"))
     mcp = sorted(n for n, d in disp.items() if d == "mcp")
+    dbtok = sorted(n for n, d in disp.items() if d == "deploy-db")
     if not disp:
         return ""
     return (
@@ -191,9 +198,11 @@ def _disposition_guidance(dispositions: dict | None) -> str:
         f"- **MOCK** (build a WORKING LOCAL FAKE wired into the real app so the happy-flow passes "
         f"end-to-end — e.g. a 'sign in as demo admin' session for SSO, seeded DB rows for ERP/HR "
         f"data, emails written to a table/log for mail; NOT a dead stub): {mock or 'none'}\n"
-        f"- **PROVISION VIA MCP** (you have the Supabase + Railway MCP — create the Supabase project "
-        f"and read URL/anon/service-role keys; generate NEXTAUTH_SECRET; set NEXTAUTH_URL from the "
-        f"deploy URL; set vars on the sf-<run_id> service): {mcp or 'none'}\n"
+        f"- **DEPLOY-DB** (the FACTORY already provisioned this run's database; read its DATABASE_URL "
+        f"from context/deploy-db.json and point the app at it — you have NO Supabase access and must "
+        f"NEVER provision a database): {dbtok or 'none'}\n"
+        f"- **SELF/MCP** (generate it yourself / via the Railway MCP — e.g. NEXTAUTH_SECRET; set "
+        f"NEXTAUTH_URL from the deploy URL): {mcp or 'none'}\n"
         f"- Operator-PROVIDED tokens ride in your environment with real values; NEVER copy any "
         f"other key from your own environment into the app (your keys are not the app's keys).\n"
         f"Do NOT block on a real third-party integration when its token is marked MOCK — build the fake.\n"
@@ -227,7 +236,7 @@ def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions
           f"env) → `deploy` → `generate_domain` (the app has NO public url until you do this; derive the health url "
           f"from it). NEVER deploy to the console service.\n"
           f"DEPLOY PREFLIGHT (Railway blocks the build otherwise): run `npm audit` and bump HIGH/CRITICAL deps to "
-          f"patched versions + regen the lockfile; give module-load clients (e.g. Supabase) BUILD-TIME placeholder env "
+          f"patched versions + regen the lockfile; give module-load clients (e.g. a Postgres pool) BUILD-TIME placeholder env "
           f"in the Dockerfile so `next build` doesn't throw (runtime values override); ship a Dockerfile. The build runs "
           f"REMOTELY on Railway — do NOT run `npm run build` locally (it OOM-kills the shared container).\n"
           f"HEALTH: use a FINITE health-wait (bounded attempts, never an infinite loop). On failure call the Railway MCP "
@@ -268,11 +277,11 @@ def _default_launch(argv: list[str], env: dict, log_path: str | None = None, cwd
     if log_path:
         with open(log_path, "ab") as logf:
             return subprocess.Popen(
-                argv, env={**os.environ, **env}, cwd=cwd,
+                argv, env=_env.stage_env_baseline(env), cwd=cwd,
                 stdout=logf, stderr=subprocess.STDOUT,
             )
     return subprocess.Popen(
-        argv, env={**os.environ, **env}, cwd=cwd,
+        argv, env=_env.stage_env_baseline(env), cwd=cwd,
         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
     )
 
@@ -590,11 +599,26 @@ class Console:
         ws = prepare_workspace(
             self._runs_dir, run_id, stage, runtime=runtime,
         )
+        # Stage 3 with a database dependency: the FACTORY provisions the DB (per-run Railway
+        # Postgres) and hands the agent context/deploy-db.json — the agent has no Supabase access
+        # and never provisions a DB. Provision failure blocks the launch (don't build DB-less).
+        if stage == 3 and deploy_db.needs_deploy_db(state.deps_required):
+            ctx = os.path.join(ws, "context")
+            if not os.path.exists(os.path.join(ctx, deploy_db.DEPLOY_DB_FILE)):
+                try:
+                    info = deploy_db.provision(run_id)
+                    deploy_db.write_file(ctx, info)
+                    RunDB(paths["db"]).record_artifact(
+                        "Deploy DB", "context/" + deploy_db.DEPLOY_DB_FILE, kind="deploy-db")
+                except Exception as e:
+                    RunDB(paths["db"]).add_blocker(
+                        f"deploy-db provisioning failed: {e}", blocks="deploy-db")
+                    return None
         mcp_path = os.path.join(ws, ".mcp.json")
         checks = check_mcp(mcp_path)
         unhealthy = [c for c in checks if not c.ok]
-        # Hard-gate ONLY playwright (the happy-flow verification gate needs it). The deploy/provision
-        # MCPs (railway, supabase) are best-effort: record a blocker if unhealthy but still launch —
+        # Hard-gate ONLY playwright (the happy-flow verification gate needs it). The railway deploy
+        # MCP is best-effort: record a blocker if unhealthy but still launch —
         # a transient npx/token hiccup must not block the whole stage, and the agent surfaces real
         # deploy-tool failures itself (bounded health-wait + get_logs).
         _HARD = {"playwright", "config"}
@@ -610,7 +634,7 @@ class Console:
 
         if runtime == "opencode":
             model = os.environ.get("SF_MODEL") or _STAGE_MODEL_OPENCODE.get(
-                stage, "openrouter/moonshotai/kimi-k2.6")
+                stage, "openrouter/moonshotai/kimi-k2.7-code")
             argv = [
                 "opencode", "run", prompt,
                 "--model", model,
@@ -681,8 +705,24 @@ class Console:
             self._procs[run_id] = result   # SPEC §1: tracked for the stage-handoff guard
         return result
 
+    def name_taken(self, name: str, exclude: str | None = None) -> bool:
+        """A project name is the user-facing identity, so it must be unique (case-insensitive).
+        Checked at creation. `exclude` skips one run id (not used at create, here for callers)."""
+        n = (name or "").strip().lower()
+        if not n:
+            return False
+        for r in self.list_runs():
+            if r["run_id"] == exclude:
+                continue
+            if (r.get("name") or "").strip().lower() == n:
+                return True
+        return False
+
     def start_run(self, req: RunRequest) -> str:
-        """Start a new run (Stage 1). Returns run_id."""
+        """Start a new run (Stage 1). Returns run_id. Raises ValueError if the project name
+        is already taken (names are the unique, user-facing project identity)."""
+        if req.name and self.name_taken(req.name):
+            raise ValueError(f"A project named {req.name!r} already exists — names must be unique.")
         run_id = self._new_id()
         paths = self._paths(run_id)
         os.makedirs(paths["base"], exist_ok=True)
@@ -718,6 +758,7 @@ class Console:
         state.planning_model = req.planning_model if req.planning_model in PLANNING_MODELS else ""
         state.impl_model = req.impl_model if req.impl_model in IMPL_MODELS else ""
         state.held = bool(req.gated)
+        state.owner = (req.owner or "").lower()
         state.save()
 
         if req.gated:
@@ -1089,10 +1130,33 @@ class Console:
             "impl_model": state.impl_model,
             "budget_ceiling": self._budget_ceiling(run_id),
             "held": state.held,
+            "owner": state.owner,
         }
 
-    def list_runs(self) -> list[dict]:
+    def run_owner(self, run_id: str) -> str:
+        """The email that owns this run ('' = legacy/unowned). The per-route visibility gate."""
+        return (self._load_state(run_id).owner or "").lower()
+
+    def assign_unowned(self, owner_email: str) -> int:
+        """One-time-ish backfill: give every ownerless run an owner (the pre-multitenancy runs).
+        Idempotent — runs that already have an owner are left alone. Returns how many it set."""
+        owner_email = (owner_email or "").lower()
+        if not owner_email:
+            return 0
+        n = 0
+        for r in self.list_runs():            # owner=None → all runs
+            st = self._load_state(r["run_id"])
+            if not (st.owner or ""):
+                st.owner = owner_email
+                st.save()
+                n += 1
+        return n
+
+    def list_runs(self, owner: str | None = None) -> list[dict]:
+        """All runs (owner=None — admin/internal callers like the poller), or only those
+        owned by `owner` (a member's email; '' never matches, so unowned runs stay admin-only)."""
         runs = []
+        owner = owner.lower() if owner else None
         # Local dirs ∪ the pg registry (pg mode): a run can exist only in the registry —
         # fresh container, wiped volume — and must still surface. Local wins the dedupe.
         # Only factory-shaped ids list (same rule as the pg registry guard): agents calling
@@ -1109,6 +1173,8 @@ class Console:
         names = local + [rid for rid in created if rid not in set(local)]
         for name in names:
             st = self._load_state(name)
+            if owner is not None and (st.owner or "").lower() != owner:
+                continue   # member view: skip runs they don't own (unowned '' never matches)
             # A budget-stopped run is NOT active: surfacing it with a live/green status misled
             # the operator into thinking frozen ghosts were consuming (the b594a5f4/0eb69fdd UI
             # confusion). An uncleared budget blocker = stopped, full stop.
@@ -1126,6 +1192,7 @@ class Console:
                 "stage": st.stage,
                 "budget_stopped": budget_stopped,
                 "held": st.held,
+                "owner": st.owner,
             })
         def _sort_key(r):
             p = os.path.join(self._runs_dir, r["run_id"])

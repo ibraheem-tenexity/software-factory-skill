@@ -80,6 +80,7 @@ class FakePgConn:
 
 @pytest.fixture()
 def pg(monkeypatch, tmp_path):
+    monkeypatch.setenv("SF_ENVIRONMENT", "test")
     monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@pooler:6543/postgres")
     fake = FakePgConn()
@@ -117,6 +118,7 @@ def test_pg_executescript_runs_translated_statements(pg):
 
 
 def test_pg_write_retries_then_raises(monkeypatch, tmp_path):
+    monkeypatch.setenv("SF_ENVIRONMENT", "test")
     monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@pooler:6543/postgres")
     attempts = []
@@ -135,6 +137,7 @@ def test_pg_write_retries_then_raises(monkeypatch, tmp_path):
 
 
 def test_schema_name_sanitized(monkeypatch, tmp_path):
+    monkeypatch.setenv("SF_ENVIRONMENT", "test")
     monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@x:6543/postgres")
     fake = FakePgConn()
@@ -147,6 +150,7 @@ def test_schema_name_sanitized(monkeypatch, tmp_path):
 def test_registry_rejects_non_factory_run_ids(monkeypatch, tmp_path):
     # A stray local process pointed at prod once registered 53 junk "runs" — only
     # run-XXXXXXXX ids may land in public.sf_runs (the schema is still created).
+    monkeypatch.setenv("SF_ENVIRONMENT", "test")
     monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@x:6543/postgres")
     fake = FakePgConn()
@@ -162,3 +166,16 @@ def test_registry_rejects_non_factory_run_ids(monkeypatch, tmp_path):
     conn2 = dbshim.connect(str(tmp_path / "run-abcd1234" / "run.db"))
     conn2.execute("SELECT 1")
     assert any("INSERT INTO public.sf_runs" in s for s, _ in fake2.statements)
+
+
+def test_ensure_refuses_path_shaped_run_id(monkeypatch, tmp_path):
+    # Defense in depth: a run id that is clearly path/shell junk (contains a separator
+    # or whitespace) must never reach CREATE SCHEMA, even bypassing the db-CLI guard.
+    monkeypatch.setenv("SF_DB", "postgres")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@x:6543/postgres")
+    fake = FakePgConn()
+    monkeypatch.setattr(dbshim, "_pg_connect", lambda url: fake)
+    conn = dbshim.PgConn(fake, "/data/runs")
+    with pytest.raises(ValueError):
+        conn.execute("SELECT 1")
+    assert not any("CREATE SCHEMA" in s for s, _ in fake.statements)

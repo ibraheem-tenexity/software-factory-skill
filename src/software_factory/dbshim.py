@@ -23,6 +23,8 @@ import re
 import sqlite3
 import time
 
+from . import env
+
 _RETRY_SLEEP = 0.5
 _TRIES = 3
 # Tables with an `id INTEGER ... IDENTITY` column — INSERTs get RETURNING id so the
@@ -31,7 +33,7 @@ _ID_TABLES = ("tickets", "phases", "artifacts", "blockers", "verifications")
 
 
 def connect(path: str):
-    if (os.environ.get("SF_DB") or "sqlite").lower() != "postgres":
+    if env.db_backend() != "postgres":
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
@@ -56,7 +58,7 @@ def registry_runs() -> list:
     """Runs known to the pg `public.sf_runs` registry: [{run_id, created}] — [] on the
     sqlite backend (discovery stays directory-based) and on any pg error (the volume
     listing must keep working even if the registry is briefly unreachable)."""
-    if (os.environ.get("SF_DB") or "sqlite").lower() != "postgres":
+    if env.db_backend() != "postgres":
         return []
     try:
         conn = _pg_connect(os.environ["DATABASE_URL"])
@@ -76,6 +78,15 @@ def registry_runs() -> list:
 def schema_for(run_id: str) -> str:
     base = run_id[4:] if run_id.startswith("run-") else run_id
     return "sf_run_" + re.sub(r"[^a-z0-9_]", "_", base.lower())
+
+
+# Path/shell junk that can never be a legitimate run id (a wrong db-CLI arg order once
+# landed values like "/data/runs" in the run_id slot). Defense in depth: refuse to
+# CREATE SCHEMA for these even if a caller bypasses the CLI guard. Kept deliberately
+# narrow (separators/whitespace/empty) so real sanitization cases like "run-AB.C-9"
+# still create their schema.
+def _is_malformed_run_id(run_id: str) -> bool:
+    return (not run_id) or bool(re.search(r"[/\\\s]", run_id))
 
 
 def _translate(sql: str) -> str:
@@ -167,6 +178,10 @@ class PgConn:
         schema itself is still created (refusing the write would lose data instead)."""
         if self._ready:
             return
+        if _is_malformed_run_id(self._run_id):
+            raise ValueError(
+                f"refusing to create a pg schema for malformed run id {self._run_id!r} "
+                "(looks like a path/shell fragment, not a run id)")
         last_err = None
         for attempt in range(_TRIES):
             try:

@@ -1206,3 +1206,36 @@ def test_list_runs_ignores_debris_dirs(tmp_path, monkeypatch):
                         lambda: [{"run_id": "demo_credentials.md", "created": 1.0}])
     ids = [r["run_id"] for r in c.list_runs()]
     assert ids == [rid]
+
+
+# ---------- run ownership (multi-tenant: members see only their own) ----------
+
+def test_owner_stamped_and_list_filters_by_owner(tmp_path):
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    # console() fixture mints a single id "run-xyz"; mint distinct ids here
+    ids = iter(["run-aaaa1111", "run-bbbb2222", "run-cccc3333"])
+    c2 = Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids))
+    a = c2.start_run(RunRequest(description="a", owner="alice@x.com"))
+    b = c2.start_run(RunRequest(description="b", owner="bob@x.com"))
+    leg = c2.start_run(RunRequest(description="legacy"))     # owner ""
+    assert c2.run_owner(a) == "alice@x.com"
+    assert c2.run_owner(leg) == ""
+    allids = {r["run_id"] for r in c2.list_runs()}
+    assert {a, b, leg} <= allids                             # admin/internal: all
+    assert {r["run_id"] for r in c2.list_runs(owner="alice@x.com")} == {a}
+    assert {r["run_id"] for r in c2.list_runs(owner="ALICE@X.COM")} == {a}   # case-insensitive
+    assert leg not in {r["run_id"] for r in c2.list_runs(owner="bob@x.com")}  # unowned hidden
+    assert c2.status(a)["owner"] == "alice@x.com"
+
+
+def test_assign_unowned_is_idempotent(tmp_path):
+    launcher = FakeLauncher()
+    ids = iter(["run-dddd4444", "run-eeee5555"])
+    c = Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids))
+    owned = c.start_run(RunRequest(description="owned", owner="alice@x.com"))
+    leg = c.start_run(RunRequest(description="legacy"))
+    assert c.assign_unowned("admin@x.com") == 1
+    assert c.run_owner(leg) == "admin@x.com"
+    assert c.run_owner(owned) == "alice@x.com"               # untouched
+    assert c.assign_unowned("admin@x.com") == 0              # nothing left

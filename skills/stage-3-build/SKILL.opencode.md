@@ -26,8 +26,9 @@ recorded, GREEN Playwright happy-flow on the live URL is done.
 ```bash
 python3 -m software_factory.db <verb> <runs_dir> <run_id> ...
 ```
-`set-phase <name>`; `spawn-agent <id> <role> <model> <phase>` / `finish-agent <id> <outcome> [cost] [pr] [diff_lines]`
-per ticket/bugfix unit; `record-artifact <title> <path> <kind> [agent]`; `record-verification <url> <0|1> <result-json>`
+`<runs_dir> <run_id>` ALWAYS come first, before the verb's own args:
+`set-phase <runs_dir> <run_id> <name>`; `spawn-agent <runs_dir> <run_id> <id> <role> <model> <phase>` / `finish-agent <runs_dir> <run_id> <id> <outcome> [cost] [pr] [diff_lines]`
+per ticket/bugfix unit; `record-artifact <runs_dir> <run_id> <title> <path> <kind> [agent]`; `record-verification <runs_dir> <run_id> <url> <0|1> <result-json>`
 for the Playwright gate; `add-blocker`/`clear-blocker`. No events — the datastore is the source of truth.
 
 ## Phase 0: plan FIRST  (`set-phase plan`)
@@ -63,8 +64,12 @@ later tickets build on merged work.
 **Dependency dispositions** (the launch prompt lists each token's disposition):
 - **MOCK** → build a WORKING LOCAL FAKE wired into the real app (demo-login session for SSO, seeded DB rows
   for ERP/HR data, emails to a table/log) — never a dead stub, never block on the real third-party.
-- **PROVISION VIA MCP** → use the Supabase + Railway MCP: create the Supabase project, read URL/anon/service-role
-  keys; generate `NEXTAUTH_SECRET`; set `NEXTAUTH_URL` from the deploy URL; set vars on the `sf-<run_id>` service.
+- **DEPLOY-DB** (any database token) → the FACTORY already provisioned this run's database and wrote
+  its connection details to **`context/deploy-db.json`** (`{"DATABASE_URL": ...}`). READ that file,
+  point the app at that `DATABASE_URL`, set it on the `sf-<run_id>` service at deploy. You do **NOT**
+  provision a database and have **NO Supabase access** — no Supabase MCP, no Supabase token. Never
+  call Supabase, never create a project.
+- **MCP** (e.g. `NEXTAUTH_SECRET`) → generate it yourself / via the Railway MCP.
 - everything else with a real value is already in your environment.
 
 ## Phase 2: deploy  (`set-phase deploy`)
@@ -88,14 +93,15 @@ It is the local stdio MCP server (`railway mcp`) and authenticates with the cont
 - **Account-level tools do NOT work** with a project token — `whoami` and `list_projects` return
   *"Not authenticated. Run 'railway login'…"*. You do **not** need them; never call them, and never
   treat that error as "the MCP is broken" — it only means the token has no user identity.
-- Supabase provisioning uses the **`supabase` MCP** (authed by `SUPABASE_ACCESS_TOKEN`, account-level).
+- There is **NO Supabase MCP and no Supabase access**. The database is provisioned by the factory;
+  read its `DATABASE_URL` from `context/deploy-db.json` (see DEPLOY-DB above).
 
 ### Successful deploy path (the proven sequence — follow it in order)
 1. **Preflight the build FIRST** (see below) — skipping this is why deploys fail at "scheduling build".
 2. `create_service` named `sf-<run_id>` (idempotent: if `list_services` shows it, reuse it).
-3. `set_variables` on `sf-<run_id>`: every runtime var the app needs (`DATABASE_URL`, `SUPABASE_URL`,
-   `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`,
-   `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`).
+3. `set_variables` on `sf-<run_id>`: the `DATABASE_URL` from `context/deploy-db.json`, plus
+   `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL` as the app needs.
+   (No Supabase vars — the app uses the factory-provided Postgres.)
 4. `deploy` the service. Railway builds it **remotely** — do NOT run `npm run build` locally (it
    OOM-restarts the shared container and kills you mid-run).
 5. `generate_domain` for `sf-<run_id>` (target the app's listen port). **The app has NO public URL
@@ -120,7 +126,7 @@ It is the local stdio MCP server (`railway mcp`) and authenticates with the cont
   flagged package to its patched version (e.g. `npm install next@^14.2.35`), regenerate the lockfile,
   commit — BEFORE deploy.
 - **Build-time env:** Railway injects service vars at RUNTIME, not into the build. Any client built at
-  module load (`createClient(SUPABASE_URL, …)`, etc.) throws *"supabaseUrl is required"* during
+  module load (e.g. a Postgres pool `new Pool({connectionString: DATABASE_URL})` at import) throws during
   `next build` page-data collection if its env is missing. Provide **build-time placeholder env** in
   the Dockerfile (real values override at runtime) OR construct those clients lazily.
 - **Builder:** ship a **Dockerfile** (Nixpacks/Railpack may fail to detect the app). Canonical pattern:
