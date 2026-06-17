@@ -78,7 +78,7 @@ def map_events(run_id: str, text: str, meta: dict | None = None, seq0: int = 0) 
             out.append({"id": _eid(run_id, "gen", seq), "type": "generation-create",
                         "timestamp": ts, "body": {
                             "id": _eid(run_id, "gen", seq), "traceId": run_id,
-                            "name": "step", "model": "kimi-k2.6",
+                            "name": "step", "model": "kimi-k2.7-code",
                             "startTime": ts, "endTime": ts,
                             "usage": {"input": tokens.get("input", 0),
                                       "output": tokens.get("output", 0)},

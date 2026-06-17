@@ -6,12 +6,15 @@ Runner / HTTP getter / sleeper are injectable so the logic is testable offline.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import time
 import urllib.request
 from dataclasses import dataclass
 from typing import Callable
+
+from . import env
 
 
 @dataclass
@@ -51,6 +54,12 @@ def deploy(target: str, dir: str, run: Callable[[list[str]], RunResult] = _real_
         # `vercel deploy --prod` prints the deployment URL on stdout.
         return _parse_url(run(["vercel", "deploy", "--cwd", dir, "--prod", "--yes"]).stdout)
     # railway: `up` ships the dir, then `domain` ensures + prints the public domain.
+    project_id = os.environ.get("RAILWAY_PROJECT_ID")
+    if not env.railway_project_allowed(project_id):
+        raise RuntimeError(
+            f"RAILWAY_PROJECT_ID={project_id!r} is not allowed for run-app deployment. "
+            f"Set SF_RUNAPP_RAILWAY_PROJECT_IDS (comma-separated) or unset RAILWAY_PROJECT_ID."
+        )
     run(["railway", "up", "--ci", dir])
     return _parse_url(run(["railway", "domain"]).stdout)
 

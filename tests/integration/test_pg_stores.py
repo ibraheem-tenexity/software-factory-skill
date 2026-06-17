@@ -15,6 +15,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture()
 def pg_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("SF_ENVIRONMENT", "test")
     monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", os.environ["SF_TEST_DATABASE_URL"])
     rid = "run-it" + uuid.uuid4().hex[:8]

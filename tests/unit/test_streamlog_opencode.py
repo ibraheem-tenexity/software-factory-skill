@@ -60,10 +60,10 @@ def test_claude_result_lines_still_parse_alongside_opencode_lines():
 
 
 def test_kimi_price_entry_exists_and_matches_openrouter_list():
-    rate = PRICES["openrouter/moonshotai/kimi-k2.6"]
-    assert rate["input"] == 0.68 / 1_000_000
-    assert rate["cached"] == 0.34 / 1_000_000
-    assert rate["output"] == 3.41 / 1_000_000
+    rate = PRICES["openrouter/moonshotai/kimi-k2.7-code"]
+    assert rate["input"] == 0.75 / 1_000_000
+    assert rate["cached"] == 0.375 / 1_000_000
+    assert rate["output"] == 3.50 / 1_000_000
 
 
 def test_garbage_and_interrupted_tool_events_are_ignored():

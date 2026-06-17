@@ -119,7 +119,7 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
   `claude-sonnet-4-6` | `claude-opus-4-8`) at start; picks persist in RunState (retries keep
   them), beat the `SF_MODEL` env knob, and anything outside the offered sets is dropped. A
   non-default S3 pick is also mandated in-prompt for Task subagents (overriding the SKILL's
-  sonnet pin). Opencode runtime: all stages `openrouter/moonshotai/kimi-k2.6` (§9).
+  sonnet pin). Opencode runtime: all stages `openrouter/moonshotai/kimi-k2.7-code` (§9).
 - MCP (stage-aware workspace `.mcp.json`): playwright (headless) for all stages; Stage 3 additionally
   `railway` (local `railway mcp`, project-token auth — project-scoped tools only) and `supabase`
   (`@supabase/mcp-server-supabase`, `SUPABASE_ACCESS_TOKEN` from env).

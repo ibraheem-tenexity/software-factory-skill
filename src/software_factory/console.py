@@ -23,7 +23,7 @@ from typing import Any, Callable
 # the pg registry's write guard (dbshim._ensure) stays strict 8-hex.
 RUN_ID_RE = re.compile(r"run-[A-Za-z0-9-]+")
 
-from . import artifacts, gates, streamlog
+from . import artifacts, env as _env, gates, streamlog
 from .agents import AgentRegistry
 from .evidence import build_evidence, verify_evidence
 from .input_pipeline import persist_and_compose
@@ -65,7 +65,11 @@ for _p in STAGE_3:
 # high-volume code edits). SF_MODEL env overrides all stages if set.
 _STAGE_MODEL = {1: "claude-opus-4-8", 2: "claude-opus-4-8", 3: "claude-sonnet-4-6"}
 # opencode runtime: one model for all stages (monolithic v1 — no per-stage split).
-_STAGE_MODEL_OPENCODE = {s: "openrouter/moonshotai/kimi-k2.6" for s in (1, 2, 3)}
+_STAGE_MODEL_OPENCODE = {
+    1: "openrouter/moonshotai/kimi-k2.7-code",
+    2: "openrouter/moonshotai/kimi-k2.7-code",
+    3: "openrouter/moonshotai/kimi-k2.7-code",
+}
 # Operator-pickable per-run models (claude runtime). The UI offers exactly these; anything
 # else is ignored at start_run so a bad request can never launch an unknown/unpriced model.
 PLANNING_MODELS = {"claude-opus-4-8", "claude-fable-5"}
@@ -268,11 +272,11 @@ def _default_launch(argv: list[str], env: dict, log_path: str | None = None, cwd
     if log_path:
         with open(log_path, "ab") as logf:
             return subprocess.Popen(
-                argv, env={**os.environ, **env}, cwd=cwd,
+                argv, env=_env.stage_env_baseline(env), cwd=cwd,
                 stdout=logf, stderr=subprocess.STDOUT,
             )
     return subprocess.Popen(
-        argv, env={**os.environ, **env}, cwd=cwd,
+        argv, env=_env.stage_env_baseline(env), cwd=cwd,
         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
     )
 
@@ -610,7 +614,7 @@ class Console:
 
         if runtime == "opencode":
             model = os.environ.get("SF_MODEL") or _STAGE_MODEL_OPENCODE.get(
-                stage, "openrouter/moonshotai/kimi-k2.6")
+                stage, "openrouter/moonshotai/kimi-k2.7-code")
             argv = [
                 "opencode", "run", prompt,
                 "--model", model,

@@ -23,6 +23,8 @@ import re
 import sqlite3
 import time
 
+from . import env
+
 _RETRY_SLEEP = 0.5
 _TRIES = 3
 # Tables with an `id INTEGER ... IDENTITY` column — INSERTs get RETURNING id so the
@@ -31,7 +33,7 @@ _ID_TABLES = ("tickets", "phases", "artifacts", "blockers", "verifications")
 
 
 def connect(path: str):
-    if (os.environ.get("SF_DB") or "sqlite").lower() != "postgres":
+    if env.db_backend() != "postgres":
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
@@ -56,7 +58,7 @@ def registry_runs() -> list:
     """Runs known to the pg `public.sf_runs` registry: [{run_id, created}] — [] on the
     sqlite backend (discovery stays directory-based) and on any pg error (the volume
     listing must keep working even if the registry is briefly unreachable)."""
-    if (os.environ.get("SF_DB") or "sqlite").lower() != "postgres":
+    if env.db_backend() != "postgres":
         return []
     try:
         conn = _pg_connect(os.environ["DATABASE_URL"])

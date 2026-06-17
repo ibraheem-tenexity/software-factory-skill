@@ -20,14 +20,14 @@ def test_kimi_when_only_openrouter_key(monkeypatch):
     monkeypatch.delenv("SF_CHAT_MODEL", raising=False)
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-x")
     m = select_chat_model()
-    assert m != "gpt-4o" and m.model == "moonshotai/kimi-k2.6"
+    assert m != "gpt-4o" and m.model == "moonshotai/kimi-k2.7-code"
 
 
 def test_sf_chat_model_kimi_forces_kimi_even_with_openai_key(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-x")
     monkeypatch.setenv("SF_CHAT_MODEL", "kimi")
-    assert select_chat_model().model == "moonshotai/kimi-k2.6"
+    assert select_chat_model().model == "moonshotai/kimi-k2.7-code"
 
 
 def test_sf_chat_model_gpt4o_is_the_rollback(monkeypatch):

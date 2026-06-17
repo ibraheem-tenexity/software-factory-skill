@@ -1,0 +1,116 @@
+"""Environment-tier guardrails.
+
+The factory console and the software it builds are intentionally run in the same process
+image, so the only real boundary between them is the environment variables we hand to a
+stage process. This module centralises the tier concept (dev/test/staging/prod) and the
+rules for
+
+* which DB backend may be used,
+* which env vars a stage agent is allowed to inherit, and
+* which Railway project IDs may be targeted by run apps.
+"""
+from __future__ import annotations
+
+import os
+
+ALLOWED_ENVIRONMENTS = {"dev", "test", "staging", "prod"}
+
+# Credentialed deploy targets are not allowed to aim at the console project.
+# Empty value means "no allowlist configured"; in prod the operator must set this.
+_RUNAPP_RAILWAY_PROJECT_IDS: set[str] = set(
+    (os.environ.get("SF_RUNAPP_RAILWAY_PROJECT_IDS") or "").split(",")
+    if os.environ.get("SF_RUNAPP_RAILWAY_PROJECT_IDS")
+    else []
+)
+
+_CONSOLE_RAILWAY_PROJECT_IDS: set[str] = set(
+    (os.environ.get("SF_CONSOLE_RAILWAY_PROJECT_IDS") or "softwarefactory").split(",")
+)
+
+# Variables a stage child must be able to see even when we scrub the console's full
+# environment. Keep this list tiny and well-known.
+_STAGE_ESSENTIAL = {
+    # Shell / user basics
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL",
+    "LANG", "LC_ALL", "LC_CTYPE", "TERM",
+    # Working directory / Python
+    "PWD", "PYTHONPATH",
+    # Temp
+    "TMPDIR", "TEMP", "TMP",
+    # OpenCode isolation helpers (overridden by launch code, but harmless to carry)
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR",
+    # Factory swarm tooling only
+    "SF_SWARM_BIN",
+    "OPENCODE_SWARM_PLUGIN",
+}
+
+
+def sf_environment() -> str:
+    """Return dev/test/staging/prod.
+
+    Explicit SF_ENVIRONMENT wins. Otherwise prod is inferred only from Railway's own env so
+    that misconfigured local shells default to dev.
+    """
+    explicit = (os.environ.get("SF_ENVIRONMENT") or "").strip().lower()
+    if explicit in ALLOWED_ENVIRONMENTS:
+        return explicit
+    if os.environ.get("RAILWAY_ENVIRONMENT") == "production":
+        return "prod"
+    return "dev"
+
+
+def is_prod() -> bool:
+    return sf_environment() == "prod"
+
+
+def db_backend(requested: str | None = None) -> str:
+    """Resolve the effective DB backend, never allowing a dev shell to silently open prod."""
+    requested = (requested or os.environ.get("SF_DB") or "").strip().lower()
+
+    if requested == "sqlite":
+        return "sqlite"
+
+    if requested == "postgres":
+        env = sf_environment()
+        if env in ("prod", "test", "staging") or os.environ.get("SF_ALLOW_DEV_PG") == "1":
+            return "postgres"
+        raise RuntimeError(
+            "SF_DB=postgres refused in SF_ENVIRONMENT=dev to prevent prod DB pollution. "
+            "Set SF_ENVIRONMENT=prod for the live console, SF_ENVIRONMENT=test for tests, "
+            "or SF_ALLOW_DEV_PG=1 if you really want dev Postgres."
+        )
+
+    if requested:
+        raise ValueError(f"Unknown SF_DB value: {requested!r}")
+
+    # Default: prod deployments may use Postgres if DATABASE_URL is present; everything else
+    # falls back to local SQLite.
+    return "postgres" if is_prod() and os.environ.get("DATABASE_URL") else "sqlite"
+
+
+def stage_env_baseline(provided: dict | None = None) -> dict:
+    """Return a scrubbed environment for a stage subprocess.
+
+    Stops workspace agents from inheriting the console's SF_DB, DATABASE_URL,
+    RAILWAY_TOKEN, ANTHROPIC_API_KEY, etc. unless the run explicitly declared them as
+    credentials (which are passed in ``provided``).
+    """
+    base = {k: v for k, v in os.environ.items() if k in _STAGE_ESSENTIAL}
+    if provided:
+        base.update(provided)
+    return base
+
+
+def railway_project_allowed(project_id: str | None) -> bool:
+    """True when a run app may target the given Railway project.
+
+    No allowlist configured (empty SF_RUNAPP_RAILWAY_PROJECT_IDS) means "not enforced".
+    The console project is always rejected.
+    """
+    if not project_id:
+        return True
+    if project_id in _CONSOLE_RAILWAY_PROJECT_IDS:
+        return False
+    if not _RUNAPP_RAILWAY_PROJECT_IDS:
+        return True
+    return project_id in _RUNAPP_RAILWAY_PROJECT_IDS

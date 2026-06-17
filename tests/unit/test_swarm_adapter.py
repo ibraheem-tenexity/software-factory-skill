@@ -20,7 +20,8 @@ from software_factory.tickets import Ticket
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "..", "fixtures", "swarm-events.jsonl")
 
-KIMI = "openrouter/moonshotai/kimi-k2.6"
+KIMI = "openrouter/moonshotai/kimi-k2.7-code"
+FIXTURE_MODEL = "openrouter/moonshotai/kimi-k2.6"
 
 
 def _ticket(tid=7, title="Add login form", acceptance="form submits", dod="tests pass"):
@@ -151,7 +152,7 @@ def test_bridge_records_spawn_and_final_costs_from_fixture(tmp_path):
     assert abs(folded["asker"] - rows["asker"].cost_usd) < 1e-9
     assert rows["asker"].status == "done" and rows["asker"].outcome == "success"
     assert rows["oracle"].input_tokens > 0
-    assert rows["oracle"].model == KIMI
+    assert rows["oracle"].model == FIXTURE_MODEL
 
 
 def test_bridge_is_idempotent_over_a_growing_file(tmp_path):

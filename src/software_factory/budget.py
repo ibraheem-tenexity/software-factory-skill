@@ -51,10 +51,10 @@ PRICES: dict[str, dict[str, float]] = {
     # OpenRouter list pricing, confirmed 2026-06-09 via /api/v1/models. OpenCode's stream
     # already carries authoritative per-step cost; this entry is the fallback rate when a
     # step_finish event has tokens but no cost.
-    "openrouter/moonshotai/kimi-k2.6": {
-        "input": 0.68 / 1_000_000,
-        "cached": 0.34 / 1_000_000,
-        "output": 3.41 / 1_000_000,
+    "openrouter/moonshotai/kimi-k2.7-code": {
+        "input": 0.75 / 1_000_000,
+        "cached": 0.375 / 1_000_000,
+        "output": 3.50 / 1_000_000,
     },
 }
 

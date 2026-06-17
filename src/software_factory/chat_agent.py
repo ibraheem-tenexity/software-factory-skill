@@ -15,7 +15,7 @@ from software_factory.console import Console, RunRequest
 
 
 def select_chat_model():
-    """Concierge model: gpt-4o (OpenAI) or Kimi K2.6 via OpenRouter's OpenAI-compatible API.
+    """Concierge model: gpt-4o (OpenAI) or Kimi K2.7 Code via OpenRouter's OpenAI-compatible API.
 
     SF_CHAT_MODEL=kimi forces Kimi; SF_CHAT_MODEL=gpt-4o forces OpenAI; unset picks gpt-4o when
     OPENAI_API_KEY exists, else Kimi when only OPENROUTER_API_KEY does. The env flag IS the
@@ -33,7 +33,7 @@ def select_chat_model():
             base_url="https://openrouter.ai/api/v1",
             api_key=os.environ.get("OPENROUTER_API_KEY", ""),
         )
-        return OpenAIChatCompletionsModel(model="moonshotai/kimi-k2.6", openai_client=client)
+        return OpenAIChatCompletionsModel(model="moonshotai/kimi-k2.7-code", openai_client=client)
     return "gpt-4o"
 
 

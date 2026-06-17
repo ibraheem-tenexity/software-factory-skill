@@ -26,8 +26,9 @@ from software_factory.console import Console, RunRequest  # noqa: E402
 from software_factory.chat_store import ChatStore, ChatMessage  # noqa: E402
 from software_factory.chat_agent import ChatAgentRunner  # noqa: E402
 from software_factory.deps import extract_env_creds  # noqa: E402
-from software_factory import notify  # noqa: E402
 from software_factory import auth  # noqa: E402
+from software_factory import env as _env  # noqa: E402
+from software_factory import notify  # noqa: E402
 from software_factory import tracing  # noqa: E402
 
 RUNS_DIR = os.environ.get("SF_RUNS_DIR", os.path.join(os.path.dirname(__file__), "..", ".runs"))
@@ -585,9 +586,10 @@ if __name__ == "__main__":
                 print(f"[janitor] quarantined {name}", flush=True)
     except Exception as e:
         print(f"[janitor] FAILED: {e}", flush=True)
-    if (os.environ.get("SF_DB") or "").lower() == "postgres":
+    if _env.sf_environment() == "prod" and _env.db_backend() == "postgres":
         # Self-backfilling flip: runs that exist only as sqlite files on the volume are
         # copied into pg at boot (idempotent — registered runs skip in one registry read).
+        # Only run this in prod; dev is forced to sqlite anyway.
         try:
             from software_factory.backfill import backfill_all
             for rid, res in backfill_all(RUNS_DIR).items():

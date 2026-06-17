@@ -80,6 +80,7 @@ class FakePgConn:
 
 @pytest.fixture()
 def pg(monkeypatch, tmp_path):
+    monkeypatch.setenv("SF_ENVIRONMENT", "test")
     monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@pooler:6543/postgres")
     fake = FakePgConn()
@@ -117,6 +118,7 @@ def test_pg_executescript_runs_translated_statements(pg):
 
 
 def test_pg_write_retries_then_raises(monkeypatch, tmp_path):
+    monkeypatch.setenv("SF_ENVIRONMENT", "test")
     monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@pooler:6543/postgres")
     attempts = []
@@ -135,6 +137,7 @@ def test_pg_write_retries_then_raises(monkeypatch, tmp_path):
 
 
 def test_schema_name_sanitized(monkeypatch, tmp_path):
+    monkeypatch.setenv("SF_ENVIRONMENT", "test")
     monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@x:6543/postgres")
     fake = FakePgConn()
@@ -147,6 +150,7 @@ def test_schema_name_sanitized(monkeypatch, tmp_path):
 def test_registry_rejects_non_factory_run_ids(monkeypatch, tmp_path):
     # A stray local process pointed at prod once registered 53 junk "runs" — only
     # run-XXXXXXXX ids may land in public.sf_runs (the schema is still created).
+    monkeypatch.setenv("SF_ENVIRONMENT", "test")
     monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@x:6543/postgres")
     fake = FakePgConn()

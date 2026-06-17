@@ -12,7 +12,7 @@ from software_factory.swarm_stage3 import fold_once, main, run_swarm_waves, synt
 from software_factory.tickets import TicketStore
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "..", "fixtures", "swarm-events.jsonl")
-KIMI = "openrouter/moonshotai/kimi-k2.6"
+KIMI = "openrouter/moonshotai/kimi-k2.7-code"
 
 
 # ---- synthesized step_finish lines ------------------------------------------------------
