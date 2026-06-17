@@ -23,7 +23,7 @@ from typing import Any, Callable
 # the pg registry's write guard (dbshim._ensure) stays strict 8-hex.
 RUN_ID_RE = re.compile(r"run-[A-Za-z0-9-]+")
 
-from . import artifacts, env as _env, gates, streamlog
+from . import artifacts, deploy_db, env as _env, gates, streamlog
 from .agents import AgentRegistry
 from .evidence import build_evidence, verify_evidence
 from .input_pipeline import persist_and_compose
@@ -175,9 +175,10 @@ def make_prompt_stage2(req: RunRequest, run_id: str, runs_dir: str, runtime: str
         + "Goal (per SKILL.md): architecture.md + architecture.svg (fewest services; data model; a "
           "`## Required Tokens` section, UPPER_SNAKE_CASE) AND PERSISTED buildable tickets — "
           "`TicketStore.create_ticket` with real acceptance + DoD (an empty store dead-ends Stage 3). "
-          "The Stage 3 build agent has the Supabase + Railway MCP, so design Supabase/Railway/NextAuth as "
-          "agent-provisionable (don't require the operator for them); route every LLM/AI feature via "
-          "OpenRouter (OPENROUTER_API_KEY). When PRD+architecture+svg exist and the store has buildable "
+          "The app's DATABASE is provisioned BY THE FACTORY (a per-run Postgres handed to Stage 3 as "
+          "context/deploy-db.json) — design the data model on plain Postgres via DATABASE_URL; do NOT "
+          "design around Supabase (Stage 3 has no Supabase access). Use demo/mock auth, not a real IdP; "
+          "route every LLM/AI feature via OpenRouter (OPENROUTER_API_KEY). When PRD+architecture+svg exist and the store has buildable "
           "tickets, STOP — the console collects deps + launches Stage 3.\n"
           f"App: {req.description}"
     )
@@ -189,6 +190,7 @@ def _disposition_guidance(dispositions: dict | None) -> str:
     # runner's own keys (operator security rule).
     mock = sorted(n for n, d in disp.items() if d in ("mock", "env"))
     mcp = sorted(n for n, d in disp.items() if d == "mcp")
+    dbtok = sorted(n for n, d in disp.items() if d == "deploy-db")
     if not disp:
         return ""
     return (
@@ -196,9 +198,11 @@ def _disposition_guidance(dispositions: dict | None) -> str:
         f"- **MOCK** (build a WORKING LOCAL FAKE wired into the real app so the happy-flow passes "
         f"end-to-end — e.g. a 'sign in as demo admin' session for SSO, seeded DB rows for ERP/HR "
         f"data, emails written to a table/log for mail; NOT a dead stub): {mock or 'none'}\n"
-        f"- **PROVISION VIA MCP** (you have the Supabase + Railway MCP — create the Supabase project "
-        f"and read URL/anon/service-role keys; generate NEXTAUTH_SECRET; set NEXTAUTH_URL from the "
-        f"deploy URL; set vars on the sf-<run_id> service): {mcp or 'none'}\n"
+        f"- **DEPLOY-DB** (the FACTORY already provisioned this run's database; read its DATABASE_URL "
+        f"from context/deploy-db.json and point the app at it — you have NO Supabase access and must "
+        f"NEVER provision a database): {dbtok or 'none'}\n"
+        f"- **SELF/MCP** (generate it yourself / via the Railway MCP — e.g. NEXTAUTH_SECRET; set "
+        f"NEXTAUTH_URL from the deploy URL): {mcp or 'none'}\n"
         f"- Operator-PROVIDED tokens ride in your environment with real values; NEVER copy any "
         f"other key from your own environment into the app (your keys are not the app's keys).\n"
         f"Do NOT block on a real third-party integration when its token is marked MOCK — build the fake.\n"
@@ -232,7 +236,7 @@ def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions
           f"env) → `deploy` → `generate_domain` (the app has NO public url until you do this; derive the health url "
           f"from it). NEVER deploy to the console service.\n"
           f"DEPLOY PREFLIGHT (Railway blocks the build otherwise): run `npm audit` and bump HIGH/CRITICAL deps to "
-          f"patched versions + regen the lockfile; give module-load clients (e.g. Supabase) BUILD-TIME placeholder env "
+          f"patched versions + regen the lockfile; give module-load clients (e.g. a Postgres pool) BUILD-TIME placeholder env "
           f"in the Dockerfile so `next build` doesn't throw (runtime values override); ship a Dockerfile. The build runs "
           f"REMOTELY on Railway — do NOT run `npm run build` locally (it OOM-kills the shared container).\n"
           f"HEALTH: use a FINITE health-wait (bounded attempts, never an infinite loop). On failure call the Railway MCP "
@@ -595,11 +599,26 @@ class Console:
         ws = prepare_workspace(
             self._runs_dir, run_id, stage, runtime=runtime,
         )
+        # Stage 3 with a database dependency: the FACTORY provisions the DB (per-run Railway
+        # Postgres) and hands the agent context/deploy-db.json — the agent has no Supabase access
+        # and never provisions a DB. Provision failure blocks the launch (don't build DB-less).
+        if stage == 3 and deploy_db.needs_deploy_db(state.deps_required):
+            ctx = os.path.join(ws, "context")
+            if not os.path.exists(os.path.join(ctx, deploy_db.DEPLOY_DB_FILE)):
+                try:
+                    info = deploy_db.provision(run_id)
+                    deploy_db.write_file(ctx, info)
+                    RunDB(paths["db"]).record_artifact(
+                        "Deploy DB", "context/" + deploy_db.DEPLOY_DB_FILE, kind="deploy-db")
+                except Exception as e:
+                    RunDB(paths["db"]).add_blocker(
+                        f"deploy-db provisioning failed: {e}", blocks="deploy-db")
+                    return None
         mcp_path = os.path.join(ws, ".mcp.json")
         checks = check_mcp(mcp_path)
         unhealthy = [c for c in checks if not c.ok]
-        # Hard-gate ONLY playwright (the happy-flow verification gate needs it). The deploy/provision
-        # MCPs (railway, supabase) are best-effort: record a blocker if unhealthy but still launch —
+        # Hard-gate ONLY playwright (the happy-flow verification gate needs it). The railway deploy
+        # MCP is best-effort: record a blocker if unhealthy but still launch —
         # a transient npx/token hiccup must not block the whole stage, and the agent surfaces real
         # deploy-tool failures itself (bounded health-wait + get_logs).
         _HARD = {"playwright", "config"}

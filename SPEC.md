@@ -52,9 +52,14 @@ The ONLY human pause in the pipeline: a required token whose disposition is `pro
 ## 3. Autonomy
 
 - The poller auto-launches Stage 2 when Stage 1 is `done` (§1 definition).
-- After Stage 2, the host classifies required tokens (`provide | mock | mcp`). If **no token requires
-  `provide`**, the host auto-satisfies deps and launches Stage 3 — no pause. If any token requires a
-  human secret, the run waits at the deps gate until the operator submits it.
+- After Stage 2, the host classifies required tokens (`provide | mock | deploy-db | mcp`). If **no
+  token requires `provide`**, the host auto-satisfies deps and launches Stage 3 — no pause. If any
+  token requires a human secret, the run waits at the deps gate until the operator submits it.
+- **Databases are factory-provided, never agent-provisioned.** Any database token (`DATABASE_URL`,
+  `SUPABASE_*`, `POSTGRES*`, …) is `deploy-db`: at Stage 3 launch the FACTORY provisions a per-run
+  Railway Postgres and writes its `DATABASE_URL` into the workspace as `context/deploy-db.json`; the
+  agent reads that file. **Stage-3 agents have NO Supabase MCP and no Supabase token** — they can
+  never create/delete a Supabase project (the account-wide-PAT blast-radius rule).
 - No other human checkpoints exist anywhere in the pipeline.
 
 ## 4. Budget
