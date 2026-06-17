@@ -49,17 +49,16 @@ def test_stage1_workspace_has_mcp_and_settings(tmp_path):
     assert settings["enableAllProjectMcpServers"] is True
 
 
-def test_stage3_workspace_wires_railway_and_supabase_mcp(tmp_path):
-    # Stage 3 deploys + provisions, so its workspace gets the Railway + Supabase MCP (authed by the
-    # env tokens) in addition to playwright. Verified-good invocations: railway `railway mcp`,
-    # supabase `npx @supabase/mcp-server-supabase`.
+def test_stage3_workspace_wires_railway_mcp_and_no_supabase(tmp_path):
+    # Stage 3 deploys, so its workspace gets the Railway MCP + playwright — but NEVER Supabase
+    # (agents have no Supabase access; the DB is factory-provided via context/deploy-db.json).
     runs = tmp_path / "runs"; runs.mkdir()
     ws = prepare_workspace(str(runs), "run-s3mcp", 3,
                            skills_dir=_make_skills_dir(tmp_path), phase_dir=_make_phase_dir(tmp_path))
     mcp = json.loads(open(os.path.join(ws, ".mcp.json")).read())["mcpServers"]
-    assert {"playwright", "railway", "supabase"}.issubset(set(mcp))
+    assert {"playwright", "railway"}.issubset(set(mcp))
+    assert "supabase" not in mcp
     assert mcp["railway"]["command"] == "railway" and mcp["railway"]["args"] == ["mcp"]
-    assert "@supabase/mcp-server-supabase" in " ".join(mcp["supabase"]["args"])
 
 
 def test_stage1_and_2_workspace_is_playwright_only(tmp_path):
@@ -214,3 +213,22 @@ def test_opencode_config_pins_provider_key_to_the_env_var():
     from software_factory.workspace_setup import opencode_config
     cfg = opencode_config(stage=3, steps=100)
     assert cfg["provider"]["openrouter"]["options"]["apiKey"] == "{env:OPENROUTER_API_KEY}"
+
+
+def test_no_supabase_mcp_at_any_stage():
+    from software_factory.workspace_setup import mcp_config
+    for s in (1, 2, 3):
+        assert "supabase" not in mcp_config(s)["mcpServers"], s
+    assert "railway" in mcp_config(3)["mcpServers"]      # railway stays (deploy)
+    assert "railway" not in mcp_config(1)["mcpServers"]
+    assert "playwright" in mcp_config(1)["mcpServers"]
+
+
+def test_stage3_contracts_drop_supabase_and_use_deploy_db_file():
+    import os
+    base = os.path.join(os.path.dirname(__file__), "..", "..", "skills")
+    for rel in ("stage-3-build/SKILL.md", "stage-3-build/SKILL.opencode.md"):
+        t = open(os.path.join(base, rel)).read()
+        assert "context/deploy-db.json" in t
+        assert "create the Supabase project" not in t
+        assert "supabase` MCP" not in t
