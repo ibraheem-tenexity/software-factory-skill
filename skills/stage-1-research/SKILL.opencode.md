@@ -19,10 +19,11 @@ The canvas is a pure projection of the per-run datastore (`run.db`). Record stat
 ```bash
 python3 -m software_factory.db <verb> <runs_dir> <run_id> ...
 ```
-- entering a phase → `set-phase <name>`
-- starting a unit of work → `spawn-agent <id> <role> <model> <phase>`; finishing it → `finish-agent <id> <outcome>`
-- a file produced → `record-artifact <title> <path> <kind> [agent-id]`
-- a blocker → `add-blocker <what> [blocks]`; when resolved → `clear-blocker <what>`
+`<runs_dir>` and `<run_id>` ALWAYS come first (right after the verb), THEN the verb's own args:
+- entering a phase → `python3 -m software_factory.db set-phase <runs_dir> <run_id> <name>`
+- starting a unit of work → `python3 -m software_factory.db spawn-agent <runs_dir> <run_id> <id> <role> <model> <phase>`; finishing it → `python3 -m software_factory.db finish-agent <runs_dir> <run_id> <id> <outcome>`
+- a file produced → `python3 -m software_factory.db record-artifact <runs_dir> <run_id> <title> <path> <kind> [agent-id]`
+- a blocker → `python3 -m software_factory.db add-blocker <runs_dir> <run_id> <what> [blocks]`; when resolved → `python3 -m software_factory.db clear-blocker <runs_dir> <run_id> <what>`
 
 Do NOT try to "emit" events — that mechanism is gone. The datastore is the single source of truth.
 

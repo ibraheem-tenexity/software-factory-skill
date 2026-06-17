@@ -13,11 +13,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 from . import dbshim
 import sys
 import time
 from typing import Optional
+
+# Canonical factory run-id shape (the strict registry form dbshim._ensure uses).
+_RUN_ID_RE = re.compile(r"run-[0-9a-f]{8}")
 
 
 def db_path(runs_dir: str, run_id: str) -> str:
@@ -173,14 +177,15 @@ class RunDB:
 # --- CLI the headless orchestrator uses instead of emitting events --------------------
 _USAGE = (
     "usage: python3 -m software_factory.db <verb> <runs_dir> <run_id> [args]\n"
-    "  set-phase <name> [status]\n"
-    "  record-artifact <title> <path> [kind] [agent]\n"
-    "  add-blocker <what> [blocks]\n"
-    "  clear-blocker <what>\n"
-    "  set-gate <name> <status>\n"
-    "  record-verification <url> <passed:0|1> <result-json>\n"
-    "  spawn-agent <agent_id> <role> <model> [phase] [ticket_id]\n"
-    "  finish-agent <agent_id> <outcome> [cost_usd] [pr] [diff_lines]\n"
+    "  (<runs_dir> <run_id> ALWAYS come first, before the verb's own args)\n"
+    "  set-phase <runs_dir> <run_id> <name> [status]\n"
+    "  record-artifact <runs_dir> <run_id> <title> <path> [kind] [agent]\n"
+    "  add-blocker <runs_dir> <run_id> <what> [blocks]\n"
+    "  clear-blocker <runs_dir> <run_id> <what>\n"
+    "  set-gate <runs_dir> <run_id> <name> <status>\n"
+    "  record-verification <runs_dir> <run_id> <url> <passed:0|1> <result-json>\n"
+    "  spawn-agent <runs_dir> <run_id> <agent_id> <role> <model> [phase] [ticket_id]\n"
+    "  finish-agent <runs_dir> <run_id> <agent_id> <outcome> [cost_usd] [pr] [diff_lines]\n"
 )
 
 
@@ -189,6 +194,16 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(_USAGE)
         return 2
     verb, runs_dir, run_id, rest = argv[0], argv[1], argv[2], argv[3:]
+    # Reject malformed run ids BEFORE constructing RunDB — connecting has a side effect
+    # (dbshim._ensure runs CREATE SCHEMA in pg mode). A wrong arg order (e.g. junk landing
+    # in the run_id slot) must never create a prod schema.
+    if not _RUN_ID_RE.fullmatch(run_id):
+        sys.stderr.write(
+            f"error: run_id {run_id!r} is not a valid factory run id (run-XXXXXXXX); "
+            "args go <verb> <runs_dir> <run_id> [args]\n"
+        )
+        sys.stderr.write(_USAGE)
+        return 2
     db = RunDB(db_path(runs_dir, run_id))
     if verb == "set-phase":
         db.set_phase(rest[0], rest[1] if len(rest) > 1 else "active")

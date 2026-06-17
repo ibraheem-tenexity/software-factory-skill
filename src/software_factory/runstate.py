@@ -45,7 +45,7 @@ _PERSISTED = {
     "stage", "stage1_done", "stage2_done", "runtime",
     "planning_model", "impl_model",
     "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
-    "budget_ceiling", "held",
+    "budget_ceiling", "held", "owner",
 }
 
 
@@ -77,6 +77,7 @@ class RunState:
     deps_disposition: dict = field(default_factory=dict)  # name -> provide|mock|mcp|env (metadata, safe on disk)
     budget_ceiling: Optional[float] = None  # per-run override of SF_COST_CEILING (SPEC §4, recoverable kill)
     held: bool = False  # gated hold: created but NOT launched until released (survives restarts)
+    owner: str = ""  # email of the creating user; members see only their own runs (admins see all)
     _store: Optional[Store] = field(default=None, repr=False, compare=False)
 
     @classmethod

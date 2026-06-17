@@ -24,8 +24,9 @@ recorded, GREEN Playwright happy-flow on the live URL is done.
 ```bash
 python3 -m software_factory.db <verb> <runs_dir> <run_id> ...
 ```
-`set-phase <name>`; `spawn-agent <id> <role> <model> <phase>` / `finish-agent <id> <outcome> [cost] [pr] [diff_lines]`
-per Task sub-agent; `record-artifact <title> <path> <kind> [agent]`; `record-verification <url> <0|1> <result-json>`
+`<runs_dir> <run_id>` ALWAYS come first, before the verb's own args:
+`set-phase <runs_dir> <run_id> <name>`; `spawn-agent <runs_dir> <run_id> <id> <role> <model> <phase>` / `finish-agent <runs_dir> <run_id> <id> <outcome> [cost] [pr] [diff_lines]`
+per Task sub-agent; `record-artifact <runs_dir> <run_id> <title> <path> <kind> [agent]`; `record-verification <runs_dir> <run_id> <url> <0|1> <result-json>`
 for the Playwright gate; `add-blocker`/`clear-blocker`. No events — the datastore is the source of truth.
 
 ## Phase 0: plan FIRST  (`set-phase plan`)

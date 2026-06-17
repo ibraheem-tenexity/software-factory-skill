@@ -89,6 +89,7 @@ class RunRequest:
     impl_model: str = ""      # S3 model (claude runtime); empty -> stage default
     name: str = ""            # operator-chosen project name (display label)
     gated: bool = False       # create held: registered + visible at $0, stage 1 launches on release
+    owner: str = ""           # email of the creating user (multi-tenant: members see only their own)
 
 
 def run_paths(runs_dir: str, run_id: str) -> dict:
@@ -685,8 +686,24 @@ class Console:
             self._procs[run_id] = result   # SPEC §1: tracked for the stage-handoff guard
         return result
 
+    def name_taken(self, name: str, exclude: str | None = None) -> bool:
+        """A project name is the user-facing identity, so it must be unique (case-insensitive).
+        Checked at creation. `exclude` skips one run id (not used at create, here for callers)."""
+        n = (name or "").strip().lower()
+        if not n:
+            return False
+        for r in self.list_runs():
+            if r["run_id"] == exclude:
+                continue
+            if (r.get("name") or "").strip().lower() == n:
+                return True
+        return False
+
     def start_run(self, req: RunRequest) -> str:
-        """Start a new run (Stage 1). Returns run_id."""
+        """Start a new run (Stage 1). Returns run_id. Raises ValueError if the project name
+        is already taken (names are the unique, user-facing project identity)."""
+        if req.name and self.name_taken(req.name):
+            raise ValueError(f"A project named {req.name!r} already exists — names must be unique.")
         run_id = self._new_id()
         paths = self._paths(run_id)
         os.makedirs(paths["base"], exist_ok=True)
@@ -722,6 +739,7 @@ class Console:
         state.planning_model = req.planning_model if req.planning_model in PLANNING_MODELS else ""
         state.impl_model = req.impl_model if req.impl_model in IMPL_MODELS else ""
         state.held = bool(req.gated)
+        state.owner = (req.owner or "").lower()
         state.save()
 
         if req.gated:
@@ -1093,10 +1111,33 @@ class Console:
             "impl_model": state.impl_model,
             "budget_ceiling": self._budget_ceiling(run_id),
             "held": state.held,
+            "owner": state.owner,
         }
 
-    def list_runs(self) -> list[dict]:
+    def run_owner(self, run_id: str) -> str:
+        """The email that owns this run ('' = legacy/unowned). The per-route visibility gate."""
+        return (self._load_state(run_id).owner or "").lower()
+
+    def assign_unowned(self, owner_email: str) -> int:
+        """One-time-ish backfill: give every ownerless run an owner (the pre-multitenancy runs).
+        Idempotent — runs that already have an owner are left alone. Returns how many it set."""
+        owner_email = (owner_email or "").lower()
+        if not owner_email:
+            return 0
+        n = 0
+        for r in self.list_runs():            # owner=None → all runs
+            st = self._load_state(r["run_id"])
+            if not (st.owner or ""):
+                st.owner = owner_email
+                st.save()
+                n += 1
+        return n
+
+    def list_runs(self, owner: str | None = None) -> list[dict]:
+        """All runs (owner=None — admin/internal callers like the poller), or only those
+        owned by `owner` (a member's email; '' never matches, so unowned runs stay admin-only)."""
         runs = []
+        owner = owner.lower() if owner else None
         # Local dirs ∪ the pg registry (pg mode): a run can exist only in the registry —
         # fresh container, wiped volume — and must still surface. Local wins the dedupe.
         # Only factory-shaped ids list (same rule as the pg registry guard): agents calling
@@ -1113,6 +1154,8 @@ class Console:
         names = local + [rid for rid in created if rid not in set(local)]
         for name in names:
             st = self._load_state(name)
+            if owner is not None and (st.owner or "").lower() != owner:
+                continue   # member view: skip runs they don't own (unowned '' never matches)
             # A budget-stopped run is NOT active: surfacing it with a live/green status misled
             # the operator into thinking frozen ghosts were consuming (the b594a5f4/0eb69fdd UI
             # confusion). An uncleared budget blocker = stopped, full stop.
@@ -1130,6 +1173,7 @@ class Console:
                 "stage": st.stage,
                 "budget_stopped": budget_stopped,
                 "held": st.held,
+                "owner": st.owner,
             })
         def _sort_key(r):
             p = os.path.join(self._runs_dir, r["run_id"])
