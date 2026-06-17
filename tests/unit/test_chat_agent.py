@@ -96,6 +96,43 @@ class TestMakeTools:
         assert "RAILWAY_TOKEN" in parsed["dep_names"]
 
 
+class TestChatToolOwnership:
+    """Run-scoped chat tools must enforce the same ownership rules as the HTTP layer."""
+
+    def test_member_cannot_check_status_of_foreign_run(self, mock_console):
+        mock_console.run_owner = MagicMock(return_value="other@example.com")
+        tools = make_tools(mock_console, viewer=lambda: ("user@example.com", "member"))
+        check = next(t for t in tools if t.name == "check_status")
+        result = asyncio.get_event_loop().run_until_complete(
+            check.on_invoke_tool(None, json.dumps({"run_id": "run-test123"}))
+        )
+        parsed = json.loads(result)
+        assert parsed.get("error") == "forbidden"
+        mock_console.status.assert_not_called()
+
+    def test_member_can_check_status_of_own_run(self, mock_console):
+        mock_console.run_owner = MagicMock(return_value="user@example.com")
+        tools = make_tools(mock_console, viewer=lambda: ("user@example.com", "member"))
+        check = next(t for t in tools if t.name == "check_status")
+        result = asyncio.get_event_loop().run_until_complete(
+            check.on_invoke_tool(None, json.dumps({"run_id": "run-test123"}))
+        )
+        parsed = json.loads(result)
+        assert "error" not in parsed
+        mock_console.status.assert_called_once_with("run-test123")
+
+    def test_admin_bypasses_ownership_check(self, mock_console):
+        mock_console.run_owner = MagicMock(return_value="other@example.com")
+        tools = make_tools(mock_console, viewer=lambda: ("admin@example.com", "admin"))
+        get = next(t for t in tools if t.name == "get_result")
+        result = asyncio.get_event_loop().run_until_complete(
+            get.on_invoke_tool(None, json.dumps({"run_id": "run-test123"}))
+        )
+        parsed = json.loads(result)
+        assert parsed.get("error") != "forbidden"
+        mock_console.evidence.assert_called_once_with("run-test123")
+
+
 def _fake_run_result(new_items, final_output=None):
     r = MagicMock()
     r.new_items = new_items

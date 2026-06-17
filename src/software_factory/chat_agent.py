@@ -72,15 +72,23 @@ software factory pipeline.
 def make_tools(console: Console, attachments=lambda: [],
                runtime=lambda: "", models=lambda: ("", ""),
                project_name=lambda: "", gated=lambda: False,
-               owner=lambda: "") -> list[FunctionTool]:
+               owner=lambda: "", viewer=lambda: ("", "admin")) -> list[FunctionTool]:
     """Create agent tools that delegate to Console methods.
 
     `attachments` returns the files attached to the message currently being
     handled, so start_pipeline can thread them into the run. `runtime` returns
     the runtime the operator picked in the UI (claude | opencode | "").
     `models` returns the operator's (planning_model, impl_model) UI picks
-    ("" = stage defaults). `project_name` returns the operator's chosen name.
+    ("" = stage defaults). `viewer` returns (email, role) for run-scoped
+    tool access control: admins/service see all, members see only their own.
     """
+
+    def _allowed(run_id: str) -> bool:
+        """Ownership check inside chat tools. Admins bypass; members must own the run."""
+        email, role = viewer()
+        if role == "admin":
+            return True
+        return bool(run_id) and (console.run_owner(run_id) or "").lower() == (email or "").lower()
 
     async def _start_pipeline(description: str, context: str = "",
                               budget: float = 25.0, target: str = "railway") -> str:
@@ -98,16 +106,24 @@ def make_tools(console: Console, attachments=lambda: [],
         return json.dumps({"run_id": run_id, "status": status})
 
     async def _check_status(run_id: str) -> str:
+        if not _allowed(run_id):
+            return json.dumps({"error": "forbidden"})
         return json.dumps(console.status(run_id))
 
     async def _get_required_deps(run_id: str) -> str:
+        if not _allowed(run_id):
+            return json.dumps({"error": "forbidden"})
         return json.dumps(console.stage2_artifacts(run_id))
 
     async def _request_dep_input(run_id: str, dep_names: list[str]) -> str:
+        if not _allowed(run_id):
+            return json.dumps({"error": "forbidden"})
         return json.dumps({"type": "dep_request", "run_id": run_id,
                            "dep_names": dep_names})
 
     async def _get_result(run_id: str) -> str:
+        if not _allowed(run_id):
+            return json.dumps({"error": "forbidden"})
         return json.dumps(console.evidence(run_id))
 
     return [
@@ -183,12 +199,14 @@ class ChatAgentRunner:
         self._pending_name: str = ""
         self._pending_gated: bool = False
         self._pending_owner: str = ""
+        self._pending_viewer: tuple[str, str] = ("", "admin")
         tools = make_tools(console, attachments=lambda: self._pending_files,
                            runtime=lambda: self._pending_runtime,
                            models=lambda: self._pending_models,
                            project_name=lambda: self._pending_name,
                            gated=lambda: self._pending_gated,
-                           owner=lambda: self._pending_owner)
+                           owner=lambda: self._pending_owner,
+                           viewer=lambda: self._pending_viewer)
         self._agent = Agent(
             name="Factory Concierge",
             instructions=CONCIERGE_INSTRUCTIONS,
@@ -203,7 +221,7 @@ class ChatAgentRunner:
                               impl_model: str = "",
                               project_name: str = "",
                               gated: bool = False,
-                              owner: str = "") -> tuple[str | None, list[ChatMessage]]:
+                              owner: str = "", role: str = "admin") -> tuple[str | None, list[ChatMessage]]:
         """Process a user message through the agent. Returns (run_id, response_messages)."""
         from agents import Runner
 
@@ -235,6 +253,7 @@ class ChatAgentRunner:
         self._pending_name = project_name or ""
         self._pending_gated = bool(gated)
         self._pending_owner = owner or ""
+        self._pending_viewer = (owner or "", role or "admin")
         try:
             result = await Runner.run(self._agent, input=history)
         finally:
@@ -244,6 +263,7 @@ class ChatAgentRunner:
             self._pending_name = ""
             self._pending_gated = False
             self._pending_owner = ""
+            self._pending_viewer = ("", "admin")
 
         response_msgs = []
         now = time.time()

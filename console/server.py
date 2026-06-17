@@ -509,7 +509,8 @@ class Handler(BaseHTTPRequestHandler):
                                                 planning_model=planning_model,
                                                 impl_model=impl_model,
                                                 project_name=project_name,
-                                                gated=gated, owner=viewer[0] or "")
+                                                gated=gated, owner=viewer[0] or "",
+                                                role=viewer[1] or "admin")
                 )
             except Exception as e:
                 return self._send(500, {"error": str(e)})
