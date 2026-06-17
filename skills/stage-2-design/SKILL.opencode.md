@@ -27,10 +27,12 @@ per unit of work; `record-artifact <runs_dir> <run_id> <title> <path> <kind> [ag
 
 `spawn-agent architect software-architect <model> architect`, then YOURSELF, from the
 PRD + design spec, design the **demo-simplest** architecture: YAGNI hard, the **fewest services possible**.
-Fixed constraints: **Railway** compute, **Supabase** storage + auth, **Vercel** frontend if needed.
+Fixed constraints: **Railway** compute; **a factory-provided Postgres** for data (the build agent
+reads its `DATABASE_URL` from `context/deploy-db.json` — design the data model on plain Postgres, NOT
+Supabase); **demo/mock auth** (not a real IdP); **Vercel** frontend if needed.
 Any LLM/AI feature MUST go through **OpenRouter** (declare `OPENROUTER_API_KEY` in Required Tokens) — see "LLM access".
-The Stage 3 build agent will have the **Supabase + Railway MCP**, so design Supabase/Railway/NextAuth as
-agent-provisionable — do NOT require the operator to supply those.
+Stage 3 has **no Supabase access** — the database is provisioned by the factory and `NEXTAUTH_SECRET`
+is self-generated, so design those as agent-/factory-handled — do NOT require the operator to supply them.
 
 Produce: service list; data model; dependency list; **`## Required Tokens`** section (UPPER_SNAKE_CASE names
 ending `_TOKEN`/`_KEY`/`_URL`/`_SECRET`/`_ID`/`_PASSWORD` so the console can parse them). Write `architecture.md`;

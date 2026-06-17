@@ -1,9 +1,11 @@
 """Dependency disposition — how each required token is satisfied at the deps gate.
 
-Three dispositions (SPEC §3), with smart defaults by token name:
-  provide — operator supplies a real value (value -> Stage 3 env, NEVER written to disk)
-  mock    — Stage 3 builds a WORKING LOCAL FAKE for that capability
-  mcp     — Stage 3 provisions it itself via the Supabase/Railway MCP (or generates it)
+Dispositions (SPEC §3), with smart defaults by token name:
+  provide   — operator supplies a real value (value -> Stage 3 env, NEVER written to disk)
+  mock      — Stage 3 builds a WORKING LOCAL FAKE for that capability
+  deploy-db — a DATABASE the FACTORY provisions (per-run Railway Postgres) and hands the agent
+              as context/deploy-db.json; the agent NEVER provisions a DB and has NO Supabase access
+  mcp       — Stage 3 self-handles via the Railway MCP / generates it (e.g. NEXTAUTH_SECRET)
 
 There is deliberately NO 'env' disposition: a built app must never inherit the runner's
 own keys (operator security rule). LLM keys default to mock; a real key is only ever
@@ -14,12 +16,22 @@ Only the disposition (metadata) is ever persisted; provided VALUES never touch d
 """
 from __future__ import annotations
 
-# Tokens the build agent can provision/derive itself via the Supabase + Railway MCP.
-_MCP_PATTERNS = ("SUPABASE_", "DATABASE_URL", "RAILWAY_", "NEXTAUTH_")
+# A DATABASE the factory provisions and hands over via context/deploy-db.json (agent has no
+# Supabase access and never provisions a DB itself).
+_DEPLOY_DB_PATTERNS = ("DATABASE_URL", "DB_URL", "POSTGRES", "PG_", "SUPABASE_URL", "SUPABASE_DB")
+# Tokens the build agent self-handles (Railway MCP for deploy, or self-generated secrets).
+_MCP_PATTERNS = ("RAILWAY_", "NEXTAUTH_")
 
 
 def classify_dep(name: str) -> str:
     n = name.upper()
+    for pat in _DEPLOY_DB_PATTERNS:
+        if n == pat or n.startswith(pat):
+            return "deploy-db"
+    # Any remaining Supabase token (anon/service keys etc.) is part of the factory-provided DB
+    # bundle, not something the agent provisions.
+    if n.startswith("SUPABASE_"):
+        return "deploy-db"
     for pat in _MCP_PATTERNS:
         if n == pat or n.startswith(pat):
             return "mcp"
@@ -36,7 +48,7 @@ def resolve_satisfied(required: list, disposition: dict, provided_names: list) -
     provided = set(provided_names)
     for name in required:
         d = disposition.get(name) or classify_dep(name)
-        if d in ("mock", "mcp", "env"):
+        if d in ("mock", "mcp", "deploy-db", "env"):
             continue
         if d == "provide" and name in provided:
             continue

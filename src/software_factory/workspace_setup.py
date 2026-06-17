@@ -27,14 +27,17 @@ BUILD_SKILL_NAMES = ("tenexity-design",)
 # supabase server reads SUPABASE_ACCESS_TOKEN from env. ruflo/claude-flow is gone.
 _PLAYWRIGHT = {"command": "npx", "args": ["-y", "@playwright/mcp@latest", "--headless", "--browser", "chromium"]}
 _RAILWAY = {"command": "railway", "args": ["mcp"]}
-_SUPABASE = {"command": "npx", "args": ["-y", "@supabase/mcp-server-supabase@latest"]}
+# NO Supabase MCP — stage agents must never have Supabase access. The Supabase access token is
+# an account-wide PAT (can create/DELETE any project, incl. production); an autonomous
+# --dangerously-skip-permissions agent must not hold it. The app's database is provisioned BY
+# THE FACTORY (deploy_db.py) and handed to the agent as context/deploy-db.json. Railway stays —
+# the agent needs it to deploy the app (create_service/deploy/generate_domain), not to make a DB.
 
 
 def mcp_config(stage: int) -> dict:
     servers = {"playwright": _PLAYWRIGHT}
     if stage >= 3:
         servers["railway"] = _RAILWAY
-        servers["supabase"] = _SUPABASE
     return {"mcpServers": servers}
 
 
