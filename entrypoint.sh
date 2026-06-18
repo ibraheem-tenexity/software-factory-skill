@@ -17,8 +17,9 @@ fi
 
 RUNS="${SF_RUNS_DIR:-/app/.runs}"
 mkdir -p "$RUNS" 2>/dev/null || true
+UVICORN="uvicorn console.app:app --host ${SF_BIND:-0.0.0.0} --port ${PORT:-8765}"
 if [ "$(id -u)" = "0" ]; then
     chown -R 1000:1000 "$RUNS" 2>/dev/null || true
-    exec setpriv --reuid=1000 --regid=1000 --init-groups python3 console/server.py
+    exec setpriv --reuid=1000 --regid=1000 --init-groups $UVICORN
 fi
-exec python3 console/server.py
+exec $UVICORN
