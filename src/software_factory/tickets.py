@@ -126,6 +126,11 @@ class TicketStore:
         ).fetchall()
         return [Ticket(**dict(r)) for r in rows]
 
+    def all_tickets(self) -> list[Ticket]:
+        """Every ticket regardless of status, in wave then id order — the kanban projection."""
+        rows = self._conn.execute("SELECT * FROM tickets ORDER BY wave, id").fetchall()
+        return [Ticket(**dict(r)) for r in rows]
+
     def render_markdown(self) -> str:
         rows = self._conn.execute("SELECT * FROM tickets ORDER BY wave, id").fetchall()
         lines = ["# Tickets", "", "| # | wave | status | title | acceptance |", "|---|---|---|---|---|"]

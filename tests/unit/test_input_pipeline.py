@@ -100,6 +100,57 @@ def test_docx_is_extracted_to_markdown_and_composed(tmp_path):
     assert "build the AutoBuilder" in ctx and "recipes, quotes, P21" in ctx
 
 
+def test_docx_default_path_extracts_embedded_images(tmp_path, monkeypatch):
+    # With NO injected converter, a .docx goes through the image-aware path so wireframe
+    # screenshots (incl. those inside Word tables) are extracted and kept paired with the md.
+    import base64, os
+    from software_factory import docx_extract
+
+    def fake_with_images(path, out_dir, img_subdir="images"):
+        img_rel = os.path.join(img_subdir, "image-01.png")
+        os.makedirs(os.path.join(out_dir, img_subdir), exist_ok=True)
+        open(os.path.join(out_dir, img_rel), "wb").write(b"\x89PNG")
+        return ("# Spec\n\n![](images/image-01.png)\n", [img_rel])
+
+    monkeypatch.setattr(docx_extract, "extract_with_images", fake_with_images)
+    written = persist_and_compose(
+        str(tmp_path), "build it",
+        [{"name": "spec.docx", "content_b64": base64.b64encode(b"docx").decode()}],
+    )
+    assert "spec.docx.md" in written
+    assert os.path.join("images", "image-01.png") in written
+    assert os.path.isfile(os.path.join(str(tmp_path), "images", "image-01.png"))
+
+
+def test_docx_falls_back_to_text_when_image_deps_missing(tmp_path, monkeypatch):
+    import base64, os
+    from software_factory import docx_extract
+
+    def raise_import(path, out_dir, img_subdir="images"):
+        raise ImportError("markdownify not installed")
+
+    monkeypatch.setattr(docx_extract, "extract_with_images", raise_import)
+    monkeypatch.setattr(docx_extract, "extract_to_markdown", lambda p: "# Fallback text")
+    written = persist_and_compose(
+        str(tmp_path), "build it",
+        [{"name": "spec.docx", "content_b64": base64.b64encode(b"docx").decode()}],
+    )
+    assert "spec.docx.md" in written
+    assert "# Fallback text" in open(os.path.join(str(tmp_path), "spec.docx.md")).read()
+
+
+def test_brief_and_interview_are_written_when_supplied(tmp_path):
+    import os
+    written = persist_and_compose(
+        str(tmp_path), "build it", [],
+        brief={"goals": "A cargo screening prototype for ground handlers."},
+        interview_md="USER: build cargo screening\nAI: on it",
+    )
+    assert "brief.md" in written and "interview.md" in written
+    assert "PROJECT BRIEF" in open(os.path.join(str(tmp_path), "brief.md")).read()
+    assert "cargo screening" in open(os.path.join(str(tmp_path), "interview.md")).read()
+
+
 def test_docx_extractor_real_pandoc_on_singer_sow():
     # Real-binary integration check (skipped when pypandoc/mammoth aren't installed locally):
     # the actual Singer SOW must extract with structure intact.
