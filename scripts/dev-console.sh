@@ -26,5 +26,5 @@ if [ ! -x "$PYTHON" ]; then
 fi
 
 echo "[dev-console] SF_ENVIRONMENT=${SF_ENVIRONMENT} SF_DB=${SF_DB} SF_RUNS_DIR=${SF_RUNS_DIR} PORT=${PORT}"
-cd "${ROOT_DIR}/console"
-exec "$PYTHON" server.py "$@"
+cd "${ROOT_DIR}"
+exec "$PYTHON" -m uvicorn console.app:app --host "${SF_BIND:-127.0.0.1}" --port "${PORT}" "$@"

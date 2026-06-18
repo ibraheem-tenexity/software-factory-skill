@@ -61,6 +61,15 @@ migrate it. Files: `tickets.py`, `agents.py`, `db.py` CLI, callers in `console.p
   run migrations at boot (or a deploy step). Forward-only, matching the existing migration philosophy.
 
 ## Phase 2 — FastAPI server (replaces `console/server.py`)
+**Status: IMPLEMENTED on branch `fastapi-server` (off `consolidated-base`) — pending integrator merge.**
+Done as a standalone server-layer port (independent of Phase 1): `console/app.py` (FastAPI/uvicorn)
+replaces `console/server.py`; DI auth (`viewer`/`require_authed`/`authorize_run`), Pydantic bodies,
+1:1 routes, SSE via `StreamingResponse`, poller+boot in the app lifespan, JSON access-log middleware.
+`test_server_routes.py` ported to `TestClient` (8 passing); `Procfile`/`Dockerfile`/`entrypoint.sh`/
+`scripts/dev-console.sh` switched to `uvicorn console.app:app`; `fastapi`+`uvicorn` added to deps.
+Follow-up for the integrator: wire the viewer `role` through `ChatAgentRunner.handle_message(role=…)`
+(k7apqsug's chat-ownership hardening) — left as-is here to keep the port behavior-preserving.
+
 Swap the HTTP shell; `Console` + repositories unchanged behind dependencies.
 - **App**: `console/app.py` — FastAPI + `uvicorn` (ASGI). Dockerfile `CMD` → `uvicorn console.app:app`.
 - **Routers** mirroring today 1:1 (parity first): `GET /`, `/index.html` (static UI), `/api/health`

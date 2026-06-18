@@ -24,7 +24,7 @@ ERD for the console datastore (table-by-table detail in [`schema-erd.md`](schema
 ┌─ Railway project: softwarefactory ─────────────────────────────────────────────────────────┐
 │                                                                                              │
 │   ┌──────────────── factory-console (the ONE long-lived service) ────────────────────────┐  │
-│   │  console/server.py   stdlib HTTP + SSE + a 3s background poller                       │  │
+│   │  console/app.py   FastAPI/uvicorn (ASGI) + SSE + a 3s background poller               │  │
 │   │     • auth gate (Google OAuth → HMAC cookie · service token · roles)                  │  │
 │   │     • REST/JSON API + /api/chat (concierge) + SSE stream                              │  │
 │   │     • poller: auto-advance stages, enforce budget, narrate, export traces             │  │
@@ -91,7 +91,7 @@ Stage 3 BUILD      tickets → built app → deploy → verify     gate: done ti
 | Module | Responsibility |
 |---|---|
 | `console.py` | The orchestrator: `Console` class — `start_run`, `_launch_stage`, stage gates (`detect_stage{1,2,3}_done`), budget, `list_runs`/`status`/`graph` projection, ownership. `RunRequest` dataclass. |
-| `console/server.py` | stdlib HTTP shell: auth gate + REST/JSON + `/api/chat` + SSE + the background poller + `/api/health`, `/api/me`, `/api/users`. |
+| `console/app.py` | FastAPI/uvicorn (ASGI) HTTP shell: auth gate (DI dependencies `viewer`/`require_authed`/`authorize_run`) + REST/JSON (Pydantic bodies) + `/api/chat` + SSE (`StreamingResponse`) + the background poller (started in the app lifespan) + `/api/health`, `/api/me`, `/api/users`. |
 | `runstate.py` | `RunState` dataclass (run metadata) + the `Store` protocol; persisted as JSON in the `runstate` table. |
 | `db.py` | `RunDB` — the per-run datastore (runstate + canvas tables) + the `python3 -m software_factory.db` CLI the stage agents call to record state. |
 | `tickets.py`, `agents.py` | `TicketStore` (work units, per-wave) and `AgentRegistry` (per-agent telemetry/cost). |
