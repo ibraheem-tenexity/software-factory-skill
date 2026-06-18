@@ -85,3 +85,28 @@ def test_tickets_projection_groups_by_status_and_wave(tmp_path):
     by_title = {t["title"]: t for t in out["tickets"]}
     assert by_title["Login screen"]["status"] == "claimed"
     assert by_title["Login screen"]["agent"] == "impl-1"
+
+
+def test_tickets_carry_app_for_multi_deliverable_runs(tmp_path):
+    from software_factory.tickets import TicketStore
+    c = _console(tmp_path, FakeLauncher())
+    rid = c.create_draft(owner="op@tenexity.ai")
+    store = TicketStore(c._paths(rid)["tickets_db"])
+    store.create_ticket("AWB capture", "handler captures AWB", "deployed", 1, app="mobile-web")
+    store.create_ticket("Ops dashboard", "ops sees events", "deployed", 1, app="web")
+    by_title = {t["title"]: t for t in c.tickets(rid)["tickets"]}
+    assert by_title["AWB capture"]["app"] == "mobile-web"
+    assert by_title["Ops dashboard"]["app"] == "web"
+
+
+def test_deployments_are_per_deliverable(tmp_path):
+    from software_factory.db import RunDB
+    c = _console(tmp_path, FakeLauncher())
+    rid = c.create_draft(owner="op@tenexity.ai")
+    db = RunDB(c._paths(rid)["db"])
+    db.record_deployment("mobile-web", "https://sf-x-mobile.up.railway.app", verified=True)
+    db.record_deployment("web", "https://sf-x-web.up.railway.app", status="live")
+    out = c.deployments(rid)
+    assert out["apps"] == ["mobile-web", "web"]
+    assert {d["url"] for d in out["deployments"]} == {
+        "https://sf-x-mobile.up.railway.app", "https://sf-x-web.up.railway.app"}

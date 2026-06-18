@@ -573,6 +573,12 @@ def run_tickets(rid: str, v: tuple = Depends(authorize_run)):
     return console.tickets(rid)
 
 
+@app.get("/api/runs/{rid}/deployments")
+def run_deployments(rid: str, v: tuple = Depends(authorize_run)):
+    """Per-deliverable deployments (a run may ship multiple apps)."""
+    return console.deployments(rid)
+
+
 @app.get("/api/runs/{rid}/brief")
 def run_brief(rid: str, v: tuple = Depends(authorize_run)):
     """The structured onboarding brief (shared by the chat interview and the brief form)."""

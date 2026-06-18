@@ -42,9 +42,13 @@ each (`architecture` and `architecture-svg`).
 ## Phase 2: tickets  (`set-phase tickets`)
 
 - A PM-lead Task sub-agent divides the implementation into steps in dependency (wave) order.
-- **PERSIST each ticket to the store** — `TicketStore.create_ticket(title, acceptance, dod, wave)` with a
-  real, non-empty `acceptance` AND `dod`. This is REQUIRED; the store is read by Stage 3 and by the done-gate.
-  (There is no "ticket event" — persisting to the store IS what puts it on the canvas.)
+- **PERSIST each ticket to the store** — `TicketStore.create_ticket(title, acceptance, dod, wave, app=...)`
+  with a real, non-empty `acceptance` AND `dod`. This is REQUIRED; the store is read by Stage 3 and by the
+  done-gate. (There is no "ticket event" — persisting to the store IS what puts it on the canvas.)
+- **Multi-deliverable:** the PRD's screen catalog tags each screen with a target **app**
+  (`mobile-web | web | api | …`). A project may ship MORE THAN ONE deliverable. Set `app=` on each ticket
+  to its deliverable so Stage 3 builds/deploys/verifies each app independently and the kanban can group by
+  app. A single-app project just uses one app value (or omit it).
 - Tickets are derived from the PRD seeds + architecture + design spec.
 
 **Done-gate (mechanical):** waves ordered, no orphan features, AND the store holds buildable tickets — verify:

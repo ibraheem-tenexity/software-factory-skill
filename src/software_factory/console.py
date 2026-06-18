@@ -874,6 +874,11 @@ class Console:
         state.save()
         return self._provision_and_launch(run_id, req, brief=brief, interview_md=interview_md)
 
+    def deployments(self, run_id: str) -> dict:
+        """Per-deliverable deployments (a run ships 1..N apps; no single run-level deploy_url)."""
+        rows = RunDB(self._paths(run_id)["db"]).deployments()
+        return {"deployments": rows, "apps": sorted({r["app"] for r in rows if r.get("app")})}
+
     def tickets(self, run_id: str) -> dict:
         """Build-ticket projection for the kanban view. Empty before Stage 2 persists tickets —
         the frontend renders an empty-state, not an error (TicketStore CREATE-IF-NOT-EXISTS)."""

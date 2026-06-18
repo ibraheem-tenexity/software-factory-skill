@@ -28,6 +28,7 @@ class Ticket:
     provenance: Optional[str]
     provenance_type: Optional[str]
     diff_lines: int
+    app: Optional[str] = None   # target deliverable: mobile-web | web | api | ... (multi-deliverable runs)
 
 
 class TicketStore:
@@ -45,16 +46,24 @@ class TicketStore:
                 agent TEXT,
                 provenance TEXT,
                 provenance_type TEXT,
-                diff_lines INTEGER NOT NULL DEFAULT 0
+                diff_lines INTEGER NOT NULL DEFAULT 0,
+                app TEXT
             )
             """
         )
+        # Pre-existing run.dbs were created before `app` — add it idempotently (no migration framework).
+        try:
+            self._conn.execute("ALTER TABLE tickets ADD COLUMN app TEXT")
+            self._conn.commit()
+        except Exception:
+            pass  # column already present
         self._conn.commit()
 
-    def create_ticket(self, title: str, acceptance: str, dod: str, wave: int) -> int:
+    def create_ticket(self, title: str, acceptance: str, dod: str, wave: int,
+                      app: Optional[str] = None) -> int:
         cur = self._conn.execute(
-            "INSERT INTO tickets (title, acceptance, dod, wave) VALUES (?, ?, ?, ?)",
-            (title, acceptance, dod, wave),
+            "INSERT INTO tickets (title, acceptance, dod, wave, app) VALUES (?, ?, ?, ?, ?)",
+            (title, acceptance, dod, wave, app),
         )
         self._conn.commit()
         return cur.lastrowid
