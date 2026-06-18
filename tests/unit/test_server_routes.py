@@ -110,6 +110,24 @@ def test_run_scoped_route_forbidden_for_non_owner(auth_mod, auth_client, monkeyp
     assert r.status_code == 403
 
 
+def test_chat_threads_viewer_role_to_concierge(auth_mod, auth_client, monkeypatch):
+    # A member's chat must carry role='member' (not the default 'admin') so the concierge's
+    # run-scoped tools enforce ownership. Regression for the FastAPI port dropping role=.
+    _login(auth_mod, auth_client, monkeypatch)          # op@tenexity.ai = member (no SF_ADMIN_EMAILS)
+    captured = {}
+
+    class _FakeRunner:
+        async def handle_message(self, run_id, message, files, images, **kw):
+            captured.update(kw)
+            return ("run-abcdef12", [])
+
+    monkeypatch.setattr(auth_mod, "_chat_runner", _FakeRunner())
+    r = auth_client.post("/api/chat", json={"message": "build me an app"})
+    assert r.status_code == 200
+    assert captured.get("role") == "member"
+    assert captured.get("owner") == "op@tenexity.ai"
+
+
 def test_push_sse_delivers_to_registered_client(app_mod):
     # The SSE mechanic: _push_sse fans a message out to every queue registered for the run
     # (the stream endpoint registers one such queue; the poller + chat/deps handlers push).

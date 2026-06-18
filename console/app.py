@@ -656,7 +656,8 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
         result_run_id, response_msgs = await _chat_runner.handle_message(
             run_id, body.message, body.files, body.images, runtime=body.runtime,
             planning_model=body.planning_model, impl_model=body.impl_model,
-            project_name=body.project_name, gated=body.gated, owner=v[0] or "")
+            project_name=body.project_name, gated=body.gated,
+            owner=v[0] or "", role=v[1] or "member")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

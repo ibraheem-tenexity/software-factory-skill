@@ -67,8 +67,10 @@ replaces `console/server.py`; DI auth (`viewer`/`require_authed`/`authorize_run`
 1:1 routes, SSE via `StreamingResponse`, poller+boot in the app lifespan, JSON access-log middleware.
 `test_server_routes.py` ported to `TestClient` (8 passing); `Procfile`/`Dockerfile`/`entrypoint.sh`/
 `scripts/dev-console.sh` switched to `uvicorn console.app:app`; `fastapi`+`uvicorn` added to deps.
-Follow-up for the integrator: wire the viewer `role` through `ChatAgentRunner.handle_message(role=…)`
-(k7apqsug's chat-ownership hardening) — left as-is here to keep the port behavior-preserving.
+Follow-up (DONE at integration): the viewer `role` is now threaded through
+`ChatAgentRunner.handle_message(role=…)` from the `/api/chat` endpoint (`role=v[1] or "member"`),
+so the concierge's run-scoped tools enforce ownership for members (admins/service pass `admin`).
+Regression test: `test_chat_threads_viewer_role_to_concierge`.
 
 Swap the HTTP shell; `Console` + repositories unchanged behind dependencies.
 - **App**: `console/app.py` — FastAPI + `uvicorn` (ASGI). Dockerfile `CMD` → `uvicorn console.app:app`.
