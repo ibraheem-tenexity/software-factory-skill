@@ -52,6 +52,53 @@ def test_prd_is_complete_requires_acceptance_and_ticket_seeds():
     assert any("ticket" in r.lower() for r in reasons)
 
 
+# An Input-Contract PRD synthesized by the Stage-1 COUNCIL (multi-deliverable screen catalog,
+# fidelity matrix, function decomposition, nav map, items-to-challenge, and a PRD lock-in tally)
+# must still satisfy the unchanged mechanical gate.
+COUNCIL_PRD = """# PRD — Cargo Screening Prototype
+## Competitor landscape
+- Acme — https://acme.com — does X
+- Beta — https://beta.io — does Y
+- Gamma — https://gamma.dev — does Z
+## Screen catalog
+| ID | Title | app | V1? |
+|----|-------|-----|-----|
+| M-09 | AWB Capture | mobile-web | Yes |
+| W-04 | Ops Dashboard | web | Yes |
+| A-01 | Screening API | api | Yes |
+## Fidelity matrix
+- live: AWB capture · simulated: x-ray feed · mock-data: tenants · out-of-scope: billing
+## Function decomposition
+1. Capture (M-09) 2. Review (W-04) 3. Sync (A-01)
+## Data fields & rules
+1. awb_ref (text) 2. PIECE_MATH: screened+unscreened+alarmed != total
+## Items to challenge / assumptions
+1. X-ray integration is SIMULATED
+## Navigation map
+| order | moment | screen | action |
+|---|---|---|---|
+| 1 | capture | M-09 | submit -> W-04 |
+## Acceptance criteria
+- Given a handler, when they capture an AWB, then a screening_event is created (verify: Playwright)
+## Ticket seeds
+- seed: AWB capture screen
+PRD lock-in: SHIP_AS_IS (3/3 seats agreed)
+"""
+
+
+def test_prd_is_complete_accepts_a_council_input_contract_prd():
+    ok, reasons = artifacts.prd_is_complete(COUNCIL_PRD)
+    assert ok is True, reasons
+
+
+def test_council_prd_missing_urls_still_fails_the_gate():
+    # the synthesizer dropping VANGUARD's real URLs must FAIL — the council can't loosen the gate
+    stripped = COUNCIL_PRD.replace("https://acme.com", "TBD").replace("https://beta.io", "TBD")
+    ok, reasons = artifacts.prd_is_complete(stripped)
+    assert ok is False
+    assert any("url" in r.lower() or "source" in r.lower() or "product" in r.lower() for r in reasons)
+
+
 ARCH_WITH_TOKENS = """\
 # Architecture
 

@@ -29,35 +29,54 @@ Do NOT try to "emit" events — that mechanism is gone. The datastore is the sin
 
 ## Phase 1: extract  (`set-phase extract`)
 
-Read everything in `<base>/input/` (the console already extracted PDFs to markdown + composed
-`context.txt`). Turn it into usable scope. Do NOT re-record an input artifact — the console already did.
+Read everything in `<base>/input/` (the console already extracted PDFs/DOCX to markdown + composed
+`context.txt`). In particular `input/brief.md` (the **structured project brief** from the onboarding
+interview — goals, success metrics, constraints, stakeholders, existing assets, risks, definition of
+done — the authoritative scope), `input/interview.md` (the transcript), and `input/images/` (extracted
+**wireframe/screenshot images**, when present — the PRD must reference them with captions). Turn it
+into usable scope. Do NOT re-record an input artifact — the console already did.
 
 ## Phase 2: provision  (`set-phase provision`)
 
 - `creds.check_all(target, env)` — any failure is a hard block (`add-blocker`), recorded, never guessed.
 - `GitHub.create_repo(name)`; seed `RunState`; `workspace.create` (the repo clones into your cwd's workspace).
 
-## Phase 3: research — work the named units in order  (`set-phase research`)
+## Phase 3: research COUNCIL — work the seats in order, then synthesize  (`set-phase research`)
 
-For EACH named unit: `spawn-agent <id> <role> <model> research`, do its work YOURSELF, then
+Run the council SEQUENTIALLY (no Task tool): each seat is a logical agent producing a candidate PRD
+draft from the SAME context (`input/brief.md` + `input/interview.md` + `context.txt` + any
+`input/images/`). For each: `spawn-agent <id> <role> <model> research`, do its work YOURSELF, then
 `finish-agent <id> success`:
 
-1. **HORIZON** (pm.lead) — context assembly: customer, job-to-be-done, success criteria, open questions.
-2. **ARCHIVIST** (scout.librarian) — reuse scan of any prior work in the repo → fork/extend/standalone note.
-3. **VANGUARD** (domain.expert) — evaluate ≥2 solution paths. **Web research is REQUIRED.** You have no
-   websearch tool; use `webfetch` against a search engine instead — fetch
-   `https://duckduckgo.com/html/?q=<query>` for 4–6 queries, then `webfetch` the best result pages.
-   Surface **≥3 real existing products** (name + URL + features + gaps). Never fabricate a URL: every
-   product URL in the PRD must come from a page you actually fetched.
-4. **CHROMA** (design.lead) — journeys, screens, states, a11y; define the primary happy-flow click-path
-   the Stage-3 Playwright gate will verify.
-5. **DESIGNER** (frontend-design) — visual design guidance using the `frontend-design` + `ui-ux-pro-max`
-   skills in `skills/`: palette, typography, layout, component style. **`skills/tenexity-design/` is
-   the BRAND CANON and overrides both where they conflict:** speak in its token names (its SKILL.md),
-   pick layouts from its PATTERN_MATRIX.md — the app must look like a Tenexity product.
-6. **HORIZON** — write `PRD.md` in the repo: product thesis; users/JTBD; journeys; competitor landscape
-   (every product with URL); MVP scope; features; NFRs; acceptance criteria (given/when/then/verification);
-   out-of-scope; ticket seeds. Commit + push, then `record-artifact PRD <repo>/PRD.md prd HORIZON`.
+1. **VANGUARD** (domain.expert) — the grounding anchor. **Web research REQUIRED.** No websearch tool;
+   `webfetch` `https://duckduckgo.com/html/?q=<query>` for 4–6 queries, then `webfetch` the best pages.
+   Surface **≥3 real existing products** (name + URL + features + gaps); evaluate ≥2 solution paths.
+   Never fabricate a URL — every product URL must come from a page you actually fetched. Write
+   `PRD-draft-vanguard.md`.
+2. **CHROMA** (design.lead) — journeys, screens, states, a11y; the primary happy-flow click-path the
+   Stage-3 Playwright gate verifies; visual guidance per `frontend-design`/`ui-ux-pro-max` with
+   **`skills/tenexity-design/` as the overriding BRAND CANON** (token names + PATTERN_MATRIX). Write
+   `PRD-draft-design.md`.
+3. **HORIZON** (pm.lead) — product thesis, users/JTBD, MVP scope, **enumerated** features + business
+   rules, acceptance criteria (given/when/then), ticket seeds, reuse scan. Write `PRD-draft-horizon.md`.
+
+Then **SYNTHESIZE** (`spawn-agent synth pm.lead <model> research`): read all three drafts and compose
+the SINGLE `PRD.md`, then `finish-agent synth success`. The synthesized PRD MUST be an **Input-Contract
+PRD** and MUST pass `prd_is_complete()`:
+- **stable IDs** on every screen/step/note;
+- a **screen catalog** table with a scope column (`V1? = Yes/Future`), one row per screen, each tagged
+  with its target **app** (`mobile-web | web | api`) — a project may ship **multiple deliverables**;
+- a **fidelity matrix** (`live | simulated | mock-data | out-of-scope`, with definitions);
+- **function decomposition** (V1 → named functions, each listing its screen IDs);
+- **enumerated** data-field lists + business rules (numbered, not prose);
+- an **items-to-challenge / assumptions** list (rendered `SIMULATED` downstream);
+- a **navigation map** (`order | moment | screen | action`);
+- the **competitor landscape** with **≥3 real product URLs** (from VANGUARD — NEVER fabricated);
+- an **## Acceptance Criteria** section (given/when/then/verification) and a **## Ticket Seeds** section;
+- captioned **wireframe image refs** when `input/images/` holds wireframes;
+- a closing **PRD lock-in** line (`SHIP_AS_IS / SHIP_WITH_EDITS / SEND_BACK` tally — autonomous).
+
+Commit + push, then `record-artifact PRD <repo>/PRD.md prd synth`.
 
 **Done-gate (mechanical):** `artifacts.prd_is_complete(PRD.md)` passes — ≥3 real product URLs, an
 acceptance-criteria section, and ticket seeds. A hollow/absent PRD does NOT advance.
