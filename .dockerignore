@@ -22,3 +22,6 @@ client_secret_*.json
 HANDOFF.md
 PLAN-claude-to-opencode-kimi.md
 PLAN.md
+
+console/web/node_modules/
+console/web/dist/

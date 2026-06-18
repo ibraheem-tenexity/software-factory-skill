@@ -59,6 +59,12 @@ ENV SF_SWARM_BIN=/opt/swarm/swarm OPENCODE_SWARM_PLUGIN=/opt/swarm/swarm-plugin.
 WORKDIR /app
 COPY . /app
 
+# Build the React console SPA (served when SF_CONSOLE=react). Node is already in the base image,
+# so this is build-time only — the runtime is still uvicorn. Non-fatal: legacy index.html serves
+# if the build is skipped/fails.
+RUN cd /app/console/web && npm ci --no-audit --no-fund && npm run build || \
+    echo "[build] React console build skipped/failed — legacy index.html will serve"
+
 RUN mkdir -p /home/node/.claude/skills /ms-puppeteer \
     && ln -sfn /app /home/node/.claude/skills/software-factory \
     && cp /app/claude-settings.json /home/node/.claude/settings.json \

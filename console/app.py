@@ -438,8 +438,24 @@ class RunCreateIn(BaseModel):
 
 
 # ── Static + open routes ──────────────────────────────────────────────────────────────────────
+# The React SPA (console/web/dist) is served when SF_CONSOLE=react AND it's been built; otherwise the
+# legacy single-file console (index.html) is the default — so the migration is opt-in and safe.
+_REACT_DIST = os.path.join(HERE, "web", "dist")
+
+
+def _react_enabled() -> bool:
+    return (os.environ.get("SF_CONSOLE", "").strip().lower() == "react"
+            and os.path.isfile(os.path.join(_REACT_DIST, "index.html")))
+
+
+if os.path.isdir(os.path.join(_REACT_DIST, "assets")):
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/assets", StaticFiles(directory=os.path.join(_REACT_DIST, "assets")), name="assets")
+
+
 def _index_html() -> bytes:
-    with open(os.path.join(HERE, "index.html"), "rb") as f:
+    path = os.path.join(_REACT_DIST, "index.html") if _react_enabled() else os.path.join(HERE, "index.html")
+    with open(path, "rb") as f:
         return f.read()
 
 
