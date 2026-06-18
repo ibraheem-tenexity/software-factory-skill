@@ -43,8 +43,10 @@ erDiagram
         text name UK "unique project identity"
         text owner_email FK "-> USERS.email"
         text description
-        text phase
+        text phase "draft | provision | … | done  (draft = pre-run interview)"
         int stage
+        jsonb brief "7-section onboarding brief (interview)"
+        jsonb interview_coverage "per-section covered flags"
         bool stage1_done
         bool stage2_done
         text runtime "claude | opencode  (pipeline type)"

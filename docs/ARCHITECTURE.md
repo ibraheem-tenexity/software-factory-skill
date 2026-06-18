@@ -63,16 +63,22 @@ OpenAI/OpenRouter (the chat concierge model).
 
 ## 2. The pipeline (the product)
 
-A **run** moves through three stages, each a separate agent subprocess launched by the console,
-gated mechanically (no human review except a required secret):
+A run is born from an **onboarding interview** (a durable *draft*), then moves through three stages,
+each a separate agent subprocess launched by the console, gated mechanically (no human review):
 
 ```
-Stage 1 RESEARCH   description+attachments → PRD.md          gate: PRD complete (≥3 real product URLs,
-                                                                    acceptance criteria, ticket seeds)
+Stage 0 INTERVIEW  concierge interviews the user → a structured 7-section BRIEF + transcript,
+                   persisted on a DRAFT run (canonical run-<8hex>, poller-invisible). On "proceed"
+                   the draft is PROMOTED → Stage 1. (Brief editable via the form or the chat.)
+Stage 1 RESEARCH   brief + interview + attachments → COUNCIL (3 drafting seats → synthesizer) →
+                   PRD.md            gate: PRD complete (≥3 real product URLs, acceptance criteria,
+                                           ticket seeds). The PRD targets the harness Input Contract.
 Stage 2 DESIGN     PRD → architecture.md + architecture.svg  gate: artifacts exist AND ≥1 buildable
-                          + tickets (TicketStore)                  ticket; then the deps gate
-Stage 3 BUILD      tickets → built app → deploy → verify     gate: done tickets trace to agents AND a
-                                                                    recorded PASSING Playwright happy-flow
+                          + tickets (TicketStore, each tagged   ticket; then the deps gate
+                          with its target app)
+Stage 3 BUILD      tickets → built app(s) → deploy → verify  gate: done tickets trace to agents AND a
+                   (1..N deliverables: sf-<run_id>-<app>)        recorded PASSING Playwright happy-flow
+                                                                  per deliverable
 ```
 
 - **Autonomy (poller, every 3s):** flips a stage to done only when its gate passes *and* its process
@@ -90,16 +96,18 @@ Stage 3 BUILD      tickets → built app → deploy → verify     gate: done ti
 
 | Module | Responsibility |
 |---|---|
-| `console.py` | The orchestrator: `Console` class — `start_run`, `_launch_stage`, stage gates (`detect_stage{1,2,3}_done`), budget, `list_runs`/`status`/`graph` projection, ownership. `RunRequest` dataclass. |
-| `console/app.py` | FastAPI/uvicorn (ASGI) HTTP shell: auth gate (DI dependencies `viewer`/`require_authed`/`authorize_run`) + REST/JSON (Pydantic bodies) + `/api/chat` + SSE (`StreamingResponse`) + the background poller (started in the app lifespan) + `/api/health`, `/api/me`, `/api/users`. |
-| `runstate.py` | `RunState` dataclass (run metadata) + the `Store` protocol; persisted as JSON in the `runstate` table. |
-| `db.py` | `RunDB` — the per-run datastore (runstate + canvas tables) + the `python3 -m software_factory.db` CLI the stage agents call to record state. |
-| `tickets.py`, `agents.py` | `TicketStore` (work units, per-wave) and `AgentRegistry` (per-agent telemetry/cost). |
+| `console.py` | The orchestrator: `Console` class — `start_run`, `create_draft`/`update_draft_brief`/`promote_draft` (the interview→run lifecycle), `_provision_and_launch`, stage gates (`detect_stage{1,2,3}_done`), budget, `list_runs`/`status`/`graph`/`tickets`/`deployments` projection, ownership. `RunRequest` dataclass. |
+| `console/app.py` | FastAPI/uvicorn (ASGI) HTTP shell: auth gate (DI dependencies `viewer`/`require_authed`/`authorize_run`) + REST/JSON (Pydantic bodies) + `/api/chat` (mints a draft for new conversations) + `/api/runs/{id}/{tickets,brief,deployments}` + SSE (`StreamingResponse`) + the background poller (started in the app lifespan) + `/api/health`, `/api/me`, `/api/users`. Serves the **React SPA** (`console/web/dist`) when `SF_CONSOLE=react`, else the legacy `index.html`. |
+| `console/web/` | The **React console** (Vite + React + TypeScript SPA): toolbar with the **graph↔kanban view toggle**, Cytoscape graph, kanban (status columns + wave swimlanes + per-app badge/filter), chat + SSE, the structured **brief form**, projects screen. Built at image-build time; served by `console/app.py`. Opt-in via `SF_CONSOLE=react`. |
+| `brief.py` | The structured onboarding **brief** vocabulary: the 7 sections, interview topics + rubrics, `coverage`/`enough` (the "ready to proceed" heuristic), `brief_to_prompt_block` (injected into Stage 1). |
+| `runstate.py` | `RunState` dataclass (run metadata, incl. `brief` + `interview_coverage`, `phase="draft"` for pre-run interviews) + the `Store` protocol; persisted as JSON in the `runstate` table. |
+| `db.py` | `RunDB` — the per-run datastore (runstate + canvas tables incl. `deployments`) + the `python3 -m software_factory.db` CLI (incl. `record-deployment`) the stage agents call to record state. |
+| `tickets.py`, `agents.py` | `TicketStore` (work units, per-wave, each tagged with its target `app` for multi-deliverable builds) and `AgentRegistry` (per-agent telemetry/cost). |
 | `dbshim.py` | The storage seam: `connect(path)` → sqlite (default) or Postgres (schema-per-run). All three stores go through it. |
 | `env.py` | dev/prod tiering (`SF_ENVIRONMENT`): `db_backend()` (dev→sqlite, postgres only in prod/test), `stage_env_baseline()` (scrubs console secrets from stage child processes), Railway project allowlist. |
 | `auth.py` + `users.py` | Google-OAuth login + HMAC session cookie + service token; `UserStore` directory (roles: admin/member) backing membership + per-run ownership. |
 | `chat_agent.py` | The "Factory Concierge" — an OpenAI-Agents-SDK agent that turns a chat conversation into a `start_run` (and answers status/deps questions). |
-| `input_pipeline.py`, `pdf_extract.py`, `docx_extract.py` | Ingest: attachments → Markdown, compose the Stage-1 input (`context.txt`). |
+| `input_pipeline.py`, `pdf_extract.py`, `docx_extract.py` | Ingest: attachments → Markdown, compose the Stage-1 input (`context.txt` + `brief.md` + `interview.md`). `docx_extract.extract_with_images` (mammoth + markdownify) keeps **wireframe images inside Word tables** → `input/images/`. |
 | `workspace_setup.py`, `workspace.py` | Per-stage ephemeral workspace: SKILL contract, `.mcp.json`, prior-stage artifacts, vendored design skills. |
 | `deploy.py` | Railway deploy + health-check helpers (stage 3). |
 | `deploy_db.py` | Factory-provisions a per-run Railway Postgres and writes `context/deploy-db.json` for the build (agents have no Supabase access). |
@@ -133,14 +141,20 @@ runtime-agnostic.
 - `public.sf_runs` — the run registry (discovery).
 - `public.users` — the user directory (roles).
 - one **schema per run** `sf_run_<id>` containing: `runstate` (the `RunState` JSON, incl.
-  description, name, **owner**, models, budget), `phases`, `artifacts` (metadata: title + path +
-  kind, not the bytes), `blockers`, `gates`, `verifications`, `tickets`, `agents`.
+  description, name, **owner**, models, budget, **`brief`** + `interview_coverage`, and `phase`
+  which is `"draft"` for a pre-run interview), `phases`, `artifacts` (metadata: title + path +
+  kind, not the bytes), `blockers`, `gates`, `verifications`, **`deployments`** (one row per
+  deliverable: `app`, `service_name`, `url`, `status`, `verified`), `tickets` (each with an `app`
+  tag), `agents`.
 - `dbshim` translates the stores' SQLite SQL to Postgres (schema-per-run via `SET LOCAL
   search_path`, `?`→`%s`, DDL deltas, `RETURNING id`). Unset `SF_DB` = plain SQLite (local/dev/tests).
-- **Target relational shape (FastAPI/DB rebuild):** a `public.run_index` projection (queryable
-  owner/name index), `public.deployments` (a run ships **1..N deliverables**, so there is no scalar
-  `deploy_url`), and `provenance` replacing the `pr INTEGER` hazard on `tickets`/`agents`. The
-  source-of-truth ERD is [`schema-erd.svg`](schema-erd.svg) (detail in [`schema-erd.md`](schema-erd.md)).
+- **Drafts:** the onboarding interview persists on a `phase="draft"` run with no recorded artifact,
+  so `is_pipeline_run` is False and the poller ignores it until `promote_draft` launches Stage 1.
+- **Multi-deliverable:** a run ships **1..N deliverables**; per-app deploy/verify state lives in the
+  `deployments` table (no scalar run-level `deploy_url`). **Target relational shape (FastAPI/DB
+  rebuild):** a `public.run_index` projection, `public.deployments`, and `provenance` replacing the
+  `pr INTEGER` hazard on `tickets`/`agents`. Source-of-truth ERD: [`schema-erd.svg`](schema-erd.svg)
+  (detail in [`schema-erd.md`](schema-erd.md)).
 
 **Files → the `/data` volume** (NOT in the database today):
 - `runs/<id>/input/` — `context.txt` (composed Stage-1 input) + converted attachments + raw uploads
