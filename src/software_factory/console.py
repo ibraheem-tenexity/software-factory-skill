@@ -820,6 +820,25 @@ class Console:
     def is_draft(self, run_id: str) -> bool:
         return self._load_state(run_id).phase == "draft"
 
+    def draft_brief(self, run_id: str) -> dict:
+        """The accumulated brief for a draft (read-only copy)."""
+        return dict(self._load_state(run_id).brief or {})
+
+    def attach_to_draft(self, run_id: str, files: list) -> list[str]:
+        """Persist + extract files attached during the interview into the draft's input/ (PDF/DOCX
+        → Markdown[+images], wireframes survive). Records them as context artifacts; the draft stays
+        invisible to the poller (is_pipeline_run excludes drafts). Returns paths written."""
+        if not files:
+            return []
+        paths = self._paths(run_id)
+        os.makedirs(paths["input_dir"], exist_ok=True)
+        written = persist_and_compose(paths["input_dir"], "", files, extract=self._extract)
+        db = RunDB(paths["db"])
+        for name in written:
+            if name != "context.txt":   # no description here → skip the (empty) composed prompt
+                db.record_artifact("input", "input/" + name, kind="context")
+        return [w for w in written if w != "context.txt"]
+
     def update_draft_brief(self, run_id: str, brief: dict, coverage: dict | None = None) -> dict:
         """Merge brief sections into a draft and persist. Returns the updated coverage so the
         concierge can see progress. Idempotent."""
@@ -892,7 +911,11 @@ class Console:
     def is_pipeline_run(self, run_id: str) -> bool:
         """True only if this run was actually started by THIS pipeline (start_run records ≥1
         artifact in run.db). A resurfaced pre-redesign dir — PRD.md on disk but an empty run.db
-        (created fresh on load) — is False, so the poller never auto-advances/zombie-launches it."""
+        (created fresh on load) — is False, so the poller never auto-advances/zombie-launches it.
+        A DRAFT (pre-run interview) is always False, even though attached files record artifacts,
+        so the poller ignores it until promotion."""
+        if self._load_state(run_id).phase == "draft":
+            return False
         db = RunDB(self._paths(run_id)["db"])
         return bool(db.artifacts())
 

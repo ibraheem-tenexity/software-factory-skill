@@ -551,6 +551,29 @@ def run_graph(rid: str, v: tuple = Depends(authorize_run)):
     return console.graph(rid)
 
 
+@app.get("/api/runs/{rid}/tickets")
+def run_tickets(rid: str, v: tuple = Depends(authorize_run)):
+    """Build-ticket projection for the kanban view (empty before Stage 2)."""
+    return console.tickets(rid)
+
+
+@app.get("/api/runs/{rid}/brief")
+def run_brief(rid: str, v: tuple = Depends(authorize_run)):
+    """The structured onboarding brief (shared by the chat interview and the brief form)."""
+    from software_factory.brief import coverage as _cov
+    brief = console.draft_brief(rid)
+    return {"brief": brief, "coverage": _cov(brief)}
+
+
+@app.put("/api/runs/{rid}/brief")
+def update_run_brief(rid: str, body: dict, v: tuple = Depends(authorize_run)):
+    """Edit the brief from the form. Body: {section: text, ...} (only known sections persist)."""
+    from software_factory.brief import BRIEF_SECTIONS
+    sections = {k: v2 for k, v2 in (body or {}).items() if k in BRIEF_SECTIONS}
+    cov = console.update_draft_brief(rid, sections)
+    return {"brief": console.draft_brief(rid), "coverage": cov}
+
+
 @app.get("/api/runs/{rid}/events")
 def run_events(rid: str, v: tuple = Depends(authorize_run)):
     return {"events": console.events(rid)}
@@ -642,9 +665,22 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
         raise HTTPException(status_code=503,
                             detail="no OPENAI_API_KEY or OPENROUTER_API_KEY — chat unavailable")
     run_id = body.run_id
-    # Messaging an EXISTING run requires ownership; a new run (no run_id) is a create.
+    # Messaging an EXISTING run requires ownership; a new conversation mints a durable DRAFT
+    # (canonical run-<8hex>) up front so the interview persists to chat.jsonl from turn one and
+    # survives a refresh/restart. The draft is invisible to the pipeline poller until promotion.
     if run_id and not _can_see(v, run_id):
         raise HTTPException(status_code=403, detail="forbidden")
+    if not run_id:
+        run_id = console.create_draft(owner=v[0] or "", name=body.project_name or "",
+                                      runtime=body.runtime, planning_model=body.planning_model,
+                                      impl_model=body.impl_model)
+    # Files/images attached during the interview persist into the draft now (wireframes survive),
+    # so they're in input/ for Stage 1 regardless of which turn they arrived on. Drafts only.
+    if (body.files or body.images) and console.is_draft(run_id):
+        try:
+            console.attach_to_draft(run_id, (body.files or []) + (body.images or []))
+        except Exception:
+            pass  # a bad attachment must not 500 the chat turn
 
     user_msg = ChatMessage(role="user", content=body.message, msg_type="text", ts=time.time())
     if body.files:
