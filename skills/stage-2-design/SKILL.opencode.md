@@ -45,9 +45,12 @@ each (`architecture` and `architecture-svg`). Then `finish-agent architect succe
 
 - `spawn-agent pm-lead pm.lead <model> tickets`, then YOURSELF divide the implementation into steps
   in dependency (wave) order; `finish-agent pm-lead success` when the store is populated.
-- **PERSIST each ticket to the store** — `TicketStore.create_ticket(title, acceptance, dod, wave)` with a
-  real, non-empty `acceptance` AND `dod`. This is REQUIRED; the store is read by Stage 3 and by the done-gate.
-  (There is no "ticket event" — persisting to the store IS what puts it on the canvas.)
+- **PERSIST each ticket to the store** — `TicketStore.create_ticket(title, acceptance, dod, wave, app=...)`
+  with a real, non-empty `acceptance` AND `dod`. This is REQUIRED; the store is read by Stage 3 and by the
+  done-gate. (There is no "ticket event" — persisting to the store IS what puts it on the canvas.)
+- **Multi-deliverable:** a project may ship MORE THAN ONE deliverable. The PRD screen catalog tags each
+  screen with an `app` (`mobile-web | web | api | …`); set `app=` on each ticket so Stage 3 builds/deploys/
+  verifies each app independently and the kanban groups by app.
 - Tickets are derived from the PRD seeds + architecture + design spec.
 
 **Done-gate (mechanical):** waves ordered, no orphan features, AND the store holds buildable tickets — verify:

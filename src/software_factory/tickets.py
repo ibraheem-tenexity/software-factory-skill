@@ -25,8 +25,10 @@ class Ticket:
     wave: int
     status: str
     agent: Optional[str]
-    pr: Optional[int]
+    provenance: Optional[str]
+    provenance_type: Optional[str]
     diff_lines: int
+    app: Optional[str] = None   # target deliverable: mobile-web | web | api | ... (multi-deliverable runs)
 
 
 class TicketStore:
@@ -42,17 +44,26 @@ class TicketStore:
                 wave INTEGER NOT NULL,
                 status TEXT NOT NULL DEFAULT 'open',
                 agent TEXT,
-                pr INTEGER,
-                diff_lines INTEGER NOT NULL DEFAULT 0
+                provenance TEXT,
+                provenance_type TEXT,
+                diff_lines INTEGER NOT NULL DEFAULT 0,
+                app TEXT
             )
             """
         )
+        # Pre-existing run.dbs were created before `app` — add it idempotently (no migration framework).
+        try:
+            self._conn.execute("ALTER TABLE tickets ADD COLUMN app TEXT")
+            self._conn.commit()
+        except Exception:
+            pass  # column already present
         self._conn.commit()
 
-    def create_ticket(self, title: str, acceptance: str, dod: str, wave: int) -> int:
+    def create_ticket(self, title: str, acceptance: str, dod: str, wave: int,
+                      app: Optional[str] = None) -> int:
         cur = self._conn.execute(
-            "INSERT INTO tickets (title, acceptance, dod, wave) VALUES (?, ?, ?, ?)",
-            (title, acceptance, dod, wave),
+            "INSERT INTO tickets (title, acceptance, dod, wave, app) VALUES (?, ?, ?, ?, ?)",
+            (title, acceptance, dod, wave, app),
         )
         self._conn.commit()
         return cur.lastrowid
@@ -69,19 +80,30 @@ class TicketStore:
         )
         self._conn.commit()
 
-    def mark_done(self, ticket_id: int, pr, diff_lines: int) -> None:
-        """Close a ticket against REAL, attributable work. `pr` is the work's provenance:
-        a merged PR number (claude orchestrator workflow) OR a commit sha string (monolithic
-        opencode workflow — direct commits to main have no PRs; run-45b8c4d5 proved the gate
-        was unsatisfiable for Kimi as previously specced). Either way the no-hollow-close
-        property holds: non-empty provenance + a non-zero diff."""
-        if not pr or (isinstance(pr, str) and len(pr.strip()) < 7):
+    def mark_done(self, ticket_id: int, provenance, diff_lines: int,
+                  provenance_type: str | None = None) -> None:
+        """Close a ticket against REAL, attributable work. `provenance` is the work's
+        proof: a merged PR number or URL (claude orchestrator workflow) OR a commit sha
+        string (monolithic opencode workflow — direct commits to main have no PRs;
+        run-45b8c4d5 proved the gate was unsatisfiable for Kimi as previously specced).
+        Either way the no-hollow-close property holds: non-empty provenance + a non-zero
+        diff."""
+        if provenance is None:
+            provenance = ""
+        if not isinstance(provenance, str):
+            provenance = str(provenance)
+        provenance = provenance.strip()
+        if not provenance:
+            raise HollowWorkError(f"ticket {ticket_id}: refusing 'done' without a merged PR or commit sha")
+        if provenance_type is None:
+            provenance_type = "pr" if provenance.isdigit() else "commit"
+        if provenance_type == "commit" and len(provenance) < 7:
             raise HollowWorkError(f"ticket {ticket_id}: refusing 'done' without a merged PR or commit sha")
         if diff_lines <= 0:
             raise HollowWorkError(f"ticket {ticket_id}: refusing 'done' with an empty diff")
         self._conn.execute(
-            "UPDATE tickets SET status = 'done', pr = ?, diff_lines = ? WHERE id = ?",
-            (pr, diff_lines, ticket_id),
+            "UPDATE tickets SET status = 'done', provenance = ?, provenance_type = ?, diff_lines = ? WHERE id = ?",
+            (provenance, provenance_type, diff_lines, ticket_id),
         )
         self._conn.commit()
 
@@ -111,6 +133,11 @@ class TicketStore:
         rows = self._conn.execute(
             "SELECT * FROM tickets WHERE status = 'done' ORDER BY id"
         ).fetchall()
+        return [Ticket(**dict(r)) for r in rows]
+
+    def all_tickets(self) -> list[Ticket]:
+        """Every ticket regardless of status, in wave then id order — the kanban projection."""
+        rows = self._conn.execute("SELECT * FROM tickets ORDER BY wave, id").fetchall()
         return [Ticket(**dict(r)) for r in rows]
 
     def render_markdown(self) -> str:

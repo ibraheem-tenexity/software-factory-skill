@@ -1,1 +1,1 @@
-web: SF_BIND=0.0.0.0 python3 console/server.py
+web: uvicorn console.app:app --host 0.0.0.0 --port ${PORT:-8765}

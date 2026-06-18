@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="940" viewBox="0 0 1320 940" role="img" aria-labelledby="title desc">
+  <title id="title">Software Factory Console Schema ERD</title>
+  <desc id="desc">Entity relationship diagram for the target console schema, including run index, per-run detail tables, chat messages, and run blobs.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .group { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; rx: 10; }
+      .entity { fill: #ffffff; stroke: #334155; stroke-width: 1.6; rx: 8; }
+      .primary { fill: #e0f2fe; stroke: #0369a1; stroke-width: 2; rx: 8; }
+      .later { fill: #f8fafc; stroke: #64748b; stroke-width: 1.6; stroke-dasharray: 7 5; rx: 8; }
+      .storage { fill: #ecfdf5; stroke: #047857; stroke-width: 2; rx: 8; }
+      .title { font: 700 24px Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 14px Arial, sans-serif; fill: #475569; }
+      .label { font: 700 15px Arial, sans-serif; fill: #0f172a; }
+      .field { font: 12px Arial, sans-serif; fill: #334155; }
+      .tiny { font: 11px Arial, sans-serif; fill: #64748b; }
+      .edge { stroke: #334155; stroke-width: 1.7; fill: none; marker-end: url(#arrow); }
+      .edge-soft { stroke: #64748b; stroke-width: 1.5; fill: none; stroke-dasharray: 6 5; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1320" height="940"/>
+  <text class="title" x="40" y="42">Console Schema ERD</text>
+  <text class="subtitle" x="40" y="66">Target relational shape: public run index + per-run detail state + later chat/blob tables.</text>
+
+  <rect class="group" x="30" y="92" width="1260" height="802"/>
+  <text class="subtitle" x="50" y="120">Global public schema</text>
+  <text class="subtitle" x="730" y="120">Per-run schema today; flat FK target later</text>
+
+  <rect class="entity" x="70" y="150" width="230" height="126"/>
+  <text class="label" x="90" y="178">public.users</text>
+  <text class="field" x="90" y="202">PK email</text>
+  <text class="field" x="90" y="222">role: admin | member</text>
+  <text class="field" x="90" y="242">created_at</text>
+  <text class="field" x="90" y="262">created_by</text>
+
+  <rect class="entity" x="70" y="328" width="230" height="112"/>
+  <text class="label" x="90" y="356">public.sf_runs</text>
+  <text class="field" x="90" y="380">PK run_id</text>
+  <text class="field" x="90" y="400">UK schema_name</text>
+  <text class="field" x="90" y="420">created_at</text>
+
+  <rect class="entity" x="70" y="480" width="230" height="126"/>
+  <text class="label" x="90" y="508">public.deployments</text>
+  <text class="field" x="90" y="532">PK id, FK run_id</text>
+  <text class="field" x="90" y="552">app, service_name</text>
+  <text class="field" x="90" y="572">url, status, verified</text>
+  <text class="tiny" x="90" y="590">1..N deliverables per run</text>
+
+  <rect class="primary" x="370" y="220" width="300" height="274"/>
+  <text class="label" x="392" y="250">public.run_index</text>
+  <text class="field" x="392" y="276">PK/FK run_id</text>
+  <text class="field" x="392" y="296">UK lower(name) where name != ''</text>
+  <text class="field" x="392" y="316">FK owner -> users.email</text>
+  <text class="field" x="392" y="336">schema_name</text>
+  <text class="field" x="392" y="356">description, phase, stage</text>
+  <text class="field" x="392" y="376">runtime (pipeline type), planning_model, impl_model</text>
+  <text class="field" x="392" y="396">model (resolved build model)</text>
+  <text class="field" x="392" y="416">stage1_done, stage2_done</text>
+  <text class="field" x="392" y="436">deps_satisfied, budget_ceiling</text>
+  <text class="field" x="392" y="456">repo_url, deploy_target, held</text>
+  <text class="field" x="392" y="476">created_at, updated_at</text>
+
+  <rect class="entity" x="740" y="150" width="230" height="102"/>
+  <text class="label" x="760" y="178">runstate</text>
+  <text class="field" x="760" y="202">PK run_id</text>
+  <text class="field" x="760" y="222">data: RunState JSON</text>
+  <text class="tiny" x="760" y="240">Transitional full state</text>
+
+  <rect class="entity" x="1010" y="150" width="230" height="102"/>
+  <text class="label" x="1030" y="178">phases</text>
+  <text class="field" x="1030" y="202">PK id</text>
+  <text class="field" x="1030" y="222">name, status, stage, ts</text>
+  <text class="tiny" x="1030" y="240">Append-only hints</text>
+
+  <rect class="entity" x="740" y="292" width="230" height="126"/>
+  <text class="label" x="760" y="320">artifacts</text>
+  <text class="field" x="760" y="344">PK id</text>
+  <text class="field" x="760" y="364">title, path, kind</text>
+  <text class="field" x="760" y="384">agent, ts</text>
+  <text class="tiny" x="760" y="402">Metadata only; bytes via blobs</text>
+
+  <rect class="entity" x="1010" y="292" width="230" height="126"/>
+  <text class="label" x="1030" y="320">tickets</text>
+  <text class="field" x="1030" y="344">PK id</text>
+  <text class="field" x="1030" y="364">title, acceptance, dod, wave</text>
+  <text class="field" x="1030" y="384">status, agent</text>
+  <text class="field" x="1030" y="404">provenance, provenance_type</text>
+
+  <rect class="entity" x="740" y="458" width="230" height="126"/>
+  <text class="label" x="760" y="486">agents</text>
+  <text class="field" x="760" y="510">PK agent_id</text>
+  <text class="field" x="760" y="530">FK ticket_id</text>
+  <text class="field" x="760" y="550">role, model, phase, status</text>
+  <text class="field" x="760" y="570">outcome, cost, tokens</text>
+
+  <rect class="entity" x="1010" y="458" width="230" height="142"/>
+  <text class="label" x="1030" y="486">verifications</text>
+  <text class="field" x="1030" y="510">PK id, FK run_id</text>
+  <text class="field" x="1030" y="530">FK deployment_id</text>
+  <text class="field" x="1030" y="550">url, passed</text>
+  <text class="field" x="1030" y="570">result jsonb, ts</text>
+  <text class="tiny" x="1030" y="588">passed = Stage 3 done gate</text>
+
+  <rect class="entity" x="740" y="624" width="230" height="102"/>
+  <text class="label" x="760" y="652">blockers</text>
+  <text class="field" x="760" y="676">PK id</text>
+  <text class="field" x="760" y="696">what, blocks, cleared, ts</text>
+
+  <rect class="entity" x="1010" y="624" width="230" height="102"/>
+  <text class="label" x="1030" y="652">gates</text>
+  <text class="field" x="1030" y="676">PK (run_id, name)</text>
+  <text class="field" x="1030" y="696">status, ts</text>
+
+  <rect class="later" x="370" y="540" width="250" height="126"/>
+  <text class="label" x="392" y="568">public.chat_messages</text>
+  <text class="field" x="392" y="592">PK id, FK run_id</text>
+  <text class="field" x="392" y="612">role, content, msg_type</text>
+  <text class="field" x="392" y="632">metadata jsonb, ts</text>
+  <text class="tiny" x="392" y="650">Later DB home for chat.jsonl</text>
+
+  <rect class="later" x="370" y="704" width="250" height="126"/>
+  <text class="label" x="392" y="732">public.run_blobs</text>
+  <text class="field" x="392" y="756">PK id, FK run_id</text>
+  <text class="field" x="392" y="776">kind, local_path</text>
+  <text class="field" x="392" y="796">storage_bucket, storage_key</text>
+  <text class="field" x="392" y="816">size_bytes, sha256</text>
+
+  <rect class="storage" x="680" y="760" width="300" height="70"/>
+  <text class="label" x="700" y="790">Supabase Storage</text>
+  <text class="field" x="700" y="812">bucket: factory-run-blobs</text>
+
+  <path class="edge" d="M300 212 C330 212, 340 292, 370 316"/>
+  <path class="edge" d="M300 384 C330 384, 340 346, 370 346"/>
+  <path class="edge" d="M370 390 C350 390, 330 460, 300 480"/>
+  <path class="edge" d="M670 286 C705 245, 715 215, 740 202"/>
+  <path class="edge" d="M670 312 C790 250, 900 206, 1010 202"/>
+  <path class="edge" d="M670 354 C700 354, 710 354, 740 354"/>
+  <path class="edge" d="M670 374 C800 345, 900 354, 1010 354"/>
+  <path class="edge" d="M670 414 C705 456, 710 520, 740 520"/>
+  <path class="edge" d="M1010 398 C975 430, 975 502, 970 520"/>
+  <path class="edge" d="M670 434 C795 464, 900 520, 1010 520"/>
+  <path class="edge" d="M670 454 C705 520, 710 654, 740 674"/>
+  <path class="edge" d="M670 454 C820 560, 930 650, 1010 674"/>
+  <path class="edge-soft" d="M520 474 L500 540"/>
+  <path class="edge-soft" d="M520 474 L500 704"/>
+  <path class="edge-soft" d="M620 776 C650 790, 660 795, 680 795"/>
+
+  <text class="tiny" x="48" y="910">Dashed boxes are later-pass durable chat/blob storage. Today chat/logs/files are on the Railway /data volume.</text>
+</svg>

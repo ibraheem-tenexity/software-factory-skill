@@ -1,123 +1,139 @@
-"""HTTP routing of the console server — the page must serve regardless of query string.
+"""HTTP routing of the console server (FastAPI app in console/app.py).
 
-Scar: '/?run=run-1e17ea6a' (the state-restore link the UI itself writes into the address bar)
-returned the JSON 404 because do_GET matched self.path verbatim, query string included.
+Ported from the stdlib-server tests to FastAPI's TestClient. Originals preserved:
+- the page must serve regardless of query string (scar: '/?run=run-1e17ea6a' returned a JSON 404
+  when do_GET matched self.path verbatim, query string included);
+- auth gate (login page vs console, 401 without session, Google login cookie, unallowed email 403).
+Added: run-scoped ownership 403 + an SSE stream smoke.
 """
 import importlib
-import json
 import os
 import sys
-import threading
-import urllib.error
-import urllib.request
 
 import pytest
+from fastapi.testclient import TestClient
+
+
+def _load_app(tmp_path, monkeypatch, **env):
+    monkeypatch.setenv("SF_RUNS_DIR", str(tmp_path))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+    import console.app as app_mod
+    importlib.reload(app_mod)
+    return app_mod
 
 
 @pytest.fixture()
-def live_server(tmp_path, monkeypatch):
-    monkeypatch.setenv("SF_RUNS_DIR", str(tmp_path))
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "console"))
-    import server as server_mod
-    importlib.reload(server_mod)
-    from http.server import ThreadingHTTPServer
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server_mod.Handler)
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-    t.start()
-    yield f"http://127.0.0.1:{httpd.server_address[1]}"
-    httpd.shutdown()
+def app_mod(tmp_path, monkeypatch):
+    return _load_app(tmp_path, monkeypatch)
 
 
-def _get(url):
-    with urllib.request.urlopen(url, timeout=10) as r:
-        return r.status, r.headers.get("Content-Type", ""), r.read()
+@pytest.fixture()
+def client(app_mod):
+    # No `with` → lifespan (and the background poller) does not run, matching the old tests.
+    return TestClient(app_mod.app)
 
 
-def test_root_serves_console_html(live_server):
-    status, ctype, body = _get(live_server + "/")
-    assert status == 200 and "text/html" in ctype
+def test_root_serves_console_html(client):
+    r = client.get("/")
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
 
 
-def test_run_restore_link_serves_console_html_not_404(live_server):
+def test_run_restore_link_serves_console_html_not_404(client):
     # the exact URL attach() writes via history.replaceState — reload must restore the run view
-    status, ctype, body = _get(live_server + "/?run=run-1e17ea6a")
-    assert status == 200 and "text/html" in ctype
-    assert b"Software Factory" in body
+    r = client.get("/?run=run-1e17ea6a")
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    assert "Software Factory" in r.text
 
 
 @pytest.fixture()
-def auth_server(tmp_path, monkeypatch):
-    monkeypatch.setenv("SF_RUNS_DIR", str(tmp_path))
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setenv("SF_GOOGLE_CLIENT_ID", "cid-123.apps.googleusercontent.com")
-    monkeypatch.setenv("SF_AUTH_EMAILS", "op@tenexity.ai")
-    monkeypatch.setenv("SF_AUTH_SECRET", "test-secret")
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "console"))
-    import server as server_mod
-    importlib.reload(server_mod)
-    from http.server import ThreadingHTTPServer
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server_mod.Handler)
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-    t.start()
-    yield f"http://127.0.0.1:{httpd.server_address[1]}"
-    httpd.shutdown()
+def auth_mod(tmp_path, monkeypatch):
+    return _load_app(
+        tmp_path, monkeypatch,
+        SF_GOOGLE_CLIENT_ID="cid-123.apps.googleusercontent.com",
+        SF_AUTH_EMAILS="op@tenexity.ai",
+        SF_AUTH_SECRET="test-secret",
+    )
 
 
-def _get_raw(url, headers=None):
-    req = urllib.request.Request(url, headers=headers or {})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return r.status, r.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read()
+@pytest.fixture()
+def auth_client(auth_mod):
+    return TestClient(auth_mod.app)
 
 
-def test_auth_enabled_root_serves_login_not_console(auth_server):
-    status, body = _get_raw(auth_server + "/")
-    assert status == 200
-    assert b"accounts.google.com" in body          # the Google sign-in page
-    assert b"cid-123" in body                       # client id injected
-    assert b"Factory Concierge" not in body         # console NOT exposed
+def test_auth_enabled_root_serves_login_not_console(auth_client):
+    r = auth_client.get("/")
+    assert r.status_code == 200
+    assert "accounts.google.com" in r.text          # the Google sign-in page
+    assert "cid-123" in r.text                       # client id injected
+    assert "Factory Concierge" not in r.text         # console NOT exposed
 
 
-def test_auth_enabled_api_requires_session(auth_server):
-    status, body = _get_raw(auth_server + "/api/runs")
-    assert status == 401
+def test_auth_enabled_api_requires_session(auth_client):
+    r = auth_client.get("/api/runs")
+    assert r.status_code == 401
 
 
-def test_google_login_sets_cookie_and_opens_console(auth_server, monkeypatch):
-    from software_factory import auth as auth_mod
-    monkeypatch.setattr(auth_mod, "_fetch_claims", lambda tok: {
-        "aud": "cid-123.apps.googleusercontent.com", "email": "op@tenexity.ai",
+def _login(auth_mod, client, monkeypatch, email="op@tenexity.ai"):
+    from software_factory import auth as auth_mod_
+    monkeypatch.setattr(auth_mod_, "_fetch_claims", lambda tok: {
+        "aud": "cid-123.apps.googleusercontent.com", "email": email,
         "email_verified": "true"})
-    req = urllib.request.Request(
-        auth_server + "/api/auth/google",
-        data=json.dumps({"credential": "goog-token"}).encode(),
-        headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=10) as r:
-        assert r.status == 200
-        cookie = r.headers.get("Set-Cookie", "")
+    return client.post("/api/auth/google", json={"credential": "goog-token"})
+
+
+def test_google_login_sets_cookie_and_opens_console(auth_mod, auth_client, monkeypatch):
+    r = _login(auth_mod, auth_client, monkeypatch)
+    assert r.status_code == 200
+    cookie = r.headers.get("set-cookie", "")
     assert "sf_session=" in cookie and "HttpOnly" in cookie
-    session = cookie.split("sf_session=")[1].split(";")[0]
-    status, body = _get_raw(auth_server + "/", headers={"Cookie": f"sf_session={session}"})
-    assert status == 200 and b"Factory Concierge" in body
-    status, _ = _get_raw(auth_server + "/api/runs", headers={"Cookie": f"sf_session={session}"})
-    assert status == 200
+    # TestClient persists the cookie on its jar → subsequent requests are authed.
+    r2 = auth_client.get("/")
+    assert r2.status_code == 200 and "Factory Concierge" in r2.text
+    r3 = auth_client.get("/api/runs")
+    assert r3.status_code == 200
 
 
-def test_google_login_rejected_for_unallowed_email(auth_server, monkeypatch):
-    from software_factory import auth as auth_mod
-    monkeypatch.setattr(auth_mod, "_fetch_claims", lambda tok: {
-        "aud": "cid-123.apps.googleusercontent.com", "email": "evil@example.com",
-        "email_verified": "true"})
-    req = urllib.request.Request(
-        auth_server + "/api/auth/google",
-        data=json.dumps({"credential": "goog-token"}).encode(),
-        headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            status = r.status
-    except urllib.error.HTTPError as e:
-        status = e.code
-    assert status == 403
+def test_google_login_rejected_for_unallowed_email(auth_mod, auth_client, monkeypatch):
+    r = _login(auth_mod, auth_client, monkeypatch, email="evil@example.com")
+    assert r.status_code == 403
+
+
+def test_run_scoped_route_forbidden_for_non_owner(auth_mod, auth_client, monkeypatch):
+    # op@tenexity.ai is a *member* here (no SF_ADMIN_EMAILS) → may only see runs it owns.
+    _login(auth_mod, auth_client, monkeypatch)
+    monkeypatch.setattr(auth_mod.console, "run_owner", lambda rid: "someone-else@tenexity.ai")
+    r = auth_client.get("/api/runs/run-deadbeef")
+    assert r.status_code == 403
+
+
+def test_chat_threads_viewer_role_to_concierge(auth_mod, auth_client, monkeypatch):
+    # A member's chat must carry role='member' (not the default 'admin') so the concierge's
+    # run-scoped tools enforce ownership. Regression for the FastAPI port dropping role=.
+    _login(auth_mod, auth_client, monkeypatch)          # op@tenexity.ai = member (no SF_ADMIN_EMAILS)
+    captured = {}
+
+    class _FakeRunner:
+        async def handle_message(self, run_id, message, files, images, **kw):
+            captured.update(kw)
+            return ("run-abcdef12", [])
+
+    monkeypatch.setattr(auth_mod, "_chat_runner", _FakeRunner())
+    r = auth_client.post("/api/chat", json={"message": "build me an app"})
+    assert r.status_code == 200
+    assert captured.get("role") == "member"
+    assert captured.get("owner") == "op@tenexity.ai"
+
+
+def test_push_sse_delivers_to_registered_client(app_mod):
+    # The SSE mechanic: _push_sse fans a message out to every queue registered for the run
+    # (the stream endpoint registers one such queue; the poller + chat/deps handlers push).
+    from software_factory.chat_store import ChatMessage
+    q: list = []
+    with app_mod._sse_lock:
+        app_mod._sse_clients.setdefault("run-1e17ea6a", []).append(q)
+    app_mod._push_sse("run-1e17ea6a", [ChatMessage(role="assistant", content="ping")])
+    assert q and q[0].startswith("data: ") and "ping" in q[0] and q[0].endswith("\n\n")

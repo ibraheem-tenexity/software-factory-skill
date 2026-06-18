@@ -150,8 +150,15 @@ def _orchestration_preamble(stage_title: str, run_id: str, runs_dir: str, budget
     )
 
 
-def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str, runtime: str = "claude") -> str:
+def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str, runtime: str = "claude",
+                       brief_block: str = "") -> str:
     ctx = f"\n\nContext / detailed input:\n{req.context}" if req.context else ""
+    # The structured onboarding brief (from the interview) is the richest context — inject it
+    # directly so the council seats plan from it; the full block is also at input/brief.md and the
+    # transcript at input/interview.md.
+    brief = (f"\n\nThe user was interviewed; the structured brief follows (also at input/brief.md; "
+             f"full transcript at input/interview.md). Treat it as authoritative project context:\n"
+             f"{brief_block.strip()}") if brief_block.strip() else ""
     if runtime == "opencode":
         units = ("The named research units and the done-gate are in SKILL.md. Do each unit yourself, "
                  "in order, recording each as a logical agent.")
@@ -165,7 +172,7 @@ def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str, runtime: str
           "GitHub repo, record it (CLEAN token-free https url): `record-artifact 'GitHub Repo' "
           "<https-url> repo` — the operator sees the repo link from the start. When the PRD passes, "
           "STOP — the console launches Stage 2.\n"
-          f"App: {req.description}{ctx}"
+          f"App: {req.description}{ctx}{brief}"
     )
 
 
@@ -724,13 +731,20 @@ class Console:
         if req.name and self.name_taken(req.name):
             raise ValueError(f"A project named {req.name!r} already exists — names must be unique.")
         run_id = self._new_id()
+        return self._provision_and_launch(run_id, req, gated=req.gated)
+
+    def _provision_and_launch(self, run_id: str, req: RunRequest, *, gated: bool = False,
+                              brief: dict | None = None, interview_md: str | None = None) -> str:
+        """Provision a run dir (id already minted), persist state, and launch Stage 1 (unless
+        gated). Shared by start_run (fresh mint) and promote_draft (existing draft id)."""
         paths = self._paths(run_id)
         os.makedirs(paths["base"], exist_ok=True)
 
-        # input -> (pdf->markdown) -> markdown + prompt -> composed Stage 1 input.
+        # input -> (pdf/docx->markdown[+images]) -> markdown + prompt -> composed Stage 1 input,
+        # plus the structured brief + interview transcript when promoting an interviewed draft.
         written = persist_and_compose(
             paths["input_dir"], req.description, req.context_files or [],
-            extract=self._extract,
+            extract=self._extract, brief=brief, interview_md=interview_md,
         )
         input_db = RunDB(paths["db"])
         for name in written:
@@ -738,7 +752,7 @@ class Console:
         # SPEC §1: the HOST performs extraction — record it (and provision opening) itself,
         # so these phases are never trust-based and extract can never sit 'pending' forever.
         input_db.set_phase("extract", "done")
-        if not req.gated:
+        if not gated:
             input_db.set_phase("provision", "active")
 
         state = self._load_state(run_id)
@@ -746,7 +760,7 @@ class Console:
         state.skill = "software-factory"
         state.skill_version = SKILL_VERSION
         state.description = req.description
-        state.name = req.name or ""
+        state.name = req.name or state.name or ""
         state.deploy_target = req.target
         state.creds_provided = sorted(env.keys())
         state.stage = 1
@@ -757,18 +771,127 @@ class Console:
         # the offered choices can ever launch. Empty = stage defaults.
         state.planning_model = req.planning_model if req.planning_model in PLANNING_MODELS else ""
         state.impl_model = req.impl_model if req.impl_model in IMPL_MODELS else ""
-        state.held = bool(req.gated)
-        state.owner = (req.owner or "").lower()
+        state.held = bool(gated)
+        state.owner = (req.owner or state.owner or "").lower()
+        if brief is not None:
+            state.brief = brief
         state.save()
 
-        if req.gated:
+        if gated:
             # Held: registered + visible at $0; stage 1 launches on release_run. Create-time
             # credential VALUES are not persisted (names only), so gated runs rely on the
             # stage-3 deps flow for app credentials.
             return run_id
-        prompt = make_prompt_stage1(req, run_id, self._runs_dir, runtime=state.runtime)
+        brief_block = ""
+        if brief:
+            from .brief import brief_to_prompt_block
+            brief_block = brief_to_prompt_block(brief)
+        prompt = make_prompt_stage1(req, run_id, self._runs_dir, runtime=state.runtime,
+                                    brief_block=brief_block)
         self._launch_stage(run_id, 1, prompt, env)
         return run_id
+
+    # ---- Durable drafts: an interview before a run exists -------------------------------
+    def create_draft(self, owner: str = "", name: str = "", runtime: str = "",
+                     planning_model: str = "", impl_model: str = "") -> str:
+        """Mint a CANONICAL run-<8hex> id at the START of the onboarding interview and persist a
+        draft RunState (phase='draft', held, NO artifact recorded → is_pipeline_run False, so the
+        poller/ghost-resume guard ignore it until promotion). Using a canonical id up front means
+        the `db` CLI + sf_runs registry guards are satisfied the moment Stage 1 launches."""
+        run_id = self._new_id()
+        paths = self._paths(run_id)
+        os.makedirs(paths["base"], exist_ok=True)
+        RunDB(paths["db"]).set_phase("draft", "active")
+        state = self._load_state(run_id)
+        state.phase = "draft"
+        state.held = True
+        state.skill = "software-factory"
+        state.skill_version = SKILL_VERSION
+        state.name = name or ""
+        state.owner = (owner or "").lower()
+        state.runtime = runtime or os.environ.get("SF_RUNTIME", "claude")
+        state.planning_model = planning_model if planning_model in PLANNING_MODELS else ""
+        state.impl_model = impl_model if impl_model in IMPL_MODELS else ""
+        state.brief = {}
+        state.interview_coverage = {}
+        state.save()
+        return run_id
+
+    def is_draft(self, run_id: str) -> bool:
+        return self._load_state(run_id).phase == "draft"
+
+    def draft_brief(self, run_id: str) -> dict:
+        """The accumulated brief for a draft (read-only copy)."""
+        return dict(self._load_state(run_id).brief or {})
+
+    def attach_to_draft(self, run_id: str, files: list) -> list[str]:
+        """Persist + extract files attached during the interview into the draft's input/ (PDF/DOCX
+        → Markdown[+images], wireframes survive). Records them as context artifacts; the draft stays
+        invisible to the poller (is_pipeline_run excludes drafts). Returns paths written."""
+        if not files:
+            return []
+        paths = self._paths(run_id)
+        os.makedirs(paths["input_dir"], exist_ok=True)
+        written = persist_and_compose(paths["input_dir"], "", files, extract=self._extract)
+        db = RunDB(paths["db"])
+        for name in written:
+            if name != "context.txt":   # no description here → skip the (empty) composed prompt
+                db.record_artifact("input", "input/" + name, kind="context")
+        return [w for w in written if w != "context.txt"]
+
+    def update_draft_brief(self, run_id: str, brief: dict, coverage: dict | None = None) -> dict:
+        """Merge brief sections into a draft and persist. Returns the updated coverage so the
+        concierge can see progress. Idempotent."""
+        state = self._load_state(run_id)
+        merged = dict(state.brief or {})
+        merged.update({k: v for k, v in (brief or {}).items() if v})
+        state.brief = merged
+        if coverage is not None:
+            state.interview_coverage = coverage
+        state.save()
+        from .brief import coverage as _cov
+        return state.interview_coverage or _cov(merged)
+
+    def promote_draft(self, run_id: str, description: str = "",
+                      interview_md: str | None = None, target: str = "railway") -> str:
+        """Promote a draft into a real run: launch Stage 1 against the EXISTING draft id, threading
+        the accumulated brief + interview transcript into the Stage-1 input. No new id is minted."""
+        state = self._load_state(run_id)
+        brief = dict(state.brief or {})
+        # The description anchors the prompt; prefer an explicit one, else the brief's goals.
+        desc = (description or state.description or brief.get("goals") or "").strip()
+        req = RunRequest(
+            description=desc,
+            target=target or state.deploy_target or "railway",
+            runtime=state.runtime,
+            planning_model=state.planning_model,
+            impl_model=state.impl_model,
+            name=state.name,
+            owner=state.owner,
+        )
+        state.phase = "provision"
+        state.held = False
+        state.save()
+        return self._provision_and_launch(run_id, req, brief=brief, interview_md=interview_md)
+
+    def deployments(self, run_id: str) -> dict:
+        """Per-deliverable deployments (a run ships 1..N apps; no single run-level deploy_url)."""
+        rows = RunDB(self._paths(run_id)["db"]).deployments()
+        return {"deployments": rows, "apps": sorted({r["app"] for r in rows if r.get("app")})}
+
+    def tickets(self, run_id: str) -> dict:
+        """Build-ticket projection for the kanban view. Empty before Stage 2 persists tickets —
+        the frontend renders an empty-state, not an error (TicketStore CREATE-IF-NOT-EXISTS)."""
+        store = TicketStore(self._paths(run_id)["tickets_db"])
+        items = [
+            {"id": t.id, "title": t.title, "wave": t.wave, "status": t.status,
+             "agent": t.agent, "provenance": t.provenance, "provenance_type": t.provenance_type,
+             "diff_lines": t.diff_lines, "acceptance": t.acceptance, "dod": t.dod,
+             "app": getattr(t, "app", None)}
+            for t in store.all_tickets()
+        ]
+        waves = sorted({t["wave"] for t in items})
+        return {"tickets": items, "waves": waves}
 
     def release_run(self, run_id: str) -> bool:
         """Release a gated hold: launch Stage 1. False if not held (double-release refuses)."""
@@ -793,7 +916,11 @@ class Console:
     def is_pipeline_run(self, run_id: str) -> bool:
         """True only if this run was actually started by THIS pipeline (start_run records ≥1
         artifact in run.db). A resurfaced pre-redesign dir — PRD.md on disk but an empty run.db
-        (created fresh on load) — is False, so the poller never auto-advances/zombie-launches it."""
+        (created fresh on load) — is False, so the poller never auto-advances/zombie-launches it.
+        A DRAFT (pre-run interview) is always False, even though attached files record artifacts,
+        so the poller ignores it until promotion."""
+        if self._load_state(run_id).phase == "draft":
+            return False
         db = RunDB(self._paths(run_id)["db"])
         return bool(db.artifacts())
 

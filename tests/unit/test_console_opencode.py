@@ -257,7 +257,7 @@ def test_mark_done_accepts_commit_sha_provenance(tmp_path):
     tid = ts.create_ticket("x", "acceptance", "dod", 1)
     ts.claim(tid, "ticket-1-build")
     ts.mark_done(tid, "a1b2c3d4e5f6a7b8", 42)
-    assert ts.done_tickets()[0].pr == "a1b2c3d4e5f6a7b8"
+    assert ts.done_tickets()[0].provenance == "a1b2c3d4e5f6a7b8"
     tid2 = ts.create_ticket("y", "a", "d", 1)
     with pytest.raises(HollowWorkError):
         ts.mark_done(tid2, "abc", 42)          # too short to be a sha — hollow
@@ -271,7 +271,7 @@ def test_evidence_opencode_run_corroborated_by_spend_not_agent_cost(tmp_path):
     bundle = {"runtime": "opencode", "skill": "software-factory", "skill_version": "0.0.1",
               "spent_usd": 12.5, "deploy_url": "https://x",
               "agents": {"counts": {"spawned": 3}, "total_cost_usd": 0.0},
-              "done_tickets": [{"id": 1, "pr": "a1b2c3d4e5f6a7b8", "diff_lines": 10}]}
+              "done_tickets": [{"id": 1, "provenance": "a1b2c3d4e5f6a7b8", "diff_lines": 10}]}
     ok, reasons = verify_evidence(bundle)
     assert not any("cost is zero" in r for r in reasons)
     assert not any("without provenance" in r for r in reasons)

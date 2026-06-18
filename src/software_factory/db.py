@@ -78,6 +78,15 @@ class RunDB:
                 result TEXT,
                 ts     REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS deployments (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                app          TEXT,
+                service_name TEXT,
+                url          TEXT,
+                status       TEXT NOT NULL DEFAULT 'deploying',
+                verified     INTEGER NOT NULL DEFAULT 0,
+                ts           REAL NOT NULL
+            );
             """
         )
         self._conn.commit()
@@ -140,6 +149,17 @@ class RunDB:
         )
         self._conn.commit()
 
+    def record_deployment(self, app: str, url: str, status: str = "live",
+                          service_name: Optional[str] = None, verified: bool = False) -> None:
+        """Record one deliverable's deployment. A run ships 1..N deliverables (mobile-web/web/api),
+        so deploy state is per-app, not a single run-level deploy_url."""
+        self._conn.execute(
+            "INSERT INTO deployments (app, service_name, url, status, verified, ts) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (app, service_name, url, status, 1 if verified else 0, time.time()),
+        )
+        self._conn.commit()
+
     # ---- projection reads (used by Console.graph / status) ---------------------------
     def phase_status(self) -> dict:
         """Latest status per phase name (rows are append-only; last write wins)."""
@@ -173,6 +193,10 @@ class RunDB:
             "SELECT COUNT(*) AS n FROM verifications WHERE passed = 1").fetchone()
         return row["n"] > 0
 
+    def deployments(self) -> list[dict]:
+        return [dict(r) for r in self._conn.execute(
+            "SELECT * FROM deployments ORDER BY id").fetchall()]
+
 
 # --- CLI the headless orchestrator uses instead of emitting events --------------------
 _USAGE = (
@@ -184,8 +208,10 @@ _USAGE = (
     "  clear-blocker <runs_dir> <run_id> <what>\n"
     "  set-gate <runs_dir> <run_id> <name> <status>\n"
     "  record-verification <runs_dir> <run_id> <url> <passed:0|1> <result-json>\n"
+    "  record-deployment <runs_dir> <run_id> <app> <url> [status] [service_name] [verified:0|1]\n"
     "  spawn-agent <runs_dir> <run_id> <agent_id> <role> <model> [phase] [ticket_id]\n"
-    "  finish-agent <runs_dir> <run_id> <agent_id> <outcome> [cost_usd] [pr] [diff_lines]\n"
+    "  finish-agent <runs_dir> <run_id> <agent_id> <outcome> [cost_usd] [provenance] [diff_lines]\n"
+    "                         provenance = PR number or commit SHA; type inferred (digits='pr', else='commit')\n"
 )
 
 
@@ -219,6 +245,13 @@ def main(argv: list[str]) -> int:
         db.set_gate(rest[0], rest[1])
     elif verb == "record-verification":
         db.record_verification(rest[0], rest[1] in ("1", "true", "True"), rest[2])
+    elif verb == "record-deployment":
+        db.record_deployment(
+            rest[0], rest[1],
+            status=rest[2] if len(rest) > 2 else "live",
+            service_name=rest[3] if len(rest) > 3 else None,
+            verified=(len(rest) > 4 and rest[4] in ("1", "true", "True")),
+        )
     elif verb == "spawn-agent":
         from .agents import AgentRegistry
         agent_id, role, model = rest[0], rest[1], rest[2]
@@ -229,9 +262,11 @@ def main(argv: list[str]) -> int:
         from .agents import AgentRegistry
         agent_id, outcome = rest[0], rest[1]
         cost = float(rest[2]) if len(rest) > 2 and rest[2] not in ("", "-") else 0.0
-        pr = int(rest[3]) if len(rest) > 3 and rest[3] not in ("", "-") else None
+        provenance = rest[3] if len(rest) > 3 and rest[3] not in ("", "-") else None
         diff_lines = int(rest[4]) if len(rest) > 4 and rest[4] not in ("", "-") else 0
-        AgentRegistry(db_path(runs_dir, run_id)).record(agent_id, outcome, cost_usd=cost, pr=pr, diff_lines=diff_lines)
+        AgentRegistry(db_path(runs_dir, run_id)).record(agent_id, outcome, cost_usd=cost,
+                                                        provenance=provenance,
+                                                        diff_lines=diff_lines)
     else:
         sys.stderr.write(_USAGE)
         return 2

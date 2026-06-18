@@ -74,8 +74,14 @@ later tickets build on merged work.
 
 ## Phase 2: deploy  (`set-phase deploy`)
 
-Deploy ONLY to this run's own dedicated service `sf-<run_id>` — **NEVER** a bare/un-named deploy
-(it would overwrite the factory console).
+**Multi-deliverable:** a run may ship MORE THAN ONE deliverable (tickets carry an `app`:
+`mobile-web | web | api | …`). Deploy **each app to its own service** `sf-<run_id>-<app>` (single-app =
+just `sf-<run_id>`), and record each: `record-deployment <app> <url> live <service_name> 0` (last arg
+`1` once its happy-flow passes). There is NO single run-level deploy URL — each deliverable is tracked
+and verified independently.
+
+Deploy ONLY to this run's own dedicated service(s) `sf-<run_id>[-<app>]` — **NEVER** a bare/un-named
+deploy (it would overwrite the factory console).
 
 **Project isolation:** built apps deploy into the **software-factory-projects** Railway project and
 NOWHERE else — never into the factory's own project (the one hosting the console). Your env's
@@ -140,9 +146,11 @@ credential helper / `GH_TOKEN`, never bake the token into the remote):
 
 ## Phase 3: test — the GATE (mandatory; the only path to done)  (`set-phase test`)
 
-Drive the LIVE deployed URL through the primary journey with the **Playwright MCP**. Build a structured
-result and pass it to `gate.happy_flow_passed(result)`. RECORD it: `record-verification <url> <0|1> <result-json>`
-(include per-flow pass/fail + screenshot/console-error refs).
+Drive the LIVE deployed URL through the primary journey with the **Playwright MCP**, **for EACH
+deliverable** (`sf-<run_id>-<app>`). Build a structured result and pass it to
+`gate.happy_flow_passed(result)`. RECORD it: `record-verification <url> <0|1> <result-json>` (include
+per-flow pass/fail + screenshot/console-error refs), and mark that app verified:
+`record-deployment <app> <url> live <service_name> 1`. ALL deliverables must pass before done.
 **Brand check (part of the gate):** fetch the deployed app's CSS and confirm it contains the literal
 `--brand: 214 100% 55%` (the Tenexity token). Include `{"brand_tokens": true|false}` in the result —
 false is a failed flow like any other: fix, redeploy, re-test.

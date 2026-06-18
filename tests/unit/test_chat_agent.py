@@ -47,20 +47,37 @@ class TestMakeTools:
         assert "request_dep_input" in names
         assert "get_result" in names
 
-    def test_start_pipeline_calls_console(self, mock_console):
-        tools = make_tools(mock_console)
+    def test_start_pipeline_promotes_the_active_draft(self, mock_console):
+        # start_pipeline no longer mints a run — it PROMOTES the in-progress interview draft.
+        mock_console.promote_draft = MagicMock(return_value="run-test123")
+        tools = make_tools(mock_console, draft_id=lambda: "run-test123",
+                           interview=lambda: "USER: build a guestbook")
         start = next(t for t in tools if t.name == "start_pipeline")
-        inp = json.dumps({"description": "Build a guestbook", "context": "NextJS app",
-                          "budget": 50, "target": "railway"})
         result = asyncio.get_event_loop().run_until_complete(
-            start.on_invoke_tool(None, inp)
+            start.on_invoke_tool(None, json.dumps({"description": "Build a guestbook"}))
         )
-        mock_console.start_run.assert_called_once()
-        req = mock_console.start_run.call_args[0][0]
-        assert req.description == "Build a guestbook"
-        assert req.context == "NextJS app"
-        assert req.budget == 50
+        mock_console.promote_draft.assert_called_once()
+        assert mock_console.promote_draft.call_args[0][0] == "run-test123"
         assert "run-test123" in result
+
+    def test_start_pipeline_works_without_a_description(self, mock_console):
+        # the brief is the payload — a description arg is optional.
+        mock_console.promote_draft = MagicMock(return_value="run-test123")
+        tools = make_tools(mock_console, draft_id=lambda: "run-test123")
+        start = next(t for t in tools if t.name == "start_pipeline")
+        asyncio.get_event_loop().run_until_complete(start.on_invoke_tool(None, json.dumps({})))
+        mock_console.promote_draft.assert_called_once()
+
+    def test_record_brief_section_updates_the_draft(self, mock_console):
+        mock_console.update_draft_brief = MagicMock(return_value={"goals": True})
+        mock_console.draft_brief = MagicMock(return_value={"goals": "a cargo screening prototype"})
+        tools = make_tools(mock_console, draft_id=lambda: "run-test123")
+        rec = next(t for t in tools if t.name == "record_brief_section")
+        result = asyncio.get_event_loop().run_until_complete(
+            rec.on_invoke_tool(None, json.dumps({"section": "goals", "summary": "a cargo screening prototype"}))
+        )
+        mock_console.update_draft_brief.assert_called_once()
+        assert json.loads(result)["recorded"] == "goals"
 
     def test_check_status_calls_console(self, mock_console):
         tools = make_tools(mock_console)
@@ -94,6 +111,43 @@ class TestMakeTools:
         parsed = json.loads(result)
         assert parsed["type"] == "dep_request"
         assert "RAILWAY_TOKEN" in parsed["dep_names"]
+
+
+class TestChatToolOwnership:
+    """Run-scoped chat tools must enforce the same ownership rules as the HTTP layer."""
+
+    def test_member_cannot_check_status_of_foreign_run(self, mock_console):
+        mock_console.run_owner = MagicMock(return_value="other@example.com")
+        tools = make_tools(mock_console, viewer=lambda: ("user@example.com", "member"))
+        check = next(t for t in tools if t.name == "check_status")
+        result = asyncio.get_event_loop().run_until_complete(
+            check.on_invoke_tool(None, json.dumps({"run_id": "run-test123"}))
+        )
+        parsed = json.loads(result)
+        assert parsed.get("error") == "forbidden"
+        mock_console.status.assert_not_called()
+
+    def test_member_can_check_status_of_own_run(self, mock_console):
+        mock_console.run_owner = MagicMock(return_value="user@example.com")
+        tools = make_tools(mock_console, viewer=lambda: ("user@example.com", "member"))
+        check = next(t for t in tools if t.name == "check_status")
+        result = asyncio.get_event_loop().run_until_complete(
+            check.on_invoke_tool(None, json.dumps({"run_id": "run-test123"}))
+        )
+        parsed = json.loads(result)
+        assert "error" not in parsed
+        mock_console.status.assert_called_once_with("run-test123")
+
+    def test_admin_bypasses_ownership_check(self, mock_console):
+        mock_console.run_owner = MagicMock(return_value="other@example.com")
+        tools = make_tools(mock_console, viewer=lambda: ("admin@example.com", "admin"))
+        get = next(t for t in tools if t.name == "get_result")
+        result = asyncio.get_event_loop().run_until_complete(
+            get.on_invoke_tool(None, json.dumps({"run_id": "run-test123"}))
+        )
+        parsed = json.loads(result)
+        assert parsed.get("error") != "forbidden"
+        mock_console.evidence.assert_called_once_with("run-test123")
 
 
 def _fake_run_result(new_items, final_output=None):
@@ -142,9 +196,10 @@ class TestHandleMessage:
         runner = ChatAgentRunner(mock_console)
         with patch("agents.Runner.run", new=AsyncMock(return_value=_fake_run_result([item]))):
             rid, msgs = asyncio.get_event_loop().run_until_complete(
-                runner.handle_message(None, "build a guestbook", [], [])
+                # the server mints the draft id and passes it in; promotion keeps that same id
+                runner.handle_message("run-abcd1234", "build a guestbook", [], [])
             )
-        assert rid is not None
+        assert rid == "run-abcd1234"
         assert any(m.msg_type == "pipeline_started" for m in msgs)
 
     def test_request_dep_input_tool_call_is_parsed(self, mock_console):
@@ -165,17 +220,16 @@ class TestHandleMessage:
         dep_msg = next(m for m in msgs if m.msg_type == "dep_request")
         assert "RAILWAY_TOKEN" in dep_msg.metadata["dep_names"]
 
-    def test_start_pipeline_tool_includes_attachments(self, mock_console):
-        """The start_pipeline tool threads pending attachments into the RunRequest —
-        so an attached PDF is not dropped at the chat layer."""
-        files = [{"name": "proposal.pdf", "content_b64": "JVBERi0="}]
-        tools = make_tools(mock_console, attachments=lambda: files)
+    def test_start_pipeline_threads_interview_transcript(self, mock_console):
+        """The promote tool threads the interview transcript into Stage 1 (so the council reads it)."""
+        mock_console.promote_draft = MagicMock(return_value="run-x")
+        tools = make_tools(mock_console, draft_id=lambda: "run-x",
+                           interview=lambda: "USER: build from this\nAI: on it")
         start = next(t for t in tools if t.name == "start_pipeline")
         asyncio.get_event_loop().run_until_complete(
             start.on_invoke_tool(None, json.dumps({"description": "Build from this"}))
         )
-        req = mock_console.start_run.call_args[0][0]
-        assert req.context_files == files
+        assert mock_console.promote_draft.call_args.kwargs["interview_md"].startswith("USER:")
 
     def test_handle_message_stashes_attachments_before_running(self, mock_console):
         """Files must be available to the tools during the agent run, since
@@ -264,23 +318,26 @@ class TestChatAgentRunner:
 
 
 class TestModelPickThreading:
-    def test_start_pipeline_threads_model_picks_into_runrequest(self, mock_console):
-        """The UI's planning/impl model picks ride the chat body (like runtime) and must
-        reach the RunRequest, or the pick silently evaporates at the chat layer."""
-        tools = make_tools(mock_console,
-                           models=lambda: ("claude-fable-5", "claude-opus-4-8"))
-        start = next(t for t in tools if t.name == "start_pipeline")
-        asyncio.get_event_loop().run_until_complete(
-            start.on_invoke_tool(None, json.dumps({"description": "Build it"}))
-        )
-        req = mock_console.start_run.call_args[0][0]
-        assert req.planning_model == "claude-fable-5"
-        assert req.impl_model == "claude-opus-4-8"
+    """The UI's runtime/model/name picks now ride into create_draft (the server passes the chat
+    body's picks when minting the interview draft); promote_draft reads them from the draft state."""
 
-    def test_start_pipeline_threads_project_name(self, mock_console):
-        tools = make_tools(mock_console, project_name=lambda: "Acme CRM")
-        start = next(t for t in tools if t.name == "start_pipeline")
-        asyncio.get_event_loop().run_until_complete(
-            start.on_invoke_tool(None, json.dumps({"description": "Build it"}))
-        )
-        assert mock_console.start_run.call_args[0][0].name == "Acme CRM"
+    def _real_console(self, tmp_path):
+        from software_factory.console import Console
+        ids = iter([f"run-{i:08x}" for i in range(1, 9)])
+        return Console(str(tmp_path), launch=lambda *a, **k: {"pid": 1}, new_id=lambda: next(ids))
+
+    def test_create_draft_threads_model_picks_and_name(self, tmp_path):
+        c = self._real_console(tmp_path)
+        rid = c.create_draft(owner="op@x.ai", name="Acme CRM",
+                             planning_model="claude-fable-5", impl_model="claude-opus-4-8")
+        st = c._load_state(rid)
+        assert st.name == "Acme CRM"
+        assert st.planning_model == "claude-fable-5"
+        assert st.impl_model == "claude-opus-4-8"
+
+    def test_promote_preserves_draft_runtime(self, tmp_path):
+        c = self._real_console(tmp_path)
+        rid = c.create_draft(owner="op@x.ai", runtime="opencode")
+        c.update_draft_brief(rid, {"goals": "a cargo screening prototype for ground handlers"})
+        c.promote_draft(rid, description="cargo screening")
+        assert c._load_state(rid).runtime == "opencode"

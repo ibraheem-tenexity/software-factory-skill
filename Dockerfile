@@ -14,7 +14,7 @@ ENV PUPPETEER_CACHE_DIR=/ms-puppeteer
 # (omit=optional / no network for the optional dep) and leaves an unrunnable text stub.
 # We install it via the official native installer below instead.
 RUN npm install -g @railway/cli @playwright/mcp playwright @mermaid-js/mermaid-cli @supabase/mcp-server-supabase
-RUN pip3 install --break-system-packages openai-agents 'markitdown[pdf,docx]' pypandoc_binary mammoth 'psycopg[binary]>=3.1'
+RUN pip3 install --break-system-packages openai-agents 'markitdown[pdf,docx]' pypandoc_binary mammoth markdownify 'psycopg[binary]>=3.1' fastapi 'uvicorn[standard]'
 
 # Chromium + OS libs into a SHARED path so the non-root runtime user can use them.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
@@ -58,6 +58,12 @@ ENV SF_SWARM_BIN=/opt/swarm/swarm OPENCODE_SWARM_PLUGIN=/opt/swarm/swarm-plugin.
 
 WORKDIR /app
 COPY . /app
+
+# Build the React console SPA (served when SF_CONSOLE=react). Node is already in the base image,
+# so this is build-time only — the runtime is still uvicorn. Non-fatal: legacy index.html serves
+# if the build is skipped/fails.
+RUN cd /app/console/web && npm ci --no-audit --no-fund && npm run build || \
+    echo "[build] React console build skipped/failed — legacy index.html will serve"
 
 RUN mkdir -p /home/node/.claude/skills /ms-puppeteer \
     && ln -sfn /app /home/node/.claude/skills/software-factory \
