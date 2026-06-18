@@ -45,7 +45,8 @@ class AgentRecord:
     cached_tokens: int
     output_tokens: int
     reasoning_tokens: int
-    pr: Optional[int]
+    provenance: Optional[str]
+    provenance_type: Optional[str]
     diff_lines: int
     started_at: float
     ended_at: Optional[float]
@@ -72,7 +73,8 @@ class AgentRegistry:
                 cached_tokens INTEGER NOT NULL DEFAULT 0,
                 output_tokens INTEGER NOT NULL DEFAULT 0,
                 reasoning_tokens INTEGER NOT NULL DEFAULT 0,
-                pr INTEGER,
+                provenance TEXT,
+                provenance_type TEXT,
                 diff_lines INTEGER NOT NULL DEFAULT 0,
                 started_at REAL NOT NULL,
                 ended_at REAL
@@ -119,21 +121,24 @@ class AgentRegistry:
         outcome: str,
         usage: Optional[Usage] = None,
         cost_usd: float = 0.0,
-        pr: Optional[int] = None,
+        provenance: Optional[str] = None,
+        provenance_type: Optional[str] = None,
         diff_lines: int = 0,
     ) -> None:
         u = usage or Usage(model="")
         now = self._clock()
+        if provenance is not None and provenance_type is None:
+            provenance_type = "pr" if str(provenance).isdigit() else "commit"
         self._conn.execute(
             "UPDATE agents SET status=?, outcome=?, cost_usd=?, input_tokens=?, cached_tokens=?, "
-            "output_tokens=?, reasoning_tokens=?, pr=?, diff_lines=?, ended_at=? WHERE agent_id=?",
+            "output_tokens=?, reasoning_tokens=?, provenance=?, provenance_type=?, diff_lines=?, ended_at=? WHERE agent_id=?",
             (_STATUS_FOR.get(outcome, "failed"), outcome, cost_usd, u.input_tokens, u.cached_tokens,
-             u.output_tokens, u.reasoning_tokens, pr, diff_lines, now, agent_id),
+             u.output_tokens, u.reasoning_tokens, provenance, provenance_type, diff_lines, now, agent_id),
         )
         self._conn.commit()
         self._sink.emit(
             {"event": "record", "agent_id": agent_id, "outcome": outcome, "cost_usd": cost_usd,
-             "pr": pr, "diff_lines": diff_lines, "at": now}
+             "provenance": provenance, "provenance_type": provenance_type, "diff_lines": diff_lines, "at": now}
         )
 
     def get(self, agent_id: str) -> AgentRecord:
@@ -184,12 +189,12 @@ class AgentRegistry:
             f"spawned {c['spawned']} · running {c['running']} · done {c['done']} · "
             f"no-op {c['no_op']} · blocked {c['blocked']} · no-op rate {self.no_op_rate(run_id):.0%}",
             "",
-            "| agent | ticket | role | status | outcome | $ | PR |",
+            "| agent | ticket | role | status | outcome | $ | provenance |",
             "|---|---|---|---|---|---|---|",
         ]
         for r in rows:
             lines.append(
                 f"| {r['agent_id']} | {r['ticket_id']} | {r['role']} | {r['status']} | "
-                f"{r['outcome'] or ''} | {r['cost_usd']:.2f} | {r['pr'] or ''} |"
+                f"{r['outcome'] or ''} | {r['cost_usd']:.2f} | {r['provenance'] or ''} |"
             )
         return "\n".join(lines) + "\n"

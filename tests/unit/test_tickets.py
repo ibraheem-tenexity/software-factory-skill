@@ -53,7 +53,7 @@ def test_mark_done_refuses_without_a_real_pr(tmp_path):
     ts = fresh(tmp_path)
     tid = ts.create_ticket("t", acceptance="a", dod="d", wave=1)
     with pytest.raises(HollowWorkError):
-        ts.mark_done(tid, pr=None, diff_lines=120)
+        ts.mark_done(tid, provenance=None, diff_lines=120)
     assert ts.get(tid).status != "done"
 
 
@@ -61,17 +61,18 @@ def test_mark_done_refuses_an_empty_diff(tmp_path):
     ts = fresh(tmp_path)
     tid = ts.create_ticket("t", acceptance="a", dod="d", wave=1)
     with pytest.raises(HollowWorkError):
-        ts.mark_done(tid, pr=7, diff_lines=0)
+        ts.mark_done(tid, provenance="7", diff_lines=0)
     assert ts.get(tid).status != "done"
 
 
 def test_mark_done_with_a_real_merged_change_succeeds(tmp_path):
     ts = fresh(tmp_path)
     tid = ts.create_ticket("t", acceptance="a", dod="d", wave=1)
-    ts.mark_done(tid, pr=7, diff_lines=120)
+    ts.mark_done(tid, provenance="7", diff_lines=120)
     t = ts.get(tid)
     assert t.status == "done"
-    assert t.pr == 7
+    assert t.provenance == "7"
+    assert t.provenance_type == "pr"
     assert tid not in [x.id for x in ts.open_tickets(wave=1)]
 
 
@@ -86,10 +87,11 @@ def test_done_tickets_returns_only_closed_ones_with_their_pr(tmp_path):
     ts = fresh(tmp_path)
     a = ts.create_ticket("done one", acceptance="a", dod="d", wave=1)
     ts.create_ticket("still open", acceptance="a", dod="d", wave=1)
-    ts.mark_done(a, pr=7, diff_lines=120)
+    ts.mark_done(a, provenance="7", diff_lines=120)
     done = ts.done_tickets()
     assert [t.id for t in done] == [a]
-    assert done[0].pr == 7 and done[0].diff_lines == 120
+    assert done[0].provenance == "7" and done[0].diff_lines == 120
+    assert done[0].provenance_type == "pr"
 
 
 def test_render_markdown_view_lists_tickets_and_status(tmp_path):

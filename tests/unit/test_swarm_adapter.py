@@ -26,7 +26,8 @@ FIXTURE_MODEL = "openrouter/moonshotai/kimi-k2.6"
 
 def _ticket(tid=7, title="Add login form", acceptance="form submits", dod="tests pass"):
     return Ticket(id=tid, title=title, acceptance=acceptance, dod=dod,
-                  wave=1, status="open", agent=None, pr=None, diff_lines=0)
+                  wave=1, status="open", agent=None, provenance=None,
+                  provenance_type=None, diff_lines=0)
 
 
 # ---- events parsing -------------------------------------------------------------------

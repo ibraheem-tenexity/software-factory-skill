@@ -35,7 +35,8 @@ def build_evidence(state: RunState, registry: AgentRegistry, tickets: TicketStor
             "total_cost_usd": round(total_cost, 6),
         },
         "done_tickets": [
-            {"id": t.id, "title": t.title, "pr": t.pr, "diff_lines": t.diff_lines}
+            {"id": t.id, "title": t.title, "provenance": t.provenance,
+             "provenance_type": t.provenance_type, "diff_lines": t.diff_lines}
             for t in tickets.done_tickets()
         ],
     }
@@ -68,7 +69,7 @@ def verify_evidence(bundle: dict) -> tuple[bool, list[str]]:
         reasons.append("recorded agent cost exceeds budget spend — accounting is inconsistent")
 
     for t in bundle.get("done_tickets", []):
-        if not t.get("pr") or t.get("diff_lines", 0) <= 0:
+        if not t.get("provenance") or t.get("diff_lines", 0) <= 0:
             reasons.append(f"ticket {t.get('id')} marked done without provenance (PR or commit sha) / real diff")
 
     if bundle.get("deploy_url") and not bundle.get("done_tickets"):

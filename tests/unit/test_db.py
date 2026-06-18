@@ -60,7 +60,7 @@ def test_cli_spawn_and_finish_agent(tmp_path):
     assert main(["finish-agent", runs, "run-abc12345", "t7", "real_diff", "0.12", "9", "40"]) == 0
     rec = AgentRegistry(db_path(runs, "run-abc12345")).get("t7")
     assert rec.role == "builder" and rec.phase == "build" and rec.ticket_id == 7
-    assert rec.status == "done" and rec.pr == 9 and rec.diff_lines == 40
+    assert rec.status == "done" and rec.provenance == "9" and rec.diff_lines == 40
 
 
 def test_cli_rejects_malformed_run_id_without_touching_db(tmp_path):

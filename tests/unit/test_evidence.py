@@ -26,11 +26,11 @@ def real_run(tmp_path):
     reg = AgentRegistry(str(tmp_path / "agents.db"), clock=lambda: 1)
     reg.spawn("a1", "run-1", 1, "build", "claude-opus-4-8")
     reg.record("a1", outcome="real_diff", usage=Usage("claude-opus-4-8", output_tokens=4000),
-               cost_usd=0.42, pr=7, diff_lines=120)
+               cost_usd=0.42, provenance="7", diff_lines=120)
 
     tickets = TicketStore(str(tmp_path / "tickets.db"))
     tid = tickets.create_ticket("guestbook", acceptance="submit->see", dod="green", wave=1)
-    tickets.mark_done(tid, pr=7, diff_lines=120)
+    tickets.mark_done(tid, provenance="7", diff_lines=120)
     return state, reg, tickets
 
 
@@ -40,7 +40,8 @@ def test_build_evidence_captures_skill_marker_agents_and_tickets(tmp_path):
     assert b["skill"] == "software-factory"
     assert b["agents"]["counts"]["spawned"] == 1
     assert b["agents"]["total_cost_usd"] == 0.42
-    assert b["done_tickets"][0]["pr"] == 7
+    assert b["done_tickets"][0]["provenance"] == "7"
+    assert b["done_tickets"][0]["provenance_type"] == "pr"
     assert b["deploy_url"] == "https://guestbook.up.railway.app"
 
 
@@ -73,7 +74,7 @@ def test_verify_flags_a_deploy_url_with_no_agents_as_fabrication():
 def test_verify_flags_a_hollow_done_ticket():
     bundle = {"skill": "software-factory", "deploy_url": None, "spent_usd": 0.42,
               "agents": {"counts": {"spawned": 1}, "total_cost_usd": 0.42},
-              "done_tickets": [{"id": 1, "pr": None, "diff_lines": 0, "title": "t"}]}
+              "done_tickets": [{"id": 1, "provenance": None, "diff_lines": 0, "title": "t"}]}
     ok, reasons = verify_evidence(bundle)
     assert ok is False
     assert any("ticket 1" in r for r in reasons)
