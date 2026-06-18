@@ -66,6 +66,15 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## Architecture doc
+
+`docs/ARCHITECTURE.md` is the canonical description of how the system is built. **Update it on every
+major structural change** — new/removed service, datastore or schema change, a new pipeline stage or
+runtime, an auth/ownership change, or anything that moves where state lives. Keep it aligned with the
+diagrams in `docs/` (`docs/schema-erd.svg` is the source-of-truth ERD, with `docs/schema-erd.md` the
+schema detail; `docs/service-architecture.svg` is the service/storage topology). If your change makes
+the doc or a diagram wrong, fixing them is part of the change, not a follow-up.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

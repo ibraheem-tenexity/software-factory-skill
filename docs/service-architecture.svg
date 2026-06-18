@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1380" height="880" viewBox="0 0 1380 880" role="img" aria-labelledby="title desc">
+  <title id="title">Software Factory Service Architecture</title>
+  <desc id="desc">Architecture diagram for the FastAPI-era software factory console, including Railway services, Supabase Postgres and Storage, stage agents, MCP tools, and external integrations.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .zone { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; rx: 14; }
+      .railway { fill: #eef2ff; stroke: #4f46e5; stroke-width: 2; rx: 10; }
+      .supabase { fill: #ecfdf5; stroke: #047857; stroke-width: 2; rx: 10; }
+      .external { fill: #fff7ed; stroke: #c2410c; stroke-width: 1.7; rx: 10; }
+      .agent { fill: #fdf4ff; stroke: #a21caf; stroke-width: 1.7; rx: 10; }
+      .volume { fill: #f1f5f9; stroke: #475569; stroke-width: 1.7; rx: 10; }
+      .title { font: 700 24px Arial, sans-serif; fill: #0f172a; }
+      .zone-title { font: 700 15px Arial, sans-serif; fill: #334155; }
+      .label { font: 700 15px Arial, sans-serif; fill: #0f172a; }
+      .text { font: 12px Arial, sans-serif; fill: #334155; }
+      .tiny { font: 11px Arial, sans-serif; fill: #64748b; }
+      .edge { stroke: #334155; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
+      .edge-soft { stroke: #64748b; stroke-width: 1.5; fill: none; stroke-dasharray: 6 5; marker-end: url(#arrow); }
+      .edge-green { stroke: #047857; stroke-width: 1.9; fill: none; marker-end: url(#arrow); }
+      .edge-orange { stroke: #c2410c; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1380" height="880"/>
+  <text class="title" x="38" y="42">Software Factory Service Architecture</text>
+  <text class="tiny" x="38" y="64">FastAPI target: replace HTTP shell, keep pipeline/orchestration contracts, move blobs to Supabase Storage later.</text>
+
+  <rect class="zone" x="30" y="92" width="230" height="720"/>
+  <text class="zone-title" x="52" y="120">Operators</text>
+
+  <rect class="zone" x="290" y="92" width="450" height="720"/>
+  <text class="zone-title" x="312" y="120">Railway: factory-console service</text>
+
+  <rect class="zone" x="770" y="92" width="280" height="720"/>
+  <text class="zone-title" x="792" y="120">Supabase: software-factory-as-a-skill</text>
+
+  <rect class="zone" x="1080" y="92" width="260" height="720"/>
+  <text class="zone-title" x="1102" y="120">External services</text>
+
+  <rect class="external" x="58" y="160" width="170" height="90"/>
+  <text class="label" x="80" y="190">Browser UI</text>
+  <text class="text" x="80" y="212">Console app</text>
+  <text class="text" x="80" y="232">Chat + canvas + SSE</text>
+
+  <rect class="external" x="58" y="300" width="170" height="76"/>
+  <text class="label" x="80" y="330">Service callers</text>
+  <text class="text" x="80" y="352">X-SF-Service-Token</text>
+
+  <rect class="railway" x="330" y="150" width="250" height="126"/>
+  <text class="label" x="352" y="180">FastAPI console</text>
+  <text class="text" x="352" y="204">Auth + routes + SSE</text>
+  <text class="text" x="352" y="224">Chat endpoint</text>
+  <text class="text" x="352" y="244">Run ownership boundary</text>
+
+  <rect class="railway" x="330" y="318" width="250" height="122"/>
+  <text class="label" x="352" y="348">Console orchestrator</text>
+  <text class="text" x="352" y="372">Console.start_run()</text>
+  <text class="text" x="352" y="392">Stage gates + budget</text>
+  <text class="text" x="352" y="412">Background poller</text>
+
+  <rect class="volume" x="330" y="482" width="250" height="122"/>
+  <text class="label" x="352" y="512">Railway /data volume</text>
+  <text class="text" x="352" y="536">runs/&lt;id&gt;/input</text>
+  <text class="text" x="352" y="556">run.log, chat.jsonl</text>
+  <text class="text" x="352" y="576">workspace scratch/cache</text>
+
+  <rect class="agent" x="330" y="646" width="250" height="112"/>
+  <text class="label" x="352" y="676">Stage subprocesses</text>
+  <text class="text" x="352" y="700">claude -p or opencode run</text>
+  <text class="text" x="352" y="720">S1 research, S2 design</text>
+  <text class="text" x="352" y="740">S3 build/deploy/test</text>
+
+  <rect class="supabase" x="805" y="150" width="210" height="126"/>
+  <text class="label" x="827" y="180">Postgres state DB</text>
+  <text class="text" x="827" y="204">public.users</text>
+  <text class="text" x="827" y="224">public.sf_runs</text>
+  <text class="text" x="827" y="244">public.run_index</text>
+  <text class="tiny" x="827" y="262">+ per-run schemas</text>
+
+  <rect class="supabase" x="805" y="330" width="210" height="126"/>
+  <text class="label" x="827" y="360">Supabase Storage</text>
+  <text class="text" x="827" y="384">bucket: factory-run-blobs</text>
+  <text class="text" x="827" y="404">inputs, artifacts</text>
+  <text class="text" x="827" y="424">logs, chat, snapshots</text>
+  <text class="tiny" x="827" y="442">Target source of truth</text>
+
+  <rect class="supabase" x="805" y="510" width="210" height="112"/>
+  <text class="label" x="827" y="540">public.run_blobs</text>
+  <text class="text" x="827" y="564">run_id, kind</text>
+  <text class="text" x="827" y="584">storage_bucket/key</text>
+  <text class="text" x="827" y="604">size, sha256, type</text>
+
+  <rect class="railway" x="805" y="670" width="210" height="92"/>
+  <text class="label" x="827" y="700">Run app services</text>
+  <text class="text" x="827" y="724">sf-&lt;run_id&gt;</text>
+  <text class="text" x="827" y="744">Live demo + app DB</text>
+
+  <rect class="external" x="1112" y="140" width="190" height="80"/>
+  <text class="label" x="1134" y="170">Google OAuth</text>
+  <text class="text" x="1134" y="194">Console sign-in</text>
+
+  <rect class="external" x="1112" y="252" width="190" height="92"/>
+  <text class="label" x="1134" y="282">OpenAI/OpenRouter</text>
+  <text class="text" x="1134" y="306">Concierge model</text>
+  <text class="text" x="1134" y="326">Claude/Kimi runtime</text>
+
+  <rect class="external" x="1112" y="376" width="190" height="92"/>
+  <text class="label" x="1134" y="406">GitHub</text>
+  <text class="text" x="1134" y="430">Source repos</text>
+  <text class="text" x="1134" y="450">PR provenance</text>
+
+  <rect class="external" x="1112" y="500" width="190" height="92"/>
+  <text class="label" x="1134" y="530">Railway MCP</text>
+  <text class="text" x="1134" y="554">create service</text>
+  <text class="text" x="1134" y="574">deploy + domains</text>
+
+  <rect class="external" x="1112" y="624" width="190" height="92"/>
+  <text class="label" x="1134" y="654">Playwright MCP</text>
+  <text class="text" x="1134" y="678">Live happy-flow</text>
+  <text class="text" x="1134" y="698">Verification gate</text>
+
+  <rect class="external" x="1112" y="748" width="190" height="70"/>
+  <text class="label" x="1134" y="778">Langfuse + Resend</text>
+  <text class="text" x="1134" y="802">Traces + emails</text>
+
+  <path class="edge" d="M228 198 C270 198, 290 198, 330 198"/>
+  <path class="edge" d="M228 338 C270 338, 290 250, 330 236"/>
+  <path class="edge" d="M455 276 L455 318"/>
+  <path class="edge" d="M455 440 L455 482"/>
+  <path class="edge" d="M455 604 L455 646"/>
+  <path class="edge" d="M580 214 C668 214, 725 214, 805 214"/>
+  <path class="edge-green" d="M580 544 C655 512, 728 412, 805 392"/>
+  <path class="edge-green" d="M580 548 C660 590, 730 574, 805 566"/>
+  <path class="edge-soft" d="M1015 566 C1032 520, 1032 438, 1015 392"/>
+  <path class="edge" d="M580 702 C650 702, 735 712, 805 716"/>
+  <path class="edge-orange" d="M580 184 C780 120, 1000 160, 1112 178"/>
+  <path class="edge-orange" d="M580 206 C820 205, 1000 275, 1112 298"/>
+  <path class="edge-orange" d="M580 700 C770 570, 970 430, 1112 422"/>
+  <path class="edge-orange" d="M580 714 C790 650, 995 560, 1112 546"/>
+  <path class="edge-orange" d="M580 724 C790 700, 995 674, 1112 670"/>
+  <path class="edge-orange" d="M580 394 C800 525, 985 738, 1112 784"/>
+
+  <text class="tiny" x="38" y="846">Blob answer: durable bytes go to Supabase Storage bucket factory-run-blobs; public.run_blobs stores pointers; Railway /data remains cache/scratch until Storage adapter lands.</text>
+</svg>
