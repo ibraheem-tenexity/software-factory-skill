@@ -338,17 +338,19 @@ class ChatAgentRunner:
             self._pending_interview_md = ""
 
         response_msgs = []
+        text_parts: list[str] = []
         now = time.time()
 
         for item in result.new_items:
             if isinstance(item, MessageOutputItem):
                 # raw_item is a ResponseOutputMessage; ItemHelpers walks its
-                # ResponseOutputText parts and concatenates the text.
+                # ResponseOutputText parts and concatenates the text. The SDK can emit MORE THAN
+                # ONE MessageOutputItem in a single turn (the model pausing around tool calls, or
+                # just being chatty) — surfacing each as its own bubble showed the user two
+                # questions in a row. Collapse all of a turn's assistant text into ONE message.
                 text = ItemHelpers.text_message_output(item)
                 if text:
-                    response_msgs.append(ChatMessage(
-                        role="assistant", content=text, msg_type="text", ts=now,
-                    ))
+                    text_parts.append(text)
             elif isinstance(item, ToolCallItem) and isinstance(item.raw_item, ResponseFunctionToolCall):
                 call = item.raw_item  # typed: .name and .arguments (JSON str) always present
                 # Required params are schema-validated by the SDK against OpenAI, but a
@@ -375,6 +377,13 @@ class ChatAgentRunner:
                         msg_type="dep_request", ts=now,
                         metadata={"run_id": run_id, "dep_names": dep_names},
                     ))
+
+        # One assistant bubble per turn: the reply (joined text) goes first, then any
+        # tool-driven system messages (pipeline_started / dep_request).
+        if text_parts:
+            response_msgs.insert(0, ChatMessage(
+                role="assistant", content="\n\n".join(text_parts), msg_type="text", ts=now,
+            ))
 
         if result.final_output and not response_msgs:
             response_msgs.append(ChatMessage(
