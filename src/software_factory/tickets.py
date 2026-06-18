@@ -25,7 +25,8 @@ class Ticket:
     wave: int
     status: str
     agent: Optional[str]
-    pr: Optional[int]
+    provenance: Optional[str]
+    provenance_type: Optional[str]
     diff_lines: int
 
 
@@ -42,7 +43,8 @@ class TicketStore:
                 wave INTEGER NOT NULL,
                 status TEXT NOT NULL DEFAULT 'open',
                 agent TEXT,
-                pr INTEGER,
+                provenance TEXT,
+                provenance_type TEXT,
                 diff_lines INTEGER NOT NULL DEFAULT 0
             )
             """
@@ -69,19 +71,30 @@ class TicketStore:
         )
         self._conn.commit()
 
-    def mark_done(self, ticket_id: int, pr, diff_lines: int) -> None:
-        """Close a ticket against REAL, attributable work. `pr` is the work's provenance:
-        a merged PR number (claude orchestrator workflow) OR a commit sha string (monolithic
-        opencode workflow — direct commits to main have no PRs; run-45b8c4d5 proved the gate
-        was unsatisfiable for Kimi as previously specced). Either way the no-hollow-close
-        property holds: non-empty provenance + a non-zero diff."""
-        if not pr or (isinstance(pr, str) and len(pr.strip()) < 7):
+    def mark_done(self, ticket_id: int, provenance, diff_lines: int,
+                  provenance_type: str | None = None) -> None:
+        """Close a ticket against REAL, attributable work. `provenance` is the work's
+        proof: a merged PR number or URL (claude orchestrator workflow) OR a commit sha
+        string (monolithic opencode workflow — direct commits to main have no PRs;
+        run-45b8c4d5 proved the gate was unsatisfiable for Kimi as previously specced).
+        Either way the no-hollow-close property holds: non-empty provenance + a non-zero
+        diff."""
+        if provenance is None:
+            provenance = ""
+        if not isinstance(provenance, str):
+            provenance = str(provenance)
+        provenance = provenance.strip()
+        if not provenance:
+            raise HollowWorkError(f"ticket {ticket_id}: refusing 'done' without a merged PR or commit sha")
+        if provenance_type is None:
+            provenance_type = "pr" if provenance.isdigit() else "commit"
+        if provenance_type == "commit" and len(provenance) < 7:
             raise HollowWorkError(f"ticket {ticket_id}: refusing 'done' without a merged PR or commit sha")
         if diff_lines <= 0:
             raise HollowWorkError(f"ticket {ticket_id}: refusing 'done' with an empty diff")
         self._conn.execute(
-            "UPDATE tickets SET status = 'done', pr = ?, diff_lines = ? WHERE id = ?",
-            (pr, diff_lines, ticket_id),
+            "UPDATE tickets SET status = 'done', provenance = ?, provenance_type = ?, diff_lines = ? WHERE id = ?",
+            (provenance, provenance_type, diff_lines, ticket_id),
         )
         self._conn.commit()
 

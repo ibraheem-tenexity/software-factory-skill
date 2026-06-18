@@ -53,7 +53,7 @@ def test_happy_slice_reaches_done_under_budget(tmp_path):
     budget.charge(Usage("claude-opus-4-8", input_tokens=8000, output_tokens=4000))
     pr = gh.open_pr(branch="feat/guestbook", title="guestbook", body="impl")
     assert gh.merge_if_green(pr, diff_lines=120) is True
-    tickets.mark_done(tid, pr=pr, diff_lines=120)
+    tickets.mark_done(tid, provenance=pr, diff_lines=120)
     assert tickets.open_tickets(wave=1) == []
     state.phase = "deploy"; state.save()
 
@@ -88,7 +88,7 @@ def test_empty_diff_build_cannot_reach_done(tmp_path):
 
     assert gh.merge_if_green(pr, diff_lines=0) is False   # VCS guard
     try:
-        tickets.mark_done(tid, pr=pr, diff_lines=0)        # ticket guard
+        tickets.mark_done(tid, provenance=pr, diff_lines=0)        # ticket guard
         assert False, "should have refused hollow done"
     except HollowWorkError:
         pass

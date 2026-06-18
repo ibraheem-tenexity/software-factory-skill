@@ -75,7 +75,7 @@ def test_status_reflects_agents_phase_and_deployed_url(tmp_path):
     reg = AgentRegistry(paths["agents_db"], clock=lambda: 1)
     reg.spawn("a1", run_id, 1, "build", "claude-opus-4-8")
     reg.record("a1", outcome="real_diff", usage=Usage("claude-opus-4-8", output_tokens=4000),
-               cost_usd=0.42, pr=7, diff_lines=120)
+               cost_usd=0.42, provenance="7", diff_lines=120)
 
     state = c._load_state(run_id)
     state.phase = "done"
@@ -653,7 +653,7 @@ def test_graph_agent_status_reflects_outcome(tmp_path):
     rid = c.start_run(RunRequest(description="x"))
     reg = AgentRegistry(db_path(str(tmp_path), rid))
     reg.spawn("a1", rid, 1, "builder", "claude-sonnet-4-6", phase="build")
-    reg.record("a1", outcome="real_diff", usage=Usage(model="claude-sonnet-4-6"), cost_usd=0.1, pr=7, diff_lines=10)
+    reg.record("a1", outcome="real_diff", usage=Usage(model="claude-sonnet-4-6"), cost_usd=0.1, provenance="7", diff_lines=10)
     a = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "agent" and n["data"]["label"] == "builder"][0]
     assert a["status"] == "done"
 
@@ -738,7 +738,7 @@ def test_stage3_done_requires_playwright_pass_and_real_agents(tmp_path):
 
     # A ticket built monolithically (no agent claimed it) -> done with agent=None
     tid = ts.create_ticket("feature", acceptance="a", dod="d", wave=1)
-    ts.mark_done(tid, pr=1, diff_lines=10)
+    ts.mark_done(tid, provenance="1", diff_lines=10)
     assert c.detect_stage3_done(rid) is False         # no Playwright pass yet
 
     # Passing Playwright verification, but the done ticket has no agent -> still not done (gate a)
@@ -748,7 +748,7 @@ def test_stage3_done_requires_playwright_pass_and_real_agents(tmp_path):
     # Build it properly: a native Task agent claims THEN completes the ticket (agent retained on done)
     reg.spawn("ag1", rid, tid, "builder", "claude-sonnet-4-6", phase="build")
     ts.claim(tid, "ag1")
-    ts.mark_done(tid, pr=1, diff_lines=10)
+    ts.mark_done(tid, provenance="1", diff_lines=10)
     assert c.detect_stage3_done(rid) is True
     st = c.status(rid)
     assert st["done"] is True and st["deploy_url"] == "https://sf-x.up.railway.app"
@@ -848,11 +848,11 @@ def test_evidence_verifies_the_run_was_really_built_by_the_skill(tmp_path):
     paths = run_paths(str(tmp_path), run_id)
     reg = AgentRegistry(paths["agents_db"], clock=lambda: 1)
     reg.spawn("a1", run_id, 1, "build", "claude-opus-4-8")
-    reg.record("a1", outcome="real_diff", cost_usd=0.42, pr=7, diff_lines=120)
+    reg.record("a1", outcome="real_diff", cost_usd=0.42, provenance="7", diff_lines=120)
     from software_factory.tickets import TicketStore
     ts = TicketStore(paths["tickets_db"])
     tid = ts.create_ticket("guestbook", acceptance="a", dod="d", wave=1)
-    ts.mark_done(tid, pr=7, diff_lines=120)
+    ts.mark_done(tid, provenance="7", diff_lines=120)
 
     state = c._load_state(run_id)
     state.phase = "done"; state.deploy_url = "https://g.up.railway.app"; state.spent_usd = 0.42

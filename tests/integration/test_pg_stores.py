@@ -63,7 +63,7 @@ def test_full_store_round_trip_on_live_pg(pg_env):
     reg = AgentRegistry(db_path)
     reg.spawn("a1", rid, tid, "build", "claude-sonnet-4-6")
     reg.record("a1", outcome="real_diff", usage=Usage("claude-sonnet-4-6"), cost_usd=0.1,
-               pr=1, diff_lines=5)
+               provenance=1, diff_lines=5)
     assert reg.counts(rid)["done"] == 1
 
     assert rid in {r["run_id"] for r in dbshim.registry_runs()}

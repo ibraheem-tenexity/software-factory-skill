@@ -185,7 +185,8 @@ _USAGE = (
     "  set-gate <runs_dir> <run_id> <name> <status>\n"
     "  record-verification <runs_dir> <run_id> <url> <passed:0|1> <result-json>\n"
     "  spawn-agent <runs_dir> <run_id> <agent_id> <role> <model> [phase] [ticket_id]\n"
-    "  finish-agent <runs_dir> <run_id> <agent_id> <outcome> [cost_usd] [pr] [diff_lines]\n"
+    "  finish-agent <runs_dir> <run_id> <agent_id> <outcome> [cost_usd] [provenance] [diff_lines]\n"
+    "                         provenance = PR number or commit SHA; type inferred (digits='pr', else='commit')\n"
 )
 
 
@@ -229,9 +230,11 @@ def main(argv: list[str]) -> int:
         from .agents import AgentRegistry
         agent_id, outcome = rest[0], rest[1]
         cost = float(rest[2]) if len(rest) > 2 and rest[2] not in ("", "-") else 0.0
-        pr = int(rest[3]) if len(rest) > 3 and rest[3] not in ("", "-") else None
+        provenance = rest[3] if len(rest) > 3 and rest[3] not in ("", "-") else None
         diff_lines = int(rest[4]) if len(rest) > 4 and rest[4] not in ("", "-") else 0
-        AgentRegistry(db_path(runs_dir, run_id)).record(agent_id, outcome, cost_usd=cost, pr=pr, diff_lines=diff_lines)
+        AgentRegistry(db_path(runs_dir, run_id)).record(agent_id, outcome, cost_usd=cost,
+                                                        provenance=provenance,
+                                                        diff_lines=diff_lines)
     else:
         sys.stderr.write(_USAGE)
         return 2

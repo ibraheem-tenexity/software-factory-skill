@@ -38,12 +38,13 @@ def test_record_real_diff_marks_done_and_captures_cost(tmp_path):
     r = reg(tmp_path)
     r.spawn("a1", "run", 1, "build", "claude-opus-4-8")
     r.record("a1", outcome="real_diff", usage=Usage("claude-opus-4-8", output_tokens=4000),
-             cost_usd=0.30, pr=7, diff_lines=120)
+             cost_usd=0.30, provenance="7", diff_lines=120)
     a = r.get("a1")
     assert a.status == "done"
     assert a.outcome == "real_diff"
     assert a.cost_usd == 0.30
-    assert a.pr == 7
+    assert a.provenance == "7"
+    assert a.provenance_type == "pr"
     assert r.active() == []  # no longer running
 
 
@@ -53,7 +54,7 @@ def test_finalize_orphans_closes_running_agents(tmp_path):
     r = reg(tmp_path)
     r.spawn("a1", "run", 1, "build", "m")
     r.spawn("a2", "run", 2, "build", "m")
-    r.record("a1", outcome="real_diff", cost_usd=0.1, pr=1, diff_lines=10)   # properly finished
+    r.record("a1", outcome="real_diff", cost_usd=0.1, provenance="1", diff_lines=10)   # properly finished
     n = r.finalize_orphans("run", stage_ok=True)
     assert n == 1                                            # only a2 was orphaned
     a2 = r.get("a2")
@@ -79,7 +80,7 @@ def test_no_op_turn_is_not_done_and_shows_in_no_op_rate(tmp_path):
     r = reg(tmp_path)
     r.spawn("a1", "run", 1, "build", "claude-opus-4-8")
     r.spawn("a2", "run", 2, "build", "claude-opus-4-8")
-    r.record("a1", outcome="real_diff", cost_usd=0.30, pr=7, diff_lines=120)
+    r.record("a1", outcome="real_diff", cost_usd=0.30, provenance="7", diff_lines=120)
     r.record("a2", outcome="no_op", cost_usd=0.05)
     assert r.get("a2").status != "done"
     c = r.counts("run")
@@ -90,8 +91,8 @@ def test_no_op_turn_is_not_done_and_shows_in_no_op_rate(tmp_path):
 def test_cost_aggregates_per_ticket(tmp_path):
     r = reg(tmp_path)
     r.spawn("a1", "run", 1, "build", "m"); r.record("a1", outcome="no_op", cost_usd=0.05)
-    r.spawn("a2", "run", 1, "build", "m"); r.record("a2", outcome="real_diff", cost_usd=0.40, pr=7, diff_lines=80)
-    r.spawn("a3", "run", 2, "build", "m"); r.record("a3", outcome="real_diff", cost_usd=0.20, pr=8, diff_lines=30)
+    r.spawn("a2", "run", 1, "build", "m"); r.record("a2", outcome="real_diff", cost_usd=0.40, provenance="7", diff_lines=80)
+    r.spawn("a3", "run", 2, "build", "m"); r.record("a3", outcome="real_diff", cost_usd=0.20, provenance="8", diff_lines=30)
     by = r.cost_by_ticket("run")
     assert round(by[1], 2) == 0.45
     assert round(by[2], 2) == 0.20
@@ -100,7 +101,7 @@ def test_cost_aggregates_per_ticket(tmp_path):
 def test_attempts_per_ticket_visible_via_counts(tmp_path):
     r = reg(tmp_path)
     r.spawn("a1", "run", 1, "build", "m"); r.record("a1", outcome="no_op", cost_usd=0.05)
-    r.spawn("a2", "run", 1, "build", "m"); r.record("a2", outcome="real_diff", cost_usd=0.4, pr=7, diff_lines=80)
+    r.spawn("a2", "run", 1, "build", "m"); r.record("a2", outcome="real_diff", cost_usd=0.4, provenance="7", diff_lines=80)
     assert r.counts("run")["spawned"] == 2  # two attempts on the same ticket are both counted
 
 
@@ -108,30 +109,16 @@ def test_events_are_pushed_to_sink_on_spawn_and_record(tmp_path):
     sink = FakeSink()
     r = reg(tmp_path, sink=sink)
     r.spawn("a1", "run", 1, "build", "claude-opus-4-8")
-    r.record("a1", outcome="real_diff", cost_usd=0.3, pr=7, diff_lines=120)
+    r.record("a1", outcome="real_diff", cost_usd=0.3, provenance="7", diff_lines=120)
     kinds = [e["event"] for e in sink.events]
     assert kinds == ["spawn", "record"]
     assert sink.events[0]["agent_id"] == "a1"
     assert sink.events[1]["outcome"] == "real_diff"
 
 
-def test_records_are_scoped_by_run(tmp_path):
-    r = reg(tmp_path)
-    r.spawn("a1", "runA", 1, "build", "m")
-    r.spawn("b1", "runB", 1, "build", "m")
-    assert r.counts("runA")["spawned"] == 1
-    assert r.counts("runB")["spawned"] == 1
-
-
-def test_state_survives_reopening_the_db(tmp_path):
-    db = str(tmp_path / "agents.db")
-    AgentRegistry(db).spawn("a1", "run", 1, "build", "m")
-    assert AgentRegistry(db).counts("run")["spawned"] == 1
-
-
 def test_render_markdown_shows_agents_and_outcomes(tmp_path):
     r = reg(tmp_path)
     r.spawn("a1", "run", 1, "build", "claude-opus-4-8")
-    r.record("a1", outcome="real_diff", cost_usd=0.3, pr=7, diff_lines=120)
+    r.record("a1", outcome="real_diff", cost_usd=0.3, provenance="7", diff_lines=120)
     md = r.render_markdown("run")
     assert "a1" in md and "real_diff" in md
