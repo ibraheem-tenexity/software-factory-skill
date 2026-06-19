@@ -396,6 +396,30 @@ class UserMgmtIn(BaseModel):
     role: str | None = None
 
 
+class OrgIn(BaseModel):
+    name: str = ""
+    industry: str | None = None
+    sub_focus: list = []
+    headcount: str | None = None
+    revenue: str | None = None
+    location: str | None = None
+    website: str | None = None
+    connected_systems: list = []
+    designation: str | None = None
+    role_description: str | None = None
+
+
+class OrgPatchIn(BaseModel):
+    name: str | None = None
+    industry: str | None = None
+    sub_focus: list | None = None
+    headcount: str | None = None
+    revenue: str | None = None
+    location: str | None = None
+    website: str | None = None
+    connected_systems: list | None = None
+
+
 class ChatIn(BaseModel):
     run_id: str | None = None
     message: str = ""
@@ -509,6 +533,38 @@ def manage_users(body: UserMgmtIn, v: tuple = Depends(require_admin)):
     else:
         users.upsert(email, role, by=v[0] or "admin")
     return {"users": users.list_users()}
+
+
+# ── Organization (onboarding front door) ──────────────────────────────────────────────────────
+# The onboarding screen reads GET /api/org on load: no org on file → first-time path; an org →
+# returning path. POST creates the org + links the current user; PATCH is the Manage editor.
+@app.get("/api/org")
+def get_org(v: tuple = Depends(require_authed)):
+    return {"org": users.org_for_user(v[0]) if v[0] else None}
+
+
+@app.post("/api/org")
+def create_org(body: OrgIn, v: tuple = Depends(require_authed)):
+    if not (body.name or "").strip():
+        raise HTTPException(status_code=400, detail="name required")
+    oid = users.create_org(
+        body.name, industry=body.industry, sub_focus=body.sub_focus,
+        headcount=body.headcount, revenue=body.revenue, location=body.location,
+        website=body.website, connected_systems=body.connected_systems, by=v[0] or "")
+    if v[0]:
+        users.set_profile(v[0], org_id=oid, designation=body.designation,
+                          role_description=body.role_description)
+    return {"org": users.get_org(oid)}
+
+
+@app.patch("/api/org")
+def patch_org(body: OrgPatchIn, v: tuple = Depends(require_authed)):
+    org = users.org_for_user(v[0]) if v[0] else None
+    if not org:
+        raise HTTPException(status_code=404, detail="no org on file")
+    fields = {k: val for k, val in body.model_dump().items() if val is not None}
+    users.update_org(org["id"], **fields)
+    return {"org": users.get_org(org["id"])}
 
 
 # ── Auth exchange ───────────────────────────────────────────────────────────────────────────

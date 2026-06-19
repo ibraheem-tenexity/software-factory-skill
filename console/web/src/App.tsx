@@ -4,6 +4,7 @@ import { GraphView } from "./components/GraphView";
 import { KanbanView, appsOf } from "./components/KanbanView";
 import { ChatPanel } from "./components/ChatPanel";
 import { ProjectsScreen } from "./components/ProjectsScreen";
+import { OnboardingScreen } from "./components/onboarding/OnboardingScreen";
 
 type View = "graph" | "kanban";
 
@@ -18,6 +19,8 @@ export function App() {
   const [runId, setRunId] = useState<string | null>(init.run);
   const [view, setViewState] = useState<View>(init.view);
   const [showProjects, setShowProjects] = useState<boolean>(!init.run);
+  // The Option C onboarding is the "new project" front door (shown instead of an empty build console).
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
   const [status, setStatus] = useState<RunSummary & Record<string, any>>({} as any);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [appFilter, setAppFilter] = useState<string>("all");
@@ -46,13 +49,17 @@ export function App() {
     return () => { live = false; clearInterval(h); };
   }, [runId]);
 
-  const openRun = (id: string) => { setRunId(id); setShowProjects(false); syncUrl(id, view); };
+  const openRun = (id: string) => { setRunId(id); setShowProjects(false); setShowOnboarding(false); syncUrl(id, view); };
+
+  if (showOnboarding) {
+    return <OnboardingScreen onComplete={openRun} />;
+  }
 
   if (showProjects) {
     return (
       <ProjectsScreen
         onOpen={openRun}
-        onNew={() => { setRunId(null); setShowProjects(false); syncUrl(null, view); }}
+        onNew={() => { setRunId(null); setShowProjects(false); setShowOnboarding(true); }}
       />
     );
   }

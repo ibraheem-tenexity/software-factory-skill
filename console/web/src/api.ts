@@ -33,6 +33,27 @@ export type BriefResponse = { brief: Brief; coverage: Record<string, boolean> };
 
 export type Me = { email: string; role: string; auth: boolean };
 
+export type Org = {
+  id: string;
+  name: string;
+  industry?: string | null;
+  sub_focus: string[];
+  headcount?: string | null;
+  revenue?: string | null;
+  location?: string | null;
+  website?: string | null;
+  connected_systems: string[];
+  created_at?: number;
+  created_by?: string;
+};
+
+// POST body: org fields plus the current user's self-described role (designation/role_description).
+export type OrgInput = Partial<Omit<Org, "id" | "created_at" | "created_by">> & {
+  name: string;
+  designation?: string;
+  role_description?: string;
+};
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(path, { credentials: "include" });
   if (!r.ok) throw new Error(`${path} → ${r.status}`);
@@ -61,6 +82,11 @@ export const api = {
   chat: (body: Record<string, unknown>) =>
     send<{ run_id: string; messages: any[] }>("/api/chat", "POST", body),
   chatHistory: (id: string) => get<{ messages: any[] }>(`/api/chat/${id}/history`),
+  getOrg: () => get<{ org: Org | null }>("/api/org"),
+  createOrg: (body: OrgInput) => send<{ org: Org }>("/api/org", "POST", body),
+  patchOrg: (body: Partial<Org>) => send<{ org: Org }>("/api/org", "PATCH", body),
+  createRun: (body: { description: string; project_name: string }) =>
+    send<{ run_id: string }>("/api/runs", "POST", body),
 };
 
 export const BRIEF_SECTIONS: { key: string; label: string }[] = [

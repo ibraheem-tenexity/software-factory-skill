@@ -128,6 +128,64 @@ def test_chat_threads_viewer_role_to_concierge(auth_mod, auth_client, monkeypatc
     assert captured.get("owner") == "op@tenexity.ai"
 
 
+def test_get_org_null_before_onboarding(auth_mod, auth_client, monkeypatch):
+    # A freshly-logged-in user with no org on file → GET /api/org returns null (first-time path).
+    _login(auth_mod, auth_client, monkeypatch)
+    r = auth_client.get("/api/org")
+    assert r.status_code == 200
+    assert r.json() == {"org": None}
+
+
+def test_post_then_get_org_roundtrip(auth_mod, auth_client, monkeypatch):
+    # POST creates the org + links the user; GET then returns it (returning path thereafter).
+    _login(auth_mod, auth_client, monkeypatch)
+    r = auth_client.post("/api/org", json={
+        "name": "Acme Industrial Supply", "industry": "Industrial Distribution",
+        "sub_focus": ["MRO / maintenance"], "headcount": "51–200", "revenue": "$10M–$50M",
+        "connected_systems": ["epicor"], "designation": "Ops Manager",
+        "role_description": "runs quoting"})
+    assert r.status_code == 200
+    org = r.json()["org"]
+    assert org["id"].startswith("org-")
+    assert org["name"] == "Acme Industrial Supply"
+    assert org["headcount"] == "51–200"            # band label verbatim, not a number
+    assert org["connected_systems"] == ["epicor"]  # json list round-trips
+    # The user is now linked → GET returns the same org, and the profile fields persisted.
+    r2 = auth_client.get("/api/org")
+    assert r2.json()["org"]["id"] == org["id"]
+    u = auth_mod.users.get_user("op@tenexity.ai")
+    assert u["org_id"] == org["id"] and u["designation"] == "Ops Manager"
+
+
+def test_post_org_requires_name(auth_mod, auth_client, monkeypatch):
+    _login(auth_mod, auth_client, monkeypatch)
+    r = auth_client.post("/api/org", json={"name": "  "})
+    assert r.status_code == 400
+
+
+def test_patch_org_updates_fields(auth_mod, auth_client, monkeypatch):
+    _login(auth_mod, auth_client, monkeypatch)
+    auth_client.post("/api/org", json={"name": "Acme", "industry": "Distribution",
+                                       "connected_systems": ["epicor"]})
+    r = auth_client.patch("/api/org", json={"headcount": "201–1,000",
+                                            "connected_systems": ["epicor", "salesforce"]})
+    assert r.status_code == 200
+    org = r.json()["org"]
+    assert org["industry"] == "Distribution"        # untouched
+    assert org["headcount"] == "201–1,000"           # patched
+    assert org["connected_systems"] == ["epicor", "salesforce"]
+
+
+def test_patch_org_404_without_org(auth_mod, auth_client, monkeypatch):
+    _login(auth_mod, auth_client, monkeypatch)
+    r = auth_client.patch("/api/org", json={"headcount": "11–50"})
+    assert r.status_code == 404
+
+
+def test_org_requires_session(auth_client):
+    assert auth_client.get("/api/org").status_code == 401
+
+
 def test_push_sse_delivers_to_registered_client(app_mod):
     # The SSE mechanic: _push_sse fans a message out to every queue registered for the run
     # (the stream endpoint registers one such queue; the poller + chat/deps handlers push).
