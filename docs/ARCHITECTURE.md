@@ -236,3 +236,28 @@ alongside `dbshim`; write-through on ingest + log flush; read on demand. Not yet
 - The model is used only where judgment is needed (research, design, code, verification); lint,
   parsing, scaffolding, migrations, deploy stay deterministic — the principle the spec-to-demo
   harness (separate plan) extends.
+
+---
+
+## 11. PROPOSED (next change) — flat project schema + 6-state kanban + orgs
+
+> **Not yet built** — the target of the next change. Full schema in [`schema-erd.md`](schema-erd.md)
+> (the "PROPOSED (next change)" section); proposed ERD + state machine + build map in the design-preview artifact.
+
+- **Rename `run` → `project`** everywhere — table `run_index → projects`, key `run_id → project_id`,
+  `RunState → ProjectState` / `RunDB → ProjectDB`, the `db` CLI arg, the stage SKILLs, and the volume
+  `runs/ → projects/`.
+- **Drop schema-per-run** → one `public` schema, all tables keyed by `project_id`; `dbshim` loses the
+  `search_path` machinery and Alembic manages one schema (the per-run fan-out + `sf_run_schema_version`
+  are retired).
+- **Organizations** (NEW top-level tenant: name, industry, headcount, revenue, location,
+  connected_systems) → **users** (`org_id`, `designation`, `role_description`, `role` admin|member,
+  `tenexity` bool = factory admin panel) → **projects**. Org context feeds the Stage-1 PRD.
+- **Tickets → 6 states** (`open → in_progress → done → deployed → qa_testing → approved`, QA bug →
+  open) + a **`description`** column (markdown bug reports w/ screenshots). New Stage-3 **QA agent** +
+  build↔QA loop; done-gate = all tickets approved.
+- **Supabase Storage** as the durable home for files/artifacts: bucket `factory-run-blobs`,
+  `<project_id>/…` (project-scoped) + `org/<org_id>/…` (org-scoped, incl. the business-process video —
+  modeled only). Unified `blobs` manifest. Runtime adapter uses the project **service_role** key, never
+  the operator's account-wide token.
+- **Layer 1 unchanged:** each built app still gets its own **Railway Postgres** (`deploy_db.py`).

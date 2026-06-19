@@ -1171,3 +1171,95 @@ For the first FastAPI implementation:
 - Do not move files, chat, or logs in the same change unless necessary.
 
 This is the lowest-risk route because it replaces the HTTP shell without changing the storage contract that stage agents and the poller rely on.
+
+---
+
+# PROPOSED (next change) — flat project schema + 6-state kanban + orgs
+
+> **Status: PROPOSED, not yet built.** This is the target of the next change; the sections above
+> describe the currently-deployed (schema-per-run) model. When this lands, it replaces them.
+
+**Headline changes:**
+- **Rename `run` → `project`** everywhere: table `run_index → projects`, key `run_id → project_id`,
+  and in code `RunState → ProjectState` / `RunDB → ProjectDB`, the `db` CLI arg, the stage SKILLs, and
+  the volume dir `runs/<id>/ → projects/<id>/`.
+- **Drop schema-per-run** → one `public` schema, every table keyed by `project_id`. `dbshim` loses the
+  per-run `CREATE SCHEMA` + `SET LOCAL search_path` machinery; Alembic manages one schema directly, so
+  the per-run fan-out + `sf_run_schema_version` (the current model) are retired.
+- **Organizations** as the top-level tenant; richer **users**; **6-state** tickets with a QA loop;
+  **Supabase Storage** for run/org files (project- and org-scoped); a unified **blobs** manifest.
+
+## Tenancy
+`organizations 1→N users 1→N projects` (a user belongs to an org; a project is owned by a user).
+`users.tenexity = true` → Tenexity staff with the factory **admin panel** (cross-org). Auth `role` is
+`admin | member` (within the app); a user's **job** is `designation` + `role_description`.
+
+## New / changed tables (all in `public`, `project_id`-keyed)
+
+### `organizations` (NEW — tenant)
+| column | type |
+|---|---|
+| id | text PK |
+| name | text |
+| industry | text |
+| headcount | int |
+| revenue | numeric |
+| location | text |
+| connected_systems | jsonb  (e.g. `["sap","epicor","salesforce"]`) |
+| created_at | timestamptz |
+
+### `users` (changed)
+| column | type |
+|---|---|
+| email | text PK |
+| org_id | text FK → organizations |
+| designation | text |
+| role_description | text |
+| role | text (`admin` \| `member`) — auth |
+| tenexity | bool — factory admin-panel access |
+| created_at · created_by | timestamptz · text |
+
+### `projects` (renamed from `run_index`; the hub)
+`project_id PK`, `name` UNIQUE, `owner` FK→users.email, `phase`, `stage`, `runtime`,
+`planning_model`, `impl_model`, `model`, `brief` jsonb, `interview_coverage` jsonb, `budget_ceiling`,
+`spent_usd`, `held`, `repo_url`, `deploy_target`, `data` jsonb (ProjectState blob, transitional),
+`created_at`, `updated_at`. `1→N` to every per-project table below via `project_id`.
+
+### `tickets` (6-state + description)
+`id PK`, `project_id` FK, `title`, **`status`** (`open|in_progress|done|deployed|qa_testing|approved`),
+**`description`** text (markdown — incl. QA bug reports with screenshot links), `acceptance`, `dod`,
+`wave`, `app`, `agent`, `provenance`, `provenance_type`, `diff_lines`.
+
+### per-project tables (each `+ project_id`)
+`agents`, `phases`, `artifacts`, `blockers`, `gates`, `verifications` (+`deployment_id` FK),
+`deployments` (per-app: `app`, `service_name`, `url`, `status`, `verified`).
+
+### `blobs` (NEW — replaces the run-only manifest)
+| column | type |
+|---|---|
+| id | bigint PK |
+| scope | text (`project` \| `org`) |
+| scope_id | text FK → project/org |
+| kind | text (input, artifact, log, qa, business-process-video, …) |
+| storage_key | text |
+| content_type · size_bytes · sha256 | text · bigint · text |
+| created_at | timestamptz |
+
+## Ticket lifecycle (kanban)
+`open → in_progress → done → deployed → qa_testing → approved`, with `qa_testing --bug--> open`.
+Transition verbs (`db` CLI + TicketStore): `claim`, `mark_done` (keeps the no-hollow gate),
+`mark_deployed`, `start_qa`, `qa_approve`, `qa_reject(bug_markdown)`. On a QA bug the agent screenshots
+the failure → uploads to Supabase Storage `<project_id>/qa/…` → writes a markdown bug report (repro +
+`![](url)`) into the ticket `description` → status back to `open`. Stage-3 done-gate = **all tickets
+`approved`**.
+
+## Where data lives (3 layers)
+1. **Built-app databases → Railway Postgres** — one instance per project (`deploy_db.py`). Unchanged.
+2. **Console project-state → Supabase Postgres** — the tables above (this doc), `software-factory-as-a-skill`.
+3. **Run/org files → Supabase Storage** — bucket `factory-run-blobs`, `<project_id>/<kind>/…` and
+   `org/<org_id>/<kind>/…`; `blobs` is the manifest. The runtime adapter uses the project **service_role**
+   key (never the operator's account-wide token).
+
+## Out of scope (now)
+The business-process **video upload pipeline** (modeled only — schema + storage path exist). Full
+write-through of all inputs/logs to Storage (QA-screenshot path first).
