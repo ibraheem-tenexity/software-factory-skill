@@ -85,8 +85,8 @@ def test_wellformed_tool_call_still_fires(monkeypatch):
     assert dep.metadata["dep_names"] == ["RAILWAY_TOKEN"]
 
 
-def test_start_pipeline_promotes_draft(monkeypatch):
-    # start_pipeline promotes the interview draft (runtime/picks already on the draft from
+def test_hand_off_to_factory_promotes_draft(monkeypatch):
+    # hand_off_to_factory promotes the interview draft (runtime/picks already on the draft from
     # create_draft); it no longer calls start_run with a fresh RunRequest.
     import json
     from unittest.mock import MagicMock
@@ -96,7 +96,7 @@ def test_start_pipeline_promotes_draft(monkeypatch):
     mock_console = MagicMock()
     mock_console.promote_draft = lambda rid, **kw: captured.update(rid=rid) or "run-x"
     tools = make_tools(mock_console, draft_id=lambda: "run-draft01")
-    start = next(t for t in tools if t.name == "start_pipeline")
+    hand = next(t for t in tools if t.name == "hand_off_to_factory")
     asyncio.get_event_loop().run_until_complete(
-        start.on_invoke_tool(None, json.dumps({"description": "x"})))
+        hand.on_invoke_tool(None, json.dumps({})))
     assert captured["rid"] == "run-draft01"

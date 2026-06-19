@@ -2,8 +2,20 @@
 prompt-block rendering injected into Stage 1."""
 from software_factory.brief import (
     BRIEF_SECTIONS, REQUIRED_SECTIONS,
-    coverage, enough, brief_to_prompt_block,
+    coverage, enough, brief_to_prompt_block, compose_description,
 )
+
+
+def test_compose_description_appends_scope_line():
+    assert compose_description("Build a quoting tool.", ["Quoting / RFQ", "Pricing & approvals"]) == (
+        "Build a quoting tool.\n\nScope of work: Quoting / RFQ, Pricing & approvals.")
+
+
+def test_compose_description_handles_empty_scope_and_empty_goal():
+    assert compose_description("Just a goal.", []) == "Just a goal."
+    assert compose_description("Just a goal.", None) == "Just a goal."
+    assert compose_description("", ["Inventory"]) == "Scope of work: Inventory."
+    assert compose_description("  ", []) == ""
 
 
 def test_required_sections_are_a_subset_of_all_sections():

@@ -62,6 +62,22 @@ def enough(brief: dict) -> tuple[bool, list[str]]:
     return (not missing, missing)
 
 
+def compose_description(goal: str, scope=None) -> str:
+    """The CANONICAL project description = goal prose + an appended scope-of-work line.
+
+    Single source of truth for the Option C onboarding format (the frontend used to do this as
+    composeDescription; it now lives here so the form and the concierge agent produce identical
+    strings). Scope is a list of work-area labels (e.g. ["Quoting / RFQ", "Pricing & approvals"]).
+    Empty scope → just the goal; empty goal + scope → just the scope line.
+    """
+    goal = (goal or "").strip()
+    items = [s.strip() for s in (scope or []) if s and s.strip()]
+    if not items:
+        return goal
+    line = "Scope of work: " + ", ".join(items) + "."
+    return f"{goal}\n\n{line}" if goal else line
+
+
 def brief_to_prompt_block(brief: dict) -> str:
     """Render the accumulated brief as a Markdown block for injection into the Stage-1 prompt.
 

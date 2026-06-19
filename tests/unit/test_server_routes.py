@@ -186,6 +186,44 @@ def test_org_requires_session(auth_client):
     assert auth_client.get("/api/org").status_code == 401
 
 
+def test_create_draft_then_patch_composes_description(client):
+    # Option C onboarding: form eagerly creates a draft, then write-throughs project fields.
+    rid = client.post("/api/drafts", json={"project_name": "Quote-to-Epicor"}).json()["run_id"]
+    assert rid.startswith("run-")
+    r = client.patch(f"/api/runs/{rid}/draft", json={
+        "name": "Quote-to-Epicor", "goal": "Replace the manual quoting spreadsheet.",
+        "scope": ["Quoting / RFQ", "Pricing & approvals"]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["description"] == ("Replace the manual quoting spreadsheet.\n\n"
+                                   "Scope of work: Quoting / RFQ, Pricing & approvals.")
+    assert body["brief"]["goals"] == "Replace the manual quoting spreadsheet."
+
+
+def test_attach_to_draft_endpoint(client):
+    rid = client.post("/api/drafts", json={}).json()["run_id"]
+    r = client.post(f"/api/runs/{rid}/attach", json={"files": []})
+    assert r.status_code == 200 and r.json() == {"attached": []}
+
+
+def test_draft_writethrough_409_on_non_draft(client):
+    # PATCH/attach/promote refuse a non-draft (already promoted or nonexistent) run.
+    for path, payload in [("/draft", {"goal": "x"}), ("/attach", {"files": []}), ("/promote", {})]:
+        method = client.patch if path == "/draft" else client.post
+        r = method(f"/api/runs/run-deadbeef{path}", json=payload)
+        assert r.status_code == 409, path
+
+
+def test_promote_endpoint_wires_to_console(client, app_mod, monkeypatch):
+    # The handoff button calls POST /promote → console.promote_draft. Stub promote to avoid a real
+    # Stage-1 launch; assert the endpoint shape.
+    rid = client.post("/api/drafts", json={}).json()["run_id"]
+    monkeypatch.setattr(app_mod.console, "promote_draft",
+                        lambda r, description="", target="railway": r)
+    res = client.post(f"/api/runs/{rid}/promote", json={"target": "railway"})
+    assert res.status_code == 200 and res.json() == {"run_id": rid, "status": "started"}
+
+
 def test_push_sse_delivers_to_registered_client(app_mod):
     # The SSE mechanic: _push_sse fans a message out to every queue registered for the run
     # (the stream endpoint registers one such queue; the poller + chat/deps handlers push).

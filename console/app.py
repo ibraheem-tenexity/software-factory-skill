@@ -49,7 +49,7 @@ auth.register_user_store(users.is_member, users.get_role)
 
 # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
 _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
-_chat_runner = ChatAgentRunner(console) if _has_chat_key else None
+_chat_runner = ChatAgentRunner(console, users) if _has_chat_key else None
 
 _sse_clients: dict[str, list] = {}
 _sse_lock = threading.Lock()
@@ -458,6 +458,30 @@ class RunCreateIn(BaseModel):
     railway_project_id: str = ""
 
 
+# Option C onboarding (draft model): the form eagerly creates a draft on mount, write-throughs the
+# project fields, attaches materials, and promotes at handoff. See docs/plans/fastapi-db-replacement.md.
+class DraftCreateIn(BaseModel):
+    project_name: str = ""
+    runtime: str = ""
+    planning_model: str = ""
+    impl_model: str = ""
+
+
+class DraftPatchIn(BaseModel):
+    name: str | None = None
+    goal: str | None = None
+    scope: list | None = None
+
+
+class AttachIn(BaseModel):
+    files: list = []
+
+
+class PromoteIn(BaseModel):
+    description: str = ""
+    target: str = "railway"
+
+
 # ── Static + open routes ──────────────────────────────────────────────────────────────────────
 # The React SPA (console/web/dist) is served when SF_CONSOLE=react AND it's been built; otherwise the
 # legacy single-file console (index.html) is the default — so the migration is opt-in and safe.
@@ -604,6 +628,18 @@ def runs_create(body: RunCreateIn, v: tuple = Depends(require_authed)):
         raise HTTPException(status_code=409, detail=str(e))
 
 
+# ── Drafts (Option C onboarding) ──────────────────────────────────────────────────────────────
+@app.post("/api/drafts")
+def create_draft(body: DraftCreateIn, v: tuple = Depends(require_authed)):
+    """Mint a durable draft run at the START of onboarding (the form is the sole eager creator on
+    mount). Returns its canonical run-<8hex> id; the form passes it into every subsequent
+    PATCH/attach/promote and into /api/chat so the rail and the form share ONE draft."""
+    run_id = console.create_draft(owner=v[0] or "", name=body.project_name,
+                                  runtime=body.runtime, planning_model=body.planning_model,
+                                  impl_model=body.impl_model)
+    return {"run_id": run_id}
+
+
 # ── Run-scoped GETs ─────────────────────────────────────────────────────────────────────────
 @app.get("/api/runs/{rid}")
 def run_status(rid: str, v: tuple = Depends(authorize_run)):
@@ -731,6 +767,37 @@ def run_release(rid: str, v: tuple = Depends(authorize_run)):
     if console.release_run(rid):
         return {"run_id": rid, "released": True}
     raise HTTPException(status_code=409, detail="not held")
+
+
+# ── Draft write-through + handoff (Option C onboarding; drafts only) ──────────────────────────
+@app.patch("/api/runs/{rid}/draft")
+def patch_draft(rid: str, body: DraftPatchIn, v: tuple = Depends(authorize_run)):
+    """Structured project write-through: {name?, goal?, scope?}. Server composes the canonical
+    description (goal + scope-of-work line). Call debounced/on-blur, NOT per keystroke."""
+    if not console.is_draft(rid):
+        raise HTTPException(status_code=409, detail="not a draft (already promoted)")
+    return console.set_draft_project(rid, name=body.name, goal=body.goal, scope=body.scope)
+
+
+@app.post("/api/runs/{rid}/attach")
+def attach_draft(rid: str, body: AttachIn, v: tuple = Depends(authorize_run)):
+    """Attach project materials (walkthrough video / documents) to the draft's input/."""
+    if not console.is_draft(rid):
+        raise HTTPException(status_code=409, detail="not a draft (already promoted)")
+    return {"attached": console.attach_to_draft(rid, body.files or [])}
+
+
+@app.post("/api/runs/{rid}/promote")
+def promote_draft(rid: str, body: PromoteIn, v: tuple = Depends(authorize_run)):
+    """Hand off to the factory: promote the draft into a real run and launch Stage 1. The composed
+    state.description + accumulated brief are the payload (description override optional)."""
+    if not console.is_draft(rid):
+        raise HTTPException(status_code=409, detail="not a draft (already promoted)")
+    try:
+        run_id = console.promote_draft(rid, description=body.description, target=body.target)
+    except ValueError as e:                # duplicate project name
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"run_id": run_id, "status": "started"}
 
 
 # ── Chat ────────────────────────────────────────────────────────────────────────────────────

@@ -37,106 +37,152 @@ def select_chat_model():
 
 
 CONCIERGE_INSTRUCTIONS = """\
-You are the Factory Concierge. Your job is to INTERVIEW the user to build a complete project \
-brief BEFORE launching the build — a richer brief produces a far more mature result than a \
-single lazy prompt. Do not launch on the first vague request; interview first.
+You are the Factory Concierge for the Software Factory onboarding. You guide the user through a short \
+intake — their company (first-time users only) and THIS project — PERSISTING each answer as you go \
+with your tools, then hand off to the build factory. Ask EXACTLY ONE question per turn and WAIT for \
+the answer before moving on (never stack two questions in one message).
 
-## The interview (one topic at a time)
-Work through these topics conversationally — ask EXACTLY ONE question per turn and WAIT for the \
-user's answer before moving on (never stack two questions in one message). Go in roughly this \
-order. Use the rubric in your head to know when a topic is sufficiently answered, and ask a brief \
-follow-up if an answer is thin:
-1. **Context & goals** — understand the user's world first: their industry and what their company/\
-organization actually does; who this product is for; the specific problem it solves and the primary \
-objective. Don't accept a one-line app idea at face value — draw out the surrounding context.
-2. **Scale & usage** — how big the organization is (company size and, if they'll share, revenue or \
-funding stage), AND the projected volume of usage for this product: expected number of users, \
-traffic/requests, data volume, and how fast they expect it to grow. This drives the architecture and \
-infrastructure, so get concrete numbers or ballparks where you can.
-3. **Success metrics** — concrete outcomes/numbers; how success is measured.
-4. **Constraints** — timeline, budget, required/avoided tech, hosting, compliance.
-5. **Stakeholders** — decision-makers, end users, sign-off.
-6. **Existing assets** — code, designs, brand assets, wireframes, integrations, docs (accept files/images).
-7. **Risks** — technical/business/dependency unknowns.
-8. **Definition of done** — what the first version must do to be accepted.
+## First, who am I talking to
+Call **get_company_profile** at the start. If it returns an org, this is a RETURNING user — their \
+company context is on file and REUSED; do NOT re-ask it, go straight to the project. If it returns \
+null, this is a FIRST-TIME user — set up the company first, then the project.
 
-After the user answers a topic, call **record_brief_section** with the section key \
-(goals | scale | success_metrics | constraints | stakeholders | existing_assets | risks | definition_of_done) \
-and a crisp summary of their answer in your own words. Use `goals` for the context/industry/company/\
-problem answer and `scale` for the company-size/revenue + projected-usage answer. Acknowledge attached \
-files/images as existing_assets. Keep moving — don't re-ask what's already covered.
+## Company setup (first-time only)
+Gather and persist with **set_company_profile** (industry + what the company does, company name, \
+headcount, annual revenue, the user's role). Optionally call **set_connected_systems** with the ids \
+of systems they use (epicor | sap | netsuite | qb | sf | site) — optional, it lets the factory pull \
+real SKUs/customers/pricing. One question per turn; persist as each answer comes in.
 
-## Proceeding to the build
-Call **propose_proceed** to check whether enough of the brief is covered. Once it reports ready \
-(or the user explicitly says "just build it"), summarize the brief in 2-3 sentences, confirm, then \
-call **start_pipeline** — this PROMOTES the in-progress draft into a real run and launches Stage 1, \
-where a council of agents turns the brief into a full PRD. Never trap the user in endless \
-questions: if they want to proceed early, do.
+## The project (always)
+- Project name + what they're building (the outcome/goal) → **set_project_basics**.
+- Which parts of the business it touches (the scope of work) → **set_project_scope**.
+- Materials: a walkthrough video or documents are the highest-signal input. Files the user attaches \
+  arrive with their message and are saved automatically — acknowledge them with \
+  **attach_project_materials**. If a specific high-value material is missing, ask for it with \
+  **request_materials**.
 
-## After the pipeline launches
-- Use check_status to monitor progress and report updates naturally.
-- When the pipeline needs dependency tokens, call request_dep_input — this shows secure input \
-  fields. NEVER ask users to paste tokens as text.
-- When the pipeline completes, call get_result and share the deployment URL(s) — a project may \
-  ship MORE THAN ONE deliverable (e.g. a mobile-web app + a web app + an API).
+## Persisting + proceeding
+Persist every answer immediately via the matching set_* tool — never just hold it in the chat. Use \
+**get_intake_state** to see what's captured and **validate_intake_complete** to gauge readiness. The \
+USER decides when to proceed and the on-screen checklist owns completion, so don't badger — when they \
+are ready (or say "just build it"), confirm in one short line and call **hand_off_to_factory**, which \
+promotes the draft into a real run and launches the build.
+
+## After handoff
+Stay on. Use **check_status** to report progress naturally; **request_dep_input** when the build needs \
+credentials (NEVER ask the user to paste tokens as chat text); **get_result** to share the deployment \
+URL(s) when it's done — a project may ship more than one deliverable.
 
 ## Style
-- Concise — 1-3 sentences per turn. Specific, not generic. One question at a time.
-- Don't dump the whole brief back each turn; a short "got it — <next question>" is ideal.
+Concise — 1-3 sentences per turn, ONE question, specific not generic. A short "got it — <next>" is ideal.
 """
 
 
-def make_tools(console: Console, attachments=lambda: [],
+def make_tools(console: Console, users=None, attachments=lambda: [],
                runtime=lambda: "", models=lambda: ("", ""),
                project_name=lambda: "", gated=lambda: False,
                owner=lambda: "", viewer=lambda: ("", "admin"),
                draft_id=lambda: "", interview=lambda: "") -> list[FunctionTool]:
-    """Create agent tools that delegate to Console methods.
-
-    `attachments` returns files attached to the current message. `draft_id` returns the canonical
-    run-<8hex> of the in-progress onboarding draft (minted by the server before the interview);
-    record_brief_section/propose_proceed/start_pipeline all act on it. `interview` returns the
-    rendered transcript so far (threaded into Stage 1 on promote). `viewer` returns (email, role)
-    for run-scoped tool access control: admins/service see all, members see only their own.
+    """The locked 13-tool concierge set (Option C onboarding). Tools delegate to Console (draft/run)
+    and the UserStore (company org). `users` is the UserStore; `owner`/`viewer` give the signed-in
+    email + role; `draft_id` is the canonical run-<8hex> of the in-progress onboarding draft (the form
+    eagerly creates it and shares the id); `interview` is the rendered transcript threaded into Stage 1
+    on hand-off; `attachments` is the files on the current message (auto-persisted by the server).
     """
-    from .brief import BRIEF_SECTIONS, enough
+    from .brief import enough
+
+    def _email() -> str:
+        return (owner() or "").strip().lower()
 
     def _allowed(run_id: str) -> bool:
-        """Ownership check inside chat tools. Admins bypass; members must own the run."""
+        """Ownership check for run-scoped tools. Admins bypass; members must own the run."""
         email, role = viewer()
         if role == "admin":
             return True
         return bool(run_id) and (console.run_owner(run_id) or "").lower() == (email or "").lower()
 
-    async def _record_brief_section(section: str, summary: str) -> str:
-        rid = draft_id()
-        if not rid:
-            return json.dumps({"error": "no active draft"})
-        if section not in BRIEF_SECTIONS:
-            return json.dumps({"error": f"unknown section {section!r}", "valid": BRIEF_SECTIONS})
-        cov = console.update_draft_brief(rid, {section: summary})
-        ready, missing = enough(console.draft_brief(rid))
-        return json.dumps({"recorded": section, "coverage": cov, "ready": ready, "missing": missing})
+    # ── Company / org (first-time setup; editable when returning) ──────────────────────────────
+    async def _get_company_profile() -> str:
+        if not users:
+            return json.dumps({"org": None})
+        return json.dumps({"org": users.org_for_user(_email())})
 
-    async def _propose_proceed() -> str:
+    async def _set_company_profile(name: str = "", industry: str = None, sub_focus: list = None,
+                                   headcount: str = None, revenue: str = None, website: str = None,
+                                   role: str = None, role_description: str = None) -> str:
+        if not users:
+            return json.dumps({"error": "no user store"})
+        email = _email()
+        if not email:
+            return json.dumps({"error": "no signed-in user"})
+        org = users.org_for_user(email)
+        if org:
+            fields = {k: v for k, v in {"name": (name or None), "industry": industry,
+                      "sub_focus": sub_focus, "headcount": headcount, "revenue": revenue,
+                      "website": website}.items() if v is not None}
+            if fields:
+                users.update_org(org["id"], **fields)
+            oid = org["id"]
+        else:
+            if not (name or "").strip():
+                return json.dumps({"error": "company name required to create the profile"})
+            oid = users.create_org(name, industry=industry, sub_focus=sub_focus, headcount=headcount,
+                                   revenue=revenue, website=website, by=email)
+        if role is not None or role_description is not None:
+            users.set_profile(email, org_id=oid, designation=role, role_description=role_description)
+        return json.dumps({"org": users.get_org(oid)})
+
+    async def _set_connected_systems(ids: list) -> str:
+        if not users:
+            return json.dumps({"error": "no user store"})
+        org = users.org_for_user(_email())
+        if not org:
+            return json.dumps({"error": "set the company profile first"})
+        users.update_org(org["id"], connected_systems=ids or [])
+        return json.dumps({"org": users.get_org(org["id"])})
+
+    # ── Project (writes to the draft; description composed server-side) ────────────────────────
+    async def _set_project_basics(name: str = "", goal: str = "") -> str:
         rid = draft_id()
         if not rid:
             return json.dumps({"error": "no active draft"})
-        brief = console.draft_brief(rid)
+        return json.dumps(console.set_draft_project(rid, name=(name or None), goal=(goal or None)))
+
+    async def _set_project_scope(scope: list) -> str:
+        rid = draft_id()
+        if not rid:
+            return json.dumps({"error": "no active draft"})
+        return json.dumps(console.set_draft_project(rid, scope=(scope or [])))
+
+    async def _attach_project_materials() -> str:
+        # Files arrive with the chat message and the server auto-persists them to the draft's input/.
+        # This tool just lets the agent acknowledge what came in this turn.
+        names = [f.get("name", "file") for f in (attachments() or [])]
+        return json.dumps({"attached_this_turn": names})
+
+    async def _request_materials(what: str = "", why: str = "") -> str:
+        return json.dumps({"type": "materials_request", "what": what, "why": why})
+
+    async def _get_intake_state() -> str:
+        # READ-ONLY. The frontend OWNS the checklist + ready gate; this is for the agent's own
+        # reasoning, it must NOT compute or push completion to the UI.
+        rid = draft_id()
+        org = users.org_for_user(_email()) if users else None
+        project = console.draft_project(rid) if rid else {}
+        return json.dumps({"company": org, "project": project})
+
+    async def _validate_intake_complete() -> str:
+        rid = draft_id()
+        brief = console.draft_brief(rid) if rid else {}
         ready, missing = enough(brief)
-        return json.dumps({"ready": ready, "missing": missing,
-                           "sections_filled": sorted(k for k, v in brief.items() if v)})
+        return json.dumps({"ready": ready, "missing": missing})
 
-    async def _start_pipeline(description: str = "", context: str = "",
-                              budget: float = 25.0, target: str = "railway") -> str:
-        """Promote the in-progress draft into a real run and launch Stage 1 (the council writes the
-        PRD from the accumulated brief + interview transcript)."""
+    async def _hand_off_to_factory(target: str = "railway") -> str:
         rid = draft_id()
         if not rid:
             return json.dumps({"error": "no active draft to promote"})
         try:
-            run_id = console.promote_draft(rid, description=description,
-                                           interview_md=interview(), target=target)
+            run_id = console.promote_draft(rid, interview_md=interview(), target=target)
         except ValueError as e:               # duplicate project name — tell the user
             return json.dumps({"error": str(e)})
         return json.dumps({"run_id": run_id, "status": "started"})
@@ -146,104 +192,78 @@ def make_tools(console: Console, attachments=lambda: [],
             return json.dumps({"error": "forbidden"})
         return json.dumps(console.status(run_id))
 
-    async def _get_required_deps(run_id: str) -> str:
+    async def _request_dep_input(run_id: str, dep_names: list) -> str:
         if not _allowed(run_id):
             return json.dumps({"error": "forbidden"})
-        return json.dumps(console.stage2_artifacts(run_id))
-
-    async def _request_dep_input(run_id: str, dep_names: list[str]) -> str:
-        if not _allowed(run_id):
-            return json.dumps({"error": "forbidden"})
-        return json.dumps({"type": "dep_request", "run_id": run_id,
-                           "dep_names": dep_names})
+        return json.dumps({"type": "dep_request", "run_id": run_id, "dep_names": dep_names})
 
     async def _get_result(run_id: str) -> str:
         if not _allowed(run_id):
             return json.dumps({"error": "forbidden"})
         return json.dumps(console.evidence(run_id))
 
+    def _tool(name, desc, props, required, fn):
+        return FunctionTool(name=name, description=desc,
+                            params_json_schema={"type": "object", "properties": props,
+                                                "required": required, "additionalProperties": False},
+                            on_invoke_tool=lambda ctx, inp, _fn=fn: _fn(**json.loads(inp or "{}")))
+
+    _str = {"type": "string"}
+    _strs = {"type": "array", "items": {"type": "string"}}
     return [
-        FunctionTool(
-            name="record_brief_section",
-            description="Record one section of the project brief after the user answers that topic. "
-                        "Call this as the interview progresses.",
-            params_json_schema={
-                "type": "object",
-                "properties": {
-                    "section": {"type": "string",
-                                "enum": ["goals", "scale", "success_metrics", "constraints",
-                                         "stakeholders", "existing_assets", "risks", "definition_of_done"]},
-                    "summary": {"type": "string", "description": "A crisp summary of the user's answer"},
-                },
-                "required": ["section", "summary"],
-            },
-            on_invoke_tool=lambda ctx, inp: _record_brief_section(**json.loads(inp)),
-        ),
-        FunctionTool(
-            name="propose_proceed",
-            description="Check whether enough of the brief is covered to start the build. Returns "
-                        "ready + which required sections are still missing.",
-            params_json_schema={"type": "object", "properties": {}},
-            on_invoke_tool=lambda ctx, inp: _propose_proceed(),
-        ),
-        FunctionTool(
-            name="start_pipeline",
-            description="Promote the interviewed draft into a real run and launch the build. Call only "
-                        "after propose_proceed reports ready (or the user asks to proceed now).",
-            params_json_schema={
-                "type": "object",
-                "properties": {
-                    "description": {"type": "string", "description": "One-line app description (optional; "
-                                    "the brief is the real payload)", "default": ""},
-                    "target": {"type": "string", "enum": ["railway", "vercel"], "default": "railway"},
-                },
-                "required": [],
-            },
-            on_invoke_tool=lambda ctx, inp: _start_pipeline(**json.loads(inp)),
-        ),
-        FunctionTool(
-            name="check_status",
-            description="Check current pipeline status — phase, stage, cost.",
-            params_json_schema={
-                "type": "object",
-                "properties": {"run_id": {"type": "string"}},
-                "required": ["run_id"],
-            },
-            on_invoke_tool=lambda ctx, inp: _check_status(**json.loads(inp)),
-        ),
-        FunctionTool(
-            name="get_required_deps",
-            description="Get list of required dependency tokens after Stage 2 completes.",
-            params_json_schema={
-                "type": "object",
-                "properties": {"run_id": {"type": "string"}},
-                "required": ["run_id"],
-            },
-            on_invoke_tool=lambda ctx, inp: _get_required_deps(**json.loads(inp)),
-        ),
-        FunctionTool(
-            name="request_dep_input",
-            description="Signal the frontend to show secure input fields for dependency tokens. Use this instead of asking the user to paste tokens in chat.",
-            params_json_schema={
-                "type": "object",
-                "properties": {
-                    "run_id": {"type": "string"},
-                    "dep_names": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["run_id", "dep_names"],
-            },
-            on_invoke_tool=lambda ctx, inp: _request_dep_input(**json.loads(inp)),
-        ),
-        FunctionTool(
-            name="get_result",
-            description="Get final artifacts and deployment URL after pipeline completes.",
-            params_json_schema={
-                "type": "object",
-                "properties": {"run_id": {"type": "string"}},
-                "required": ["run_id"],
-            },
-            on_invoke_tool=lambda ctx, inp: _get_result(**json.loads(inp)),
-        ),
+        _tool("get_company_profile",
+              "Read the company/org already on file for the signed-in user (null if first-time). "
+              "Call this first to tell returning users from first-time users.",
+              {}, [], lambda: _get_company_profile()),
+        _tool("set_company_profile",
+              "Create or update the user's company profile (first-time setup, or edits). Persists to "
+              "the org. industry/headcount/revenue are stored as LABELS (e.g. '51–200', '$10M–$50M').",
+              {"name": _str, "industry": _str, "sub_focus": _strs, "headcount": _str,
+               "revenue": _str, "website": _str, "role": _str, "role_description": _str},
+              [], _set_company_profile),
+        _tool("set_connected_systems",
+              "Record which systems the company uses (ids: epicor|sap|netsuite|qb|sf|site). Optional; "
+              "lets the factory pull real SKUs/customers/pricing. Requires a company profile first.",
+              {"ids": _strs}, ["ids"], _set_connected_systems),
+        _tool("set_project_basics",
+              "Set the project NAME and the GOAL (what they're building / the outcome). Persists to the "
+              "draft; the server composes the canonical description from goal + scope.",
+              {"name": _str, "goal": _str}, [], _set_project_basics),
+        _tool("set_project_scope",
+              "Set the scope-of-work areas this project touches (e.g. 'Quoting / RFQ', 'Order entry'). "
+              "Persists to the draft and is appended to the project description server-side.",
+              {"scope": _strs}, ["scope"], _set_project_scope),
+        _tool("attach_project_materials",
+              "Acknowledge materials the user attached this turn (walkthrough video / documents). Files "
+              "auto-persist to the draft; this confirms what arrived.",
+              {}, [], lambda: _attach_project_materials()),
+        _tool("request_materials",
+              "Ask the user to provide a specific high-signal material you don't have yet (e.g. a "
+              "walkthrough video). Use for missing inputs, not for tokens (use request_dep_input).",
+              {"what": _str, "why": _str}, ["what"], _request_materials),
+        _tool("get_intake_state",
+              "READ-ONLY snapshot of what's captured: company org + project {name, goal, scope, "
+              "description, brief}. For your reasoning only — the on-screen checklist owns completion.",
+              {}, [], lambda: _get_intake_state()),
+        _tool("validate_intake_complete",
+              "Check whether enough is captured to proceed. Returns {ready, missing}. Advisory — the "
+              "user decides when to hand off.",
+              {}, [], lambda: _validate_intake_complete()),
+        _tool("hand_off_to_factory",
+              "Promote the draft into a real run and launch the build. Call when the user is ready (or "
+              "says 'just build it').",
+              {"target": {"type": "string", "enum": ["railway", "vercel"], "default": "railway"}},
+              [], _hand_off_to_factory),
+        _tool("check_status",
+              "Check current pipeline status — phase, stage, cost — after handoff.",
+              {"run_id": _str}, ["run_id"], _check_status),
+        _tool("request_dep_input",
+              "Signal the frontend to show secure input fields for dependency tokens. Use this instead "
+              "of asking the user to paste tokens in chat.",
+              {"run_id": _str, "dep_names": _strs}, ["run_id", "dep_names"], _request_dep_input),
+        _tool("get_result",
+              "Get final artifacts and deployment URL(s) after the pipeline completes.",
+              {"run_id": _str}, ["run_id"], _get_result),
     ]
 
 
@@ -261,8 +281,9 @@ def _render_interview(history: list[dict]) -> str:
 class ChatAgentRunner:
     """Manages the concierge agent and translates between chat and Console."""
 
-    def __init__(self, console: Console):
+    def __init__(self, console: Console, users=None):
         self._console = console
+        self._users = users
         self._pending_files: list = []
         self._pending_runtime: str = ""
         self._pending_models: tuple = ("", "")
@@ -272,7 +293,7 @@ class ChatAgentRunner:
         self._pending_viewer: tuple[str, str] = ("", "admin")
         self._pending_draft_id: str = ""
         self._pending_interview_md: str = ""
-        tools = make_tools(console, attachments=lambda: self._pending_files,
+        tools = make_tools(console, users=users, attachments=lambda: self._pending_files,
                            runtime=lambda: self._pending_runtime,
                            models=lambda: self._pending_models,
                            project_name=lambda: self._pending_name,
@@ -364,7 +385,7 @@ class ChatAgentRunner:
                 # Required params are schema-validated by the SDK against OpenAI, but a
                 # ChatCompletions-compat proxy (Kimi via OpenRouter) can emit malformed
                 # arguments — degrade to a plain reply rather than 500ing the chat endpoint.
-                if call.name == "start_pipeline":
+                if call.name == "hand_off_to_factory":
                     # The draft was promoted in-place; run_id is already the canonical draft id
                     # (set by the server before the interview). No slug minting.
                     if not run_id:
