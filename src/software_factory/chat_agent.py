@@ -4,14 +4,13 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any
 
 from agents import Agent, FunctionTool, ItemHelpers
 from agents.items import MessageOutputItem, ToolCallItem
 from openai.types.responses import ResponseFunctionToolCall
 
 from software_factory.chat_store import ChatMessage
-from software_factory.console import Console, RunRequest
+from software_factory.console import Console
 
 
 def select_chat_model():
