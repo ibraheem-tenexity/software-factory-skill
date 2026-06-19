@@ -54,6 +54,17 @@ const PATHS: Record<string, string> = {
   bot: "M12 8V4H8 M4 8h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z M2 14h2 M20 14h2 M15 13v2 M9 13v2",
   search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z M21 21l-4.35-4.35",
   send: "M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z",
+  // factory-console additions
+  kanban: "M5 3h4v18H5z M15 3h4v10h-4z",
+  tree: "M5 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4z M19 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4z M19 7a2 2 0 1 0 0 4 2 2 0 0 0 0-4z M5 7v10 M5 12h9a3 3 0 0 0 3-3V9 M5 17h9a3 3 0 0 1 3 3v-1",
+  map: "M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7z M12 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
+  refresh: "M23 4v6h-6 M1 20v-6h6 M3.51 9a9 9 0 0 1 14.85-3.36L23 10 M1 14l4.64 4.36A9 9 0 0 0 20.49 15",
+  external: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6 M15 3h6v6 M10 14L21 3",
+  github: "M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22",
+  lock: "M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M7 11V7a5 5 0 0 1 10 0v4",
+  flask: "M9 2v6l-5 9a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-5-9V2 M7 2h10 M6.5 14h11",
+  database: "M12 2c4.42 0 8 1.34 8 3s-3.58 3-8 3-8-1.34-8-3 3.58-3 8-3z M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5 M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6",
+  zap: "M13 2L3 14h9l-1 8 10-12h-9l1-8z",
 };
 
 export function Icon({ name, size = 16, color = "currentColor", strokeWidth = 2, style }:
@@ -276,6 +287,23 @@ export function StatusPill({ tone = "neutral", children, dot = true }:
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 9px", borderRadius: 9999,
       font: `500 11px/1.3 ${T.sans}`, background: tones[0], color: tones[1] }}>
       {dot && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor" }} />}{children}
+    </span>
+  );
+}
+
+// ConfidencePill — the confidence cascade (exact→high→med→low→none) rendered as a soft pill.
+// Matches the design's signature: band + optional numeric score (shared.jsx ConfidencePill).
+export function ConfidencePill({ band, score }:
+  { band: "exact" | "high" | "med" | "low" | "none"; score?: number }) {
+  const map = {
+    exact: [T.cExactSoft, T.cExact, "exact"], high: [T.cHighSoft, T.cHigh, "high"],
+    med: [T.cMedSoft, T.cMed, "medium"], low: [T.cLowSoft, T.cLow, "low"], none: [T.cNoneSoft, T.cNone, "—"],
+  }[band];
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", borderRadius: 9999,
+      font: `500 11px/1.3 ${T.sans}`, background: map[0] as string, color: map[1] as string }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor" }} />
+      {map[2]}{score != null ? ` ${score}` : ""}
     </span>
   );
 }

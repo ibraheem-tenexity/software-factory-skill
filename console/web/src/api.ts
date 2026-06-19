@@ -43,6 +43,31 @@ export type BriefResponse = { brief: Brief; coverage: Record<string, boolean> };
 
 export type Me = { email: string; role: string; auth: boolean };
 
+// GET /api/runs/{id}/deployments → console.deployments(). Per-deliverable: a run ships 1..N apps.
+export type Deployment = { app?: string; url?: string; repo?: string; [k: string]: any };
+export type DeploymentsResponse = { deployments: Deployment[]; apps: string[] };
+
+// GET /api/runs/{id}/deps → console.stage2_artifacts(). `tokens` are the architecture-derived
+// required tokens; `disposition[name]` is the per-token plan (mcp | mock | provide).
+export type DepToken = { name: string; [k: string]: any };
+export type DepsResponse = {
+  deps_required: string[];
+  deps_provided: string[];
+  deps_satisfied: boolean;
+  disposition: Record<string, string>;
+  tokens: DepToken[];
+};
+// POST /api/runs/{id}/deps body — {deps: {name: {disposition, value?}}}. value rides into the
+// Stage-3 env only; it is never persisted to disk (see console.submit_deps).
+export type DepSubmit = Record<string, { disposition: string; value?: string }>;
+export type DepsSubmitResponse = {
+  deps_provided: string[]; deps_required: string[]; disposition: Record<string, string>;
+  missing: string[]; satisfied: boolean;
+};
+
+export type RunEvent = { ts: number; type: string; payload: Record<string, any> };
+export type Artifact = { path: string; content?: string; error?: string };
+
 // Public boot config the SPA reads to decide whether to gate on login (auth on) or open
 // straight to the console (auth off, dev/test). client_id feeds the Google sign-in button.
 export type AuthConfig = { enabled: boolean; client_id: string };
@@ -97,6 +122,13 @@ export const api = {
   chat: (body: Record<string, unknown>) =>
     send<{ run_id: string; messages: any[] }>("/api/chat", "POST", body),
   chatHistory: (id: string) => get<{ messages: any[] }>(`/api/chat/${id}/history`),
+  deployments: (id: string) => get<DeploymentsResponse>(`/api/runs/${id}/deployments`),
+  deps: (id: string) => get<DepsResponse>(`/api/runs/${id}/deps`),
+  submitDeps: (id: string, deps: DepSubmit) =>
+    send<DepsSubmitResponse>(`/api/runs/${id}/deps`, "POST", { deps }),
+  events: (id: string) => get<{ events: RunEvent[] }>(`/api/runs/${id}/events`),
+  artifact: (id: string, path: string) =>
+    get<Artifact>(`/api/runs/${id}/artifact?path=${encodeURIComponent(path)}`),
   getOrg: () => get<{ org: Org | null }>("/api/org"),
   createOrg: (body: OrgInput) => send<{ org: Org }>("/api/org", "POST", body),
   patchOrg: (body: Partial<Org>) => send<{ org: Org }>("/api/org", "PATCH", body),
