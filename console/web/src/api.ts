@@ -37,6 +37,10 @@ export type BriefResponse = { brief: Brief; coverage: Record<string, boolean> };
 
 export type Me = { email: string; role: string; auth: boolean };
 
+// Public boot config the SPA reads to decide whether to gate on login (auth on) or open
+// straight to the console (auth off, dev/test). client_id feeds the Google sign-in button.
+export type AuthConfig = { enabled: boolean; client_id: string };
+
 export type Org = {
   id: string;
   name: string;
@@ -76,6 +80,7 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 }
 
 export const api = {
+  authConfig: () => get<AuthConfig>("/api/auth/config"),
   me: () => get<Me>("/api/me"),
   runs: () => get<{ runs: RunSummary[] }>("/api/runs"),
   status: (id: string) => get<RunSummary & Record<string, any>>(`/api/runs/${id}`),

@@ -5,6 +5,7 @@ import { KanbanView, appsOf } from "./components/KanbanView";
 import { ChatPanel } from "./components/ChatPanel";
 import { ProjectsScreen } from "./components/ProjectsScreen";
 import { OnboardingScreen } from "./components/onboarding/OnboardingScreen";
+import { LoginScreen } from "./components/LoginScreen";
 
 type View = "graph" | "kanban";
 
@@ -98,4 +99,36 @@ export function App() {
       </div>
     </div>
   );
+}
+
+// ── Auth gate (Option B) ───────────────────────────────────────────────────────────────────
+// Top-level seam the whole React track gates through. Reads the public /api/auth/config: auth
+// off (dev/test) ⇒ straight to the app; auth on ⇒ check /api/me FIRST and short-circuit to
+// <LoginScreen> on 401, BEFORE App mounts and fires its data fetches. On Google success the
+// gate re-resolves (cookie now set ⇒ /api/me 200 ⇒ app).
+//
+// SEAM FOR TASK 3 (dashboard): the `authed ⇒ <App/>` branch below is where the dashboard plugs
+// in — replace/extend the authed render (today <App/>, the build console) with the dashboard
+// shell. Nothing above that line (login/auth resolution) should need to change.
+type GateState = "loading" | "login" | "app";
+
+export function Gate() {
+  const [state, setState] = useState<GateState>("loading");
+  const [clientId, setClientId] = useState("");
+
+  const resolve = () => {
+    api.authConfig()
+      .then((cfg) => {
+        if (!cfg.enabled) { setState("app"); return; }   // auth off ⇒ open console (no login)
+        setClientId(cfg.client_id);
+        api.me().then(() => setState("app")).catch(() => setState("login"));  // 401 ⇒ login
+      })
+      .catch(() => setState("app"));   // config unreachable ⇒ fail open, don't lock the user out
+  };
+
+  useEffect(resolve, []);
+
+  if (state === "loading") return <div style={{ height: "100vh", background: "#FAFAFA" }} />;
+  if (state === "login") return <LoginScreen clientId={clientId} onAuthed={resolve} />;
+  return <App />;
 }

@@ -186,6 +186,48 @@ def test_org_requires_session(auth_client):
     assert auth_client.get("/api/org").status_code == 401
 
 
+def test_auth_config_public_when_disabled(client):
+    # The SPA reads /api/auth/config on boot to decide whether to gate. Auth off (dev/test) →
+    # enabled false, empty client id, and the route is reachable without a session.
+    r = client.get("/api/auth/config")
+    assert r.status_code == 200
+    assert r.json() == {"enabled": False, "client_id": ""}
+
+
+def test_auth_config_public_and_returns_client_id_when_enabled(auth_client):
+    # Public (no session) so the static bundle can render the Google button; returns the
+    # OAuth web client id (already public — it's in the GIS button) and enabled=true.
+    r = auth_client.get("/api/auth/config")
+    assert r.status_code == 200
+    assert r.json() == {"enabled": True, "client_id": "cid-123.apps.googleusercontent.com"}
+
+
+def test_me_open_when_auth_disabled(client):
+    # Backs the SPA's disabled-path: auth off ⇒ /api/me is 200 admin ⇒ LoginScreen never shows.
+    r = client.get("/api/me")
+    assert r.status_code == 200
+    assert r.json() == {"email": None, "role": "admin", "auth": False}
+
+
+def test_react_mode_serves_spa_to_unauthed(auth_mod, auth_client, monkeypatch):
+    # Option B gate-rework: in React mode the SPA gates login itself (via /api/auth/config +
+    # /api/me), so root() serves the bundle to UNAUTHED users too — not the server login page.
+    monkeypatch.setattr(auth_mod, "_react_enabled", lambda: True)
+    monkeypatch.setattr(auth_mod, "_index_html", lambda: b"<div id='root'></div><!--SPA-->")
+    r = auth_client.get("/")
+    assert r.status_code == 200
+    assert "SPA" in r.text                       # the React bundle
+    assert "accounts.google.com" not in r.text   # NOT the server-rendered login page
+
+
+def test_legacy_mode_still_serves_server_login_to_unauthed(auth_client):
+    # Guard the gate: with React OFF (default in tests), unauthed root() must still serve the
+    # server-rendered Google sign-in page — the Option B change must not leak into legacy mode.
+    r = auth_client.get("/")
+    assert r.status_code == 200
+    assert "accounts.google.com" in r.text
+
+
 def test_push_sse_delivers_to_registered_client(app_mod):
     # The SSE mechanic: _push_sse fans a message out to every queue registered for the run
     # (the stream endpoint registers one such queue; the poller + chat/deps handlers push).

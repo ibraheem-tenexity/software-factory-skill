@@ -490,6 +490,11 @@ def _login_html() -> str:
 def root(v: tuple = Depends(viewer)):
     # The root serves the Google sign-in page when auth is on and the caller has no session;
     # otherwise the console. (Query strings like /?run=x route here too — FastAPI matches path.)
+    # React mode: the SPA gates login itself (reads /api/auth/config + /api/me, renders its own
+    # LoginScreen on 401), so serve the bundle to unauthed users too. Legacy mode keeps the
+    # server-rendered login page.
+    if _react_enabled():
+        return HTMLResponse(_index_html())
     if not v[2]:
         return HTMLResponse(_login_html())
     return HTMLResponse(_index_html())
@@ -558,6 +563,14 @@ def patch_org(body: OrgPatchIn, v: tuple = Depends(require_authed)):
 
 
 # ── Auth exchange ───────────────────────────────────────────────────────────────────────────
+@app.get("/api/auth/config")
+def auth_config():
+    # Public (no session): the React SPA reads this on boot to know whether auth is on and to get
+    # the Google OAuth web client id for the sign-in button. client_id is already public (it's
+    # embedded in the GIS button); enabled carries no secret.
+    return {"enabled": auth.enabled(), "client_id": auth.client_id()}
+
+
 @app.post("/api/auth/google")
 def google_login(body: GoogleLoginIn):
     # The login exchange is the ONLY route reachable without a session.
