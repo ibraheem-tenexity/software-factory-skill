@@ -64,7 +64,8 @@ export const api = {
 };
 
 export const BRIEF_SECTIONS: { key: string; label: string }[] = [
-  { key: "goals", label: "Goals" },
+  { key: "goals", label: "Context & Goals" },
+  { key: "scale", label: "Scale & Usage" },
   { key: "success_metrics", label: "Success Metrics" },
   { key: "constraints", label: "Constraints" },
   { key: "stakeholders", label: "Stakeholders" },

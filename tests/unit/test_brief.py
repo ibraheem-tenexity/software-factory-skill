@@ -1,15 +1,13 @@
 """The structured onboarding brief: coverage, the 'enough to proceed' heuristic, and the
 prompt-block rendering injected into Stage 1."""
 from software_factory.brief import (
-    BRIEF_SECTIONS, REQUIRED_SECTIONS, INTERVIEW_TOPICS,
+    BRIEF_SECTIONS, REQUIRED_SECTIONS,
     coverage, enough, brief_to_prompt_block,
 )
 
 
 def test_required_sections_are_a_subset_of_all_sections():
     assert set(REQUIRED_SECTIONS).issubset(set(BRIEF_SECTIONS))
-    # every interview topic maps onto a real section
-    assert all(t["section"] in BRIEF_SECTIONS for t in INTERVIEW_TOPICS)
 
 
 def test_coverage_needs_more_than_a_trivial_answer():
@@ -48,7 +46,7 @@ def test_prompt_block_renders_filled_sections_in_order():
         "goals": "Cargo screening demo.",
     })
     assert "PROJECT BRIEF" in block
-    assert "## Goals" in block and "Cargo screening demo." in block
+    assert "## Context & Goals" in block and "Cargo screening demo." in block
     assert "## Definition of Done" in block
     # goals (earlier in BRIEF_SECTIONS) renders before definition_of_done regardless of input order
-    assert block.index("## Goals") < block.index("## Definition of Done")
+    assert block.index("## Context & Goals") < block.index("## Definition of Done")

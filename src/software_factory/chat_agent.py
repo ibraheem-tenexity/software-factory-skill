@@ -43,20 +43,29 @@ brief BEFORE launching the build — a richer brief produces a far more mature r
 single lazy prompt. Do not launch on the first vague request; interview first.
 
 ## The interview (one topic at a time)
-Work through these topics conversationally, ONE question per turn, in roughly this order. Use \
-the rubric in your head to know when a topic is sufficiently answered:
-1. **Goals / context** — what the business does, the problem this solves, the primary objective.
-2. **Success metrics** — concrete outcomes/numbers; how success is measured.
-3. **Constraints** — timeline, budget, required/avoided tech, hosting, compliance.
-4. **Stakeholders** — decision-makers, end users, sign-off.
-5. **Existing assets** — code, designs, brand assets, wireframes, integrations, docs (accept files/images).
-6. **Risks** — technical/business/dependency unknowns.
-7. **Definition of done** — what the first version must do to be accepted.
+Work through these topics conversationally — ask EXACTLY ONE question per turn and WAIT for the \
+user's answer before moving on (never stack two questions in one message). Go in roughly this \
+order. Use the rubric in your head to know when a topic is sufficiently answered, and ask a brief \
+follow-up if an answer is thin:
+1. **Context & goals** — understand the user's world first: their industry and what their company/\
+organization actually does; who this product is for; the specific problem it solves and the primary \
+objective. Don't accept a one-line app idea at face value — draw out the surrounding context.
+2. **Scale & usage** — how big the organization is (company size and, if they'll share, revenue or \
+funding stage), AND the projected volume of usage for this product: expected number of users, \
+traffic/requests, data volume, and how fast they expect it to grow. This drives the architecture and \
+infrastructure, so get concrete numbers or ballparks where you can.
+3. **Success metrics** — concrete outcomes/numbers; how success is measured.
+4. **Constraints** — timeline, budget, required/avoided tech, hosting, compliance.
+5. **Stakeholders** — decision-makers, end users, sign-off.
+6. **Existing assets** — code, designs, brand assets, wireframes, integrations, docs (accept files/images).
+7. **Risks** — technical/business/dependency unknowns.
+8. **Definition of done** — what the first version must do to be accepted.
 
 After the user answers a topic, call **record_brief_section** with the section key \
-(goals | success_metrics | constraints | stakeholders | existing_assets | risks | definition_of_done) \
-and a crisp summary of their answer in your own words. Acknowledge attached files/images as \
-existing_assets. Keep moving — don't re-ask what's already covered.
+(goals | scale | success_metrics | constraints | stakeholders | existing_assets | risks | definition_of_done) \
+and a crisp summary of their answer in your own words. Use `goals` for the context/industry/company/\
+problem answer and `scale` for the company-size/revenue + projected-usage answer. Acknowledge attached \
+files/images as existing_assets. Keep moving — don't re-ask what's already covered.
 
 ## Proceeding to the build
 Call **propose_proceed** to check whether enough of the brief is covered. Once it reports ready \
@@ -163,8 +172,8 @@ def make_tools(console: Console, attachments=lambda: [],
                 "type": "object",
                 "properties": {
                     "section": {"type": "string",
-                                "enum": ["goals", "success_metrics", "constraints", "stakeholders",
-                                         "existing_assets", "risks", "definition_of_done"]},
+                                "enum": ["goals", "scale", "success_metrics", "constraints",
+                                         "stakeholders", "existing_assets", "risks", "definition_of_done"]},
                     "summary": {"type": "string", "description": "A crisp summary of the user's answer"},
                 },
                 "required": ["section", "summary"],
