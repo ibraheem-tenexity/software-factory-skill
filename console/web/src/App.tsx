@@ -3,7 +3,8 @@ import { api, RunSummary } from "./api";
 import { GraphView } from "./components/GraphView";
 import { KanbanView, appsOf } from "./components/KanbanView";
 import { ChatPanel } from "./components/ChatPanel";
-import { ProjectsScreen } from "./components/ProjectsScreen";
+import { Dashboard } from "./components/Dashboard";
+import { OrgAdminScreen } from "./components/OrgAdminScreen";
 import { OnboardingScreen } from "./components/onboarding/OnboardingScreen";
 import { LoginScreen } from "./components/LoginScreen";
 
@@ -22,6 +23,8 @@ export function App() {
   const [showProjects, setShowProjects] = useState<boolean>(!init.run);
   // The Option C onboarding is the "new project" front door (shown instead of an empty build console).
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
+  // Org admin route (dashboard org switcher / "Manage organization →"). Placeholder until §2.3.
+  const [showOrg, setShowOrg] = useState<boolean>(false);
   const [status, setStatus] = useState<RunSummary & Record<string, any>>({} as any);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [appFilter, setAppFilter] = useState<string>("all");
@@ -56,11 +59,18 @@ export function App() {
     return <OnboardingScreen onComplete={openRun} />;
   }
 
+  if (showOrg) {
+    return <OrgAdminScreen onBack={() => setShowOrg(false)} />;
+  }
+
   if (showProjects) {
+    // Projects dashboard (PRD §2.2) is the post-login home. onOpen reuses the existing openRun
+    // (into the build console — owned by the factory task); onNew → onboarding; onOrg → §2.3.
     return (
-      <ProjectsScreen
+      <Dashboard
         onOpen={openRun}
         onNew={() => { setRunId(null); setShowProjects(false); setShowOnboarding(true); }}
+        onOrg={() => setShowOrg(true)}
       />
     );
   }

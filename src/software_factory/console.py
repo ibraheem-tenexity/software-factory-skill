@@ -1316,6 +1316,18 @@ class Console:
                 b.get("blocks") == "budget" and not b["cleared"]
                 for b in RunDB(self._paths(name)["db"]).blockers()
             )
+            # Distinct agent roles on the run (first-seen order) — the dashboard's per-project
+            # avatar stack (PRD §2.2). Empty when nothing's been spawned yet.
+            roles: list[str] = []
+            for a in AgentRegistry(self._paths(name)["agents_db"]).agents_for(name):
+                if a.role and a.role not in roles:
+                    roles.append(a.role)
+            # Last activity (epoch) for the dashboard's "updated" column; falls back to the
+            # registry create time for a registry-only run with no local dir yet.
+            try:
+                updated = os.path.getmtime(os.path.join(self._runs_dir, name))
+            except OSError:
+                updated = created.get(name, 0)
             runs.append({
                 "run_id": name,
                 "phase": self.current_phase(name),
@@ -1327,14 +1339,10 @@ class Console:
                 "budget_stopped": budget_stopped,
                 "held": st.held,
                 "owner": st.owner,
+                "agents": roles[:5],
+                "updated": updated,
             })
-        def _sort_key(r):
-            p = os.path.join(self._runs_dir, r["run_id"])
-            try:
-                return os.path.getmtime(p)
-            except OSError:  # registry-only run, no local dir yet
-                return created.get(r["run_id"], 0)
-        runs.sort(key=_sort_key, reverse=True)
+        runs.sort(key=lambda r: r["updated"], reverse=True)
         return runs
 
     def events(self, run_id: str) -> list:

@@ -8,6 +8,12 @@ export type RunSummary = {
   spent_usd?: number;
   owner?: string;
   done?: boolean;
+  description?: string;   // the project goal (one-liner shown on the dashboard row)
+  deploy_url?: string;    // present ⇒ deployed/live
+  budget_stopped?: boolean;
+  held?: boolean;
+  agents?: string[];      // distinct agent roles on the run (avatar stack)
+  updated?: number;       // last-activity epoch (seconds)
 };
 
 export type TicketStatus =

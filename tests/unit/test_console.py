@@ -237,6 +237,31 @@ def test_list_runs_returns_launched_runs_for_reconnect(tmp_path):
     assert one["description"] == "app 0" and "phase" in one
 
 
+def test_list_runs_includes_distinct_agent_roles_and_updated_timestamp(tmp_path):
+    # The projects dashboard (PRD §2.2) renders a per-project agent avatar-stack + last-activity,
+    # so each run carries `agents` (distinct roles, first-seen order) and an `updated` epoch.
+    c = console(tmp_path, FakeLauncher())
+    c._new_id = lambda: "run-0"
+    rid = c.start_run(RunRequest(description="app"))
+    paths = run_paths(str(tmp_path), rid)
+    reg = AgentRegistry(paths["agents_db"], clock=lambda: 1)
+    reg.spawn("a1", rid, 1, "architect", "claude-opus-4-8", phase="architect")
+    reg.spawn("a2", rid, 2, "build", "claude-sonnet-4-6", phase="build")
+    reg.spawn("a3", rid, 3, "build", "claude-sonnet-4-6", phase="build")  # dup role collapses
+
+    row = [r for r in c.list_runs() if r["run_id"] == rid][0]
+    assert row["agents"] == ["architect", "build"]      # distinct, first-seen order
+    assert isinstance(row["updated"], (int, float)) and row["updated"] > 0
+
+
+def test_list_runs_agents_empty_when_none_spawned(tmp_path):
+    c = console(tmp_path, FakeLauncher())
+    c._new_id = lambda: "run-0"
+    rid = c.start_run(RunRequest(description="app"))
+    row = [r for r in c.list_runs() if r["run_id"] == rid][0]
+    assert row["agents"] == []
+
+
 def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
     from software_factory.db import RunDB, db_path
     from software_factory.agents import AgentRegistry
