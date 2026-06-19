@@ -337,6 +337,26 @@ Security note:
 - If the Data API exposes this table, enable RLS and keep policies tight, or revoke anon/authenticated access and use only the server connection.
 - The console server should remain the authorization boundary. Do not rely on user-editable metadata for roles.
 
+### `public.sf_run_schema_version`
+
+Purpose: per-run-schema version registry for the Alembic per-run fan-out (see "Migrations" below).
+One row per run; records which per-run template version each `sf_run_<id>` schema is at, so the
+fan-out only applies pending revisions. Created in the Alembic baseline (`0001`); `dbshim` stamps a
+new schema's row at head on creation.
+
+```sql
+create table if not exists public.sf_run_schema_version (
+  run_id     text primary key,
+  version    text not null,
+  updated_at timestamptz not null default now()
+);
+```
+
+### `public.alembic_version`
+
+Alembic's own bookkeeping table (single row, the current global head — e.g. `0001_baseline`). Managed
+entirely by Alembic; never written by application code.
+
 ## Current Per-Run Schema
 
 For `run-1234abcd`, the schema name is:
