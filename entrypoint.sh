@@ -17,6 +17,15 @@ fi
 
 RUNS="${SF_RUNS_DIR:-/app/.runs}"
 mkdir -p "$RUNS" 2>/dev/null || true
+
+# Apply DB migrations (Alembic global tables + per-run schema fan-out) BEFORE serving, so the
+# schema is deterministic. Postgres-only — a no-op on sqlite. Non-fatal: the console's own
+# CREATE-IF-NOT-EXISTS + the lifespan boot are a backstop if this can't reach the DB.
+if [ "$SF_DB_LOWER" = "postgres" ]; then
+    echo "[entrypoint] applying DB migrations..."
+    python3 -m software_factory.migrate || echo "[entrypoint] WARN: migrate failed; continuing (boot will retry)" >&2
+fi
+
 UVICORN="uvicorn console.app:app --host ${SF_BIND:-0.0.0.0} --port ${PORT:-8765}"
 if [ "$(id -u)" = "0" ]; then
     chown -R 1000:1000 "$RUNS" 2>/dev/null || true

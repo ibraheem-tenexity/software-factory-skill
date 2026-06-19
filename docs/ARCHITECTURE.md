@@ -136,8 +136,8 @@ runtime-agnostic.
 
 ## 5. Data model & where state lives
 
-**Run STATE → Postgres** (Supabase; `software-factory-state` today, cutover to the Tenexity-org
-`software-factory-as-a-skill` pending — see [`schema-erd.md`](schema-erd.md), when `SF_DB=postgres`):
+**Run STATE → Postgres** (Supabase **`software-factory-as-a-skill`**, Tenexity org — cut over from the
+old personal-org `software-factory-state`; see [`schema-erd.md`](schema-erd.md), when `SF_DB=postgres`):
 - `public.sf_runs` — the run registry (discovery).
 - `public.users` — the user directory (roles).
 - one **schema per run** `sf_run_<id>` containing: `runstate` (the `RunState` JSON, incl.
@@ -148,6 +148,11 @@ runtime-agnostic.
   tag), `agents`.
 - `dbshim` translates the stores' SQLite SQL to Postgres (schema-per-run via `SET LOCAL
   search_path`, `?`→`%s`, DDL deltas, `RETURNING id`). Unset `SF_DB` = plain SQLite (local/dev/tests).
+- **Migrations (Alembic):** `software_factory.migrate` (run at deploy via `entrypoint.sh` + defensively
+  in the boot lifespan, Postgres-only) applies **Alembic** revisions to the global `public` tables
+  (`migrations/`, baseline `0001`) and runs a **per-run fan-out** that versions every `sf_run_<id>`
+  schema in `public.sf_run_schema_version` (new schemas are stamped at head by `dbshim` on creation).
+  This replaces the old scattered `CREATE TABLE IF NOT EXISTS` self-creation as the source of truth.
 - **Drafts:** the onboarding interview persists on a `phase="draft"` run with no recorded artifact,
   so `is_pipeline_run` is False and the poller ignores it until `promote_draft` launches Stage 1.
 - **Multi-deliverable:** a run ships **1..N deliverables**; per-app deploy/verify state lives in the
@@ -205,8 +210,8 @@ alongside `dbshim`; write-through on ingest + log flush; read on demand. Not yet
   unhealthy email.
 - **Railway services:** `factory-console` (the orchestrator + volume), `sf-<run_id>` (each built
   demo app + its factory-provisioned Railway Postgres), `autobuilder`/`factory-api` (legacy).
-  **Supabase:** `software-factory-state` (factory state today; cutover to the Tenexity-org
-  `software-factory-as-a-skill` pending). **Secrets** are Railway service env vars (Anthropic,
+  **Supabase:** `software-factory-as-a-skill` (Tenexity org — factory state; cut over from the old
+  personal-org `software-factory-state`). **Secrets** are Railway service env vars (Anthropic,
   OpenRouter, OpenAI, Resend, Langfuse, Google client id, service token, `DATABASE_URL`).
 
 ---

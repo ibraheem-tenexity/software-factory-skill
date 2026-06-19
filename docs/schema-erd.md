@@ -261,12 +261,12 @@ Current code references:
 
 Use the Tenexity Supabase project named `software-factory-as-a-skill`.
 
-Current coordination says:
+Cutover status:
 
-- Current live DB: `software-factory-state` in the personal org.
-- Intended DB: `software-factory-as-a-skill` in the Tenexity org.
-- The cutover is not live yet.
-- Do not delete the old DB until cutover and verification are complete.
+- Live DB: **`software-factory-as-a-skill`** in the Tenexity org (cut over from the old personal-org
+  `software-factory-state`).
+- Schema is **Alembic-managed** (`migrations/` + `software_factory.migrate`); see "Migrations" below.
+- The old `software-factory-state` is kept intact as a rollback path until the new DB is fully verified.
 
 ## Current Global Tables
 
@@ -1113,10 +1113,23 @@ Potential RLS direction if browser direct reads ever happen:
 
 - `tickets.pr` and `agents.pr` are typed as integer but opencode can use commit SHA provenance.
 - `runstate.data` is JSON stored as text, so SQL filtering on owner/name/stage requires loading each run unless a projection table is added.
-- Per-run schemas need careful connection handling with the Supabase transaction pooler.
-- No current migration framework exists; constructors use `create table if not exists`.
-- Adding columns requires explicit `alter table` logic or Alembic migrations.
+- Per-run schemas need careful connection handling with the Supabase transaction pooler
+  (`prepare_threshold=None` — server-side prepared statements break on the 6543 pooler).
 - Files/logs/chat are not durable if the `/data` volume is lost.
+
+## Migrations (Alembic)
+
+The schema is now **Alembic-managed** (no more relying on scattered `create table if not exists`):
+- **Global `public` tables** — standard Alembic revisions in `migrations/` (baseline `0001` =
+  `sf_runs`, `users`, `sf_run_schema_version`). `alembic upgrade head` via `software_factory.migrate`.
+- **Per-run `sf_run_<id>` schemas** — Alembic can't iterate dynamic schemas, so per-run schema changes
+  are versioned in `software_factory.schema_ddl.PER_RUN_REVISIONS` and applied by a **fan-out**
+  (`migrate.fanout_per_run`) across every schema in `public.sf_runs`, with each schema's version
+  recorded in `public.sf_run_schema_version`. `dbshim` stamps new schemas at head on creation.
+- **Run automatically** at deploy (`entrypoint.sh` → `python3 -m software_factory.migrate`, before
+  uvicorn) and defensively in the console boot lifespan. Postgres-only; sqlite/dev is a no-op.
+- Adding a per-run column later = append a revision to `PER_RUN_REVISIONS` (idempotent, unqualified
+  DDL); the next deploy fans it out across all run schemas.
 
 ## Open Questions
 

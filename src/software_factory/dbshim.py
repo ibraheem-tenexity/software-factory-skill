@@ -197,6 +197,18 @@ class PgConn:
                         cur.execute(
                             "INSERT INTO public.sf_runs (run_id, schema_name) VALUES (%s, %s) "
                             "ON CONFLICT DO NOTHING", (self._run_id, self._schema))
+                        # Stamp this new per-run schema at the current per-run template version so
+                        # the Alembic fan-out (software_factory.migrate) skips it. Best-effort: the
+                        # version registry may not exist yet on a never-migrated DB.
+                        from .schema_ddl import per_run_head
+                        cur.execute(
+                            "CREATE TABLE IF NOT EXISTS public.sf_run_schema_version ("
+                            "run_id text PRIMARY KEY, version text NOT NULL, "
+                            "updated_at timestamptz NOT NULL DEFAULT now())")
+                        cur.execute(
+                            "INSERT INTO public.sf_run_schema_version (run_id, version) "
+                            "VALUES (%s, %s) ON CONFLICT (run_id) DO NOTHING",
+                            (self._run_id, per_run_head()))
                 self._ready = True
                 return
             except Exception as e:
