@@ -887,7 +887,7 @@ class Console:
             {"id": t.id, "title": t.title, "wave": t.wave, "status": t.status,
              "agent": t.agent, "provenance": t.provenance, "provenance_type": t.provenance_type,
              "diff_lines": t.diff_lines, "acceptance": t.acceptance, "dod": t.dod,
-             "app": getattr(t, "app", None)}
+             "app": getattr(t, "app", None), "description": getattr(t, "description", "")}
             for t in store.all_tickets()
         ]
         waves = sorted({t["wave"] for t in items})

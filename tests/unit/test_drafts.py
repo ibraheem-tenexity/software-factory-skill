@@ -83,7 +83,7 @@ def test_tickets_projection_groups_by_status_and_wave(tmp_path):
     assert {t["title"] for t in out["tickets"]} == {"Login screen", "Dashboard"}
     assert out["waves"] == [1, 2]
     by_title = {t["title"]: t for t in out["tickets"]}
-    assert by_title["Login screen"]["status"] == "claimed"
+    assert by_title["Login screen"]["status"] == "in_progress"
     assert by_title["Login screen"]["agent"] == "impl-1"
 
 

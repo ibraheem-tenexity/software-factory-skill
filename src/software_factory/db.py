@@ -212,6 +212,12 @@ _USAGE = (
     "  spawn-agent <runs_dir> <run_id> <agent_id> <role> <model> [phase] [ticket_id]\n"
     "  finish-agent <runs_dir> <run_id> <agent_id> <outcome> [cost_usd] [provenance] [diff_lines]\n"
     "                         provenance = PR number or commit SHA; type inferred (digits='pr', else='commit')\n"
+    "  claim <runs_dir> <run_id> <ticket_id> <agent>\n"
+    "  mark-done <runs_dir> <run_id> <ticket_id> <provenance> <diff_lines>\n"
+    "  mark-deployed <runs_dir> <run_id> <ticket_id>\n"
+    "  start-qa <runs_dir> <run_id> <ticket_id>\n"
+    "  qa-approve <runs_dir> <run_id> <ticket_id>\n"
+    "  qa-reject <runs_dir> <run_id> <ticket_id> <bug_markdown>   (ticket → open, carries the bug report)\n"
 )
 
 
@@ -267,6 +273,22 @@ def main(argv: list[str]) -> int:
         AgentRegistry(db_path(runs_dir, run_id)).record(agent_id, outcome, cost_usd=cost,
                                                         provenance=provenance,
                                                         diff_lines=diff_lines)
+    elif verb in ("claim", "mark-done", "mark-deployed", "start-qa", "qa-approve", "qa-reject"):
+        from .tickets import TicketStore
+        ts = TicketStore(db_path(runs_dir, run_id))
+        tid = int(rest[0])
+        if verb == "claim":
+            ts.claim(tid, rest[1])
+        elif verb == "mark-done":
+            ts.mark_done(tid, rest[1], int(rest[2]))
+        elif verb == "mark-deployed":
+            ts.mark_deployed(tid)
+        elif verb == "start-qa":
+            ts.start_qa(tid)
+        elif verb == "qa-approve":
+            ts.qa_approve(tid)
+        elif verb == "qa-reject":
+            ts.qa_reject(tid, rest[1])
     else:
         sys.stderr.write(_USAGE)
         return 2

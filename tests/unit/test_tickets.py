@@ -6,7 +6,7 @@ did nothing. Here that transition simply raises.
 """
 import pytest
 
-from software_factory.tickets import TicketStore, HollowWorkError
+from software_factory.tickets import TicketStore, HollowWorkError, IllegalTransition
 
 
 def fresh(tmp_path):
@@ -40,12 +40,12 @@ def test_open_tickets_are_scoped_by_wave(tmp_path):
     assert [t.id for t in ts.open_tickets(wave=2)] == [w2]
 
 
-def test_claim_assigns_agent_and_leaves_ticket_open_until_done(tmp_path):
+def test_claim_assigns_agent_and_moves_to_in_progress(tmp_path):
     ts = fresh(tmp_path)
     tid = ts.create_ticket("t", acceptance="a", dod="d", wave=1)
     ts.claim(tid, agent="build-agent-1")
     t = ts.get(tid)
-    assert t.status == "claimed"
+    assert t.status == "in_progress"
     assert t.agent == "build-agent-1"
 
 
@@ -100,3 +100,64 @@ def test_render_markdown_view_lists_tickets_and_status(tmp_path):
     md = ts.render_markdown()
     assert "Guestbook form" in md
     assert "open" in md
+
+
+# -- 6-state lifecycle + QA loop --------------------------------------------------------
+def _to_deployed(ts):
+    tid = ts.create_ticket("t", acceptance="a", dod="d", wave=1)
+    ts.claim(tid, agent="build-1")
+    ts.mark_done(tid, provenance="abc1234", diff_lines=40)
+    ts.mark_deployed(tid)
+    return tid
+
+
+def test_full_happy_lifecycle_to_approved(tmp_path):
+    ts = fresh(tmp_path)
+    tid = _to_deployed(ts)
+    assert ts.get(tid).status == "deployed"
+    ts.start_qa(tid)
+    assert ts.get(tid).status == "qa_testing"
+    ts.qa_approve(tid)
+    assert ts.get(tid).status == "approved"
+    assert ts.all_approved()
+    assert [t.id for t in ts.approved_tickets()] == [tid]
+
+
+def test_qa_reject_bounces_to_open_with_bug_report(tmp_path):
+    ts = fresh(tmp_path)
+    tid = _to_deployed(ts)
+    ts.start_qa(tid)
+    ts.qa_reject(tid, "Submit button 404s.\n\n![shot](https://x/y.png)")
+    t = ts.get(tid)
+    assert t.status == "open"               # back in the build queue
+    assert t.agent is None                  # cleared for a fresh claim
+    assert "QA bug" in t.description and "Submit button 404s" in t.description
+    assert "y.png" in t.description          # screenshot link carried for the next build agent
+    assert tid in [x.id for x in ts.open_tickets(wave=1)]   # re-buildable
+
+
+def test_done_tickets_includes_built_and_beyond(tmp_path):
+    ts = fresh(tmp_path)
+    tid = _to_deployed(ts)                   # status == deployed
+    assert tid in [t.id for t in ts.done_tickets()]   # still counts as built-or-beyond
+    assert not ts.all_approved()
+
+
+def test_illegal_transitions_raise(tmp_path):
+    ts = fresh(tmp_path)
+    tid = ts.create_ticket("t", acceptance="a", dod="d", wave=1)
+    with pytest.raises(IllegalTransition):
+        ts.mark_deployed(tid)                # open → deployed (must be done first)
+    with pytest.raises(IllegalTransition):
+        ts.qa_approve(tid)                   # open → approved (never QA'd)
+    ts.claim(tid, "b1"); ts.mark_done(tid, provenance="9", diff_lines=5)
+    with pytest.raises(IllegalTransition):
+        ts.start_qa(tid)                     # done → qa_testing (must deploy first)
+    with pytest.raises(IllegalTransition):
+        ts.qa_reject(tid, "nope")            # done → open via qa_reject (not in qa_testing)
+
+
+def test_create_ticket_with_description(tmp_path):
+    ts = fresh(tmp_path)
+    tid = ts.create_ticket("t", acceptance="a", dod="d", wave=1, description="build the thing")
+    assert ts.get(tid).description == "build the thing"
