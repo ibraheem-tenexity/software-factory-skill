@@ -10,16 +10,20 @@ export type RunSummary = {
   done?: boolean;
 };
 
+export type TicketStatus =
+  | "open" | "in_progress" | "done" | "deployed" | "qa_testing" | "approved";
+
 export type Ticket = {
   id: number;
   title: string;
   wave: number;
-  status: "open" | "claimed" | "done";
+  status: TicketStatus;
   agent: string | null;
   provenance: string | null;
   provenance_type: string | null;
   diff_lines: number;
   app: string | null;
+  description?: string;
 };
 
 export type TicketsResponse = { tickets: Ticket[]; waves: number[] };

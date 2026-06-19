@@ -54,7 +54,7 @@ select { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(
 /* Kanban */
 .kanban { position: absolute; inset: 0; overflow: auto; padding: 16px; }
 .kb-board { display: flex; gap: 16px; align-items: flex-start; min-height: 100%; }
-.kb-col { flex: 1; min-width: 0; background: var(--muted); border: 1px solid var(--border);
+.kb-col { flex: 1 0 200px; min-width: 200px; background: var(--muted); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 10px; }
 .kb-col-head { display: flex; justify-content: space-between; font: 700 0.72rem var(--sans);
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-fg); margin-bottom: 8px; }
@@ -62,8 +62,11 @@ select { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(
 .kb-lane-label { font: 600 0.66rem var(--mono); color: var(--muted-fg); margin: 8px 0 4px; }
 .kb-card { background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--muted-fg);
   border-radius: 6px; padding: 9px 11px; margin-bottom: 8px; }
-.kb-col[data-status="claimed"] .kb-card { border-left-color: var(--amber); }
-.kb-col[data-status="done"] .kb-card { border-left-color: var(--success); }
+.kb-col[data-status="in_progress"] .kb-card { border-left-color: var(--amber); }
+.kb-col[data-status="done"] .kb-card { border-left-color: var(--primary); }
+.kb-col[data-status="deployed"] .kb-card { border-left-color: #0ea5e9; }
+.kb-col[data-status="qa_testing"] .kb-card { border-left-color: #a855f7; }
+.kb-col[data-status="approved"] .kb-card { border-left-color: var(--success); }
 .kb-title { font: 600 0.84rem var(--sans); margin: 3px 0 6px; line-height: 1.35; }
 .kb-card-top { display: flex; justify-content: space-between; }
 .kb-wave { font: 600 0.62rem var(--mono); color: var(--muted-fg); }

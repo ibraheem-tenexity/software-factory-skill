@@ -2,9 +2,12 @@ import { useEffect, useState } from "react";
 import { api, Ticket, TicketsResponse } from "../api";
 
 const COLUMNS: { status: Ticket["status"]; label: string }[] = [
-  { status: "open", label: "To Do" },
-  { status: "claimed", label: "In Progress" },
+  { status: "open", label: "Open" },
+  { status: "in_progress", label: "In Progress" },
   { status: "done", label: "Done" },
+  { status: "deployed", label: "Deployed" },
+  { status: "qa_testing", label: "QA Testing" },
+  { status: "approved", label: "Approved" },
 ];
 
 function Card({ t }: { t: Ticket }) {
