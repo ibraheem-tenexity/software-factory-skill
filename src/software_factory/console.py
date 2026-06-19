@@ -852,6 +852,43 @@ class Console:
         from .brief import coverage as _cov
         return state.interview_coverage or _cov(merged)
 
+    def draft_project(self, run_id: str) -> dict:
+        """Read-only project projection of a draft (name + goal + scope + composed description +
+        brief + coverage) — the counterpart of set_draft_project, for the concierge's get_intake_state."""
+        from .brief import coverage as _cov
+        state = self._load_state(run_id)
+        brief = dict(state.brief or {})
+        return {"name": state.name, "goal": brief.get("goals", ""), "scope": list(state.scope or []),
+                "description": state.description or "", "brief": brief, "coverage": _cov(brief)}
+
+    def set_draft_project(self, run_id: str, name: str | None = None,
+                          goal: str | None = None, scope: list | None = None) -> dict:
+        """Structured project setter for the Option C onboarding (draft phase). Writes the project
+        name, the goal (into brief.goals so it reaches the Stage-1 brief block), and the scope-of-work
+        backing — then RECOMPOSES the canonical description = compose(goal, scope) server-side, so the
+        form and the concierge agent never duplicate the format. Each field is optional; goal and scope
+        recompose against each other's persisted value so independent calls stay idempotent.
+        Returns {name, goal, scope, description, brief, coverage}."""
+        from .brief import compose_description, coverage as _cov
+        state = self._load_state(run_id)
+        if name is not None:
+            state.name = name
+        brief = dict(state.brief or {})
+        if goal is not None:
+            brief["goals"] = goal
+            state.brief = brief
+        if scope is not None:
+            state.scope = list(scope)
+        # Recompose only when there's something to compose from (avoid clobbering a hand-set
+        # description with an empty string before any project answer exists).
+        eff_goal = brief.get("goals", "") or ""
+        eff_scope = state.scope or []
+        if eff_goal or eff_scope:
+            state.description = compose_description(eff_goal, eff_scope)
+        state.save()
+        return {"name": state.name, "goal": brief.get("goals", ""), "scope": list(state.scope or []),
+                "description": state.description or "", "brief": brief, "coverage": _cov(brief)}
+
     def promote_draft(self, run_id: str, description: str = "",
                       interview_md: str | None = None, target: str = "railway") -> str:
         """Promote a draft into a real run: launch Stage 1 against the EXISTING draft id, threading

@@ -64,6 +64,37 @@ def test_promote_draft_launches_stage1_with_brief_threaded(tmp_path):
     assert os.path.isfile(os.path.join(base, "input", "interview.md"))
 
 
+def test_set_draft_project_writes_name_goal_and_composes_description(tmp_path):
+    c = _console(tmp_path, FakeLauncher())
+    rid = c.create_draft(owner="op@tenexity.ai")
+    out = c.set_draft_project(rid, name="Quote-to-Epicor",
+                              goal="Replace the manual quoting spreadsheet.",
+                              scope=["Quoting / RFQ", "Pricing & approvals"])
+    assert out["name"] == "Quote-to-Epicor"
+    assert out["brief"]["goals"] == "Replace the manual quoting spreadsheet."   # goal → brief.goals
+    assert out["scope"] == ["Quoting / RFQ", "Pricing & approvals"]
+    # canonical description = goal + scope-of-work line (composed server-side)
+    assert out["description"] == ("Replace the manual quoting spreadsheet.\n\n"
+                                  "Scope of work: Quoting / RFQ, Pricing & approvals.")
+    st = c._load_state(rid)
+    assert st.scope == ["Quoting / RFQ", "Pricing & approvals"]
+    assert st.description == out["description"]
+
+
+def test_set_draft_project_recomposes_idempotently_across_independent_calls(tmp_path):
+    # set_project_basics (goal) then set_project_scope (scope) arrive as separate tool calls —
+    # the second must recompose against the persisted goal, not wipe it.
+    c = _console(tmp_path, FakeLauncher())
+    rid = c.create_draft(owner="op@tenexity.ai")
+    c.set_draft_project(rid, goal="Build quotes against our Epicor SKUs.")
+    out = c.set_draft_project(rid, scope=["Quoting / RFQ"])
+    assert out["description"] == "Build quotes against our Epicor SKUs.\n\nScope of work: Quoting / RFQ."
+    # updating just the goal later keeps the existing scope in the recomposed description
+    out2 = c.set_draft_project(rid, goal="Build quotes and route discounts for approval.")
+    assert out2["description"] == ("Build quotes and route discounts for approval.\n\n"
+                                   "Scope of work: Quoting / RFQ.")
+
+
 def test_tickets_projection_empty_for_fresh_run(tmp_path):
     c = _console(tmp_path, FakeLauncher())
     rid = c.create_draft(owner="op@tenexity.ai")

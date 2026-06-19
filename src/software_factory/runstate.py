@@ -46,7 +46,7 @@ _PERSISTED = {
     "planning_model", "impl_model",
     "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
     "budget_ceiling", "held", "owner",
-    "brief", "interview_coverage",
+    "brief", "interview_coverage", "scope",
 }
 
 
@@ -83,6 +83,10 @@ class RunState:
     # during the pre-run interview (phase == "draft") and injected into the Stage-1 PRD prompt.
     brief: dict = field(default_factory=dict)
     interview_coverage: dict = field(default_factory=dict)
+    # Option C "scope of work" selections (e.g. ["Quoting / RFQ", ...]). NOT a brief section —
+    # the structured backing for the project description: description = compose(brief.goals, scope),
+    # recomposed idempotently whenever goal or scope changes via Console.set_draft_project.
+    scope: list = field(default_factory=list)
     _store: Optional[Store] = field(default=None, repr=False, compare=False)
 
     @classmethod
