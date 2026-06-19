@@ -1,6 +1,48 @@
 # Handover — software-factory-skill
 
-_Last updated: 2026-06-17. Supersedes any prior HANDOFF/handover doc._
+_Last updated: 2026-06-19._
+
+## LATEST (2026-06-19) — feature build on branch `worktree-flat-project` (NOT merged, NOT deployed)
+
+An autonomous build off the plan `this-is-the-feedback-purring-donut.md`. **8 commits on
+`worktree-flat-project`** (tip `c9c01e1`), **full suite 451 passed / 3 skipped, `console/web` build
+green.** Nothing deployed, nothing pushed, no Supabase resources created — per the operator's standing
+constraints. Built by the integrator + three subagents (onboarding, QA-gate done inline, neck-beard).
+
+**Shipped (all on the CURRENT schema-per-run model):**
+- **Org/User model** (`users.py`) — `public.organizations` + user profile cols (`org_id`,
+  `designation`, `role_description`, `tenexity`); headcount/revenue are **band-label text**. `fd71538`
+- **6-state tickets + QA loop** (`tickets.py`, `db.py` CLI) — `open→in_progress→done→deployed→
+  qa_testing→approved`; `qa_reject` bounces to `open` with a markdown bug report in the new
+  `description`; `IllegalTransition` guards. `fbfc19a`
+- **Storage adapter + blobs** (`storage.py`, `blobs.py`) — Supabase Storage REST / local fallback,
+  env-gated; manifest table. `fc21c80`
+- **Stage-3 QA gate** — `detect_stage3_done` now also requires `all_approved()`; both stage-3 SKILLs
+  document the per-ticket QA loop. `a45cbb8`
+- **Option C onboarding** (`console/web/src/components/onboarding/`) — both paths (first-time capture /
+  returning org-on-file) selected by `GET /api/org`; `GET/POST/PATCH /api/org` endpoints; handoff reuses
+  the existing run/brief/Stage-1 flow. `c4bfbcc`
+- **Kanban 6 columns** + docs. `6ad061b`, `34c039e`
+
+**Verify:** `python3 -m venv .venv && .venv/bin/pip install -e '.[dev,postgres]'`, then
+`. .venv/bin/activate && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q` (≈3.7 min) and
+`cd console/web && npm install && npm run build`. (The "local test env is broken" gotcha below is
+OUTDATED for this worktree — a fresh `.venv` runs the **whole** suite incl. the openai/httpx tests.)
+
+**DEFERRED to an operator-reviewed follow-up (integrator decision — see ARCHITECTURE §11):** the
+flat-schema rewrite + global `run→project` rename + Alembic-flat + the one-time live data migration.
+Reason: highest blast radius (rewrites `dbshim`'s pooler primitive, every store, the `db` CLI/SKILL
+contract, `console.py`'s graph projection); benefit is ops-only; the live migration is operator-gated
+regardless. Because it's deferred, the per-run fan-out / `schema_ddl` / `sf_run_schema_version` are
+**still live** — do not delete them until that rewrite is done.
+
+**Operator next steps for this build:** (1) review the branch; (2) to enable real blob storage, the
+one-time `SUPABASE_AT` setup — create the `factory-run-blobs` bucket + read the project `service_role`
+key (adapter falls back to local until then); (3) follow-ups noted in the onboarding commit: bundle the
+real Hanken Grotesk/JetBrains Mono woff2 (system fallbacks for now), and wire doc/video upload through
+the storage adapter (model-only today); (4) decide whether to schedule the deferred flat rewrite.
+
+---
 
 ## TL;DR — the one thing to know
 `main` is at **`f3246fe`** with the full combined work merged, but the **live console is still
