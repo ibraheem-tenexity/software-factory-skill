@@ -139,13 +139,20 @@ runtime-agnostic.
 **Run STATE → Postgres** (Supabase **`software-factory-as-a-skill`**, Tenexity org — cut over from the
 old personal-org `software-factory-state`; see [`schema-erd.md`](schema-erd.md), when `SF_DB=postgres`):
 - `public.sf_runs` — the run registry (discovery).
-- `public.users` — the user directory (roles).
+- `public.users` — the user directory (roles) + onboarding profile columns **`org_id`,
+  `designation`, `role_description`, `tenexity`** (Tenexity-staff flag).
+- `public.organizations` (top-level tenant: `name`, `industry`, `sub_focus`, `headcount`/`revenue`
+  stored as **band-label text** e.g. `"51–200"` / `"$10M–$50M"`, `location`, `website`,
+  `connected_systems`) — the org-on-file model behind the Option C onboarding.
+- `public.blobs` — manifest for durable file storage (scope `run`|`org`, scope_id, kind,
+  storage_key, content_type, size, sha256); see §6.
 - one **schema per run** `sf_run_<id>` containing: `runstate` (the `RunState` JSON, incl.
   description, name, **owner**, models, budget, **`brief`** + `interview_coverage`, and `phase`
   which is `"draft"` for a pre-run interview), `phases`, `artifacts` (metadata: title + path +
   kind, not the bytes), `blockers`, `gates`, `verifications`, **`deployments`** (one row per
   deliverable: `app`, `service_name`, `url`, `status`, `verified`), `tickets` (each with an `app`
-  tag), `agents`.
+  tag, a **6-state `status`** `open → in_progress → done → deployed → qa_testing → approved`, and a
+  markdown **`description`** that carries QA bug reports on a `qa_reject` bounce), `agents`.
 - `dbshim` translates the stores' SQLite SQL to Postgres (schema-per-run via `SET LOCAL
   search_path`, `?`→`%s`, DDL deltas, `RETURNING id`). Unset `SF_DB` = plain SQLite (local/dev/tests).
 - **Migrations (Alembic):** `software_factory.migrate` (run at deploy via `entrypoint.sh` + defensively
@@ -174,17 +181,24 @@ inputs, logs, and chat — and the factory cannot run without a volume to write 
 
 ---
 
-## 6. PLANNED — Supabase Storage as durable file storage
+## 6. Supabase Storage as durable file storage (adapter BUILT; bucket + write-through pending)
 
 Today the volume is a single point of data loss for files. Direction: **a Supabase Storage bucket
 (`factory-run-blobs`) becomes the durable home for blobs** — uploaded attachments/images, `run.log`,
-`chat.jsonl`, and artifact bytes — keyed by `run_id`, with a `public.run_blobs` manifest table
-holding the `(storage_bucket, storage_key)` pointers. The volume becomes a cache/scratch space, not
-the source of truth. This makes the volume disposable (lose it → re-hydrate from the bucket +
-Postgres) and is a prerequisite for the spec-to-demo harness, which needs durable, addressable
-wireframe images for the S1 vision pass and the S5 screenshot-diff. (Scope: a storage adapter
-alongside `dbshim`; write-through on ingest + log flush; read on demand. Not yet built — the
-`run_blobs` manifest is shown dashed in [`schema-erd.svg`](schema-erd.svg).)
+`chat.jsonl`, and artifact bytes — keyed by `run_id`, with a `public.blobs` manifest table holding
+the pointers. The volume becomes a cache/scratch space, not the source of truth.
+
+**Built:** `software_factory.storage` (`put`/`get`/`url`/`listing`/`sha256`) + `software_factory.blobs.BlobStore`
+manifest. The adapter is **env-gated, mirroring `notify`/`tracing`:** with
+`SUPABASE_URL` + `SUPABASE_SERVICE_KEY` + `SF_STORAGE_BUCKET` it uploads via the Supabase Storage
+REST API using the **project-scoped service_role key** (a console-side secret — agents never get an
+account-wide token); without them it falls back to a local `SF_BLOB_DIR`, so dev + the hermetic test
+suite need no creds. Two scopes share one bucket: run-scoped `<run_id>/<kind>/<file>` and org-scoped
+`org/<org_id>/<kind>/<file>`. The immediate consumer is **durable QA screenshots** (a bug report
+bounced to a ticket's `description` links `![](<url>)` images).
+
+**Pending (operator-gated):** creating the `factory-run-blobs` bucket + reading the project service
+key (a one-time `SUPABASE_AT` setup step), and the full write-through of inputs/logs/artifacts.
 
 ---
 
@@ -239,25 +253,32 @@ alongside `dbshim`; write-through on ingest + log flush; read on demand. Not yet
 
 ---
 
-## 11. PROPOSED (next change) — flat project schema + 6-state kanban + orgs
+## 11. SHIPPED (this change) — orgs + 6-state kanban + QA loop + storage + Option C onboarding
 
-> **Not yet built** — the target of the next change. Full schema in [`schema-erd.md`](schema-erd.md)
-> (the "PROPOSED (next change)" section); proposed ERD + state machine + build map in the design-preview artifact.
+Built on the **current schema-per-run model** (the flat rewrite below was deliberately deferred), all
+behind the green test suite:
+- **Organizations + user profiles** — `public.organizations` (top-level tenant) and the
+  `org_id`/`designation`/`role_description`/`tenexity` columns on `public.users`; headcount/revenue are
+  **band-label text**. Org context is available to feed the Stage-1 PRD.
+- **Tickets → 6 states** (`open → in_progress → done → deployed → qa_testing → approved`, with
+  `qa_reject` bouncing to `open`) + a markdown **`description`** carrying bug reports; transition verbs
+  on `TicketStore` and the `db` CLI. The Stage-3 **QA loop** is documented in both stage-3 SKILLs and the
+  host **done-gate now requires `all_approved()`** (every ticket QA-approved) on top of the
+  traceable-agents + passing-Playwright gates.
+- **Supabase Storage adapter + `blobs` manifest** — see §6 (env-gated; local fallback).
+- **Option C onboarding** — the React front door (`console/web/src/components/onboarding/`), two paths
+  selected by `GET /api/org` (first-time company capture vs returning org-on-file), with
+  `GET/POST/PATCH /api/org` endpoints. Handoff reuses the existing run/brief/Stage-1 flow.
+- **Kanban** — 6 lifecycle columns.
 
-- **Rename `run` → `project`** everywhere — table `run_index → projects`, key `run_id → project_id`,
-  `RunState → ProjectState` / `RunDB → ProjectDB`, the `db` CLI arg, the stage SKILLs, and the volume
-  `runs/ → projects/`.
-- **Drop schema-per-run** → one `public` schema, all tables keyed by `project_id`; `dbshim` loses the
-  `search_path` machinery and Alembic manages one schema (the per-run fan-out + `sf_run_schema_version`
-  are retired).
-- **Organizations** (NEW top-level tenant: name, industry, headcount, revenue, location,
-  connected_systems) → **users** (`org_id`, `designation`, `role_description`, `role` admin|member,
-  `tenexity` bool = factory admin panel) → **projects**. Org context feeds the Stage-1 PRD.
-- **Tickets → 6 states** (`open → in_progress → done → deployed → qa_testing → approved`, QA bug →
-  open) + a **`description`** column (markdown bug reports w/ screenshots). New Stage-3 **QA agent** +
-  build↔QA loop; done-gate = all tickets approved.
-- **Supabase Storage** as the durable home for files/artifacts: bucket `factory-run-blobs`,
-  `<project_id>/…` (project-scoped) + `org/<org_id>/…` (org-scoped, incl. the business-process video —
-  modeled only). Unified `blobs` manifest. Runtime adapter uses the project **service_role** key, never
-  the operator's account-wide token.
-- **Layer 1 unchanged:** each built app still gets its own **Railway Postgres** (`deploy_db.py`).
+### Still DEFERRED (operator-reviewed follow-up) — flat project schema + run→project rename
+The highest-blast-radius part of the original plan is intentionally **not** in this change (rewrites the
+proven `dbshim` pooler primitive, every store, the `db` CLI/SKILL contract, and `console.py`'s graph
+projection; benefit is ops-only; the payoff live migration is operator-gated):
+- **Rename `run` → `project`** everywhere (`run_index → projects`, `run_id → project_id`,
+  `RunState → ProjectState`/`RunDB → ProjectDB`, the `db` CLI arg, the SKILLs, the volume `runs/ → projects/`).
+- **Drop schema-per-run** → one `public` schema keyed by `project_id`; retire the per-run fan-out +
+  `schema_ddl` + `sf_run_schema_version`; Alembic manages one schema.
+- The one-time **data migration** (`sf_run_*` → flat tables; `claimed → in_progress`).
+- Full schema in [`schema-erd.md`](schema-erd.md) (the "PROPOSED" section).
+- **Layer 1 unchanged either way:** each built app still gets its own **Railway Postgres** (`deploy_db.py`).

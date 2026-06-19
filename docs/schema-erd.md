@@ -222,6 +222,15 @@ legend:  ──<  one-to-many      1:1  one-to-one      PK primary  UK unique  F
 _Folded from the former root `schema.md` (now removed). The ERD above and `schema-erd.svg` are the
 source of truth for table shape; this section carries DDL, constraints, storage, and API detail._
 
+> **SHIPPED (2026-06, on the current schema-per-run model — the flat rewrite below is DEFERRED):**
+> new global tables **`public.organizations`** (name, industry, sub_focus, headcount/revenue as
+> band-label text, location, website, connected_systems) and **`public.blobs`** (scope `run`|`org`,
+> scope_id, kind, storage_key, content_type, size, sha256); **`public.users`** gained
+> `org_id`/`designation`/`role_description`/`tenexity`; the per-run **`tickets`** table gained a 6-state
+> `status` (`open → in_progress → done → deployed → qa_testing → approved`) + a markdown `description`
+> (QA bug reports). The flat `project_id` rewrite + `run→project` rename + per-run-fan-out retirement +
+> data migration in the "PROPOSED" subsections remain a deferred, operator-reviewed follow-up.
+
 ## Current Decisions
 
 - First FastAPI pass should replace the HTTP shell while keeping `dbshim`, per-run schemas, and the current store classes as repositories.
