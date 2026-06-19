@@ -1,6 +1,22 @@
-"""RunDB — the single per-run datastore that backs RunState and the canvas projection."""
+"""RunDB — the run datastore that backs RunState and the canvas projection."""
 from software_factory.db import RunDB, db_path
 from software_factory.runstate import RunState
+
+
+def test_flat_run_id_isolation_in_one_shared_db(tmp_path):
+    # Postgres shares ONE set of canvas tables across runs (flat schema); prove the run_id scoping
+    # by pointing two RunDBs at different run ids (incl. the gates composite PK, where both runs use
+    # the same gate name).
+    dbf = str(tmp_path / "shared.db")
+    a = RunDB(dbf); a._run_id = "run-aaaaaaaa"
+    b = RunDB(dbf); b._run_id = "run-bbbbbbbb"
+    a.set_phase("research", "done"); a.set_gate("stage1", "passed"); a.add_blocker("x")
+    b.set_phase("research", "active"); b.set_gate("stage1", "failed")
+    assert a.phase_status()["research"] == "done"      # each run sees only its own rows
+    assert b.phase_status()["research"] == "active"
+    assert a.gate_status()["stage1"] == "passed"        # same gate name, isolated per run
+    assert b.gate_status()["stage1"] == "failed"
+    assert len(a.blockers()) == 1 and len(b.blockers()) == 0
 
 
 def test_runstate_round_trips_through_run_db(tmp_path):

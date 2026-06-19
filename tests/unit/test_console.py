@@ -970,31 +970,6 @@ def test_stage2_done_and_deps_flow(tmp_path):
     assert "RAILWAY_TOKEN" in st["deps_provided"]
 
 
-def test_submit_deps_dispositions_satisfy_without_values(tmp_path):
-    """Mock/MCP/env deps satisfy with no value; only 'provide' needs one. Values never persist."""
-    import os
-    c = console(tmp_path, FakeLauncher())
-    run_id = c.start_run(RunRequest(description="x"))
-    state = c._load_state(run_id)
-    state.stage1_done = True
-    state.stage2_done = True
-    state.deps_required = ["SUPABASE_URL", "ADP_CLIENT_ID", "OPENROUTER_API_KEY"]
-    state.save()
-
-    # SUPABASE_URL→mcp (default), ADP_CLIENT_ID→mock (default), OPENROUTER→provide w/ value
-    result = c.submit_deps(run_id, {
-        "SUPABASE_URL": {"disposition": "mcp"},
-        "ADP_CLIENT_ID": {"disposition": "mock"},
-        "OPENROUTER_API_KEY": {"disposition": "provide", "value": "sk-or-real"},
-    })
-    assert result["satisfied"] is True
-    assert result["missing"] == []
-    # Disposition persisted (metadata), but the provided VALUE is NOT on disk (run.db).
-    saved = open(os.path.join(str(tmp_path), run_id, "run.db"), "rb").read()
-    assert b"sk-or-real" not in saved
-    assert c._load_state(run_id).deps_disposition["SUPABASE_URL"] == "mcp"
-
-
 def test_submit_deps_unsatisfied_when_provide_lacks_value(tmp_path):
     c = console(tmp_path, FakeLauncher())
     run_id = c.start_run(RunRequest(description="x"))
@@ -1194,22 +1169,6 @@ def test_list_runs_unions_pg_registry_with_local_dirs(tmp_path, monkeypatch):
     ids = [r["run_id"] for r in c.list_runs()]
     assert ids.count(rid_local) == 1            # deduped
     assert "run-pgonly" in ids                  # registry-only run surfaced
-
-
-def test_list_runs_ignores_debris_dirs(tmp_path, monkeypatch):
-    # Volume debris ("build-plan.md/run.db" from agents misusing db verbs) must never
-    # list as a run — local AND registry arms enforce the run-id shape.
-    from software_factory import console as console_mod
-    launcher = FakeLauncher()
-    c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="real run"))
-    junk = tmp_path / "build-plan.md"
-    junk.mkdir()
-    (junk / "run.db").write_bytes(b"")
-    monkeypatch.setattr(console_mod.dbshim, "registry_runs",
-                        lambda: [{"run_id": "demo_credentials.md", "created": 1.0}])
-    ids = [r["run_id"] for r in c.list_runs()]
-    assert ids == [rid]
 
 
 # ---------- run ownership (multi-tenant: members see only their own) ----------

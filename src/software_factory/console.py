@@ -94,8 +94,8 @@ class RunRequest:
 
 def run_paths(runs_dir: str, run_id: str) -> dict:
     base = os.path.join(runs_dir, run_id)
-    # ONE SQLite db per run is the source of truth: runstate + tickets + agents + the
-    # canvas-projected tables (phases/artifacts/blockers/gates/verifications) all live in run.db.
+    # The flat Postgres tables are the source of truth: runstate + tickets + agents + the
+    # canvas-projected tables (phases/artifacts/blockers/gates/verifications), all keyed by run_id.
     db = os.path.join(base, "run.db")
     return {
         "base": base,

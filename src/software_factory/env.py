@@ -64,28 +64,10 @@ def is_prod() -> bool:
 
 
 def db_backend(requested: str | None = None) -> str:
-    """Resolve the effective DB backend, never allowing a dev shell to silently open prod."""
-    requested = (requested or os.environ.get("SF_DB") or "").strip().lower()
-
-    if requested == "sqlite":
-        return "sqlite"
-
-    if requested == "postgres":
-        env = sf_environment()
-        if env in ("prod", "test", "staging") or os.environ.get("SF_ALLOW_DEV_PG") == "1":
-            return "postgres"
-        raise RuntimeError(
-            "SF_DB=postgres refused in SF_ENVIRONMENT=dev to prevent prod DB pollution. "
-            "Set SF_ENVIRONMENT=prod for the live console, SF_ENVIRONMENT=test for tests, "
-            "or SF_ALLOW_DEV_PG=1 if you really want dev Postgres."
-        )
-
-    if requested:
-        raise ValueError(f"Unknown SF_DB value: {requested!r}")
-
-    # Default: prod deployments may use Postgres if DATABASE_URL is present; everything else
-    # falls back to local SQLite.
-    return "postgres" if is_prod() and os.environ.get("DATABASE_URL") else "sqlite"
+    """Postgres everywhere — there is no sqlite backend. Kept as a single seam (and for
+    call-site compatibility); the store layer always talks to `DATABASE_URL` via `dbshim`.
+    Dev/test point `DATABASE_URL` at a local/throwaway Postgres; prod at Supabase."""
+    return "postgres"
 
 
 def stage_env_baseline(provided: dict | None = None) -> dict:

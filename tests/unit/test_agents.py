@@ -19,8 +19,10 @@ class FakeSink:
 
 def reg(tmp_path, sink=None, clock=None):
     ticks = iter(range(1, 10_000))
+    # Flat schema: the registry scopes by the run id in its path (<runs_dir>/<run_id>/…), and these
+    # tests spawn under run_id="run" — so the db lives in a "run" dir to match (as it does in prod).
     return AgentRegistry(
-        str(tmp_path / "agents.db"),
+        str(tmp_path / "run" / "agents.db"),
         sink=sink or NullSink(),
         clock=clock or (lambda: next(ticks)),
     )

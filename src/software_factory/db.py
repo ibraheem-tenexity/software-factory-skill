@@ -1,8 +1,9 @@
-"""Single per-run SQLite datastore — the source of truth the canvas projects from.
+"""Per-run datastore — the source of truth the canvas projects from (Postgres, flat schema).
 
-One file per run: ``<base>/run.db``. It holds RunState (the ``runstate`` table) plus the
-canvas-projected tables: ``phases``, ``artifacts``, ``blockers``, ``gates``, ``verifications``.
-``tickets`` and ``agents`` live in the SAME file (created by TicketStore / AgentRegistry).
+All runs share one set of tables keyed by ``run_id``: RunState (the ``runstate`` table) plus the
+canvas-projected tables ``phases``, ``artifacts``, ``blockers``, ``gates``, ``verifications``,
+``deployments``. ``tickets`` and ``agents`` are the same flat model (TicketStore / AgentRegistry).
+The ``path`` argument names the run directory + the ``run_id`` to scope by; storage is Postgres.
 
 The headless orchestrator records canvas state by calling the CLI
 (``python3 -m software_factory.db <verb> <runs_dir> <run_id> ...``) instead of emitting
@@ -28,68 +29,21 @@ def db_path(runs_dir: str, run_id: str) -> str:
     return os.path.join(runs_dir, run_id, "run.db")
 
 
+def run_id_from_path(path: str) -> str:
+    """The run id a store at `path` belongs to — the run-dir name in
+    `<runs_dir>/<run_id>/run.db`. In the flat schema every per-run table is scoped by this."""
+    return os.path.basename(os.path.dirname(path))
+
+
 class RunDB:
-    """The per-run datastore. Also implements the RunState ``Store`` protocol
-    (``read``/``write``) so RunState persists into the ``runstate`` table."""
+    """The run datastore (Postgres). In the flat schema all runs share one set of tables keyed
+    by ``run_id``. Also implements the RunState ``Store`` protocol (``read``/``write``) via the
+    ``runstate`` table."""
 
     def __init__(self, path: str):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        self._conn = dbshim.connect(path)  # sqlite today, pg when SF_DB=postgres
-        self._init()
-
-    def _init(self) -> None:
-        self._conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS runstate (
-                run_id TEXT PRIMARY KEY,
-                data   TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS phases (
-                id     INTEGER PRIMARY KEY AUTOINCREMENT,
-                name   TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'active',
-                stage  INTEGER,
-                ts     REAL NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS artifacts (
-                id     INTEGER PRIMARY KEY AUTOINCREMENT,
-                title  TEXT,
-                path   TEXT,
-                kind   TEXT,
-                agent  TEXT,
-                ts     REAL NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS blockers (
-                id      INTEGER PRIMARY KEY AUTOINCREMENT,
-                what    TEXT,
-                blocks  TEXT,
-                cleared INTEGER NOT NULL DEFAULT 0,
-                ts      REAL NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS gates (
-                name   TEXT PRIMARY KEY,
-                status TEXT NOT NULL,
-                ts     REAL NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS verifications (
-                id     INTEGER PRIMARY KEY AUTOINCREMENT,
-                url    TEXT,
-                passed INTEGER NOT NULL,
-                result TEXT,
-                ts     REAL NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS deployments (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                app          TEXT,
-                service_name TEXT,
-                url          TEXT,
-                status       TEXT NOT NULL DEFAULT 'deploying',
-                verified     INTEGER NOT NULL DEFAULT 0,
-                ts           REAL NOT NULL
-            );
-            """
-        )
-        self._conn.commit()
+        self._run_id = run_id_from_path(path)
+        self._conn = dbshim.connect(path)  # Postgres; schema owned by Alembic (prod) / tests
 
     # ---- RunState Store protocol (the runstate table) --------------------------------
     def read(self, run_id: str) -> Optional[dict]:
@@ -109,42 +63,43 @@ class RunDB:
     # ---- canvas-state writes (used by the CLI the orchestrator calls) ----------------
     def set_phase(self, name: str, status: str = "active", stage: Optional[int] = None) -> None:
         self._conn.execute(
-            "INSERT INTO phases (name, status, stage, ts) VALUES (?, ?, ?, ?)",
-            (name, status, stage, time.time()),
+            "INSERT INTO phases (run_id, name, status, stage, ts) VALUES (?, ?, ?, ?, ?)",
+            (self._run_id, name, status, stage, time.time()),
         )
         self._conn.commit()
 
     def record_artifact(self, title: str, path: str, kind: Optional[str] = None,
                         agent: Optional[str] = None) -> None:
         self._conn.execute(
-            "INSERT INTO artifacts (title, path, kind, agent, ts) VALUES (?, ?, ?, ?, ?)",
-            (title, path, kind, agent, time.time()),
+            "INSERT INTO artifacts (run_id, title, path, kind, agent, ts) VALUES (?, ?, ?, ?, ?, ?)",
+            (self._run_id, title, path, kind, agent, time.time()),
         )
         self._conn.commit()
 
     def add_blocker(self, what: str, blocks: Optional[str] = None) -> None:
         self._conn.execute(
-            "INSERT INTO blockers (what, blocks, ts) VALUES (?, ?, ?)",
-            (what, blocks, time.time()),
+            "INSERT INTO blockers (run_id, what, blocks, ts) VALUES (?, ?, ?, ?)",
+            (self._run_id, what, blocks, time.time()),
         )
         self._conn.commit()
 
     def clear_blocker(self, what: str) -> None:
-        self._conn.execute("UPDATE blockers SET cleared = 1 WHERE what = ?", (what,))
+        self._conn.execute("UPDATE blockers SET cleared = 1 WHERE run_id = ? AND what = ?",
+                           (self._run_id, what))
         self._conn.commit()
 
     def set_gate(self, name: str, status: str) -> None:
         self._conn.execute(
-            "INSERT INTO gates (name, status, ts) VALUES (?, ?, ?) "
-            "ON CONFLICT(name) DO UPDATE SET status = excluded.status, ts = excluded.ts",
-            (name, status, time.time()),
+            "INSERT INTO gates (run_id, name, status, ts) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(run_id, name) DO UPDATE SET status = excluded.status, ts = excluded.ts",
+            (self._run_id, name, status, time.time()),
         )
         self._conn.commit()
 
     def record_verification(self, url: str, passed: bool, result) -> None:
         self._conn.execute(
-            "INSERT INTO verifications (url, passed, result, ts) VALUES (?, ?, ?, ?)",
-            (url, 1 if passed else 0,
+            "INSERT INTO verifications (run_id, url, passed, result, ts) VALUES (?, ?, ?, ?, ?)",
+            (self._run_id, url, 1 if passed else 0,
              result if isinstance(result, str) else json.dumps(result), time.time()),
         )
         self._conn.commit()
@@ -154,48 +109,51 @@ class RunDB:
         """Record one deliverable's deployment. A run ships 1..N deliverables (mobile-web/web/api),
         so deploy state is per-app, not a single run-level deploy_url."""
         self._conn.execute(
-            "INSERT INTO deployments (app, service_name, url, status, verified, ts) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (app, service_name, url, status, 1 if verified else 0, time.time()),
+            "INSERT INTO deployments (run_id, app, service_name, url, status, verified, ts) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (self._run_id, app, service_name, url, status, 1 if verified else 0, time.time()),
         )
         self._conn.commit()
 
-    # ---- projection reads (used by Console.graph / status) ---------------------------
+    # ---- projection reads (scoped to this run) ---------------------------------------
     def phase_status(self) -> dict:
         """Latest status per phase name (rows are append-only; last write wins)."""
         out: dict = {}
-        for r in self._conn.execute("SELECT name, status FROM phases ORDER BY ts, id").fetchall():
+        for r in self._conn.execute(
+                "SELECT name, status FROM phases WHERE run_id = ? ORDER BY ts, id",
+                (self._run_id,)).fetchall():
             out[r["name"]] = r["status"]
         return out
 
     def phases(self) -> list[dict]:
         return [dict(r) for r in self._conn.execute(
-            "SELECT * FROM phases ORDER BY ts, id").fetchall()]
+            "SELECT * FROM phases WHERE run_id = ? ORDER BY ts, id", (self._run_id,)).fetchall()]
 
     def artifacts(self) -> list[dict]:
         return [dict(r) for r in self._conn.execute(
-            "SELECT * FROM artifacts ORDER BY id").fetchall()]
+            "SELECT * FROM artifacts WHERE run_id = ? ORDER BY id", (self._run_id,)).fetchall()]
 
     def blockers(self) -> list[dict]:
         return [dict(r) for r in self._conn.execute(
-            "SELECT * FROM blockers ORDER BY id").fetchall()]
+            "SELECT * FROM blockers WHERE run_id = ? ORDER BY id", (self._run_id,)).fetchall()]
 
     def gate_status(self) -> dict:
         return {r["name"]: r["status"] for r in self._conn.execute(
-            "SELECT name, status FROM gates").fetchall()}
+            "SELECT name, status FROM gates WHERE run_id = ?", (self._run_id,)).fetchall()}
 
     def verifications(self) -> list[dict]:
         return [dict(r) for r in self._conn.execute(
-            "SELECT * FROM verifications ORDER BY id").fetchall()]
+            "SELECT * FROM verifications WHERE run_id = ? ORDER BY id", (self._run_id,)).fetchall()]
 
     def has_passing_verification(self) -> bool:
         row = self._conn.execute(
-            "SELECT COUNT(*) AS n FROM verifications WHERE passed = 1").fetchone()
+            "SELECT COUNT(*) AS n FROM verifications WHERE run_id = ? AND passed = 1",
+            (self._run_id,)).fetchone()
         return row["n"] > 0
 
     def deployments(self) -> list[dict]:
         return [dict(r) for r in self._conn.execute(
-            "SELECT * FROM deployments ORDER BY id").fetchall()]
+            "SELECT * FROM deployments WHERE run_id = ? ORDER BY id", (self._run_id,)).fetchall()]
 
 
 # --- CLI the headless orchestrator uses instead of emitting events --------------------

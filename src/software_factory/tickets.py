@@ -1,4 +1,4 @@
-"""Local SQLite ticket store with an enforced 6-state lifecycle + QA loop.
+"""Ticket store (Postgres) with an enforced 6-state lifecycle + QA loop.
 
     open → in_progress → done → deployed → qa_testing → approved
                                               │
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 
 from . import dbshim
+from .db import run_id_from_path
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -29,6 +30,10 @@ STATES = ("open", "in_progress", "done", "deployed", "qa_testing", "approved")
 _BUILDABLE = ("open", "in_progress")
 # "Built or beyond" — passed the hollow gate. Stage-3 proof + done_tickets() count these.
 _BUILT_OR_BEYOND = ("done", "deployed", "qa_testing", "approved")
+
+# Ticket dataclass columns (excludes the run_id scoping column) — so `Ticket(**dict(row))` maps cleanly.
+_COLS = ("id, title, acceptance, dod, wave, status, agent, provenance, "
+         "provenance_type, diff_lines, app, description")
 
 
 class HollowWorkError(Exception):
@@ -57,48 +62,24 @@ class Ticket:
 
 class TicketStore:
     def __init__(self, path: str):
-        self._conn = dbshim.connect(path)  # sqlite today, pg when SF_DB=postgres
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tickets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                acceptance TEXT NOT NULL,
-                dod TEXT NOT NULL,
-                wave INTEGER NOT NULL,
-                status TEXT NOT NULL DEFAULT 'open',
-                agent TEXT,
-                provenance TEXT,
-                provenance_type TEXT,
-                diff_lines INTEGER NOT NULL DEFAULT 0,
-                app TEXT,
-                description TEXT NOT NULL DEFAULT ''
-            )
-            """
-        )
-        # Pre-existing run.dbs were created before these columns — add them idempotently
-        # (no migration framework for the per-run schema).
-        for col, ddl in (("app", "ALTER TABLE tickets ADD COLUMN app TEXT"),
-                         ("description", "ALTER TABLE tickets ADD COLUMN description TEXT NOT NULL DEFAULT ''")):
-            try:
-                self._conn.execute(ddl)
-                self._conn.commit()
-            except Exception:
-                pass  # column already present
-        self._conn.commit()
+        self._run_id = run_id_from_path(path)
+        self._conn = dbshim.connect(path)  # Postgres; schema owned by Alembic (prod) / tests
 
     def create_ticket(self, title: str, acceptance: str, dod: str, wave: int,
                       app: Optional[str] = None, description: str = "") -> int:
         cur = self._conn.execute(
-            "INSERT INTO tickets (title, acceptance, dod, wave, app, description) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (title, acceptance, dod, wave, app, description or ""),
+            "INSERT INTO tickets (run_id, title, acceptance, dod, wave, app, description) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (self._run_id, title, acceptance, dod, wave, app, description or ""),
         )
         self._conn.commit()
         return cur.lastrowid
 
     def get(self, ticket_id: int) -> Ticket:
-        row = self._conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+        row = self._conn.execute(
+            "SELECT id, title, acceptance, dod, wave, status, agent, provenance, "
+            "provenance_type, diff_lines, app, description FROM tickets "
+            "WHERE id = ? AND run_id = ?", (ticket_id, self._run_id)).fetchone()
         if row is None:
             raise KeyError(f"no ticket {ticket_id}")
         return Ticket(**dict(row))
@@ -118,7 +99,8 @@ class TicketStore:
         # (deployed/qa_testing/approved) raises.
         self._require(ticket_id, ("open", "in_progress", "done"), "in_progress")
         self._conn.execute(
-            "UPDATE tickets SET status = 'in_progress', agent = ? WHERE id = ?", (agent, ticket_id)
+            "UPDATE tickets SET status = 'in_progress', agent = ? WHERE id = ? AND run_id = ?",
+            (agent, ticket_id, self._run_id)
         )
         self._conn.commit()
 
@@ -145,24 +127,28 @@ class TicketStore:
         if diff_lines <= 0:
             raise HollowWorkError(f"ticket {ticket_id}: refusing 'done' with an empty diff")
         self._conn.execute(
-            "UPDATE tickets SET status = 'done', provenance = ?, provenance_type = ?, diff_lines = ? WHERE id = ?",
-            (provenance, provenance_type, diff_lines, ticket_id),
+            "UPDATE tickets SET status = 'done', provenance = ?, provenance_type = ?, diff_lines = ? "
+            "WHERE id = ? AND run_id = ?",
+            (provenance, provenance_type, diff_lines, ticket_id, self._run_id),
         )
         self._conn.commit()
 
     def mark_deployed(self, ticket_id: int) -> None:
         self._require(ticket_id, ("done",), "deployed")
-        self._conn.execute("UPDATE tickets SET status = 'deployed' WHERE id = ?", (ticket_id,))
+        self._conn.execute("UPDATE tickets SET status = 'deployed' WHERE id = ? AND run_id = ?",
+                           (ticket_id, self._run_id))
         self._conn.commit()
 
     def start_qa(self, ticket_id: int) -> None:
         self._require(ticket_id, ("deployed",), "qa_testing")
-        self._conn.execute("UPDATE tickets SET status = 'qa_testing' WHERE id = ?", (ticket_id,))
+        self._conn.execute("UPDATE tickets SET status = 'qa_testing' WHERE id = ? AND run_id = ?",
+                           (ticket_id, self._run_id))
         self._conn.commit()
 
     def qa_approve(self, ticket_id: int) -> None:
         self._require(ticket_id, ("qa_testing",), "approved")
-        self._conn.execute("UPDATE tickets SET status = 'approved' WHERE id = ?", (ticket_id,))
+        self._conn.execute("UPDATE tickets SET status = 'approved' WHERE id = ? AND run_id = ?",
+                           (ticket_id, self._run_id))
         self._conn.commit()
 
     def qa_reject(self, ticket_id: int, bug_markdown: str) -> None:
@@ -175,8 +161,8 @@ class TicketStore:
         report = (t.description or "").rstrip()
         report = (report + "\n\n" if report else "") + f"## QA bug (rejected {stamp})\n\n{bug_markdown.strip()}\n"
         self._conn.execute(
-            "UPDATE tickets SET status = 'open', agent = NULL, description = ? WHERE id = ?",
-            (report, ticket_id),
+            "UPDATE tickets SET status = 'open', agent = NULL, description = ? WHERE id = ? AND run_id = ?",
+            (report, ticket_id, self._run_id),
         )
         self._conn.commit()
 
@@ -186,14 +172,16 @@ class TicketStore:
         wave-serialization order (parallel within a wave, waves in sequence). A QA-bounced
         ticket (back to `open`) re-opens its wave."""
         rows = self._conn.execute(
-            "SELECT DISTINCT wave FROM tickets WHERE status IN ('open','in_progress') ORDER BY wave"
+            "SELECT DISTINCT wave FROM tickets WHERE run_id = ? AND status IN ('open','in_progress') "
+            "ORDER BY wave", (self._run_id,)
         ).fetchall()
         return [r["wave"] for r in rows]
 
     def open_tickets(self, wave: int) -> list[Ticket]:
         rows = self._conn.execute(
-            "SELECT * FROM tickets WHERE wave = ? AND status IN ('open','in_progress') ORDER BY id",
-            (wave,)
+            f"SELECT {_COLS} FROM tickets WHERE run_id = ? AND wave = ? "
+            "AND status IN ('open','in_progress') ORDER BY id",
+            (self._run_id, wave)
         ).fetchall()
         return [Ticket(**dict(r)) for r in rows]
 
@@ -202,36 +190,42 @@ class TicketStore:
         AND definition of done. Empty-string acceptance/dod don't count — they'd be hollow
         and `mark_done` (which enforces DoD) couldn't verify them. This is the mechanical
         gate that proves Stage 2 PERSISTED its tickets, not just emitted ticket events."""
-        rows = self._conn.execute("SELECT acceptance, dod FROM tickets").fetchall()
+        rows = self._conn.execute(
+            "SELECT acceptance, dod FROM tickets WHERE run_id = ?", (self._run_id,)).fetchall()
         return sum(1 for r in rows if (r["acceptance"] or "").strip() and (r["dod"] or "").strip())
 
     def done_tickets(self) -> list[Ticket]:
         """Tickets that passed the hollow-done gate — `done` and everything beyond it
         (deployed/qa_testing/approved). Stage-3 proof counts these."""
         rows = self._conn.execute(
-            "SELECT * FROM tickets WHERE status IN ('done','deployed','qa_testing','approved') ORDER BY id"
+            f"SELECT {_COLS} FROM tickets WHERE run_id = ? "
+            "AND status IN ('done','deployed','qa_testing','approved') ORDER BY id", (self._run_id,)
         ).fetchall()
         return [Ticket(**dict(r)) for r in rows]
 
     def approved_tickets(self) -> list[Ticket]:
         rows = self._conn.execute(
-            "SELECT * FROM tickets WHERE status = 'approved' ORDER BY id"
+            f"SELECT {_COLS} FROM tickets WHERE run_id = ? AND status = 'approved' ORDER BY id",
+            (self._run_id,)
         ).fetchall()
         return [Ticket(**dict(r)) for r in rows]
 
     def all_approved(self) -> bool:
         """True when at least one ticket exists and every ticket is `approved` — the
         QA-complete gate for Stage 3 (set by the QA agent's qa_approve calls)."""
-        rows = self._conn.execute("SELECT status FROM tickets").fetchall()
+        rows = self._conn.execute(
+            "SELECT status FROM tickets WHERE run_id = ?", (self._run_id,)).fetchall()
         return bool(rows) and all(r["status"] == "approved" for r in rows)
 
     def all_tickets(self) -> list[Ticket]:
         """Every ticket regardless of status, in wave then id order — the kanban projection."""
-        rows = self._conn.execute("SELECT * FROM tickets ORDER BY wave, id").fetchall()
+        rows = self._conn.execute(
+            f"SELECT {_COLS} FROM tickets WHERE run_id = ? ORDER BY wave, id", (self._run_id,)).fetchall()
         return [Ticket(**dict(r)) for r in rows]
 
     def render_markdown(self) -> str:
-        rows = self._conn.execute("SELECT * FROM tickets ORDER BY wave, id").fetchall()
+        rows = self._conn.execute(
+            f"SELECT {_COLS} FROM tickets WHERE run_id = ? ORDER BY wave, id", (self._run_id,)).fetchall()
         lines = ["# Tickets", "", "| # | wave | status | title | acceptance |", "|---|---|---|---|---|"]
         for r in rows:
             lines.append(f"| {r['id']} | {r['wave']} | {r['status']} | {r['title']} | {r['acceptance']} |")

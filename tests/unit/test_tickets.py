@@ -161,3 +161,21 @@ def test_create_ticket_with_description(tmp_path):
     ts = fresh(tmp_path)
     tid = ts.create_ticket("t", acceptance="a", dod="d", wave=1, description="build the thing")
     assert ts.get(tid).description == "build the thing"
+
+
+def test_flat_run_id_isolation_in_one_shared_db(tmp_path):
+    # In Postgres every run shares ONE tickets table (flat schema); exercise the run_id scoping by
+    # pointing two stores at different run ids.
+    db = str(tmp_path / "shared.db")
+    a = TicketStore(db); a._run_id = "run-aaaaaaaa"
+    b = TicketStore(db); b._run_id = "run-bbbbbbbb"
+    ta = a.create_ticket("A-feature", "x", "y", wave=1)
+    tb = b.create_ticket("B-feature", "x", "y", wave=1)
+    assert [t.title for t in a.all_tickets()] == ["A-feature"]   # each store sees only its run
+    assert [t.title for t in b.all_tickets()] == ["B-feature"]
+    assert a.buildable_count() == 1 and b.buildable_count() == 1
+    assert [t.id for t in a.open_tickets(1)] == [ta]
+    with pytest.raises(KeyError):
+        a.get(tb)                                                # cross-run get is denied
+    a.claim(ta, "agent-1")                                       # transitions stay run-scoped
+    assert b.get(tb).status == "open"

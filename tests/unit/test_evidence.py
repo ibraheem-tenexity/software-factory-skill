@@ -23,7 +23,8 @@ def real_run(tmp_path):
     state.spent_usd = 0.42
     state.save()
 
-    reg = AgentRegistry(str(tmp_path / "agents.db"), clock=lambda: 1)
+    # Flat schema: the registry scopes by the run id in its path; this run is "run-1".
+    reg = AgentRegistry(str(tmp_path / "run-1" / "agents.db"), clock=lambda: 1)
     reg.spawn("a1", "run-1", 1, "build", "claude-opus-4-8")
     reg.record("a1", outcome="real_diff", usage=Usage("claude-opus-4-8", output_tokens=4000),
                cost_usd=0.42, provenance="7", diff_lines=120)

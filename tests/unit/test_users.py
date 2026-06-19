@@ -1,4 +1,4 @@
-"""User directory + roles (sqlite backend; pg path is the same SQL via dbshim)."""
+"""User directory + roles + organizations (Postgres via dbshim)."""
 import pytest
 
 from software_factory import users
@@ -6,9 +6,8 @@ from software_factory import users
 
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
-    monkeypatch.delenv("SF_DB", raising=False)            # sqlite
     monkeypatch.setenv("SF_ADMIN_EMAILS", "boss@t.ai")
-    return users.UserStore(str(tmp_path / "users.db"))
+    return users.UserStore()
 
 
 def test_env_admins_seeded(store):

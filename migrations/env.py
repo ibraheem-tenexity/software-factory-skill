@@ -1,13 +1,16 @@
-"""Alembic environment for the console's GLOBAL public tables.
+"""Alembic environment for the console's public tables.
 
 Connects to $DATABASE_URL (the console's Postgres). Online mode only — we always have a live DB
-when migrating. Raw SQL migrations (op.execute) so no SQLAlchemy models are required.
+when migrating. `target_metadata` is the SQLAlchemy models in `software_factory.models` (the single
+schema source) so revisions build from / can autogenerate against them.
 """
 from __future__ import annotations
 
 import os
 from alembic import context
 from sqlalchemy import create_engine, pool
+
+from software_factory import models
 
 
 def _url() -> str:
@@ -28,7 +31,7 @@ def run_migrations_online() -> None:
     engine = create_engine(_url(), poolclass=pool.NullPool, future=True,
                           connect_args={"prepare_threshold": None})
     with engine.connect() as connection:
-        context.configure(connection=connection, target_metadata=None,
+        context.configure(connection=connection, target_metadata=models.metadata,
                           version_table="alembic_version", version_table_schema="public")
         with context.begin_transaction():
             context.run_migrations()

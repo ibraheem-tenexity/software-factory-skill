@@ -281,23 +281,14 @@ def _boot():
                 print(f"[janitor] quarantined {name}", flush=True)
     except Exception as e:
         print(f"[janitor] FAILED: {e}", flush=True)
-    if _env.sf_environment() == "prod" and _env.db_backend() == "postgres":
-        # Apply migrations BEFORE backfill so the global tables + per-run version registry exist
-        # and backfilled schemas get stamped. Defensive backstop to entrypoint.sh (idempotent).
+    if _env.sf_environment() == "prod":
+        # Apply migrations (Alembic upgrade head) so every table exists. Defensive backstop to
+        # entrypoint.sh (idempotent).
         try:
             from software_factory import migrate as _migrate
             _migrate.run()
         except Exception as e:
             print(f"[migrate] boot FAILED: {e}", flush=True)
-        # Self-backfilling flip: runs that exist only as sqlite files on the volume are
-        # copied into pg at boot (idempotent — registered runs skip in one registry read).
-        # Only run this in prod; dev is forced to sqlite anyway.
-        try:
-            from software_factory.backfill import backfill_all
-            for rid, res in backfill_all(RUNS_DIR).items():
-                print(f"[backfill] {rid}: {res}", flush=True)
-        except Exception as e:
-            print(f"[backfill] FAILED: {e}", flush=True)
     # Backfill ownership on pre-multitenancy runs → the first bootstrap admin (idempotent).
     _admins = [e.strip() for e in os.environ.get("SF_ADMIN_EMAILS", "").split(",") if e.strip()]
     if _admins:

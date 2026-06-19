@@ -1,6 +1,6 @@
 """Agent telemetry registry — visibility into how many agents ran and how they performed.
 
-SQLite source of truth (queryable, resumable, unit-testable offline). Every lifecycle event
+Postgres source of truth (queryable, resumable). Every lifecycle event
 is also pushed to a pluggable sink so an external dashboard can render the run in real time.
 The headline health metric is the no-op rate: agents that produced no real change.
 """
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 
 from . import dbshim
+from .db import run_id_from_path
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
@@ -20,7 +21,7 @@ class Sink(Protocol):
 
 
 class NullSink:
-    """Default sink: visibility stays local in SQLite, nothing is pushed out."""
+    """Default sink: visibility stays in the database, nothing is pushed out."""
 
     def emit(self, event: dict) -> None:
         pass
@@ -54,34 +55,10 @@ class AgentRecord:
 
 class AgentRegistry:
     def __init__(self, path: str, sink: Sink = NullSink(), clock: Callable[[], float] = time.time):
-        self._conn = dbshim.connect(path)  # sqlite today, pg when SF_DB=postgres
+        self._run_id = run_id_from_path(path)
+        self._conn = dbshim.connect(path)  # Postgres; schema owned by Alembic (prod) / tests
         self._sink = sink
         self._clock = clock
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agents (
-                agent_id TEXT PRIMARY KEY,
-                run_id TEXT NOT NULL,
-                ticket_id INTEGER,
-                role TEXT NOT NULL,
-                model TEXT NOT NULL,
-                phase TEXT,
-                status TEXT NOT NULL DEFAULT 'running',
-                outcome TEXT,
-                cost_usd REAL NOT NULL DEFAULT 0,
-                input_tokens INTEGER NOT NULL DEFAULT 0,
-                cached_tokens INTEGER NOT NULL DEFAULT 0,
-                output_tokens INTEGER NOT NULL DEFAULT 0,
-                reasoning_tokens INTEGER NOT NULL DEFAULT 0,
-                provenance TEXT,
-                provenance_type TEXT,
-                diff_lines INTEGER NOT NULL DEFAULT 0,
-                started_at REAL NOT NULL,
-                ended_at REAL
-            )
-            """
-        )
-        self._conn.commit()
 
     def spawn(self, agent_id: str, run_id: str, ticket_id: Optional[int], role: str,
               model: str, phase: Optional[str] = None) -> None:
@@ -131,9 +108,10 @@ class AgentRegistry:
             provenance_type = "pr" if str(provenance).isdigit() else "commit"
         self._conn.execute(
             "UPDATE agents SET status=?, outcome=?, cost_usd=?, input_tokens=?, cached_tokens=?, "
-            "output_tokens=?, reasoning_tokens=?, provenance=?, provenance_type=?, diff_lines=?, ended_at=? WHERE agent_id=?",
+            "output_tokens=?, reasoning_tokens=?, provenance=?, provenance_type=?, diff_lines=?, ended_at=? "
+            "WHERE agent_id=? AND run_id=?",
             (_STATUS_FOR.get(outcome, "failed"), outcome, cost_usd, u.input_tokens, u.cached_tokens,
-             u.output_tokens, u.reasoning_tokens, provenance, provenance_type, diff_lines, now, agent_id),
+             u.output_tokens, u.reasoning_tokens, provenance, provenance_type, diff_lines, now, agent_id, self._run_id),
         )
         self._conn.commit()
         self._sink.emit(
@@ -142,13 +120,16 @@ class AgentRegistry:
         )
 
     def get(self, agent_id: str) -> AgentRecord:
-        row = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        row = self._conn.execute(
+            "SELECT * FROM agents WHERE agent_id=? AND run_id=?", (agent_id, self._run_id)).fetchone()
         if row is None:
             raise KeyError(agent_id)
         return AgentRecord(**dict(row))
 
     def active(self) -> list[AgentRecord]:
-        rows = self._conn.execute("SELECT * FROM agents WHERE status='running' ORDER BY started_at").fetchall()
+        rows = self._conn.execute(
+            "SELECT * FROM agents WHERE run_id=? AND status='running' ORDER BY started_at",
+            (self._run_id,)).fetchall()
         return [AgentRecord(**dict(r)) for r in rows]
 
     def counts(self, run_id: str) -> dict:

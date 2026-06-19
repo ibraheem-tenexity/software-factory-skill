@@ -142,7 +142,7 @@ def test_env_sets_pwd_xdg_isolation_and_db_inside_workspace():
 # ---- event bridge ---------------------------------------------------------------------
 
 def test_bridge_records_spawn_and_final_costs_from_fixture(tmp_path):
-    reg = AgentRegistry(str(tmp_path / "run.db"))
+    reg = AgentRegistry(str(tmp_path / "run-x" / "run.db"))
     events = read_events(FIXTURE)
     folded = bridge_events(events, reg, "run-x", KIMI)
     rows = {r.agent_id: r for r in reg.agents_for("run-x")}
@@ -157,7 +157,7 @@ def test_bridge_records_spawn_and_final_costs_from_fixture(tmp_path):
 
 
 def test_bridge_is_idempotent_over_a_growing_file(tmp_path):
-    reg = AgentRegistry(str(tmp_path / "run.db"))
+    reg = AgentRegistry(str(tmp_path / "run-x" / "run.db"))
     events = read_events(FIXTURE)
     bridge_events(events[:4], reg, "run-x", KIMI)   # mid-run poll: spawned, no outcomes yet
     running = {r.agent_id: r for r in reg.agents_for("run-x")}
@@ -170,7 +170,7 @@ def test_bridge_is_idempotent_over_a_growing_file(tmp_path):
 
 
 def test_bridge_maps_ticket_agents_to_ticket_ids_and_failures(tmp_path):
-    reg = AgentRegistry(str(tmp_path / "run.db"))
+    reg = AgentRegistry(str(tmp_path / "run-x" / "run.db"))
     events = [
         {"type": "agent-spawned", "agent": "ticket-3", "sessionId": "s1"},
         {"type": "agent-turn-done", "agent": "ticket-3", "round": 0, "model": KIMI,
@@ -190,7 +190,7 @@ def test_bridge_maps_ticket_agents_to_ticket_ids_and_failures(tmp_path):
 def test_bridge_agent_settled_supersedes_agent_done(tmp_path):
     # opencode-swarm >= df0a10d emits agent-settled AFTER the sweep with the true final
     # cost/status; agent-done remains the realtime (pre-sweep) signal.
-    reg = AgentRegistry(str(tmp_path / "run.db"))
+    reg = AgentRegistry(str(tmp_path / "run-x" / "run.db"))
     tok = {"input": 100, "output": 10, "reasoning": 0, "cache": {"read": 0, "write": 0}}
     events = [
         {"type": "agent-spawned", "agent": "ticket-9", "sessionId": "s"},
@@ -209,7 +209,7 @@ def test_bridge_agent_settled_supersedes_agent_done(tmp_path):
 
 
 def test_bridge_settled_failure_wins_over_earlier_done(tmp_path):
-    reg = AgentRegistry(str(tmp_path / "run.db"))
+    reg = AgentRegistry(str(tmp_path / "run-x" / "run.db"))
     events = [
         {"type": "agent-spawned", "agent": "a", "sessionId": "s"},
         {"type": "agent-done", "agent": "a", "result": "ok", "costUsd": 0.01},
@@ -251,7 +251,7 @@ def test_v020_fixture_rounds_are_monotonic_ordinals():
 
 
 def test_v020_fixture_bridge_settles_to_the_settled_costs(tmp_path):
-    reg = AgentRegistry(str(tmp_path / "run.db"))
+    reg = AgentRegistry(str(tmp_path / "run-x" / "run.db"))
     events = read_events(FIXTURE_V020)
     bridge_events(events, reg, "run-x", KIMI)
     settled = {e["agent"]: e["costUsd"] for e in events if e["type"] == "agent-settled"}

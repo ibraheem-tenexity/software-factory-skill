@@ -1,0 +1,169 @@
+"""SQLAlchemy models — the SINGLE, object-oriented definition of every table.
+
+Postgres everywhere (no sqlite): the schema is owned by Alembic in prod and by `metadata.create_all`
+against the test Postgres in the suite — both build from THIS `metadata`, so they cannot drift.
+Query routing goes through `dbshim` (the Postgres connection wrapper that handles the Supabase 6543
+transaction pooler) — the recorded "hybrid": ORM for schema definition, `dbshim` for DML.
+
+Flat schema: one set of tables, every per-run table keyed by `run_id`. `gates`/`agents` use composite
+`(run_id, …)` PKs since their natural keys are only unique within a run. The global directory tables
+(organizations, users, blobs) are single row-sets, not per-run.
+"""
+from __future__ import annotations
+
+from sqlalchemy import (Column, DateTime, Float, Integer, MetaData, Table, Text, func)
+
+metadata = MetaData()
+
+runstate = Table(
+    "runstate", metadata,
+    Column("run_id", Text, primary_key=True),
+    Column("data", Text, nullable=False),
+)
+
+phases = Table(
+    "phases", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("status", Text, nullable=False, server_default="active"),
+    Column("stage", Integer),
+    Column("ts", Float, nullable=False),
+)
+
+artifacts = Table(
+    "artifacts", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("title", Text),
+    Column("path", Text),
+    Column("kind", Text),
+    Column("agent", Text),
+    Column("ts", Float, nullable=False),
+)
+
+blockers = Table(
+    "blockers", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("what", Text),
+    Column("blocks", Text),
+    Column("cleared", Integer, nullable=False, server_default="0"),
+    Column("ts", Float, nullable=False),
+)
+
+gates = Table(
+    "gates", metadata,
+    Column("run_id", Text, primary_key=True),
+    Column("name", Text, primary_key=True),
+    Column("status", Text, nullable=False),
+    Column("ts", Float, nullable=False),
+)
+
+verifications = Table(
+    "verifications", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("url", Text),
+    Column("passed", Integer, nullable=False),
+    Column("result", Text),
+    Column("ts", Float, nullable=False),
+)
+
+deployments = Table(
+    "deployments", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("app", Text),
+    Column("service_name", Text),
+    Column("url", Text),
+    Column("status", Text, nullable=False, server_default="deploying"),
+    Column("verified", Integer, nullable=False, server_default="0"),
+    Column("ts", Float, nullable=False),
+)
+
+tickets = Table(
+    "tickets", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("title", Text, nullable=False),
+    Column("acceptance", Text, nullable=False),
+    Column("dod", Text, nullable=False),
+    Column("wave", Integer, nullable=False),
+    Column("status", Text, nullable=False, server_default="open"),
+    Column("agent", Text),
+    Column("provenance", Text),
+    Column("provenance_type", Text),
+    Column("diff_lines", Integer, nullable=False, server_default="0"),
+    Column("app", Text),
+    Column("description", Text, nullable=False, server_default=""),
+)
+
+agents = Table(
+    "agents", metadata,
+    Column("agent_id", Text, primary_key=True),
+    Column("run_id", Text, primary_key=True),
+    Column("ticket_id", Integer),
+    Column("role", Text, nullable=False),
+    Column("model", Text, nullable=False),
+    Column("phase", Text),
+    Column("status", Text, nullable=False, server_default="running"),
+    Column("outcome", Text),
+    Column("cost_usd", Float, nullable=False, server_default="0"),
+    Column("input_tokens", Integer, nullable=False, server_default="0"),
+    Column("cached_tokens", Integer, nullable=False, server_default="0"),
+    Column("output_tokens", Integer, nullable=False, server_default="0"),
+    Column("reasoning_tokens", Integer, nullable=False, server_default="0"),
+    Column("provenance", Text),
+    Column("provenance_type", Text),
+    Column("diff_lines", Integer, nullable=False, server_default="0"),
+    Column("started_at", Float, nullable=False),
+    Column("ended_at", Float),
+)
+
+# ---- global directory tables (one row-set, not per-run) ------------------------------
+organizations = Table(
+    "organizations", metadata,
+    Column("id", Text, primary_key=True),
+    Column("name", Text, nullable=False),
+    Column("industry", Text),
+    Column("sub_focus", Text),                 # JSON-encoded list
+    Column("headcount", Text),                 # band label, e.g. "51–200"
+    Column("revenue", Text),                   # band label, e.g. "$10M–$50M"
+    Column("location", Text),
+    Column("website", Text),
+    Column("connected_systems", Text),         # JSON-encoded list
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+    Column("created_by", Text),
+)
+
+users = Table(
+    "users", metadata,
+    Column("email", Text, primary_key=True),
+    Column("role", Text, nullable=False, server_default="member"),
+    Column("org_id", Text),
+    Column("designation", Text),
+    Column("role_description", Text),
+    Column("tenexity", Integer),
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+    Column("created_by", Text),
+)
+
+blobs = Table(
+    "blobs", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("scope", Text, nullable=False),     # 'run' | 'org'
+    Column("scope_id", Text, nullable=False),
+    Column("kind", Text),
+    Column("storage_key", Text, nullable=False),
+    Column("content_type", Text),
+    Column("size_bytes", Integer),
+    Column("sha256", Text),
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+)
+
+# Groupings: the flat per-run tables, the global directory tables, and everything (Alembic + tests).
+RUNDB = (runstate, phases, artifacts, blockers, gates, verifications, deployments)
+FLAT_TABLES = RUNDB + (tickets, agents)
+GLOBAL_TABLES = (organizations, users, blobs)
+ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES

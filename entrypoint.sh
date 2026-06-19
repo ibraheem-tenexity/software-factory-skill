@@ -7,24 +7,14 @@ set -eu
 
 cd /app
 
-# Environment safety guard.
-SF_DB_LOWER="$(printf '%s' "${SF_DB:-}" | tr '[:upper:]' '[:lower:]')"
-SF_ENV_LOWER="$(printf '%s' "${SF_ENVIRONMENT:-}" | tr '[:upper:]' '[:lower:]')"
-if [ "$SF_DB_LOWER" = "postgres" ] && [ "$SF_ENV_LOWER" != "prod" ] && [ "${SF_ALLOW_DEV_PG:-}" != "1" ]; then
-    echo "[entrypoint] ERROR: SF_DB=postgres is only allowed when SF_ENVIRONMENT=prod. Set SF_ENVIRONMENT=prod on Railway." >&2
-    exit 1
-fi
-
 RUNS="${SF_RUNS_DIR:-/app/.runs}"
 mkdir -p "$RUNS" 2>/dev/null || true
 
-# Apply DB migrations (Alembic global tables + per-run schema fan-out) BEFORE serving, so the
-# schema is deterministic. Postgres-only — a no-op on sqlite. Non-fatal: the console's own
-# CREATE-IF-NOT-EXISTS + the lifespan boot are a backstop if this can't reach the DB.
-if [ "$SF_DB_LOWER" = "postgres" ]; then
-    echo "[entrypoint] applying DB migrations..."
-    python3 -m software_factory.migrate || echo "[entrypoint] WARN: migrate failed; continuing (boot will retry)" >&2
-fi
+# Apply DB migrations (Alembic, the single public schema) BEFORE serving, so the schema is
+# deterministic. Postgres everywhere; a no-op without DATABASE_URL. Non-fatal: the lifespan boot
+# retries if this can't reach the DB.
+echo "[entrypoint] applying DB migrations..."
+python3 -m software_factory.migrate || echo "[entrypoint] WARN: migrate failed; continuing (boot will retry)" >&2
 
 UVICORN="uvicorn console.app:app --host ${SF_BIND:-0.0.0.0} --port ${PORT:-8765}"
 if [ "$(id -u)" = "0" ]; then
