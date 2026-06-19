@@ -749,6 +749,10 @@ def test_stage3_done_requires_playwright_pass_and_real_agents(tmp_path):
     reg.spawn("ag1", rid, tid, "builder", "claude-sonnet-4-6", phase="build")
     ts.claim(tid, "ag1")
     ts.mark_done(tid, provenance="1", diff_lines=10)
+    # Built + verified, but QA hasn't approved yet (gate c) -> still not done.
+    assert c.detect_stage3_done(rid) is False
+    # QA loop closes: deploy -> qa -> approve every ticket.
+    ts.mark_deployed(tid); ts.start_qa(tid); ts.qa_approve(tid)
     assert c.detect_stage3_done(rid) is True
     st = c.status(rid)
     assert st["done"] is True and st["deploy_url"] == "https://sf-x.up.railway.app"

@@ -154,11 +154,29 @@ per-flow pass/fail + screenshot/console-error refs), and mark that app verified:
 **Brand check (part of the gate):** fetch the deployed app's CSS and confirm it contains the literal
 `--brand: 214 100% 55%` (the Tenexity token). Include `{"brand_tokens": true|false}` in the result —
 false is a failed flow like any other: fix, redeploy, re-test.
-- **Green** → the run is DONE (the host records `deploy_url` + marks done).
+- **Green** → proceed to the per-ticket QA loop below.
 - **Red** → `gate.bugs_from(result)` → fix each failed flow yourself, one at a time, each recorded as
   a logical fix agent → redeploy → re-test.
 
 A deploy with NO recorded passing Playwright verification is NOT done — the host refuses it.
+
+## Phase 3b: QA loop — per-ticket approval (`set-phase qa`)
+
+Deliverable-level pass is necessary but not sufficient: **every ticket must reach `approved`** before
+the run is done. Lifecycle: `open → in_progress → done → deployed → qa_testing → approved`; `qa_reject`
+bounces a ticket back to `open` with a bug report. Per ticket, after its app is live:
+1. `python3 -m software_factory.db mark-deployed <runs_dir> <run_id> <ticket_id>`
+2. `python3 -m software_factory.db start-qa <runs_dir> <run_id> <ticket_id>`
+3. Drive THAT ticket's acceptance flow on the live URL (Playwright MCP).
+   - **Pass** → `python3 -m software_factory.db qa-approve <runs_dir> <run_id> <ticket_id>`
+   - **Bug** → store screenshots durably (`software_factory.storage.put("<run_id>", "qa/ticket-<id>-<ts>.png",
+     "<path>")` → URL; `blobs.BlobStore(<run.db>).record("run","<run_id>",<key>,kind="qa-screenshot")`),
+     write a markdown bug report with `![](<url>)` links, then
+     `python3 -m software_factory.db qa-reject <runs_dir> <run_id> <ticket_id> "<bug_markdown>"`. The
+     ticket returns to `open` carrying the report — rebuild it, redeploy, QA again.
+
+**The run is DONE only when `TicketStore.all_approved()`** (every ticket `approved`) AND a passing
+Playwright verification per deliverable is recorded. `detect_stage3_done` enforces both.
 
 ## Phase 4: teardown  (`set-phase teardown`)
 
@@ -170,7 +188,8 @@ Proof (run.db + run.log) at the base survives.
 | Need | Call |
 |------|------|
 | Record canvas state | `python3 -m software_factory.db <verb> <runs_dir> <run_id> ...` |
-| Tickets | `tickets.TicketStore` — `claim`, `mark_done` |
+| Tickets | `tickets.TicketStore` — `claim`, `mark_done`, `mark_deployed`, `start_qa`, `qa_approve`, `qa_reject`, `all_approved` |
+| Blob storage | `storage.put/get/url`, `blobs.BlobStore.record` — durable QA screenshots (Supabase Storage; local fallback) |
 | Repo / PR / merge | `repo.GitHub` — `open_pr`, `merge_if_green` |
 | Deploy + health | `deploy.deploy(target, dir)`, `deploy.healthy(url)` |
 | Done verdict | `gate.happy_flow_passed(result)`, `gate.bugs_from(result)` |
@@ -180,7 +199,7 @@ Proof (run.db + run.log) at the base survives.
 
 - **Budget:** on `BudgetExceeded`, stop and report shipped-vs-pending.
 - **No hollow done:** empty diff = no-op = retry; `merge_if_green` + `mark_done` enforce real diffs/PRs;
-  done REQUIRES a recorded passing Playwright verification.
+  done REQUIRES a recorded passing Playwright verification AND every ticket `approved` via the QA loop.
 - **One ticket at a time:** each bracketed by `spawn-agent`/`claim`/…/`finish-agent` with the same id.
 - **Deploy isolation:** always deploy to `sf-<run_id>`, never the console service.
 - **Fully autonomous** — no human approval gates.

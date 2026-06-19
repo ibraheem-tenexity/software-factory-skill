@@ -1002,9 +1002,11 @@ class Console:
         return True
 
     def detect_stage3_done(self, run_id: str) -> bool:
-        """Stage 3 is done ONLY when BOTH hard gates pass (no hollow done):
-        (a) the completed tickets trace to recorded native-Task agents — not a monolithic build, and
-        (b) a PASSING Playwright happy-flow against the live URL is recorded in run.db.
+        """Stage 3 is done ONLY when ALL hard gates pass (no hollow done):
+        (a) the completed tickets trace to recorded native-Task agents — not a monolithic build,
+        (b) a PASSING Playwright happy-flow against the live URL is recorded in run.db, and
+        (c) the QA loop closed: EVERY ticket reached `approved` (deployed → qa_testing → approved).
+            A ticket that QA bounced (qa_reject → open) re-opens the run until it's rebuilt + re-passed.
         On success, record the deploy_url (from the passing verification) and mark phase=done."""
         state = self._load_state(run_id)
         if state.phase == "done":
@@ -1015,9 +1017,14 @@ class Console:
         if not db.has_passing_verification():
             return False
         # Gate (a): tickets were built by per-ticket agents, not one monolithic session.
-        done = TicketStore(paths["tickets_db"]).done_tickets()
+        tickets = TicketStore(paths["tickets_db"])
+        done = tickets.done_tickets()
         spawned = len(AgentRegistry(paths["agents_db"]).agents_for(run_id))
         if not done or spawned == 0 or any(t.agent is None for t in done):
+            return False
+        # Gate (c): QA approved every ticket. The QA agent drives each deployed ticket's happy flow
+        # and qa_approve/qa_reject's it; the run is not done while any ticket is unapproved.
+        if not tickets.all_approved():
             return False
         passing = [v for v in db.verifications() if v["passed"]]
         if passing:
