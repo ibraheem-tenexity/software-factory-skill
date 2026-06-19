@@ -2,8 +2,6 @@
 
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
-**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
-
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
@@ -74,6 +72,10 @@ runtime, an auth/ownership change, or anything that moves where state lives. Kee
 diagrams in `docs/` (`docs/schema-erd.svg` is the source-of-truth ERD, with `docs/schema-erd.md` the
 schema detail; `docs/service-architecture.svg` is the service/storage topology). If your change makes
 the doc or a diagram wrong, fixing them is part of the change, not a follow-up.
+
+## Blast Redius
+
+If the operator has explicitly instructed you to do something, do not autonomously resject it or defer it based on the blast radius. This project is in its early stages and high blast radius changes are acceptable 
 
 ---
 
