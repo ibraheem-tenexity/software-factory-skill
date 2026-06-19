@@ -43,20 +43,29 @@ brief BEFORE launching the build — a richer brief produces a far more mature r
 single lazy prompt. Do not launch on the first vague request; interview first.
 
 ## The interview (one topic at a time)
-Work through these topics conversationally, ONE question per turn, in roughly this order. Use \
-the rubric in your head to know when a topic is sufficiently answered:
-1. **Goals / context** — what the business does, the problem this solves, the primary objective.
-2. **Success metrics** — concrete outcomes/numbers; how success is measured.
-3. **Constraints** — timeline, budget, required/avoided tech, hosting, compliance.
-4. **Stakeholders** — decision-makers, end users, sign-off.
-5. **Existing assets** — code, designs, brand assets, wireframes, integrations, docs (accept files/images).
-6. **Risks** — technical/business/dependency unknowns.
-7. **Definition of done** — what the first version must do to be accepted.
+Work through these topics conversationally — ask EXACTLY ONE question per turn and WAIT for the \
+user's answer before moving on (never stack two questions in one message). Go in roughly this \
+order. Use the rubric in your head to know when a topic is sufficiently answered, and ask a brief \
+follow-up if an answer is thin:
+1. **Context & goals** — understand the user's world first: their industry and what their company/\
+organization actually does; who this product is for; the specific problem it solves and the primary \
+objective. Don't accept a one-line app idea at face value — draw out the surrounding context.
+2. **Scale & usage** — how big the organization is (company size and, if they'll share, revenue or \
+funding stage), AND the projected volume of usage for this product: expected number of users, \
+traffic/requests, data volume, and how fast they expect it to grow. This drives the architecture and \
+infrastructure, so get concrete numbers or ballparks where you can.
+3. **Success metrics** — concrete outcomes/numbers; how success is measured.
+4. **Constraints** — timeline, budget, required/avoided tech, hosting, compliance.
+5. **Stakeholders** — decision-makers, end users, sign-off.
+6. **Existing assets** — code, designs, brand assets, wireframes, integrations, docs (accept files/images).
+7. **Risks** — technical/business/dependency unknowns.
+8. **Definition of done** — what the first version must do to be accepted.
 
 After the user answers a topic, call **record_brief_section** with the section key \
-(goals | success_metrics | constraints | stakeholders | existing_assets | risks | definition_of_done) \
-and a crisp summary of their answer in your own words. Acknowledge attached files/images as \
-existing_assets. Keep moving — don't re-ask what's already covered.
+(goals | scale | success_metrics | constraints | stakeholders | existing_assets | risks | definition_of_done) \
+and a crisp summary of their answer in your own words. Use `goals` for the context/industry/company/\
+problem answer and `scale` for the company-size/revenue + projected-usage answer. Acknowledge attached \
+files/images as existing_assets. Keep moving — don't re-ask what's already covered.
 
 ## Proceeding to the build
 Call **propose_proceed** to check whether enough of the brief is covered. Once it reports ready \
@@ -163,8 +172,8 @@ def make_tools(console: Console, attachments=lambda: [],
                 "type": "object",
                 "properties": {
                     "section": {"type": "string",
-                                "enum": ["goals", "success_metrics", "constraints", "stakeholders",
-                                         "existing_assets", "risks", "definition_of_done"]},
+                                "enum": ["goals", "scale", "success_metrics", "constraints",
+                                         "stakeholders", "existing_assets", "risks", "definition_of_done"]},
                     "summary": {"type": "string", "description": "A crisp summary of the user's answer"},
                 },
                 "required": ["section", "summary"],
@@ -338,17 +347,19 @@ class ChatAgentRunner:
             self._pending_interview_md = ""
 
         response_msgs = []
+        text_parts: list[str] = []
         now = time.time()
 
         for item in result.new_items:
             if isinstance(item, MessageOutputItem):
                 # raw_item is a ResponseOutputMessage; ItemHelpers walks its
-                # ResponseOutputText parts and concatenates the text.
+                # ResponseOutputText parts and concatenates the text. The SDK can emit MORE THAN
+                # ONE MessageOutputItem in a single turn (the model pausing around tool calls, or
+                # just being chatty) — surfacing each as its own bubble showed the user two
+                # questions in a row. Collapse all of a turn's assistant text into ONE message.
                 text = ItemHelpers.text_message_output(item)
                 if text:
-                    response_msgs.append(ChatMessage(
-                        role="assistant", content=text, msg_type="text", ts=now,
-                    ))
+                    text_parts.append(text)
             elif isinstance(item, ToolCallItem) and isinstance(item.raw_item, ResponseFunctionToolCall):
                 call = item.raw_item  # typed: .name and .arguments (JSON str) always present
                 # Required params are schema-validated by the SDK against OpenAI, but a
@@ -375,6 +386,13 @@ class ChatAgentRunner:
                         msg_type="dep_request", ts=now,
                         metadata={"run_id": run_id, "dep_names": dep_names},
                     ))
+
+        # One assistant bubble per turn: the reply (joined text) goes first, then any
+        # tool-driven system messages (pipeline_started / dep_request).
+        if text_parts:
+            response_msgs.insert(0, ChatMessage(
+                role="assistant", content="\n\n".join(text_parts), msg_type="text", ts=now,
+            ))
 
         if result.final_output and not response_msgs:
             response_msgs.append(ChatMessage(

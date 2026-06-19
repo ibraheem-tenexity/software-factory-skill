@@ -2,7 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { BriefForm } from "./BriefForm";
 
-type Msg = { role: string; content: string; msg_type?: string };
+type Msg = { role: string; content: string; msg_type?: string; ts?: number };
+
+// A message arrives twice — once in the POST /api/chat response, once echoed over the SSE
+// stream (the server _push_sse's the same reply so other watchers see it). Dedup on a stable
+// identity so the caller's own client doesn't render each reply twice.
+const keyOf = (m: Msg) => `${m.ts ?? ""}|${m.role}|${m.content}`;
+function mergeMsgs(prev: Msg[], incoming: Msg[]): Msg[] {
+  const seen = new Set(prev.map(keyOf));
+  const fresh: Msg[] = [];
+  for (const m of incoming) {
+    const k = keyOf(m);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    fresh.push(m);
+  }
+  return fresh.length ? [...prev, ...fresh] : prev;
+}
 
 export function ChatPanel({ runId, onRunCreated }: { runId: string | null; onRunCreated: (id: string) => void }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
@@ -19,7 +35,7 @@ export function ChatPanel({ runId, onRunCreated }: { runId: string | null; onRun
       try {
         const m = JSON.parse(e.data);
         const arr = Array.isArray(m) ? m : [m];
-        setMsgs((prev) => [...prev, ...arr]);
+        setMsgs((prev) => mergeMsgs(prev, arr));
       } catch { /* heartbeat */ }
     };
     return () => es.close();
@@ -36,7 +52,7 @@ export function ChatPanel({ runId, onRunCreated }: { runId: string | null; onRun
     try {
       const r = await api.chat({ run_id: runId, message });
       if (!runId && r.run_id) onRunCreated(r.run_id);
-      setMsgs((prev) => [...prev, ...(r.messages || [])]);
+      setMsgs((prev) => mergeMsgs(prev, r.messages || []));
     } catch {
       setMsgs((prev) => [...prev, { role: "system", content: "(chat error)" }]);
     } finally {

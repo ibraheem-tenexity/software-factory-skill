@@ -13,6 +13,7 @@ from __future__ import annotations
 # Ordered canonical sections (snake_case; legacy used camelCase TS). Order = display + prompt order.
 BRIEF_SECTIONS: list[str] = [
     "goals",
+    "scale",
     "success_metrics",
     "constraints",
     "stakeholders",
@@ -23,7 +24,8 @@ BRIEF_SECTIONS: list[str] = [
 
 # Human labels for each section (UI + prompt headings).
 SECTION_LABELS: dict[str, str] = {
-    "goals": "Goals",
+    "goals": "Context & Goals",
+    "scale": "Scale & Usage",
     "success_metrics": "Success Metrics",
     "constraints": "Constraints",
     "stakeholders": "Stakeholders",
@@ -31,95 +33,6 @@ SECTION_LABELS: dict[str, str] = {
     "risks": "Risks & Unknowns",
     "definition_of_done": "Definition of Done",
 }
-
-# The conversational interview: one topic per turn. Ported from the legacy intake script.
-# Each topic maps onto one brief section and carries a rubric of points a complete answer covers.
-INTERVIEW_TOPICS: list[dict] = [
-    {
-        "key": "client_context",
-        "section": "goals",
-        "label": "Client & project context",
-        "primary_question": "Tell me about the project — who is it for, what does your business do, "
-                            "and what are you trying to accomplish?",
-        "rubric": [
-            "what the business/client does (industry, business model)",
-            "the core problem this project solves and the value to users",
-            "the primary objective or metric to optimize",
-        ],
-    },
-    {
-        "key": "success_metrics",
-        "section": "success_metrics",
-        "label": "Success metrics",
-        "primary_question": "How will we know this is a success? What concrete outcomes or numbers matter?",
-        "rubric": [
-            "at least one quantifiable target or threshold",
-            "the current baseline (if any)",
-            "how/where success is measured",
-        ],
-    },
-    {
-        "key": "constraints",
-        "section": "constraints",
-        "label": "Tech stack & constraints",
-        "primary_question": "Any constraints I should respect — timeline, budget, required/avoided "
-                            "tech, hosting, or compliance?",
-        "rubric": [
-            "timeline or deadline",
-            "budget or spend ceiling",
-            "required or off-limits technology / platforms",
-            "regulatory, security, or performance requirements",
-        ],
-    },
-    {
-        "key": "stakeholders",
-        "section": "stakeholders",
-        "label": "Stakeholders & users",
-        "primary_question": "Who are the decision-makers and the end users? Who signs off?",
-        "rubric": [
-            "primary decision-maker / sponsor",
-            "the end users or affected parties",
-            "the approval / sign-off chain",
-        ],
-    },
-    {
-        "key": "existing_assets",
-        "section": "existing_assets",
-        "label": "Existing assets",
-        "primary_question": "What already exists I should build on — code, designs, brand assets, "
-                            "integrations, docs? (Attach files if you have them.)",
-        "rubric": [
-            "existing codebases or repositories",
-            "designs, brand assets, or wireframes",
-            "third-party services / integrations already in use",
-            "documentation or domain knowledge to preserve",
-        ],
-    },
-    {
-        "key": "risks",
-        "section": "risks",
-        "label": "Risks & unknowns",
-        "primary_question": "What are the biggest risks or open questions — technical, business, "
-                            "or dependencies?",
-        "rubric": [
-            "technical risks or open technical questions",
-            "business or market risks",
-            "dependency / third-party risks",
-        ],
-    },
-    {
-        "key": "definition_of_done",
-        "section": "definition_of_done",
-        "label": "Definition of done",
-        "primary_question": "What does 'done' look like for the first version?",
-        "rubric": [
-            "functional completion criteria",
-            "quality / testing bar",
-            "deployment or go-live state",
-            "who accepts / signs off",
-        ],
-    },
-]
 
 # Sections that must be covered before the concierge offers to proceed. Kept deliberately small so
 # the interview never traps the user — everything else is nice-to-have and the user can force-proceed.

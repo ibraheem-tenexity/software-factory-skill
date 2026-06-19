@@ -183,6 +183,29 @@ class TestHandleMessage:
             )
         assert any(m.msg_type == "text" and "what shall we build" in m.content for m in msgs)
 
+    def test_multiple_message_items_collapse_to_one_bubble(self, mock_console):
+        """Regression: the SDK can emit >1 MessageOutputItem per turn (model chatty / pausing
+        around tool calls). They must collapse into ONE assistant bubble, not render as two
+        questions in a row."""
+        from agents.items import MessageOutputItem
+        from openai.types.responses import ResponseOutputMessage, ResponseOutputText
+
+        def _msg(mid, txt):
+            raw = ResponseOutputMessage(
+                id=mid, content=[ResponseOutputText(annotations=[], text=txt, type="output_text")],
+                role="assistant", status="completed", type="message")
+            return MessageOutputItem(agent=MagicMock(), raw_item=raw)
+
+        items = [_msg("m1", "Got it. Any existing assets?"), _msg("m2", "And any risks?")]
+        runner = ChatAgentRunner(mock_console)
+        with patch("agents.Runner.run", new=AsyncMock(return_value=_fake_run_result(items))):
+            rid, msgs = asyncio.get_event_loop().run_until_complete(
+                runner.handle_message("run-abcd1234", "university success office", [], [])
+            )
+        text_msgs = [m for m in msgs if m.msg_type == "text"]
+        assert len(text_msgs) == 1
+        assert "existing assets" in text_msgs[0].content and "risks" in text_msgs[0].content
+
     def test_start_pipeline_tool_call_is_parsed(self, mock_console):
         from agents.items import ToolCallItem
         from openai.types.responses import ResponseFunctionToolCall
