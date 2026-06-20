@@ -1,0 +1,154 @@
+// Software Factory — Console Schema ERD (source of truth: src/software_factory/models.py)
+// Flat schema: ONE public schema. Per-project tables are keyed by `project_id`; the global
+// directory tables are single row-sets. Render: dot -Tsvg docs/schema-erd.dot -o docs/schema-erd.svg
+digraph SchemaERD {
+  rankdir=LR;
+  bgcolor="#f8fafc";
+  labelloc="t";
+  fontname="Arial";
+  fontsize=22;
+  label=<<b>Console Schema ERD</b><br/><font point-size="13" color="#475569">One flat <font face="monospace">public</font> schema — per-project tables keyed by project_id; global directory tables are single row-sets. (src/software_factory/models.py)</font>>;
+  node [shape=plaintext, fontname="Arial"];
+  edge [color="#334155", arrowsize=0.8];
+
+  // ---- per-project tables (keyed by project_id) ----------------------------------------
+  projectstate [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#e0f2fe" port="t"><b>projectstate</b></td></tr>
+      <tr><td align="left"><b>PK</b> project_id</td></tr>
+      <tr><td align="left">data : ProjectState JSON</td></tr>
+      <tr><td align="left"><font color="#64748b" point-size="10">(JSON holds name, owner, phase,<br/>stage, models, budget, brief)</font></td></tr>
+      <tr><td align="left"><font color="#64748b" point-size="10">also the project registry</font></td></tr>
+    </table>>];
+
+  phases [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#f1f5f9" port="t"><b>phases</b></td></tr>
+      <tr><td align="left"><b>PK</b> id</td></tr>
+      <tr><td align="left"><b>FK</b> project_id</td></tr>
+      <tr><td align="left">name, status, stage, ts</td></tr>
+    </table>>];
+
+  artifacts [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#f1f5f9" port="t"><b>artifacts</b></td></tr>
+      <tr><td align="left"><b>PK</b> id</td></tr>
+      <tr><td align="left"><b>FK</b> project_id</td></tr>
+      <tr><td align="left">title, path, kind, agent, ts</td></tr>
+      <tr><td align="left"><font color="#64748b" point-size="10">metadata only; bytes via blobs</font></td></tr>
+    </table>>];
+
+  blockers [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#f1f5f9" port="t"><b>blockers</b></td></tr>
+      <tr><td align="left"><b>PK</b> id</td></tr>
+      <tr><td align="left"><b>FK</b> project_id</td></tr>
+      <tr><td align="left">what, blocks, cleared, ts</td></tr>
+    </table>>];
+
+  gates [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#f1f5f9" port="t"><b>gates</b></td></tr>
+      <tr><td align="left"><b>PK</b> (project_id, name)</td></tr>
+      <tr><td align="left">status, ts</td></tr>
+    </table>>];
+
+  verifications [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#f1f5f9" port="t"><b>verifications</b></td></tr>
+      <tr><td align="left"><b>PK</b> id</td></tr>
+      <tr><td align="left"><b>FK</b> project_id</td></tr>
+      <tr><td align="left">url, passed, result, ts</td></tr>
+      <tr><td align="left"><font color="#64748b" point-size="10">passed = Stage 3 done gate</font></td></tr>
+    </table>>];
+
+  deployments [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#f1f5f9" port="t"><b>deployments</b></td></tr>
+      <tr><td align="left"><b>PK</b> id</td></tr>
+      <tr><td align="left"><b>FK</b> project_id</td></tr>
+      <tr><td align="left">app, service_name, url</td></tr>
+      <tr><td align="left">status, verified, ts</td></tr>
+      <tr><td align="left"><font color="#64748b" point-size="10">1..N deliverables per project</font></td></tr>
+    </table>>];
+
+  tickets [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#f1f5f9" port="t"><b>tickets</b></td></tr>
+      <tr><td align="left"><b>PK</b> id</td></tr>
+      <tr><td align="left"><b>FK</b> project_id</td></tr>
+      <tr><td align="left">title, acceptance, dod, wave</td></tr>
+      <tr><td align="left">status (6-state), agent, app</td></tr>
+      <tr><td align="left">provenance, provenance_type</td></tr>
+      <tr><td align="left">diff_lines, description</td></tr>
+    </table>>];
+
+  agents [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#f1f5f9" port="t"><b>agents</b></td></tr>
+      <tr><td align="left"><b>PK</b> (agent_id, project_id)</td></tr>
+      <tr><td align="left">ticket_id, role, model, phase</td></tr>
+      <tr><td align="left">status, outcome, cost_usd</td></tr>
+      <tr><td align="left">*_tokens, provenance, diff_lines</td></tr>
+      <tr><td align="left">started_at, ended_at</td></tr>
+    </table>>];
+
+  // ---- global directory tables (single row-set) ---------------------------------------
+  organizations [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#fef9c3" port="t"><b>organizations</b></td></tr>
+      <tr><td align="left"><b>PK</b> id</td></tr>
+      <tr><td align="left">name, industry, sub_focus</td></tr>
+      <tr><td align="left">headcount, revenue (band text)</td></tr>
+      <tr><td align="left">location, website, connected_systems</td></tr>
+      <tr><td align="left">plan, monthly_budget_cap</td></tr>
+      <tr><td align="left">created_at, created_by</td></tr>
+    </table>>];
+
+  users [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#fef9c3" port="t"><b>users</b></td></tr>
+      <tr><td align="left"><b>PK</b> email</td></tr>
+      <tr><td align="left">role : admin | member</td></tr>
+      <tr><td align="left"><b>FK</b> org_id</td></tr>
+      <tr><td align="left">designation, role_description</td></tr>
+      <tr><td align="left">tenexity, created_at, created_by</td></tr>
+    </table>>];
+
+  blobs [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#ecfdf5" port="t"><b>blobs</b></td></tr>
+      <tr><td align="left"><b>PK</b> id</td></tr>
+      <tr><td align="left">scope : project | org, scope_id</td></tr>
+      <tr><td align="left">kind, name, tag</td></tr>
+      <tr><td align="left">storage_key, content_type</td></tr>
+      <tr><td align="left">size_bytes, sha256, created_at</td></tr>
+    </table>>];
+
+  blob_uses [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#ecfdf5" port="t"><b>blob_uses</b></td></tr>
+      <tr><td align="left"><b>PK</b> id</td></tr>
+      <tr><td align="left"><b>FK</b> blob_id</td></tr>
+      <tr><td align="left"><b>FK</b> project_id</td></tr>
+      <tr><td align="left">created_at</td></tr>
+      <tr><td align="left"><font color="#64748b" point-size="10">org KB doc used by a project</font></td></tr>
+    </table>>];
+
+  // ---- relationships ------------------------------------------------------------------
+  // every per-project table references the project (projectstate.project_id)
+  projectstate:t -> phases:t;
+  projectstate:t -> artifacts:t;
+  projectstate:t -> blockers:t;
+  projectstate:t -> gates:t;
+  projectstate:t -> verifications:t;
+  projectstate:t -> deployments:t;
+  projectstate:t -> tickets:t;
+  projectstate:t -> agents:t;
+  tickets:t -> agents:t [style=dashed, color="#64748b", label=<<font point-size="9">ticket_id</font>>];
+
+  users:t -> organizations:t [label=<<font point-size="9">org_id</font>>];
+  blob_uses:t -> blobs:t;
+  blob_uses:t -> projectstate:t [style=dashed, color="#64748b"];
+  users:t -> projectstate:t [style=dashed, color="#64748b", label=<<font point-size="9">owner (in JSON)</font>>];
+}
