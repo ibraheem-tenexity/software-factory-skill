@@ -68,6 +68,23 @@ export type DepsSubmitResponse = {
 export type RunEvent = { ts: number; type: string; payload: Record<string, any> };
 export type Artifact = { path: string; content?: string; error?: string };
 
+// Project view (§2.5) — Overview rollup + Documents, per tjyb5gmy's LOCKED shapes (PR #13).
+// Callers degrade to empty until live.
+export type ProjectMaterial = { name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number };
+export type ProjectArtifact = { title: string; path?: string; kind?: string; agent?: string; ts?: number };
+export type ProjectOverview = {
+  brief?: { name?: string; description?: string; goal?: string; scope?: string[]; owner?: string; phase?: string; stage?: number; created?: number | string };
+  build?: { pct?: number; tickets_done?: number; tickets_total?: number; agents_working?: number; spent_usd?: number; budget_ceiling?: number; done?: boolean; deploy_url?: string };
+  services?: { label: string; kind?: string; status?: string; detail?: string; url?: string }[];
+  agents?: { role: string; model?: string; status?: string; task?: string; cost_usd?: number }[];
+  org?: { name?: string; industry?: string; connected_systems?: string[] } | null;
+  materials?: ProjectMaterial[];
+  produced?: ProjectArtifact[];
+  materials_count?: number;
+  produced_count?: number;
+};
+export type ProjectDocuments = { uploaded: ProjectMaterial[]; produced: ProjectArtifact[] };
+
 // Org-admin (§2.3) — org-scoped, per the locked contract in docs/plans/org-admin-api.md.
 export type Member = { email: string; role: string; designation?: string; you?: boolean };
 export type OrgDoc = { id: string; name: string; kind?: string; tag?: string; size_bytes?: number; content_type?: string; used_count?: number; updated?: number };
@@ -138,6 +155,9 @@ export const api = {
   events: (id: string) => get<{ events: RunEvent[] }>(`/api/runs/${id}/events`),
   artifact: (id: string, path: string) =>
     get<Artifact>(`/api/runs/${id}/artifact?path=${encodeURIComponent(path)}`),
+  // Project view (§2.5) — Overview rollup + Documents. Backend landing via #13; degrade to empty.
+  overview: (id: string) => get<ProjectOverview>(`/api/runs/${id}/overview`),
+  documents: (id: string) => get<ProjectDocuments>(`/api/runs/${id}/documents`),
   getOrg: () => get<{ org: Org | null }>("/api/org"),
   createOrg: (body: OrgInput) => send<{ org: Org }>("/api/org", "POST", body),
   patchOrg: (body: Partial<Org>) => send<{ org: Org }>("/api/org", "PATCH", body),

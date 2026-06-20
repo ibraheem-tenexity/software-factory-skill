@@ -5,6 +5,7 @@ import { OrgAdminScreen } from "./components/OrgAdminScreen";
 import { OnboardingScreen } from "./components/onboarding/OnboardingScreen";
 import { LoginScreen } from "./components/LoginScreen";
 import { FactoryConsole } from "./components/factory/FactoryConsole";
+import { ProjectView } from "./components/project/ProjectView";
 
 function readInitialRun(): string | null {
   return new URLSearchParams(location.search).get("run");
@@ -17,6 +18,9 @@ export function App() {
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
   // Org admin route (dashboard org switcher / "Manage organization →"). Placeholder until §2.3.
   const [showOrg, setShowOrg] = useState<boolean>(false);
+  // Open-run peer view (§2.5): 'project' = ProjectView (Overview/Documents tabs); 'factory' = the
+  // Factory Console. The "Factory console" peer-tab flips this; FactoryConsole's back returns here.
+  const [openView, setOpenView] = useState<"project" | "factory">("project");
 
   const syncUrl = (run: string | null) => {
     const p = new URLSearchParams();
@@ -24,7 +28,7 @@ export function App() {
     history.replaceState(null, "", "?" + p.toString());
   };
 
-  const openRun = (id: string) => { setRunId(id); setShowProjects(false); setShowOnboarding(false); syncUrl(id); };
+  const openRun = (id: string) => { setRunId(id); setShowProjects(false); setShowOnboarding(false); setOpenView("project"); syncUrl(id); };
   const backToProjects = () => { setRunId(null); setShowProjects(true); syncUrl(null); };
 
   // keep the SPA boot warm — discover runs once so a deep-linked ?run= resolves.
@@ -50,8 +54,12 @@ export function App() {
     );
   }
 
-  // Open run ⇒ the Factory Console (PRD §2.6) is the run's main view.
-  return <FactoryConsole runId={runId} onBack={backToProjects} />;
+  // Open run ⇒ the §2.5 Project View (Overview/Documents tabs) is the default; its "Factory console"
+  // peer-tab flips to the Factory Console (PRD §2.6), whose back returns to the Project View.
+  if (openView === "factory") {
+    return <FactoryConsole runId={runId} onBack={() => setOpenView("project")} />;
+  }
+  return <ProjectView runId={runId} onBack={backToProjects} onOpenFactory={() => setOpenView("factory")} />;
 }
 
 // ── Auth gate (Option B) ───────────────────────────────────────────────────────────────────
