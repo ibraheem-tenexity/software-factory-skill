@@ -119,6 +119,84 @@ export type OrgInput = Partial<Omit<Org, "id" | "created_at" | "created_by">> & 
   role_description?: string;
 };
 
+// ── Tenexity OS admin portal (§3) — staff-gated, cross-tenant. Degrade to empty until live.
+export type AdminPulse = {
+  tenants?: number;
+  projects?: number;
+  agents_active?: number;
+  agents_total?: number;
+  today_burn?: string;
+  avg_friction?: number | null;
+};
+
+export type AdminProjectRow = {
+  run_id: string;
+  name: string;
+  client: string;
+  factory: string;
+  phase: string;
+  stage?: number;
+  tasks_done: number;
+  tasks_total: number;
+  spent_usd?: number;
+  updated?: number | string;
+  is_demo: boolean;
+  owner?: string;
+};
+
+export type AdminAgent = {
+  callsign: string;
+  sign: string;
+  role: string;
+  desc: string;
+  model: string;
+  cost_tier: number;
+  success: number;
+  runs: number;
+  on: boolean;
+  prompt_version?: number;
+  prompt_applied?: boolean;
+  prompt?: string;
+  tools?: { name: string; type?: string; scope?: string }[];
+  activity?: { text: string; ts?: string }[];
+};
+
+export type AdminTool = {
+  name: string;
+  type: "MCP" | "API" | "native" | "HTTP";
+  provider: string;
+  scope: string;
+  status: "connected" | "available";
+  used: number;
+  auth: string;
+};
+
+export type AdminClient = {
+  org_id: string;
+  name: string;
+  initials: string;
+  projects: number;
+  tickets: number;
+  spend: string;
+  last_activity: string;
+};
+
+export type AdminAccessUser = {
+  email: string;
+  type: "New org" | "Tenexity";
+  org: string;
+  role: string;
+  status: "active" | "invited";
+};
+
+export type AdminOverview = {
+  pulse: AdminPulse;
+  active_projects: AdminProjectRow[];
+  agents: AdminAgent[];
+};
+
+export type AdminProjectMode = "all" | "real" | "demo";
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(path, { credentials: "include" });
   if (!r.ok) throw new Error(`${path} → ${r.status}`);
@@ -172,6 +250,28 @@ export const api = {
   patchBilling: (body: { plan?: string; monthly_budget_cap?: number }) => send<OrgUsage>("/api/org/billing", "PATCH", body),
   createProject: (body: { description: string; project_name: string }) =>
     send<{ project_id: string }>("/api/projects", "POST", body),
+  // ── Tenexity OS admin portal (§3). Staff-gated, cross-tenant. Degrade to empty until live.
+  adminOverview: () => get<AdminOverview>("/api/admin/overview"),
+  adminClients: () => get<{ clients: AdminClient[] }>("/api/admin/clients"),
+  adminCreateClient: (body: Partial<Omit<AdminClient, "org_id">> & { name: string }) => send<{ client: AdminClient }>("/api/admin/clients", "POST", body),
+  adminUpdateClient: (org_id: string, body: Partial<AdminClient>) => send<{ client: AdminClient }>(`/api/admin/clients/${encodeURIComponent(org_id)}`, "PATCH", body),
+  adminDeleteClient: (org_id: string) => send<{ ok?: boolean }>(`/api/admin/clients/${encodeURIComponent(org_id)}`, "DELETE"),
+  adminProjects: (mode?: AdminProjectMode) => get<{ projects: AdminProjectRow[] }>(`/api/admin/projects${mode ? `?mode=${mode}` : ""}`),
+  adminSetProjectMode: (rid: string, is_demo: boolean) => send<{ project: AdminProjectRow }>(`/api/admin/projects/${encodeURIComponent(rid)}`, "PATCH", { is_demo }),
+  adminAgents: () => get<{ agents: AdminAgent[] }>("/api/admin/agents"),
+  adminCreateAgent: (body: Partial<Omit<AdminAgent, "callsign">> & { callsign: string }) => send<{ agent: AdminAgent }>("/api/admin/agents", "POST", body),
+  adminUpdateAgent: (callsign: string, body: Partial<AdminAgent>) => send<{ agent: AdminAgent }>(`/api/admin/agents/${encodeURIComponent(callsign)}`, "PATCH", body),
+  adminDeleteAgent: (callsign: string) => send<{ ok?: boolean }>(`/api/admin/agents/${encodeURIComponent(callsign)}`, "DELETE"),
+  adminAgent: (callsign: string) => get<AdminAgent>(`/api/admin/agents/${encodeURIComponent(callsign)}`),
+  adminPatchAgentPrompt: (callsign: string, prompt: string) => send<{ version?: number; applied: boolean }>(`/api/admin/agents/${encodeURIComponent(callsign)}/prompt`, "PATCH", { prompt }),
+  adminTools: () => get<{ tools: AdminTool[] }>("/api/admin/tools"),
+  adminCreateTool: (body: Partial<AdminTool> & { name: string; type: AdminTool["type"]; provider: string }) => send<{ tool: AdminTool }>("/api/admin/tools", "POST", body),
+  adminUpdateTool: (id: string, body: Partial<AdminTool>) => send<{ tool: AdminTool }>(`/api/admin/tools/${encodeURIComponent(id)}`, "PATCH", body),
+  adminDeleteTool: (id: string) => send<{ ok?: boolean }>(`/api/admin/tools/${encodeURIComponent(id)}`, "DELETE"),
+  adminAccess: () => get<{ users: AdminAccessUser[] }>("/api/admin/access"),
+  adminInvite: (body: { email: string; access_type: "org" | "tenexity"; org_name?: string }) => send<{ users: AdminAccessUser[] }>("/api/admin/access", "POST", body),
+  adminUpdateAccess: (email: string, body: { role?: string; status?: "active" | "invited" }) => send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "PATCH", body),
+  adminDeleteAccess: (email: string) => send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "DELETE"),
   // ── Onboarding draft model (docs/plans/concierge-onboarding-api.md) ──
   createDraft: (body?: { project_name?: string }) =>
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),

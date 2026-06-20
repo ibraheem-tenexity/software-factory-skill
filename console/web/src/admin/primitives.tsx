@@ -157,6 +157,7 @@ export function TextInput({
   mono,
   onKeyDown,
   size = "md",
+  disabled,
 }: {
   value?: string;
   onChange?: (value: string) => void;
@@ -166,12 +167,14 @@ export function TextInput({
   mono?: boolean;
   onKeyDown?: (e: React.KeyboardEvent) => void;
   size?: "sm" | "md";
+  disabled?: boolean;
 }) {
   const h = size === "sm" ? 32 : 36;
   return (
     <input
       type={type}
       value={value || ""}
+      disabled={disabled}
       onChange={(e) => onChange?.(e.target.value)}
       placeholder={placeholder}
       onKeyDown={onKeyDown}
@@ -186,6 +189,7 @@ export function TextInput({
         color: T.fg,
         font: `400 13px/1 ${mono ? T.mono : T.sans}`,
         outline: "none",
+        opacity: disabled ? 0.6 : 1,
         ...style,
       }}
     />
