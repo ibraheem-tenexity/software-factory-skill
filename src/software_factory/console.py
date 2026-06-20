@@ -930,6 +930,24 @@ class Console:
         waves = sorted({t["wave"] for t in items})
         return {"tickets": items, "waves": waves}
 
+    def agents(self, run_id: str) -> list[dict]:
+        """Agents on a run (Project View §2.5) — a flat projection of the agent registry."""
+        regs = AgentRegistry(self._paths(run_id)["agents_db"]).agents_for(run_id)
+        return [{"agent_id": a.agent_id, "role": a.role, "model": a.model, "phase": a.phase,
+                 "status": a.status, "outcome": a.outcome, "ticket_id": a.ticket_id,
+                 "cost_usd": a.cost_usd}
+                for a in regs]
+
+    def artifacts(self, run_id: str) -> list[dict]:
+        """Factory-produced artifacts for a run (Project View Documents tab / produced docs)."""
+        return RunDB(self._paths(run_id)["db"]).artifacts()
+
+    def run_created(self, run_id: str) -> float | None:
+        """Best-available creation time: the earliest recorded phase timestamp (runstate carries no
+        created column). None if nothing has been recorded yet."""
+        ts = [p["ts"] for p in RunDB(self._paths(run_id)["db"]).phases() if p.get("ts")]
+        return min(ts) if ts else None
+
     def release_run(self, run_id: str) -> bool:
         """Release a gated hold: launch Stage 1. False if not held (double-release refuses)."""
         state = self._load_state(run_id)

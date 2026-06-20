@@ -39,6 +39,7 @@ from software_factory import notify  # noqa: E402
 from software_factory import tracing  # noqa: E402
 from software_factory import storage  # noqa: E402
 from software_factory import billing  # noqa: E402
+from software_factory import project_view  # noqa: E402
 from software_factory.users import UserStore  # noqa: E402
 from software_factory.blobs import BlobStore  # noqa: E402
 
@@ -51,7 +52,7 @@ console = Console(RUNS_DIR)
 users = UserStore(os.path.join(RUNS_DIR, "users.db"))
 auth.register_user_store(users.is_member, users.get_role)
 
-# Org knowledge-base / project-material blob index (bytes live in storage; this is the manifest).
+# Blob manifest — org knowledge-base docs + run-scoped uploaded materials (bytes live in storage).
 blobs = BlobStore(os.path.join(RUNS_DIR, "blobs.db"))
 
 # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
@@ -915,6 +916,36 @@ def run_log(rid: str, full: str = "", v: tuple = Depends(authorize_run)):
 @app.get("/api/runs/{rid}/deps")
 def run_deps(rid: str, v: tuple = Depends(authorize_run)):
     return console.stage2_artifacts(rid)
+
+
+# ── Project View (PRD §2.5): Overview + Documents aggregates ─────────────────────────────────────
+@app.get("/api/runs/{rid}/overview")
+def run_overview(rid: str, v: tuple = Depends(authorize_run)):
+    status = console.status(rid)
+    tickets = console.tickets(rid)["tickets"]
+    deployments = console.deployments(rid)["deployments"]
+    owner = status.get("owner") or ""
+    org = users.org_for_user(owner) if owner else None
+    has_verification = bool(status.get("done")) or any(d.get("verified") for d in deployments)
+    in_build = (status.get("stage") or 0) >= 2 and not status.get("done")
+    docs = project_view.documents(blobs.list_for("run", rid), console.artifacts(rid))
+    return {
+        "brief": project_view.brief_block(console.draft_project(rid), status,
+                                          console.run_created(rid)),
+        "build": project_view.build_status(status, tickets),
+        "services": project_view.services_at_work(org, deployments, status.get("impl_model") or "",
+                                                  has_verification, in_build),
+        "agents": project_view.agents_projection(console.agents(rid), tickets),
+        "org": ({"name": org["name"], "industry": org.get("industry"),
+                 "connected_systems": org.get("connected_systems", [])} if org else None),
+        "materials_count": len(docs["uploaded"]),
+        "produced_count": len(docs["produced"]),
+    }
+
+
+@app.get("/api/runs/{rid}/documents")
+def run_documents(rid: str, v: tuple = Depends(authorize_run)):
+    return project_view.documents(blobs.list_for("run", rid), console.artifacts(rid))
 
 
 # ── Run-scoped actions ──────────────────────────────────────────────────────────────────────
