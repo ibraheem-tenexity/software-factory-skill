@@ -538,6 +538,11 @@ def _index_html() -> bytes:
         return f.read()
 
 
+def _admin_html() -> bytes:
+    with open(os.path.join(_REACT_DIST, "admin.html"), "rb") as f:
+        return f.read()
+
+
 def _login_html() -> str:
     with open(os.path.join(HERE, "login.html")) as f:
         return f.read().replace("{{CLIENT_ID}}", auth.client_id())
@@ -556,6 +561,18 @@ def root(v: tuple = Depends(viewer)):
     if not v[2]:
         return HTMLResponse(_login_html())
     return HTMLResponse(_index_html())
+
+
+@app.get("/admin", response_class=HTMLResponse)
+@app.get("/admin.html", response_class=HTMLResponse)
+def admin_portal(v: tuple = Depends(viewer)):
+    # The Tenexity OS operator portal is a separate SPA entry (console/web/admin.html →
+    # src/admin/main.tsx), built alongside index.html. Only available in React mode (the
+    # legacy single-file console has no admin entry). Like root(), the SPA gates its own
+    # access; the service token / session resolve the full-admin identity it needs.
+    if not _react_enabled():
+        raise HTTPException(status_code=404, detail="not found")
+    return HTMLResponse(_admin_html())
 
 
 @app.get("/api/health")
