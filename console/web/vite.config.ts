@@ -5,7 +5,16 @@ import react from "@vitejs/plugin-react";
 // to the running uvicorn so the SPA talks to the real console in development.
 export default defineConfig({
   plugins: [react()],
-  build: { outDir: "dist", emptyOutDir: true },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        admin: "admin.html",
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {
