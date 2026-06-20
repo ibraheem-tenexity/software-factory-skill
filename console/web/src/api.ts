@@ -130,7 +130,7 @@ export type AdminPulse = {
 };
 
 export type AdminProjectRow = {
-  run_id: string;
+  project_id: string;
   name: string;
   client: string;
   factory: string;

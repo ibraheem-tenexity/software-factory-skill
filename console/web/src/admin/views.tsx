@@ -431,7 +431,7 @@ export function AdminProjectsView({ query }: { query: string }) {
         </div>
         {filtered.map((p, i) => (
           <div
-            key={p.run_id}
+            key={p.project_id}
             style={{
               background: T.raised,
               borderTop: i ? `1px solid ${T.borderSubtle}` : "none",
@@ -932,7 +932,7 @@ export function AdminOverview({ onNav, query }: { onNav: (id: string) => void; q
           </div>
           {filteredProjects.slice(0, 6).map((p, i) => (
             <div
-              key={p.run_id}
+              key={p.project_id}
               style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderTop: i ? `1px solid ${T.borderSubtle}` : "none" }}
             >
               <span
