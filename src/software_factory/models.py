@@ -133,6 +133,8 @@ organizations = Table(
     Column("location", Text),
     Column("website", Text),
     Column("connected_systems", Text),         # JSON-encoded list
+    Column("plan", Text),                       # billing plan label, e.g. "Team"
+    Column("monthly_budget_cap", Float),        # USD/month cap shown in Usage & billing
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
     Column("created_by", Text),
 )
@@ -155,6 +157,8 @@ blobs = Table(
     Column("scope", Text, nullable=False),     # 'run' | 'org'
     Column("scope_id", Text, nullable=False),
     Column("kind", Text),
+    Column("name", Text),                       # display filename, e.g. "standard-pricing.xlsx"
+    Column("tag", Text),                        # category label, e.g. "Price book"
     Column("storage_key", Text, nullable=False),
     Column("content_type", Text),
     Column("size_bytes", Integer),
@@ -162,8 +166,18 @@ blobs = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
 )
 
+# A project (run) drawing on an org-scoped knowledge-base doc. One row per (blob, run); the
+# knowledge-base "used by N projects" count is COUNT(DISTINCT run_id) over these rows.
+blob_uses = Table(
+    "blob_uses", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("blob_id", Integer, nullable=False),
+    Column("run_id", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+)
+
 # Groupings: the flat per-run tables, the global directory tables, and everything (Alembic + tests).
 RUNDB = (runstate, phases, artifacts, blockers, gates, verifications, deployments)
 FLAT_TABLES = RUNDB + (tickets, agents)
-GLOBAL_TABLES = (organizations, users, blobs)
+GLOBAL_TABLES = (organizations, users, blobs, blob_uses)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES

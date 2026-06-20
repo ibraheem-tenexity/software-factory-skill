@@ -16,6 +16,7 @@ APIRouter, SSE via StreamingResponse, and the background poller started in the a
 Run:  uvicorn console.app:app --host 0.0.0.0 --port 8765   (or python3 console/app.py)
 """
 import asyncio
+import base64
 import contextlib
 import json
 import os
@@ -36,7 +37,10 @@ from software_factory import auth  # noqa: E402
 from software_factory import env as _env  # noqa: E402
 from software_factory import notify  # noqa: E402
 from software_factory import tracing  # noqa: E402
+from software_factory import storage  # noqa: E402
+from software_factory import billing  # noqa: E402
 from software_factory.users import UserStore  # noqa: E402
+from software_factory.blobs import BlobStore  # noqa: E402
 
 RUNS_DIR = os.environ.get("SF_RUNS_DIR", os.path.join(os.path.dirname(__file__), "..", ".runs"))
 HERE = os.path.dirname(__file__)
@@ -46,6 +50,9 @@ console = Console(RUNS_DIR)
 # auth's role/membership decisions; without it auth falls back to the env lists.
 users = UserStore(os.path.join(RUNS_DIR, "users.db"))
 auth.register_user_store(users.is_member, users.get_role)
+
+# Org knowledge-base / project-material blob index (bytes live in storage; this is the manifest).
+blobs = BlobStore(os.path.join(RUNS_DIR, "blobs.db"))
 
 # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
 _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
@@ -410,6 +417,33 @@ class OrgPatchIn(BaseModel):
     connected_systems: list | None = None
 
 
+class OrgDocIn(BaseModel):
+    name: str = ""
+    tag: str | None = None
+    content_type: str | None = None
+    data_b64: str = ""
+
+
+class OrgDocUseIn(BaseModel):
+    run_id: str = ""
+
+
+class OrgMemberIn(BaseModel):
+    email: str = ""
+    role: str = "member"
+    designation: str | None = None
+
+
+class OrgMemberPatchIn(BaseModel):
+    role: str | None = None
+    designation: str | None = None
+
+
+class OrgBillingIn(BaseModel):
+    plan: str | None = None
+    monthly_budget_cap: float | None = None
+
+
 class ChatIn(BaseModel):
     run_id: str | None = None
     message: str = ""
@@ -560,6 +594,141 @@ def patch_org(body: OrgPatchIn, v: tuple = Depends(require_authed)):
     fields = {k: val for k, val in body.model_dump().items() if val is not None}
     users.update_org(org["id"], **fields)
     return {"org": users.get_org(org["id"])}
+
+
+# ── Org admin (PRD §2.3) ──────────────────────────────────────────────────────────────────────
+# Knowledge base, Team & access, Usage & billing — all resolve the org from the caller's session
+# (no org_id in the path). Reads need membership (an org on file); writes need admin.
+_DOC_KIND = {"pdf": "pdf", "xlsx": "xlsx", "xls": "xlsx", "csv": "csv", "doc": "doc", "docx": "doc",
+             "mp4": "video", "mov": "video", "png": "img", "jpg": "img", "jpeg": "img"}
+
+
+def _doc_kind(name: str) -> str:
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    return _DOC_KIND.get(ext, "doc")
+
+
+def _caller_org(v: tuple) -> dict:
+    """The org on file for the session, or 404 (mirrors PATCH /api/org)."""
+    org = users.org_for_user(v[0]) if v[0] else None
+    if not org:
+        raise HTTPException(status_code=404, detail="no org on file")
+    return org
+
+
+def _members_payload(org_id: str, me: str) -> dict:
+    return {"members": [
+        {"email": m["email"], "role": m["role"], "designation": m.get("designation"),
+         "you": m["email"] == me}
+        for m in users.list_org_members(org_id)]}
+
+
+def _org_doc_or_404(doc_id: int, org_id: str) -> dict:
+    b = blobs.get_blob(doc_id)
+    if not b or b["scope"] != "org" or b["scope_id"] != org_id:
+        raise HTTPException(status_code=404, detail="doc not found")
+    return b
+
+
+# Knowledge base ----------------------------------------------------------------------------------
+@app.get("/api/org/docs")
+def org_docs(v: tuple = Depends(require_authed)):
+    return {"docs": blobs.list_org_docs(_caller_org(v)["id"])}
+
+
+@app.post("/api/org/docs")
+def org_doc_upload(body: OrgDocIn, v: tuple = Depends(require_admin)):
+    org = _caller_org(v)
+    if not (body.name or "").strip():
+        raise HTTPException(status_code=400, detail="name required")
+    try:
+        raw = base64.b64decode(body.data_b64 or "", validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="data_b64 must be valid base64")
+    scope_id = f"org/{org['id']}"
+    key = f"kb/{body.name}"
+    storage.put(scope_id, key, raw)
+    bid = blobs.record("org", org["id"], f"{scope_id}/{key}", name=body.name, tag=body.tag,
+                       kind=_doc_kind(body.name), content_type=body.content_type,
+                       size_bytes=len(raw), sha256=storage.sha256(raw))
+    doc = next((d for d in blobs.list_org_docs(org["id"]) if d["id"] == bid), None)
+    return {"doc": doc}
+
+
+@app.post("/api/org/docs/{doc_id}/use")
+def org_doc_use(doc_id: int, body: OrgDocUseIn, v: tuple = Depends(require_authed)):
+    org = _caller_org(v)
+    _org_doc_or_404(doc_id, org["id"])
+    if not (body.run_id or "").strip():
+        raise HTTPException(status_code=400, detail="run_id required")
+    return {"used_count": blobs.record_use(doc_id, body.run_id)}
+
+
+@app.delete("/api/org/docs/{doc_id}")
+def org_doc_delete(doc_id: int, v: tuple = Depends(require_admin)):
+    org = _caller_org(v)
+    _org_doc_or_404(doc_id, org["id"])
+    blobs.delete(doc_id)
+    return {"ok": True}
+
+
+# Team & access -----------------------------------------------------------------------------------
+@app.get("/api/org/members")
+def org_members(v: tuple = Depends(require_authed)):
+    return _members_payload(_caller_org(v)["id"], (v[0] or "").lower())
+
+
+@app.post("/api/org/members")
+def org_member_invite(body: OrgMemberIn, v: tuple = Depends(require_admin)):
+    org = _caller_org(v)
+    if not (body.email or "").strip():
+        raise HTTPException(status_code=400, detail="email required")
+    users.invite_member(body.email, org["id"], role=body.role or "member",
+                        designation=body.designation, by=v[0] or "")
+    return _members_payload(org["id"], (v[0] or "").lower())
+
+
+@app.patch("/api/org/members/{email}")
+def org_member_update(email: str, body: OrgMemberPatchIn, v: tuple = Depends(require_admin)):
+    org = _caller_org(v)
+    member = users.get_user(email)
+    if not member or member.get("org_id") != org["id"]:
+        raise HTTPException(status_code=404, detail="member not found")
+    if body.role in ("admin", "member"):
+        users.upsert(email, body.role, by=v[0] or "")
+    if body.designation is not None:
+        users.set_profile(email, designation=body.designation)
+    return _members_payload(org["id"], (v[0] or "").lower())
+
+
+@app.delete("/api/org/members/{email}")
+def org_member_remove(email: str, v: tuple = Depends(require_admin)):
+    org = _caller_org(v)
+    member = users.get_user(email)
+    if not member or member.get("org_id") != org["id"]:
+        raise HTTPException(status_code=404, detail="member not found")
+    users.remove(email)
+    return _members_payload(org["id"], (v[0] or "").lower())
+
+
+# Usage & billing ---------------------------------------------------------------------------------
+@app.get("/api/org/usage")
+def org_usage(v: tuple = Depends(require_authed)):
+    org = _caller_org(v)
+    member_emails = {m["email"].lower() for m in users.list_org_members(org["id"])}
+    runs = [r for r in console.list_runs(owner=None)
+            if (r.get("owner") or "").lower() in member_emails]
+    return billing.summarize(org, runs)
+
+
+@app.patch("/api/org/billing")
+def org_billing(body: OrgBillingIn, v: tuple = Depends(require_admin)):
+    org = _caller_org(v)
+    fields = {k: val for k, val in body.model_dump().items() if val is not None}
+    if fields:
+        users.update_org(org["id"], **fields)
+    org = users.get_org(org["id"])
+    return {"plan": org["plan"], "monthly_budget_cap": org["monthly_budget_cap"]}
 
 
 # ── Auth exchange ───────────────────────────────────────────────────────────────────────────

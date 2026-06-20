@@ -143,9 +143,13 @@ old personal-org `software-factory-state`; see [`schema-erd.md`](schema-erd.md),
   `designation`, `role_description`, `tenexity`** (Tenexity-staff flag).
 - `public.organizations` (top-level tenant: `name`, `industry`, `sub_focus`, `headcount`/`revenue`
   stored as **band-label text** e.g. `"51–200"` / `"$10M–$50M"`, `location`, `website`,
-  `connected_systems`) — the org-on-file model behind the Option C onboarding.
-- `public.blobs` — manifest for durable file storage (scope `run`|`org`, scope_id, kind,
-  storage_key, content_type, size, sha256); see §6.
+  `connected_systems`, plus **`plan`/`monthly_budget_cap`** for Org Admin Usage & billing) — the
+  org-on-file model behind the Option C onboarding.
+- `public.blobs` — manifest for durable file storage (scope `run`|`org`, scope_id, kind, **`name`**
+  (display filename), **`tag`** (category), storage_key, content_type, size, sha256); see §6. The
+  org knowledge base (PRD §2.3) is the `scope='org'` rows.
+- `public.blob_uses` (`blob_id`, `run_id`) — one row per project that imported an org knowledge-base
+  doc; the doc's "used by N projects" count is `COUNT(DISTINCT run_id)`.
 - one **schema per run** `sf_run_<id>` containing: `runstate` (the `RunState` JSON, incl.
   description, name, **owner**, models, budget, **`brief`** + `interview_coverage`, and `phase`
   which is `"draft"` for a pre-run interview), `phases`, `artifacts` (metadata: title + path +
