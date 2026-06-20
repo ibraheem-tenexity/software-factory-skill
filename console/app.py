@@ -5,9 +5,9 @@ contract, same auth/ownership rules — now with Pydantic bodies, dependency-inj
 APIRouter, SSE via StreamingResponse, and the background poller started in the app lifespan.
 
   GET  /                       -> UI (graph + chat panel)  [login page when auth-enabled + unauthed]
-  POST /api/runs               -> launches a run (legacy form path)
-  GET  /api/runs/<id>          -> live status
-  GET  /api/runs/<id>/evidence -> proof-of-run bundle
+  POST /api/projects               -> launches a run (legacy form path)
+  GET  /api/projects/<id>          -> live status
+  GET  /api/projects/<id>/evidence -> proof-of-run bundle
   POST /api/chat               -> send chat message, get agent response
   GET  /api/chat/<id>/history  -> full chat history for a run
   POST /api/chat/<id>/deps     -> submit dep values securely
@@ -29,7 +29,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Str
 from pydantic import BaseModel
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from software_factory.console import Console, RunRequest  # noqa: E402
+from software_factory.console import Console, ProjectRequest  # noqa: E402
 from software_factory.chat_store import ChatStore, ChatMessage  # noqa: E402
 from software_factory.chat_agent import ChatAgentRunner  # noqa: E402
 from software_factory.deps import extract_env_creds  # noqa: E402
@@ -43,17 +43,17 @@ from software_factory import project_view  # noqa: E402
 from software_factory.users import UserStore  # noqa: E402
 from software_factory.blobs import BlobStore  # noqa: E402
 
-RUNS_DIR = os.environ.get("SF_RUNS_DIR", os.path.join(os.path.dirname(__file__), "..", ".runs"))
+PROJECTS_DIR = os.environ.get("SF_PROJECTS_DIR", os.path.join(os.path.dirname(__file__), "..", ".projects"))
 HERE = os.path.dirname(__file__)
-console = Console(RUNS_DIR)
+console = Console(PROJECTS_DIR)
 
 # User directory (roles + login membership). Seeds env SF_ADMIN_EMAILS as admins and backs
 # auth's role/membership decisions; without it auth falls back to the env lists.
-users = UserStore(os.path.join(RUNS_DIR, "users.db"))
+users = UserStore()
 auth.register_user_store(users.is_member, users.get_role)
 
 # Blob manifest — org knowledge-base docs + run-scoped uploaded materials (bytes live in storage).
-blobs = BlobStore(os.path.join(RUNS_DIR, "blobs.db"))
+blobs = BlobStore()
 
 # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
 _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
@@ -61,17 +61,17 @@ _chat_runner = ChatAgentRunner(console, users) if _has_chat_key else None
 
 _sse_clients: dict[str, list] = {}
 _sse_lock = threading.Lock()
-_run_stages: dict[str, int] = {}
+_project_stages: dict[str, int] = {}
 
 
-def _chat_path(run_id: str) -> str:
-    return os.path.join(RUNS_DIR, run_id, "chat.jsonl")
+def _chat_path(project_id: str) -> str:
+    return os.path.join(PROJECTS_DIR, project_id, "chat.jsonl")
 
 
-def _push_sse(run_id: str, msgs: list[ChatMessage]):
+def _push_sse(project_id: str, msgs: list[ChatMessage]):
     """Push messages to all SSE clients watching this run."""
     with _sse_lock:
-        clients = _sse_clients.get(run_id, [])
+        clients = _sse_clients.get(project_id, [])
     for msg in msgs:
         data = json.dumps(msg.to_dict())
         for q in clients:
@@ -82,32 +82,32 @@ _stage2_launched: set = set()
 _stage3_launched: set = set()
 
 
-def _auto_advance(rid: str):
+def _auto_advance(pid: str):
     """SPEC §1+§3: flip stage-done (gate + finished process) and launch the next stage, so runs
     advance with no manual nudge. Stage 2 auto-launches when Stage 1 is done; deps auto-satisfy
     when no human secret is needed; Stage 3 auto-launches once deps are satisfied. Launch guards
     are marked ONLY on success so a refusal (e.g. prior process still alive) retries next tick."""
     try:
-        if not console.is_pipeline_run(rid):
-            return  # resurfaced pre-redesign dir (empty run.db) — never auto-advance/zombie-launch it
-        if console.detect_stage1_done(rid):
-            s = console.status(rid)
-            if s.get("stage") == 1 and rid not in _stage2_launched:
-                if console.start_stage2(rid):
-                    _stage2_launched.add(rid)
-        if console.detect_stage2_done(rid):  # flips stage2_done + parses required tokens
-            console.maybe_autosatisfy_deps(rid)   # SPEC §3: no 'provide' token -> no pause
-            s = console.status(rid)
-            if s.get("deps_satisfied") and s.get("stage") == 2 and rid not in _stage3_launched:
-                if console.start_stage3(rid):
-                    _stage3_launched.add(rid)
-        console.detect_stage3_done(rid)  # marks done ONLY with a recorded passing Playwright verification
+        if not console.is_pipeline_project(pid):
+            return  # resurfaced pre-redesign dir (empty project store) — never auto-advance/zombie-launch it
+        if console.detect_stage1_done(pid):
+            s = console.status(pid)
+            if s.get("stage") == 1 and pid not in _stage2_launched:
+                if console.start_stage2(pid):
+                    _stage2_launched.add(pid)
+        if console.detect_stage2_done(pid):  # flips stage2_done + parses required tokens
+            console.maybe_autosatisfy_deps(pid)   # SPEC §3: no 'provide' token -> no pause
+            s = console.status(pid)
+            if s.get("deps_satisfied") and s.get("stage") == 2 and pid not in _stage3_launched:
+                if console.start_stage3(pid):
+                    _stage3_launched.add(pid)
+        console.detect_stage3_done(pid)  # marks done ONLY with a recorded passing Playwright verification
     except Exception:
         pass
 
 
 _narrated: set = set()
-# run_id -> crash auto-resume attempts, bounded per server life. Configurable: long opencode
+# project_id -> crash auto-resume attempts, bounded per server life. Configurable: long opencode
 # sessions (multi-hour Kimi build/test loops) crash more often than claude's — run-b594a5f4
 # exhausted 2 resumes mid-test-phase and stalled 12h. The bound exists to stop crash loops,
 # not to ration recovery; budget enforcement is the real spend brake.
@@ -115,11 +115,11 @@ _AUTO_RESUME_MAX = int(os.environ.get("SF_AUTO_RESUME_MAX", "2") or 2)
 _auto_resumed: dict = {}
 
 
-def _append_notifications(rid: str, msgs):
+def _append_notifications(pid: str, msgs):
     """Persist + push stage notifications, deduped against the persisted chat history —
     a restarted server re-walks stage transitions and re-fired old notifications AFTER
     newer messages, scrambling the chat panel's chronology (run-45b8c4d5)."""
-    store = ChatStore(_chat_path(rid))
+    store = ChatStore(_chat_path(pid))
     try:
         seen = {m.content for m in store.history()}
     except Exception:
@@ -128,16 +128,16 @@ def _append_notifications(rid: str, msgs):
     for m in fresh:
         store.append(m)
     if fresh:
-        _push_sse(rid, fresh)
+        _push_sse(pid, fresh)
 
 
-def _narrate(rid: str, key: str, text: str):
+def _narrate(pid: str, key: str, text: str):
     """SPEC §6: deterministic chat-panel narration — one message per (run, event), no LLM.
     Dedup survives server restarts by checking the persisted chat history, not just memory."""
-    if (rid, key) in _narrated:
+    if (pid, key) in _narrated:
         return
-    _narrated.add((rid, key))
-    store = ChatStore(_chat_path(rid))
+    _narrated.add((pid, key))
+    store = ChatStore(_chat_path(pid))
     try:
         if any(m.content == text for m in store.history()):
             return  # already narrated in a previous server life
@@ -145,44 +145,44 @@ def _narrate(rid: str, key: str, text: str):
         pass
     msg = ChatMessage(role="assistant", content=text)
     store.append(msg)
-    _push_sse(rid, [msg])
+    _push_sse(pid, [msg])
     # Operator email on the four operator-relevant events (done / depswait / budget / crash) —
     # placed AFTER the dedup so an email fires at most once per (run, event). Fire-and-forget:
     # notify.send never raises and must never block the poller.
     if notify.should_email(key):
         threading.Thread(
             target=notify.send,
-            args=(f"[factory] {rid}: {text[:90]}", f"{text}\n\nrun: {rid}"),
+            args=(f"[factory] {pid}: {text[:90]}", f"{text}\n\nrun: {pid}"),
             daemon=True,
         ).start()
 
 
-def _narrate_run(rid: str, st: dict):
-    links = console.run_links(rid)
+def _narrate_project(pid: str, st: dict):
+    links = console.project_links(pid)
     if links.get("repo"):
-        _narrate(rid, "repo", f"📦 Source repo: {links['repo']}")
+        _narrate(pid, "repo", f"📦 Source repo: {links['repo']}")
     if st.get("stage1_done"):
-        _narrate(rid, "s1", "✅ Research complete — design & architecture starting.")
+        _narrate(pid, "s1", "✅ Research complete — design & architecture starting.")
     if st.get("stage2_done"):
         if st.get("deps_satisfied"):
-            _narrate(rid, "deps", "🔓 Design complete — dependencies satisfied, build starting.")
+            _narrate(pid, "deps", "🔓 Design complete — dependencies satisfied, build starting.")
         elif st.get("deps_required"):
             need = [n for n in (st.get("deps_required") or [])]
-            _narrate(rid, "depswait", "⏸ Design complete — waiting for you to supply: " + ", ".join(need))
+            _narrate(pid, "depswait", "⏸ Design complete — waiting for you to supply: " + ", ".join(need))
     if links.get("live") and not st.get("done"):
-        _narrate(rid, "deployed", f"🚀 Deployed (verifying): {links['live']}")
+        _narrate(pid, "deployed", f"🚀 Deployed (verifying): {links['live']}")
     if st.get("done"):
         live = st.get("deploy_url") or links.get("live") or ""
         repo = links.get("repo") or ""
         msg = f"✅ Done — Live demo: {live}" + (f" · 📦 Repo: {repo}" if repo else "")
         try:
-            creds = console.demo_credentials(rid)
+            creds = console.demo_credentials(pid)
         except Exception:
             creds = None
         if creds:
             # The seeded throwaway demo login (SPEC §6) — without it an auth'd app can't be demoed.
             msg += "\n🔑 Demo login:\n" + creds
-        _narrate(rid, "done", msg)
+        _narrate(pid, "done", msg)
 
 
 _tracer = tracing.Tracer()
@@ -196,12 +196,12 @@ def _health() -> dict:
     if (os.environ.get("SF_DB") or "").lower() == "postgres":
         from software_factory import dbshim
         try:
-            dbshim.registry_runs()
+            dbshim.registry_projects()
             pg = True
         except Exception:
             pg = False
     try:
-        free_mb = int(_sh.disk_usage(RUNS_DIR).free / 1048576)
+        free_mb = int(_sh.disk_usage(PROJECTS_DIR).free / 1048576)
     except OSError:
         free_mb = -1
     ok = (pg is not False) and free_mb > 200
@@ -209,7 +209,7 @@ def _health() -> dict:
 
 
 def _poll_transitions():
-    """Background thread: auto-advance stages, enforce the per-run budget, narrate progress."""
+    """Background thread: auto-advance stages, enforce the per-project budget, narrate progress."""
     tick = 0
     while True:
         time.sleep(3)
@@ -226,44 +226,44 @@ def _poll_transitions():
             except Exception:
                 pass
         try:
-            for run_info in console.list_runs():
-                rid = run_info.get("id") or run_info.get("run_id", "")
-                if not rid:
+            for project_info in console.list_projects():
+                pid = project_info.get("id") or project_info.get("project_id", "")
+                if not pid:
                     continue
-                if run_info.get("held"):  # gated hold: nothing to advance/enforce/narrate
+                if project_info.get("held"):  # gated hold: nothing to advance/enforce/narrate
                     continue
-                _auto_advance(rid)
-                st = console.status(rid)
+                _auto_advance(pid)
+                st = console.status(pid)
                 # LLM traces: ship this run's new log lines to Langfuse (no-op without keys).
-                _tracer.tick(rid, os.path.join(RUNS_DIR, rid, "run.log"),
+                _tracer.tick(pid, os.path.join(PROJECTS_DIR, pid, "project.log"),
                              meta={"runtime": st.get("runtime", "")})
                 try:
-                    if not st.get("done") and console.enforce_budget(rid):
-                        _narrate(rid, "budget-%d" % int(console._budget_ceiling(rid)),
+                    if not st.get("done") and console.enforce_budget(pid):
+                        _narrate(pid, "budget-%d" % int(console._budget_ceiling(pid)),
                                  "⏸ Budget cap reached — stage stopped (state preserved). "
                                  "Raise the cap to continue.")
                     # SPEC §3 zero-touch: resume a crashed stage automatically (bounded).
-                    if not st.get("done") and _auto_resumed.get(rid, 0) < _AUTO_RESUME_MAX:
-                        if console.auto_resume_dead_stage(rid):
-                            _auto_resumed[rid] = _auto_resumed.get(rid, 0) + 1
-                            _narrate(rid, "resume-%d" % _auto_resumed[rid],
+                    if not st.get("done") and _auto_resumed.get(pid, 0) < _AUTO_RESUME_MAX:
+                        if console.auto_resume_dead_stage(pid):
+                            _auto_resumed[pid] = _auto_resumed.get(pid, 0) + 1
+                            _narrate(pid, "resume-%d" % _auto_resumed[pid],
                                      "⚠️ Stage process died mid-flight — auto-resumed "
-                                     f"(attempt {_auto_resumed[rid]}/{_AUTO_RESUME_MAX}).")
-                    _narrate_run(rid, st)
+                                     f"(attempt {_auto_resumed[pid]}/{_AUTO_RESUME_MAX}).")
+                    _narrate_project(pid, st)
                 except Exception:
                     pass
                 if st.get("done") or st.get("phase") == "pending":
                     continue
-                prev = _run_stages.get(rid, 0)
+                prev = _project_stages.get(pid, 0)
                 cur = st.get("stage", 1)
                 if cur != prev:
-                    _run_stages[rid] = cur
+                    _project_stages[pid] = cur
                     if _chat_runner:
-                        _append_notifications(rid, _chat_runner.check_and_notify(rid, prev_stage=prev))
+                        _append_notifications(pid, _chat_runner.check_and_notify(pid, prev_stage=prev))
                 if st.get("done") and prev > 0:
                     if _chat_runner:
-                        _append_notifications(rid, _chat_runner.check_and_notify(rid, prev_stage=cur))
-                    _run_stages.pop(rid, None)
+                        _append_notifications(pid, _chat_runner.check_and_notify(pid, prev_stage=cur))
+                    _project_stages.pop(pid, None)
         except Exception:
             pass
 
@@ -275,15 +275,15 @@ def _boot():
     print(f"[runner] uid={os.getuid()} user={getpass.getuser()} home={os.environ.get('HOME')}", flush=True)
     if not _has_chat_key:
         print("[warn] no OPENAI_API_KEY or OPENROUTER_API_KEY — chat agent disabled, API-only mode")
-    # Quarantine debris under runs_dir: agents misusing db verbs once created dirs like
-    # "build-plan.md/run.db" on the volume — moved aside (never deleted), so discovery and
+    # Quarantine debris under projects_dir: agents misusing db verbs once created dirs like
+    # "build-plan.md/project store" on the volume — moved aside (never deleted), so discovery and
     # the boot backfill only ever see real runs.
     try:
-        from software_factory.console import RUN_ID_RE
-        qdir = os.path.join(RUNS_DIR, "_quarantine")
-        for name in os.listdir(RUNS_DIR):
-            p = os.path.join(RUNS_DIR, name)
-            if os.path.isdir(p) and name != "_quarantine" and not RUN_ID_RE.fullmatch(name):
+        from software_factory.console import PROJECT_ID_RE
+        qdir = os.path.join(PROJECTS_DIR, "_quarantine")
+        for name in os.listdir(PROJECTS_DIR):
+            p = os.path.join(PROJECTS_DIR, name)
+            if os.path.isdir(p) and name != "_quarantine" and not PROJECT_ID_RE.fullmatch(name):
                 os.makedirs(qdir, exist_ok=True)
                 os.rename(p, os.path.join(qdir, f"{name}.{int(time.time())}"))
                 print(f"[janitor] quarantined {name}", flush=True)
@@ -313,7 +313,7 @@ async def lifespan(app: FastAPI):
     _boot()
     t = threading.Thread(target=_poll_transitions, daemon=True)
     t.start()
-    print(f"software-factory console (FastAPI) — runs in {os.path.abspath(RUNS_DIR)}", flush=True)
+    print(f"software-factory console (FastAPI) — runs in {os.path.abspath(PROJECTS_DIR)}", flush=True)
     yield
 
 
@@ -322,16 +322,16 @@ app = FastAPI(title="software-factory console", lifespan=lifespan)
 
 # ── Structured access log ───────────────────────────────────────────────────────────────────
 # One JSON line per response on stdout — Railway captures stdout natively, so `railway logs`
-# becomes greppable by route/status/run_id. Mirrors the old Handler._send logging.
+# becomes greppable by route/status/project_id. Mirrors the old Handler._send logging.
 @app.middleware("http")
 async def _access_log(request: Request, call_next):
     t0 = time.time()
     response = await call_next(request)
     try:
         path = request.url.path
-        rid = path.split("/api/runs/")[1].split("/")[0] if "/api/runs/" in path else ""
+        pid = path.split("/api/projects/")[1].split("/")[0] if "/api/projects/" in path else ""
         print(json.dumps({"ts": round(time.time(), 3), "method": request.method,
-                          "path": path, "status": response.status_code, "run_id": rid,
+                          "path": path, "status": response.status_code, "project_id": pid,
                           "ms": int((time.time() - t0) * 1000)}), flush=True)
     except Exception:
         pass
@@ -360,7 +360,7 @@ def require_authed(v: tuple = Depends(viewer)) -> tuple:
     return v
 
 
-def _can_see(v: tuple, run_id: str) -> bool:
+def _can_see(v: tuple, project_id: str) -> bool:
     """Ownership gate enforced on EVERY run-scoped route — filtering the list is not enough,
     a member could fetch another's run by URL. Admin/service = all; member = own only."""
     email, role, ok = v
@@ -368,12 +368,12 @@ def _can_see(v: tuple, run_id: str) -> bool:
         return False
     if role == "admin":
         return True
-    return bool(run_id) and console.run_owner(run_id) == (email or "").lower()
+    return bool(project_id) and console.project_owner(project_id) == (email or "").lower()
 
 
-def authorize_run(rid: str, v: tuple = Depends(require_authed)) -> tuple:
-    """For run-scoped routes carrying {rid}: 403 unless admin/service or the run's owner."""
-    if not _can_see(v, rid):
+def authorize_project(pid: str, v: tuple = Depends(require_authed)) -> tuple:
+    """For run-scoped routes carrying {pid}: 403 unless admin/service or the run's owner."""
+    if not _can_see(v, pid):
         raise HTTPException(status_code=403, detail="forbidden")
     return v
 
@@ -426,7 +426,7 @@ class OrgDocIn(BaseModel):
 
 
 class OrgDocUseIn(BaseModel):
-    run_id: str = ""
+    project_id: str = ""
 
 
 class OrgMemberIn(BaseModel):
@@ -446,7 +446,7 @@ class OrgBillingIn(BaseModel):
 
 
 class ChatIn(BaseModel):
-    run_id: str | None = None
+    project_id: str | None = None
     message: str = ""
     files: list = []
     images: list = []
@@ -478,7 +478,7 @@ class RetryIn(BaseModel):
     creds: dict | None = None
 
 
-class RunCreateIn(BaseModel):
+class ProjectCreateIn(BaseModel):
     description: str = ""
     context: str = ""
     budget: float = 100
@@ -701,9 +701,9 @@ def org_doc_upload(body: OrgDocIn, v: tuple = Depends(require_admin)):
 def org_doc_use(doc_id: int, body: OrgDocUseIn, v: tuple = Depends(require_authed)):
     org = _caller_org(v)
     _org_doc_or_404(doc_id, org["id"])
-    if not (body.run_id or "").strip():
-        raise HTTPException(status_code=400, detail="run_id required")
-    return {"used_count": blobs.record_use(doc_id, body.run_id)}
+    if not (body.project_id or "").strip():
+        raise HTTPException(status_code=400, detail="project_id required")
+    return {"used_count": blobs.record_use(doc_id, body.project_id)}
 
 
 @app.delete("/api/org/docs/{doc_id}")
@@ -758,7 +758,7 @@ def org_member_remove(email: str, v: tuple = Depends(require_admin)):
 def org_usage(v: tuple = Depends(require_authed)):
     org = _caller_org(v)
     member_emails = {m["email"].lower() for m in users.list_org_members(org["id"])}
-    runs = [r for r in console.list_runs(owner=None)
+    runs = [r for r in console.list_projects(owner=None)
             if (r.get("owner") or "").lower() in member_emails]
     return billing.summarize(org, runs)
 
@@ -795,20 +795,20 @@ def google_login(body: GoogleLoginIn):
 
 
 # ── Runs: list + create ───────────────────────────────────────────────────────────────────────
-@app.get("/api/runs")
-def runs_list(v: tuple = Depends(require_authed)):
+@app.get("/api/projects")
+def projects_list(v: tuple = Depends(require_authed)):
     owner = None if v[1] == "admin" else v[0]
-    return {"runs": console.list_runs(owner=owner)}
+    return {"projects": console.list_projects(owner=owner)}
 
 
-@app.post("/api/runs")
-def runs_create(body: RunCreateIn, v: tuple = Depends(require_authed)):
+@app.post("/api/projects")
+def projects_create(body: ProjectCreateIn, v: tuple = Depends(require_authed)):
     creds = {}
     if body.railway_token:
         creds["RAILWAY_TOKEN"] = body.railway_token
     if body.railway_project_id:
         creds["RAILWAY_PROJECT_ID"] = body.railway_project_id
-    req = RunRequest(
+    req = ProjectRequest(
         description=body.description,
         context=body.context,
         budget=float(body.budget),
@@ -823,7 +823,7 @@ def runs_create(body: RunCreateIn, v: tuple = Depends(require_authed)):
         owner=v[0] or "",
     )
     try:
-        return {"run_id": console.start_run(req)}
+        return {"project_id": console.start_project(req)}
     except ValueError as e:           # duplicate project name
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -834,65 +834,65 @@ def create_draft(body: DraftCreateIn, v: tuple = Depends(require_authed)):
     """Mint a durable draft run at the START of onboarding (the form is the sole eager creator on
     mount). Returns its canonical run-<8hex> id; the form passes it into every subsequent
     PATCH/attach/promote and into /api/chat so the rail and the form share ONE draft."""
-    run_id = console.create_draft(owner=v[0] or "", name=body.project_name,
+    project_id = console.create_draft(owner=v[0] or "", name=body.project_name,
                                   runtime=body.runtime, planning_model=body.planning_model,
                                   impl_model=body.impl_model)
-    return {"run_id": run_id}
+    return {"project_id": project_id}
 
 
 # ── Run-scoped GETs ─────────────────────────────────────────────────────────────────────────
-@app.get("/api/runs/{rid}")
-def run_status(rid: str, v: tuple = Depends(authorize_run)):
-    return console.status(rid)
+@app.get("/api/projects/{pid}")
+def project_status(pid: str, v: tuple = Depends(authorize_project)):
+    return console.status(pid)
 
 
-@app.get("/api/runs/{rid}/evidence")
-def run_evidence(rid: str, v: tuple = Depends(authorize_run)):
-    return console.evidence(rid)
+@app.get("/api/projects/{pid}/evidence")
+def project_evidence(pid: str, v: tuple = Depends(authorize_project)):
+    return console.evidence(pid)
 
 
-@app.get("/api/runs/{rid}/graph")
-def run_graph(rid: str, v: tuple = Depends(authorize_run)):
-    return console.graph(rid)
+@app.get("/api/projects/{pid}/graph")
+def project_graph(pid: str, v: tuple = Depends(authorize_project)):
+    return console.graph(pid)
 
 
-@app.get("/api/runs/{rid}/tickets")
-def run_tickets(rid: str, v: tuple = Depends(authorize_run)):
+@app.get("/api/projects/{pid}/tickets")
+def project_tickets(pid: str, v: tuple = Depends(authorize_project)):
     """Build-ticket projection for the kanban view (empty before Stage 2)."""
-    return console.tickets(rid)
+    return console.tickets(pid)
 
 
-@app.get("/api/runs/{rid}/deployments")
-def run_deployments(rid: str, v: tuple = Depends(authorize_run)):
+@app.get("/api/projects/{pid}/deployments")
+def project_deployments(pid: str, v: tuple = Depends(authorize_project)):
     """Per-deliverable deployments (a run may ship multiple apps)."""
-    return console.deployments(rid)
+    return console.deployments(pid)
 
 
-@app.get("/api/runs/{rid}/brief")
-def run_brief(rid: str, v: tuple = Depends(authorize_run)):
+@app.get("/api/projects/{pid}/brief")
+def project_brief(pid: str, v: tuple = Depends(authorize_project)):
     """The structured onboarding brief (shared by the chat interview and the brief form)."""
     from software_factory.brief import coverage as _cov
-    brief = console.draft_brief(rid)
+    brief = console.draft_brief(pid)
     return {"brief": brief, "coverage": _cov(brief)}
 
 
-@app.put("/api/runs/{rid}/brief")
-def update_run_brief(rid: str, body: dict, v: tuple = Depends(authorize_run)):
+@app.put("/api/projects/{pid}/brief")
+def update_project_brief(pid: str, body: dict, v: tuple = Depends(authorize_project)):
     """Edit the brief from the form. Body: {section: text, ...} (only known sections persist)."""
     from software_factory.brief import BRIEF_SECTIONS
     sections = {k: v2 for k, v2 in (body or {}).items() if k in BRIEF_SECTIONS}
-    cov = console.update_draft_brief(rid, sections)
-    return {"brief": console.draft_brief(rid), "coverage": cov}
+    cov = console.update_draft_brief(pid, sections)
+    return {"brief": console.draft_brief(pid), "coverage": cov}
 
 
-@app.get("/api/runs/{rid}/events")
-def run_events(rid: str, v: tuple = Depends(authorize_run)):
-    return {"events": console.events(rid)}
+@app.get("/api/projects/{pid}/events")
+def project_events(pid: str, v: tuple = Depends(authorize_project)):
+    return {"events": console.events(pid)}
 
 
-@app.get("/api/runs/{rid}/artifact")
-def run_artifact(rid: str, path: str = "", raw: str = "", v: tuple = Depends(authorize_run)):
-    result = console.artifact(rid, path)
+@app.get("/api/projects/{pid}/artifact")
+def project_artifact(pid: str, path: str = "", raw: str = "", v: tuple = Depends(authorize_project)):
+    result = console.artifact(pid, path)
     if raw and "content" in result:
         # Raw mode: serve the file itself (right Content-Type) so e.g. the architecture SVG
         # opens full-size in its own browser tab.
@@ -902,40 +902,40 @@ def run_artifact(rid: str, path: str = "", raw: str = "", v: tuple = Depends(aut
     return result
 
 
-@app.get("/api/runs/{rid}/log")
-def run_log(rid: str, full: str = "", v: tuple = Depends(authorize_run)):
+@app.get("/api/projects/{pid}/log")
+def project_log(pid: str, full: str = "", v: tuple = Depends(authorize_project)):
     if full == "json":
-        return {"log": console.read_log(rid, max_bytes=None)}
+        return {"log": console.read_log(pid, max_bytes=None)}
     if full:
-        body = console.read_log(rid, max_bytes=None)
+        body = console.read_log(pid, max_bytes=None)
         return PlainTextResponse(body, media_type="text/plain; charset=utf-8",
-                                 headers={"Content-Disposition": f'attachment; filename="{rid}.log"'})
-    return console.read_log_envelope(rid)
+                                 headers={"Content-Disposition": f'attachment; filename="{pid}.log"'})
+    return console.read_log_envelope(pid)
 
 
-@app.get("/api/runs/{rid}/deps")
-def run_deps(rid: str, v: tuple = Depends(authorize_run)):
-    return console.stage2_artifacts(rid)
+@app.get("/api/projects/{pid}/deps")
+def project_deps(pid: str, v: tuple = Depends(authorize_project)):
+    return console.stage2_artifacts(pid)
 
 
 # ── Project View (PRD §2.5): Overview + Documents aggregates ─────────────────────────────────────
-@app.get("/api/runs/{rid}/overview")
-def run_overview(rid: str, v: tuple = Depends(authorize_run)):
-    status = console.status(rid)
-    tickets = console.tickets(rid)["tickets"]
-    deployments = console.deployments(rid)["deployments"]
+@app.get("/api/projects/{pid}/overview")
+def project_overview(pid: str, v: tuple = Depends(authorize_project)):
+    status = console.status(pid)
+    tickets = console.tickets(pid)["tickets"]
+    deployments = console.deployments(pid)["deployments"]
     owner = status.get("owner") or ""
     org = users.org_for_user(owner) if owner else None
     has_verification = bool(status.get("done")) or any(d.get("verified") for d in deployments)
     in_build = (status.get("stage") or 0) >= 2 and not status.get("done")
-    docs = project_view.documents(blobs.list_for("run", rid), console.artifacts(rid))
+    docs = project_view.documents(blobs.list_for("project", pid), console.artifacts(pid))
     return {
-        "brief": project_view.brief_block(console.draft_project(rid), status,
-                                          console.run_created(rid)),
+        "brief": project_view.brief_block(console.draft_project(pid), status,
+                                          console.project_created(pid)),
         "build": project_view.build_status(status, tickets),
         "services": project_view.services_at_work(org, deployments, status.get("impl_model") or "",
                                                   has_verification, in_build),
-        "agents": project_view.agents_projection(console.agents(rid), tickets),
+        "agents": project_view.agents_projection(console.agents(pid), tickets),
         "org": ({"name": org["name"], "industry": org.get("industry"),
                  "connected_systems": org.get("connected_systems", [])} if org else None),
         "materials_count": len(docs["uploaded"]),
@@ -943,91 +943,91 @@ def run_overview(rid: str, v: tuple = Depends(authorize_run)):
     }
 
 
-@app.get("/api/runs/{rid}/documents")
-def run_documents(rid: str, v: tuple = Depends(authorize_run)):
-    return project_view.documents(blobs.list_for("run", rid), console.artifacts(rid))
+@app.get("/api/projects/{pid}/documents")
+def project_documents(pid: str, v: tuple = Depends(authorize_project)):
+    return project_view.documents(blobs.list_for("project", pid), console.artifacts(pid))
 
 
 # ── Run-scoped actions ──────────────────────────────────────────────────────────────────────
-@app.post("/api/runs/{rid}/continue")
-def run_continue(rid: str, body: ContinueIn, v: tuple = Depends(authorize_run)):
-    return console.continue_run(rid, body.gate)
+@app.post("/api/projects/{pid}/continue")
+def project_continue(pid: str, body: ContinueIn, v: tuple = Depends(authorize_project)):
+    return console.continue_project(pid, body.gate)
 
 
-@app.post("/api/runs/{rid}/deps")
-def run_submit_deps(rid: str, body: DepsIn, v: tuple = Depends(authorize_run)):
-    return console.submit_deps(rid, body.deps)
+@app.post("/api/projects/{pid}/deps")
+def project_submit_deps(pid: str, body: DepsIn, v: tuple = Depends(authorize_project)):
+    return console.submit_deps(pid, body.deps)
 
 
-@app.post("/api/runs/{rid}/stage2")
-def run_stage2(rid: str, v: tuple = Depends(authorize_run)):
-    result = console.start_stage2(rid)
+@app.post("/api/projects/{pid}/stage2")
+def project_stage2(pid: str, v: tuple = Depends(authorize_project)):
+    result = console.start_stage2(pid)
     if result:
-        return {"run_id": result, "stage": 2}
+        return {"project_id": result, "stage": 2}
     raise HTTPException(status_code=409, detail="stage1 not done or MCP unhealthy")
 
 
-@app.post("/api/runs/{rid}/stage3")
-def run_stage3(rid: str, body: Stage3In, v: tuple = Depends(authorize_run)):
-    result = console.start_stage3(rid, extra_creds=extract_env_creds(body.creds or {}))
+@app.post("/api/projects/{pid}/stage3")
+def project_stage3(pid: str, body: Stage3In, v: tuple = Depends(authorize_project)):
+    result = console.start_stage3(pid, extra_creds=extract_env_creds(body.creds or {}))
     if result:
-        return {"run_id": result, "stage": 3}
+        return {"project_id": result, "stage": 3}
     raise HTTPException(status_code=409, detail="stage2 not done or deps not satisfied")
 
 
-@app.post("/api/runs/{rid}/budget")
-def run_budget(rid: str, body: BudgetIn, v: tuple = Depends(authorize_run)):
+@app.post("/api/projects/{pid}/budget")
+def project_budget(pid: str, body: BudgetIn, v: tuple = Depends(authorize_project)):
     try:
         ceiling = float(body.ceiling)
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="ceiling (number) required")
-    return console.raise_budget(rid, ceiling)
+    return console.raise_budget(pid, ceiling)
 
 
-@app.post("/api/runs/{rid}/retry")
-def run_retry(rid: str, body: RetryIn, v: tuple = Depends(authorize_run)):
-    result = console.retry_stage(rid, int(body.stage), extra_creds=body.creds)
+@app.post("/api/projects/{pid}/retry")
+def project_retry(pid: str, body: RetryIn, v: tuple = Depends(authorize_project)):
+    result = console.retry_stage(pid, int(body.stage), extra_creds=body.creds)
     if result:
-        return {"run_id": result, "retried_stage": int(body.stage)}
+        return {"project_id": result, "retried_stage": int(body.stage)}
     raise HTTPException(status_code=409, detail="cannot retry: invalid stage or prior stage not done")
 
 
-@app.post("/api/runs/{rid}/release")
-def run_release(rid: str, v: tuple = Depends(authorize_run)):
-    if console.release_run(rid):
-        return {"run_id": rid, "released": True}
+@app.post("/api/projects/{pid}/release")
+def project_release(pid: str, v: tuple = Depends(authorize_project)):
+    if console.release_project(pid):
+        return {"project_id": pid, "released": True}
     raise HTTPException(status_code=409, detail="not held")
 
 
 # ── Draft write-through + handoff (Option C onboarding; drafts only) ──────────────────────────
-@app.patch("/api/runs/{rid}/draft")
-def patch_draft(rid: str, body: DraftPatchIn, v: tuple = Depends(authorize_run)):
+@app.patch("/api/projects/{pid}/draft")
+def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_project)):
     """Structured project write-through: {name?, goal?, scope?}. Server composes the canonical
     description (goal + scope-of-work line). Call debounced/on-blur, NOT per keystroke."""
-    if not console.is_draft(rid):
+    if not console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
-    return console.set_draft_project(rid, name=body.name, goal=body.goal, scope=body.scope)
+    return console.set_draft_project(pid, name=body.name, goal=body.goal, scope=body.scope)
 
 
-@app.post("/api/runs/{rid}/attach")
-def attach_draft(rid: str, body: AttachIn, v: tuple = Depends(authorize_run)):
+@app.post("/api/projects/{pid}/attach")
+def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)):
     """Attach project materials (walkthrough video / documents) to the draft's input/."""
-    if not console.is_draft(rid):
+    if not console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
-    return {"attached": console.attach_to_draft(rid, body.files or [])}
+    return {"attached": console.attach_to_draft(pid, body.files or [])}
 
 
-@app.post("/api/runs/{rid}/promote")
-def promote_draft(rid: str, body: PromoteIn, v: tuple = Depends(authorize_run)):
+@app.post("/api/projects/{pid}/promote")
+def promote_draft(pid: str, body: PromoteIn, v: tuple = Depends(authorize_project)):
     """Hand off to the factory: promote the draft into a real run and launch Stage 1. The composed
     state.description + accumulated brief are the payload (description override optional)."""
-    if not console.is_draft(rid):
+    if not console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
     try:
-        run_id = console.promote_draft(rid, description=body.description, target=body.target)
+        project_id = console.promote_draft(pid, description=body.description, target=body.target)
     except ValueError as e:                # duplicate project name
         raise HTTPException(status_code=409, detail=str(e))
-    return {"run_id": run_id, "status": "started"}
+    return {"project_id": project_id, "status": "started"}
 
 
 # ── Chat ────────────────────────────────────────────────────────────────────────────────────
@@ -1036,21 +1036,21 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
     if not _chat_runner:
         raise HTTPException(status_code=503,
                             detail="no OPENAI_API_KEY or OPENROUTER_API_KEY — chat unavailable")
-    run_id = body.run_id
+    project_id = body.project_id
     # Messaging an EXISTING run requires ownership; a new conversation mints a durable DRAFT
     # (canonical run-<8hex>) up front so the interview persists to chat.jsonl from turn one and
     # survives a refresh/restart. The draft is invisible to the pipeline poller until promotion.
-    if run_id and not _can_see(v, run_id):
+    if project_id and not _can_see(v, project_id):
         raise HTTPException(status_code=403, detail="forbidden")
-    if not run_id:
-        run_id = console.create_draft(owner=v[0] or "", name=body.project_name or "",
+    if not project_id:
+        project_id = console.create_draft(owner=v[0] or "", name=body.project_name or "",
                                       runtime=body.runtime, planning_model=body.planning_model,
                                       impl_model=body.impl_model)
     # Files/images attached during the interview persist into the draft now (wireframes survive),
     # so they're in input/ for Stage 1 regardless of which turn they arrived on. Drafts only.
-    if (body.files or body.images) and console.is_draft(run_id):
+    if (body.files or body.images) and console.is_draft(project_id):
         try:
-            console.attach_to_draft(run_id, (body.files or []) + (body.images or []))
+            console.attach_to_draft(project_id, (body.files or []) + (body.images or []))
         except Exception:
             pass  # a bad attachment must not 500 the chat turn
 
@@ -1061,60 +1061,60 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
         user_msg.metadata["images"] = [i.get("name", "image") for i in body.images]
 
     try:
-        result_run_id, response_msgs = await _chat_runner.handle_message(
-            run_id, body.message, body.files, body.images, runtime=body.runtime,
+        result_project_id, response_msgs = await _chat_runner.handle_message(
+            project_id, body.message, body.files, body.images, runtime=body.runtime,
             planning_model=body.planning_model, impl_model=body.impl_model,
             project_name=body.project_name, gated=body.gated,
             owner=v[0] or "", role=v[1] or "member")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    if not run_id:
-        run_id = result_run_id
-    if run_id:
-        store = ChatStore(_chat_path(run_id))
+    if not project_id:
+        project_id = result_project_id
+    if project_id:
+        store = ChatStore(_chat_path(project_id))
         store.append(user_msg)
         for m in response_msgs:
             store.append(m)
-        _push_sse(run_id, response_msgs)
+        _push_sse(project_id, response_msgs)
 
-    return {"run_id": run_id, "messages": [m.to_dict() for m in response_msgs]}
+    return {"project_id": project_id, "messages": [m.to_dict() for m in response_msgs]}
 
 
-@app.get("/api/chat/{rid}/history")
-def chat_history(rid: str, v: tuple = Depends(authorize_run)):
-    store = ChatStore(_chat_path(rid))
+@app.get("/api/chat/{pid}/history")
+def chat_history(pid: str, v: tuple = Depends(authorize_project)):
+    store = ChatStore(_chat_path(pid))
     return {"messages": [m.to_dict() for m in store.history()]}
 
 
-@app.post("/api/chat/{rid}/deps")
-def chat_deps(rid: str, body: DepsIn, v: tuple = Depends(authorize_run)):
+@app.post("/api/chat/{pid}/deps")
+def chat_deps(pid: str, body: DepsIn, v: tuple = Depends(authorize_project)):
     deps = body.deps
-    result = console.submit_deps(rid, deps)
+    result = console.submit_deps(pid, deps)
     dep_msg = ChatMessage(role="user", content=f"Provided: {', '.join(deps.keys())}",
                           msg_type="dep_submit", ts=time.time(),
                           metadata={"dep_names": list(deps.keys())})
-    store = ChatStore(_chat_path(rid))
+    store = ChatStore(_chat_path(pid))
     store.append(dep_msg)
     if result.get("satisfied"):
-        console.start_stage3(rid, extra_creds=extract_env_creds(deps))
+        console.start_stage3(pid, extra_creds=extract_env_creds(deps))
         launch_msg = ChatMessage(role="system", content="Dependencies received. Build stage launching.",
                                  msg_type="status_update", ts=time.time(),
-                                 metadata={"run_id": rid, "stage": 3})
+                                 metadata={"project_id": pid, "stage": 3})
         store.append(launch_msg)
-        _push_sse(rid, [dep_msg, launch_msg])
+        _push_sse(pid, [dep_msg, launch_msg])
     else:
-        _push_sse(rid, [dep_msg])
+        _push_sse(pid, [dep_msg])
     return result
 
 
-@app.get("/api/chat/{rid}/stream")
-async def chat_stream(rid: str, v: tuple = Depends(authorize_run)):
+@app.get("/api/chat/{pid}/stream")
+async def chat_stream(pid: str, v: tuple = Depends(authorize_project)):
     """SSE for real-time pipeline updates. Drains a per-client queue fed by _push_sse (from the
     poller thread + chat/deps handlers); keepalive every 2s."""
     q: list[str] = []
     with _sse_lock:
-        _sse_clients.setdefault(rid, []).append(q)
+        _sse_clients.setdefault(pid, []).append(q)
 
     async def gen():
         try:
@@ -1126,7 +1126,7 @@ async def chat_stream(rid: str, v: tuple = Depends(authorize_run)):
                     await asyncio.sleep(2)
         finally:
             with _sse_lock:
-                clients = _sse_clients.get(rid, [])
+                clients = _sse_clients.get(pid, [])
                 if q in clients:
                     clients.remove(q)
 

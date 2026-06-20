@@ -1,6 +1,6 @@
 // DocumentsTab.tsx — Project view §2.5 Documents tab (design orgproject.jsx → ProjectDashboard
 // docs view): all project documents as file tiles, split "Uploaded by you" + "Produced by the
-// factory". Driven by tjyb5gmy's GET /api/runs/{id}/documents (PR #13); degrades to empty.
+// factory". Driven by tjyb5gmy's GET /api/projects/{id}/documents (PR #13); degrades to empty.
 import { useEffect, useState } from "react";
 import { api, ProjectDocuments, ProjectMaterial, ProjectArtifact } from "../../api";
 import { T, CategoryLabel } from "../onboarding/design";
@@ -31,12 +31,12 @@ function FileTile({ label, kind, sub, tag, onOpen }: { label: string; kind?: str
   );
 }
 
-export function DocumentsTab({ runId }: { runId: string }) {
+export function DocumentsTab({ projectId }: { projectId: string }) {
   const [docs, setDocs] = useState<ProjectDocuments | null>(null);
 
   useEffect(() => {
-    api.documents(runId).then(setDocs).catch(() => setDocs(null)); // backend pending → graceful empty
-  }, [runId]);
+    api.documents(projectId).then(setDocs).catch(() => setDocs(null)); // backend pending → graceful empty
+  }, [projectId]);
 
   const uploaded: ProjectMaterial[] = docs?.uploaded || [];
   const produced: ProjectArtifact[] = docs?.produced || [];
@@ -57,7 +57,7 @@ export function DocumentsTab({ runId }: { runId: string }) {
         <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Produced by the factory</h3>
         {produced.length ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-            {produced.map((d, i) => <FileTile key={d.title + i} label={d.title} kind={d.kind} tag={d.agent} onOpen={d.path ? () => window.open(`/api/runs/${runId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
+            {produced.map((d, i) => <FileTile key={d.title + i} label={d.title} kind={d.kind} tag={d.agent} onOpen={d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
           </div>
         ) : <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "20px", textAlign: "center", font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary }}>The factory hasn’t produced documents yet.</div>}
       </div>

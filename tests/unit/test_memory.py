@@ -1,6 +1,6 @@
 """Proposal §4 — memory & context architecture, made concrete + testable.
 
-Pull-not-push memory with the proposal's namespaces (project/<id>, run/<id>, tickets/<id>,
+Pull-not-push memory with the proposal's namespaces (project/<id>, tickets/<id>,
 coordination) and a ReasoningBank precedent loop (record trajectory→verdict, recall by
 similarity, consolidate = distill+prune between phases). This module is the namespace +
 precedent CONVENTION plus a local JSON store, so the behaviour is deterministic and unit-testable.
@@ -10,15 +10,14 @@ from software_factory import memory
 
 def test_namespaces_match_the_proposal(tmp_path):
     assert memory.project_ns("p1") == "project/p1"
-    assert memory.run_ns("r1") == "run/r1"
     assert memory.ticket_ns("7") == "tickets/7"
     assert memory.COORDINATION == "coordination"
 
 
 def test_write_read_roundtrip(tmp_path):
     store = memory.MemoryStore(str(tmp_path))
-    store.write(memory.run_ns("r1"), "prd", {"problem": "x"})
-    assert store.read(memory.run_ns("r1"), "prd")["problem"] == "x"
+    store.write(memory.project_ns("r1"), "prd", {"problem": "x"})
+    assert store.read(memory.project_ns("r1"), "prd")["problem"] == "x"
 
 
 def test_search_pulls_by_relevance(tmp_path):

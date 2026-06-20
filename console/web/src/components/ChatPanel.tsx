@@ -20,17 +20,17 @@ function mergeMsgs(prev: Msg[], incoming: Msg[]): Msg[] {
   return fresh.length ? [...prev, ...fresh] : prev;
 }
 
-export function ChatPanel({ runId, onRunCreated }: { runId: string | null; onRunCreated: (id: string) => void }) {
+export function ChatPanel({ projectId, onProjectCreated }: { projectId: string | null; onProjectCreated: (id: string) => void }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!runId) { setMsgs([]); return; }
-    api.chatHistory(runId).then((d) => setMsgs(d.messages || [])).catch(() => setMsgs([]));
+    if (!projectId) { setMsgs([]); return; }
+    api.chatHistory(projectId).then((d) => setMsgs(d.messages || [])).catch(() => setMsgs([]));
     // live updates: SSE stream of new messages for this run
-    const es = new EventSource(`/api/chat/${runId}/stream`, { withCredentials: true } as any);
+    const es = new EventSource(`/api/chat/${projectId}/stream`, { withCredentials: true } as any);
     es.onmessage = (e) => {
       try {
         const m = JSON.parse(e.data);
@@ -39,7 +39,7 @@ export function ChatPanel({ runId, onRunCreated }: { runId: string | null; onRun
       } catch { /* heartbeat */ }
     };
     return () => es.close();
-  }, [runId]);
+  }, [projectId]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
@@ -50,8 +50,8 @@ export function ChatPanel({ runId, onRunCreated }: { runId: string | null; onRun
     setBusy(true);
     setMsgs((prev) => [...prev, { role: "user", content: message }]);
     try {
-      const r = await api.chat({ run_id: runId, message });
-      if (!runId && r.run_id) onRunCreated(r.run_id);
+      const r = await api.chat({ project_id: projectId, message });
+      if (!projectId && r.project_id) onProjectCreated(r.project_id);
       setMsgs((prev) => mergeMsgs(prev, r.messages || []));
     } catch {
       setMsgs((prev) => [...prev, { role: "system", content: "(chat error)" }]);
@@ -71,7 +71,7 @@ export function ChatPanel({ runId, onRunCreated }: { runId: string | null; onRun
         ))}
         <div ref={endRef} />
       </div>
-      {runId && <BriefForm runId={runId} />}
+      {projectId && <BriefForm projectId={projectId} />}
       <div className="compose">
         <textarea
           value={text}

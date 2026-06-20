@@ -19,10 +19,10 @@ class FakeSink:
 
 def reg(tmp_path, sink=None, clock=None):
     ticks = iter(range(1, 10_000))
-    # Flat schema: the registry scopes by the run id in its path (<runs_dir>/<run_id>/…), and these
-    # tests spawn under run_id="run" — so the db lives in a "run" dir to match (as it does in prod).
+    # Flat schema: the registry scopes by the run id in its path (<projects_dir>/<project_id>/…), and these
+    # tests spawn under project_id="run" — so the db lives in a "run" dir to match (as it does in prod).
     return AgentRegistry(
-        str(tmp_path / "run" / "agents.db"),
+        str(tmp_path / "run"),
         sink=sink or NullSink(),
         clock=clock or (lambda: next(ticks)),
     )
@@ -30,7 +30,7 @@ def reg(tmp_path, sink=None, clock=None):
 
 def test_spawn_lists_agent_as_active_and_counts_it(tmp_path):
     r = reg(tmp_path)
-    r.spawn("a1", run_id="run", ticket_id=1, role="build", model="claude-opus-4-8")
+    r.spawn("a1", project_id="run", ticket_id=1, role="build", model="claude-opus-4-8")
     assert [a.agent_id for a in r.active()] == ["a1"]
     assert r.counts("run")["spawned"] == 1
     assert r.counts("run")["running"] == 1
@@ -69,7 +69,7 @@ def test_finalize_orphans_closes_running_agents(tmp_path):
 
 
 def test_success_outcome_is_a_done_synonym_not_failed(tmp_path):
-    # run-ce47692e scar: the Stage-3 orchestrator reported `finish-agent <id> success`; "success"
+    # project-ce47692e scar: the Stage-3 orchestrator reported `finish-agent <id> success`; "success"
     # wasn't in the outcome vocabulary so the .get(..., "failed") default mislabeled a SUCCESSFUL
     # agent as failed (red on the canvas). "success" maps to done.
     r = reg(tmp_path)

@@ -15,11 +15,11 @@ Read the Stage 1 artifacts from `context/` (PRD.md and the design spec).
 ## Record state in the datastore (there are NO events)
 
 ```bash
-python3 -m software_factory.db <verb> <runs_dir> <run_id> ...
+python3 -m software_factory.db <verb> <projects_dir> <project_id> ...
 ```
-`<runs_dir> <run_id>` ALWAYS come first, before the verb's own args:
-`set-phase <runs_dir> <run_id> <name>` per phase; `spawn-agent <runs_dir> <run_id> <id> <role> <model> <phase>` / `finish-agent <runs_dir> <run_id> <id> <outcome>`
-per Task sub-agent; `record-artifact <runs_dir> <run_id> <title> <path> <kind> [agent]` per file. No events — the datastore is the source of truth.
+`<projects_dir> <project_id>` ALWAYS come first, before the verb's own args:
+`set-phase <projects_dir> <project_id> <name>` per phase; `spawn-agent <projects_dir> <project_id> <id> <role> <model> <phase>` / `finish-agent <projects_dir> <project_id> <id> <outcome>`
+per Task sub-agent; `record-artifact <projects_dir> <project_id> <title> <path> <kind> [agent]` per file. No events — the datastore is the source of truth.
 
 ## Phase 1: architect  (`set-phase architect`)
 
@@ -54,7 +54,7 @@ each (`architecture` and `architecture-svg`).
 **Done-gate (mechanical):** waves ordered, no orphan features, AND the store holds buildable tickets — verify:
 ```bash
 python3 -c "import sys; sys.path.insert(0,'/app/src'); from software_factory.tickets import TicketStore; \
-assert TicketStore('<run.db>').buildable_count() >= 1, 'EMPTY/HOLLOW ticket store — call create_ticket with real acceptance + dod'"
+assert TicketStore('<project.db>').buildable_count() >= 1, 'EMPTY/HOLLOW ticket store — call create_ticket with real acceptance + dod'"
 ```
 
 ## When done
@@ -66,7 +66,7 @@ collects required dependencies from the user, and launches Stage 3. (No "done" e
 
 | Need | Call |
 |------|------|
-| Record canvas state | `python3 -m software_factory.db <verb> <runs_dir> <run_id> ...` |
+| Record canvas state | `python3 -m software_factory.db <verb> <projects_dir> <project_id> ...` |
 | Architecture diagram | `diagram.render(mermaid_text, out_path)` |
 | Artifact gate | `artifacts.verify(run_dir, paths)` |
 | Tickets | `tickets.TicketStore` — `create_ticket` (persist!), `claim`, `mark_done` |

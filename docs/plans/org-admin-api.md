@@ -20,13 +20,13 @@ Already-existing routes the OrgAdmin screen also uses (unchanged — not in this
 |---|---|---|---|---|
 | GET | `/api/org/docs` | member | — | `{docs: [Doc]}` |
 | POST | `/api/org/docs` | admin | `{name, tag?, content_type?, data_b64}` | `{doc: Doc}` |
-| POST | `/api/org/docs/{doc_id}/use` | member | `{run_id}` | `{used_count}` |
+| POST | `/api/org/docs/{doc_id}/use` | member | `{project_id}` | `{used_count}` |
 | DELETE | `/api/org/docs/{doc_id}` | admin | — | `{ok: true}` |
 
 `Doc` = `{id, name, kind, tag, size_bytes, content_type, used_count, updated}`
 - `kind` ∈ `pdf | xlsx | csv | doc | video | img` (derived from filename ext; default `doc`) — maps to your `FILE_KIND` tiles.
 - `size_bytes` int, `updated` epoch seconds — **format in the UI** (you already format tiles).
-- `used_count` = number of distinct projects that imported the doc (`COUNT(DISTINCT run_id)`).
+- `used_count` = number of distinct projects that imported the doc (`COUNT(DISTINCT project_id)`).
 - Empty KB → `{docs: []}` (200). `404` only when the caller has no org → your graceful-empty path still works.
 
 Upload: send the file bytes base64-encoded in `data_b64`. `400` on a missing `name` or invalid base64.
@@ -56,7 +56,7 @@ leak other orgs' users inside a tenant's screen.
 | PATCH | `/api/org/billing` | admin | `{plan?, monthly_budget_cap?}` | `{plan, monthly_budget_cap}` |
 
 `Usage` = `{plan, monthly_budget_cap, spent, active_projects, total_projects, by_project: [Proj]}`
-`Proj` = `{run_id, name, spent_usd}` (sorted by spend desc).
+`Proj` = `{project_id, name, spent_usd}` (sorted by spend desc).
 - The server rolls up **all** org members' runs (a member client can't — it only sees its own).
 - `spent` = sum of each run's lifetime spend (no reliable per-month boundary → total-to-date, not month-windowed).
 - `total_projects` = all org projects; `active_projects` = building now (not budget-stopped, not held, not yet shipped).
@@ -66,7 +66,7 @@ leak other orgs' users inside a tenant's screen.
 
 ### Schema (migration `0004_org_admin`)
 - `blobs.name`, `blobs.tag` (display filename + category)
-- `blob_uses(id, blob_id, run_id, created_at)` — reuse links
+- `blob_uses(id, blob_id, project_id, created_at)` — reuse links
 - `organizations.plan`, `organizations.monthly_budget_cap`
 
 ### Note on the run→project rename

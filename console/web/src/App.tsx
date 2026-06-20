@@ -7,13 +7,13 @@ import { LoginScreen } from "./components/LoginScreen";
 import { FactoryConsole } from "./components/factory/FactoryConsole";
 import { ProjectView } from "./components/project/ProjectView";
 
-function readInitialRun(): string | null {
+function readInitialProject(): string | null {
   return new URLSearchParams(location.search).get("run");
 }
 
 export function App() {
-  const [runId, setRunId] = useState<string | null>(readInitialRun());
-  const [showProjects, setShowProjects] = useState<boolean>(!readInitialRun());
+  const [projectId, setProjectId] = useState<string | null>(readInitialProject());
+  const [showProjects, setShowProjects] = useState<boolean>(!readInitialProject());
   // The Option C onboarding is the "new project" front door (shown instead of an empty build console).
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
   // Org admin route (dashboard org switcher / "Manage organization →"). Placeholder until §2.3.
@@ -28,27 +28,27 @@ export function App() {
     history.replaceState(null, "", "?" + p.toString());
   };
 
-  const openRun = (id: string) => { setRunId(id); setShowProjects(false); setShowOnboarding(false); setOpenView("project"); syncUrl(id); };
-  const backToProjects = () => { setRunId(null); setShowProjects(true); syncUrl(null); };
+  const openProject = (id: string) => { setProjectId(id); setShowProjects(false); setShowOnboarding(false); setOpenView("project"); syncUrl(id); };
+  const backToProjects = () => { setProjectId(null); setShowProjects(true); syncUrl(null); };
 
   // keep the SPA boot warm — discover runs once so a deep-linked ?run= resolves.
-  useEffect(() => { if (!runId) api.runs().catch(() => {}); }, [runId]);
+  useEffect(() => { if (!projectId) api.projects().catch(() => {}); }, [projectId]);
 
   if (showOnboarding) {
-    return <OnboardingScreen onComplete={openRun} />;
+    return <OnboardingScreen onComplete={openProject} />;
   }
 
   if (showOrg) {
     return <OrgAdminScreen onBack={() => setShowOrg(false)} />;
   }
 
-  if (showProjects || !runId) {
-    // Projects dashboard (PRD §2.2) is the post-login home. onOpen reuses openRun (into the
+  if (showProjects || !projectId) {
+    // Projects dashboard (PRD §2.2) is the post-login home. onOpen reuses openProject (into the
     // Factory Console — the open-run view below); onNew → onboarding; onOrg → §2.3 placeholder.
     return (
       <Dashboard
-        onOpen={openRun}
-        onNew={() => { setRunId(null); setShowProjects(false); setShowOnboarding(true); }}
+        onOpen={openProject}
+        onNew={() => { setProjectId(null); setShowProjects(false); setShowOnboarding(true); }}
         onOrg={() => setShowOrg(true)}
       />
     );
@@ -57,9 +57,9 @@ export function App() {
   // Open run ⇒ the §2.5 Project View (Overview/Documents tabs) is the default; its "Factory console"
   // peer-tab flips to the Factory Console (PRD §2.6), whose back returns to the Project View.
   if (openView === "factory") {
-    return <FactoryConsole runId={runId} onBack={() => setOpenView("project")} />;
+    return <FactoryConsole projectId={projectId} onBack={() => setOpenView("project")} />;
   }
-  return <ProjectView runId={runId} onBack={backToProjects} onOpenFactory={() => setOpenView("factory")} />;
+  return <ProjectView projectId={projectId} onBack={backToProjects} onOpenFactory={() => setOpenView("factory")} />;
 }
 
 // ── Auth gate (Option B) ───────────────────────────────────────────────────────────────────

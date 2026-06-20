@@ -32,19 +32,19 @@ function Card({ t }: { t: Ticket }) {
   );
 }
 
-export function KanbanView({ runId, appFilter }: { runId: string; appFilter: string }) {
+export function KanbanView({ projectId, appFilter }: { projectId: string; appFilter: string }) {
   const [data, setData] = useState<TicketsResponse>({ tickets: [], waves: [] });
 
   useEffect(() => {
     let live = true;
-    const tick = () => api.tickets(runId).then((d) => live && setData(d)).catch(() => {});
+    const tick = () => api.tickets(projectId).then((d) => live && setData(d)).catch(() => {});
     tick();
     const h = setInterval(tick, 2000);
     return () => {
       live = false;
       clearInterval(h);
     };
-  }, [runId]);
+  }, [projectId]);
 
   const items = appFilter === "all" ? data.tickets : data.tickets.filter((t) => (t.app || "") === appFilter);
   if (!items.length) {

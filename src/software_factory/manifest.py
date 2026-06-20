@@ -65,23 +65,23 @@ class Manifest:
             raise ValueError("duplicate app_secret names")
 
 
-def manifest_path(runs_dir: str, run_id: str) -> str:
-    return os.path.join(runs_dir, run_id, "manifest.json")
+def manifest_path(projects_dir: str, project_id: str) -> str:
+    return os.path.join(projects_dir, project_id, "manifest.json")
 
 
-def write_manifest(runs_dir: str, run_id: str, manifest: Manifest) -> str:
+def write_manifest(projects_dir: str, project_id: str, manifest: Manifest) -> str:
     manifest.validate()
-    base = os.path.join(runs_dir, run_id)
+    base = os.path.join(projects_dir, project_id)
     os.makedirs(base, exist_ok=True)
-    path = manifest_path(runs_dir, run_id)
+    path = manifest_path(projects_dir, project_id)
     with open(path, "w") as f:
         json.dump(manifest.to_dict(), f, indent=2)
     return path
 
 
-def load_manifest(runs_dir: str, run_id: str):
+def load_manifest(projects_dir: str, project_id: str):
     """Return the Manifest, or None if the architecture phase hasn't emitted one yet."""
-    path = manifest_path(runs_dir, run_id)
+    path = manifest_path(projects_dir, project_id)
     if not os.path.exists(path):
         return None
     with open(path) as f:

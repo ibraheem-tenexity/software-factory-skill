@@ -1,5 +1,5 @@
-// NodeMap.tsx — Tree and Map views, both built from the REAL graph (/api/runs/{id}/graph →
-// console.graph). The graph is a Cytoscape-shaped projection of run.db:
+// NodeMap.tsx — Tree and Map views, both built from the REAL graph (/api/projects/{id}/graph →
+// console.graph). The graph is a Cytoscape-shaped projection of the project store:
 //   nodes: { data: { id, label, kind, status, ... } }
 //   edges: { data: { source, target, etype } }   etype ∈ flow | hierarchy | feedback
 // kinds: orchestrator | phase | gate | deps | agent | artifact | blocker

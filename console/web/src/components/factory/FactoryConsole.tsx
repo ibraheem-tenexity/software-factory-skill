@@ -8,7 +8,7 @@
 // Liveness: polls status + tickets + graph every 4s (agents run server-side; no sim button).
 import { useEffect, useState } from "react";
 import { T, Icon, Wordmark, StatusPill, Btn } from "../onboarding/design";
-import { api, RunSummary, Graph, Ticket } from "../../api";
+import { api, ProjectSummary, Graph, Ticket } from "../../api";
 import { phaseStatesFromGraph, atWaitForDeps, PhaseStatus } from "./pipeline";
 import { StageRail } from "./StageRail";
 import { WaitForDeps } from "./WaitForDeps";
@@ -17,7 +17,7 @@ import { TreeView, MapView } from "./NodeMap";
 import { Concierge } from "./Concierge";
 import { DocViewer, artifactsFromGraph, ArtifactRef } from "./Artifacts";
 
-type Status = RunSummary & Record<string, any>;
+type Status = ProjectSummary & Record<string, any>;
 type View = "kanban" | "tree" | "map";
 type Doc = { label: string; path?: string; content?: string } | null;
 
@@ -35,7 +35,7 @@ function phaseTone(phase?: string): "success" | "warning" | "danger" | "neutral"
   return "neutral";
 }
 
-export function FactoryConsole({ runId, onBack }: { runId: string; onBack: () => void }) {
+export function FactoryConsole({ projectId, onBack }: { projectId: string; onBack: () => void }) {
   const [status, setStatus] = useState<Status>({} as Status);
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -45,14 +45,14 @@ export function FactoryConsole({ runId, onBack }: { runId: string; onBack: () =>
   useEffect(() => {
     let live = true;
     const tick = () => {
-      api.status(runId).then((s) => live && setStatus(s)).catch(() => {});
-      api.tickets(runId).then((d) => live && setTickets(d.tickets || [])).catch(() => {});
-      api.graph(runId).then((g) => live && setGraph(g)).catch(() => {});
+      api.status(projectId).then((s) => live && setStatus(s)).catch(() => {});
+      api.tickets(projectId).then((d) => live && setTickets(d.tickets || [])).catch(() => {});
+      api.graph(projectId).then((g) => live && setGraph(g)).catch(() => {});
     };
     tick();
     const h = setInterval(tick, 4000);
     return () => { live = false; clearInterval(h); };
-  }, [runId]);
+  }, [projectId]);
 
   const phaseStates: Record<string, PhaseStatus> = phaseStatesFromGraph(graph.nodes);
   const artifacts: ArtifactRef[] = artifactsFromGraph(graph);
@@ -103,14 +103,14 @@ export function FactoryConsole({ runId, onBack }: { runId: string; onBack: () =>
       {/* ── body: Concierge rail + main column ── */}
       <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "340px 1fr", gap: 0 }}>
         <div style={{ borderRight: `1px solid ${T.borderSubtle}`, padding: 16, overflowY: "auto", background: T.raised }}>
-          <Concierge runId={runId} artifacts={artifacts}
+          <Concierge projectId={projectId} artifacts={artifacts}
             onOpenArtifact={(a) => setDoc({ label: a.label, path: a.path })} />
         </div>
 
         <main style={{ overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
           <StageRail graph={graph} phaseStates={phaseStates} depsSatisfied={!!status.deps_satisfied} />
 
-          {showDeps && <WaitForDeps runId={runId} onResolved={() => api.status(runId).then(setStatus).catch(() => {})} />}
+          {showDeps && <WaitForDeps projectId={projectId} onResolved={() => api.status(projectId).then(setStatus).catch(() => {})} />}
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -164,7 +164,7 @@ export function FactoryConsole({ runId, onBack }: { runId: string; onBack: () =>
         </main>
       </div>
 
-      <DocViewer runId={runId} doc={doc} onClose={() => setDoc(null)} />
+      <DocViewer projectId={projectId} doc={doc} onClose={() => setDoc(null)} />
     </div>
   );
 }

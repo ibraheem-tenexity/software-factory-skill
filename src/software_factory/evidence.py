@@ -9,18 +9,18 @@ budget actually spent. A URL with no agents and no merged PRs is flagged as a fa
 from __future__ import annotations
 
 from .agents import AgentRegistry
-from .runstate import RunState
+from .projectstate import ProjectState
 from .tickets import TicketStore
 
 _EPS = 1e-6
 SKILL_NAME = "software-factory"
 
 
-def build_evidence(state: RunState, registry: AgentRegistry, tickets: TicketStore) -> dict:
-    run_id = state.run_id
-    total_cost = sum(registry.cost_by_ticket(run_id).values())
+def build_evidence(state: ProjectState, registry: AgentRegistry, tickets: TicketStore) -> dict:
+    project_id = state.project_id
+    total_cost = sum(registry.cost_by_ticket(project_id).values())
     return {
-        "run_id": run_id,
+        "project_id": project_id,
         "runtime": getattr(state, "runtime", "claude"),
         "skill": state.skill,
         "skill_version": state.skill_version,
@@ -30,8 +30,8 @@ def build_evidence(state: RunState, registry: AgentRegistry, tickets: TicketStor
         "deploy_url": state.deploy_url,
         "spent_usd": state.spent_usd,
         "agents": {
-            "counts": registry.counts(run_id),
-            "no_op_rate": registry.no_op_rate(run_id),
+            "counts": registry.counts(project_id),
+            "no_op_rate": registry.no_op_rate(project_id),
             "total_cost_usd": round(total_cost, 6),
         },
         "done_tickets": [
@@ -58,7 +58,7 @@ def verify_evidence(bundle: dict) -> tuple[bool, list[str]]:
         reasons.append("no agents recorded — the outcome is uncorroborated")
     elif total_cost <= 0:
         # Monolithic opencode agents cannot see their own cost (it lives in the host-owned
-        # run.log stream); the run-level spend is the model-work corroboration there.
+        # project.log stream); the run-level spend is the model-work corroboration there.
         if bundle.get("runtime") == "opencode":
             if spent <= 0:
                 reasons.append("no spend recorded — no real model work was recorded")

@@ -7,16 +7,16 @@ The §2.5 screen has two tabs — **Overview** and **Documents** — both scoped
 Almost all underlying data already exists (status/tickets/deployments/agents/artifacts/blobs/org);
 this branch adds **two aggregate endpoints** so the frontend makes one call per tab instead of
 five, and so derived fields (% complete, services-at-work, agent→task join) are computed
-server-side. Both routes reuse the existing `authorize_run` ownership gate (admin/owner only).
+server-side. Both routes reuse the existing `authorize_project` ownership gate (admin/owner only).
 
 > Naming: built against current `run` naming; rebases onto 40zxvvrk's `run→project` sweep later
-> (mechanical `run_id`→`project_id`, `/api/runs`→`/api/projects`). Route *shapes* below are stable.
+> (mechanical `project_id`→`project_id`, `/api/projects`→`/api/projects`). Route *shapes* below are stable.
 
 ---
 
 ## 1. Overview tab
 
-`GET /api/runs/{rid}/overview` → `200`
+`GET /api/projects/{rid}/overview` → `200`
 
 ```jsonc
 {
@@ -65,7 +65,7 @@ No fabricated services; if a signal is absent the row is omitted.
 
 ## 2. Documents tab
 
-`GET /api/runs/{rid}/documents` → `200`
+`GET /api/projects/{rid}/documents` → `200`
 
 ```jsonc
 {
@@ -87,10 +87,10 @@ No fabricated services; if a signal is absent the row is omitted.
 ---
 
 ### What's new vs reused
-- **New** (this branch): `GET /api/runs/{rid}/overview`, `GET /api/runs/{rid}/documents`;
+- **New** (this branch): `GET /api/projects/{rid}/overview`, `GET /api/projects/{rid}/documents`;
   `console.agents(rid)` + `console.artifacts(rid)` read accessors; pure assembler module
   `software_factory.project_view`.
-- **Reused unchanged**: `console.status/tickets/deployments/draft_brief/run_owner`, `BlobStore.list_for`,
-  `users.org_for_user`, the `authorize_run` gate.
+- **Reused unchanged**: `console.status/tickets/deployments/draft_brief/project_owner`, `BlobStore.list_for`,
+  `users.org_for_user`, the `authorize_project` gate.
 - **No schema change.** (Run-blob display name comes from the storage key — no new column; the
   org-admin branch separately owns `blobs.name/tag`.)

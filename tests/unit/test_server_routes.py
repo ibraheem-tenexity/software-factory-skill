@@ -1,7 +1,7 @@
 """HTTP routing of the console server (FastAPI app in console/app.py).
 
 Ported from the stdlib-server tests to FastAPI's TestClient. Originals preserved:
-- the page must serve regardless of query string (scar: '/?run=run-1e17ea6a' returned a JSON 404
+- the page must serve regardless of query string (scar: '/?run=project-1e17ea6a' returned a JSON 404
   when do_GET matched self.path verbatim, query string included);
 - auth gate (login page vs console, 401 without session, Google login cookie, unallowed email 403).
 Added: run-scoped ownership 403 + an SSE stream smoke.
@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 
 def _load_app(tmp_path, monkeypatch, **env):
-    monkeypatch.setenv("SF_RUNS_DIR", str(tmp_path))
+    monkeypatch.setenv("SF_PROJECTS_DIR", str(tmp_path))
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     for k, v in env.items():
@@ -44,7 +44,7 @@ def test_root_serves_console_html(client):
 
 def test_run_restore_link_serves_console_html_not_404(client):
     # the exact URL attach() writes via history.replaceState — reload must restore the run view
-    r = client.get("/?run=run-1e17ea6a")
+    r = client.get("/?run=project-1e17ea6a")
     assert r.status_code == 200 and "text/html" in r.headers["content-type"]
     assert "Software Factory" in r.text
 
@@ -73,7 +73,7 @@ def test_auth_enabled_root_serves_login_not_console(auth_client):
 
 
 def test_auth_enabled_api_requires_session(auth_client):
-    r = auth_client.get("/api/runs")
+    r = auth_client.get("/api/projects")
     assert r.status_code == 401
 
 
@@ -93,7 +93,7 @@ def test_google_login_sets_cookie_and_opens_console(auth_mod, auth_client, monke
     # TestClient persists the cookie on its jar → subsequent requests are authed.
     r2 = auth_client.get("/")
     assert r2.status_code == 200 and "Factory Concierge" in r2.text
-    r3 = auth_client.get("/api/runs")
+    r3 = auth_client.get("/api/projects")
     assert r3.status_code == 200
 
 
@@ -105,8 +105,8 @@ def test_google_login_rejected_for_unallowed_email(auth_mod, auth_client, monkey
 def test_run_scoped_route_forbidden_for_non_owner(auth_mod, auth_client, monkeypatch):
     # op@tenexity.ai is a *member* here (no SF_ADMIN_EMAILS) → may only see runs it owns.
     _login(auth_mod, auth_client, monkeypatch)
-    monkeypatch.setattr(auth_mod.console, "run_owner", lambda rid: "someone-else@tenexity.ai")
-    r = auth_client.get("/api/runs/run-deadbeef")
+    monkeypatch.setattr(auth_mod.console, "project_owner", lambda rid: "someone-else@tenexity.ai")
+    r = auth_client.get("/api/projects/project-deadbeef")
     assert r.status_code == 403
 
 
@@ -117,9 +117,9 @@ def test_chat_threads_viewer_role_to_concierge(auth_mod, auth_client, monkeypatc
     captured = {}
 
     class _FakeRunner:
-        async def handle_message(self, run_id, message, files, images, **kw):
+        async def handle_message(self, project_id, message, files, images, **kw):
             captured.update(kw)
-            return ("run-abcdef12", [])
+            return ("project-abcdef12", [])
 
     monkeypatch.setattr(auth_mod, "_chat_runner", _FakeRunner())
     r = auth_client.post("/api/chat", json={"message": "build me an app"})
@@ -230,9 +230,9 @@ def test_legacy_mode_still_serves_server_login_to_unauthed(auth_client):
 
 def test_create_draft_then_patch_composes_description(client):
     # Option C onboarding: form eagerly creates a draft, then write-throughs project fields.
-    rid = client.post("/api/drafts", json={"project_name": "Quote-to-Epicor"}).json()["run_id"]
-    assert rid.startswith("run-")
-    r = client.patch(f"/api/runs/{rid}/draft", json={
+    rid = client.post("/api/drafts", json={"project_name": "Quote-to-Epicor"}).json()["project_id"]
+    assert rid.startswith("project-")
+    r = client.patch(f"/api/projects/{rid}/draft", json={
         "name": "Quote-to-Epicor", "goal": "Replace the manual quoting spreadsheet.",
         "scope": ["Quoting / RFQ", "Pricing & approvals"]})
     assert r.status_code == 200
@@ -243,8 +243,8 @@ def test_create_draft_then_patch_composes_description(client):
 
 
 def test_attach_to_draft_endpoint(client):
-    rid = client.post("/api/drafts", json={}).json()["run_id"]
-    r = client.post(f"/api/runs/{rid}/attach", json={"files": []})
+    rid = client.post("/api/drafts", json={}).json()["project_id"]
+    r = client.post(f"/api/projects/{rid}/attach", json={"files": []})
     assert r.status_code == 200 and r.json() == {"attached": []}
 
 
@@ -252,18 +252,18 @@ def test_draft_writethrough_409_on_non_draft(client):
     # PATCH/attach/promote refuse a non-draft (already promoted or nonexistent) run.
     for path, payload in [("/draft", {"goal": "x"}), ("/attach", {"files": []}), ("/promote", {})]:
         method = client.patch if path == "/draft" else client.post
-        r = method(f"/api/runs/run-deadbeef{path}", json=payload)
+        r = method(f"/api/projects/project-deadbeef{path}", json=payload)
         assert r.status_code == 409, path
 
 
 def test_promote_endpoint_wires_to_console(client, app_mod, monkeypatch):
     # The handoff button calls POST /promote → console.promote_draft. Stub promote to avoid a real
     # Stage-1 launch; assert the endpoint shape.
-    rid = client.post("/api/drafts", json={}).json()["run_id"]
+    rid = client.post("/api/drafts", json={}).json()["project_id"]
     monkeypatch.setattr(app_mod.console, "promote_draft",
                         lambda r, description="", target="railway": r)
-    res = client.post(f"/api/runs/{rid}/promote", json={"target": "railway"})
-    assert res.status_code == 200 and res.json() == {"run_id": rid, "status": "started"}
+    res = client.post(f"/api/projects/{rid}/promote", json={"target": "railway"})
+    assert res.status_code == 200 and res.json() == {"project_id": rid, "status": "started"}
 
 
 def test_push_sse_delivers_to_registered_client(app_mod):
@@ -272,6 +272,6 @@ def test_push_sse_delivers_to_registered_client(app_mod):
     from software_factory.chat_store import ChatMessage
     q: list = []
     with app_mod._sse_lock:
-        app_mod._sse_clients.setdefault("run-1e17ea6a", []).append(q)
-    app_mod._push_sse("run-1e17ea6a", [ChatMessage(role="assistant", content="ping")])
+        app_mod._sse_clients.setdefault("project-1e17ea6a", []).append(q)
+    app_mod._push_sse("project-1e17ea6a", [ChatMessage(role="assistant", content="ping")])
     assert q and q[0].startswith("data: ") and "ping" in q[0] and q[0].endswith("\n\n")

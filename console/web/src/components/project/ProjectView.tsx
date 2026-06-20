@@ -3,7 +3,7 @@
 // the "Factory console" tab is a NAV CALLBACK into the existing console (onOpenFactory) — it is NOT
 // rendered inline, so this stays fully decoupled from the factory components.
 import { useEffect, useState } from "react";
-import { api, RunSummary } from "../../api";
+import { api, ProjectSummary } from "../../api";
 import { T, Icon, Btn, StatusPill, Avatar, Wordmark } from "../onboarding/design";
 import { OverviewTab } from "./OverviewTab";
 import { DocumentsTab } from "./DocumentsTab";
@@ -11,7 +11,7 @@ import { DocumentsTab } from "./DocumentsTab";
 type Tab = "overview" | "documents";
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 
-function statusOf(s: RunSummary & Record<string, any>): { label: string; tone: Tone } {
+function statusOf(s: ProjectSummary & Record<string, any>): { label: string; tone: Tone } {
   if (s.deploy_url || s.done || s.phase === "done") return { label: "Deployed", tone: "success" };
   if (s.budget_stopped || s.held) return { label: "Needs input", tone: "warning" };
   if (s.phase === "draft") return { label: "Draft", tone: "neutral" };
@@ -25,18 +25,18 @@ const TABS: { id: Tab | "factory"; label: string }[] = [
   { id: "documents", label: "Documents" },
 ];
 
-export function ProjectView({ runId, onBack, onOpenFactory }: { runId: string; onBack: () => void; onOpenFactory: () => void }) {
+export function ProjectView({ projectId, onBack, onOpenFactory }: { projectId: string; onBack: () => void; onOpenFactory: () => void }) {
   const [tab, setTab] = useState<Tab>("overview");
-  const [status, setStatus] = useState<(RunSummary & Record<string, any>) | null>(null);
+  const [status, setStatus] = useState<(ProjectSummary & Record<string, any>) | null>(null);
   const [email, setEmail] = useState("");
 
-  useEffect(() => { setTab("overview"); }, [runId]);
+  useEffect(() => { setTab("overview"); }, [projectId]);
   useEffect(() => {
-    api.status(runId).then(setStatus).catch(() => setStatus(null));
+    api.status(projectId).then(setStatus).catch(() => setStatus(null));
     api.me().then((m) => setEmail(m.email || "")).catch(() => {});
-  }, [runId]);
+  }, [projectId]);
 
-  const name = status?.name || runId;
+  const name = status?.name || projectId;
   const st = status ? statusOf(status) : null;
 
   return (
@@ -69,8 +69,8 @@ export function ProjectView({ runId, onBack, onOpenFactory }: { runId: string; o
 
       {/* tab content (peer views; Factory console navigates out via onOpenFactory) */}
       {tab === "overview"
-        ? <OverviewTab runId={runId} onOpenFactory={onOpenFactory} />
-        : <DocumentsTab runId={runId} />}
+        ? <OverviewTab projectId={projectId} onOpenFactory={onOpenFactory} />
+        : <DocumentsTab projectId={projectId} />}
     </div>
   );
 }

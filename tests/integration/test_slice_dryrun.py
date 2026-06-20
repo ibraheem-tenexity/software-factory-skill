@@ -6,7 +6,7 @@ This mirrors the exact call sequence SKILL.md tells the orchestrator to make, so
 spine regressions (a gate wired wrong, budget not tracked, resume broken) offline.
 """
 from software_factory.budget import Budget, Usage, BudgetExceeded
-from software_factory.runstate import RunState, JsonFileStore
+from software_factory.projectstate import ProjectState, JsonFileStore
 from software_factory.tickets import TicketStore, HollowWorkError
 from software_factory.repo import GitHub, RunResult
 from software_factory.gate import happy_flow_passed, bugs_from
@@ -31,9 +31,9 @@ def deploy_runner(url):
 
 def test_happy_slice_reaches_done_under_budget(tmp_path):
     store = JsonFileStore(str(tmp_path))
-    state = RunState.load("run-dry", store)
+    state = ProjectState.load("project-dry", store)
     budget = Budget(100.0)
-    tickets = TicketStore(str(tmp_path / "tickets.db"))
+    tickets = TicketStore(str(tmp_path / "project-1"))
     gh = GitHub(run=gh_runner())
 
     # provision
@@ -73,7 +73,7 @@ def test_happy_slice_reaches_done_under_budget(tmp_path):
     state.phase = "done"; state.spent_usd = budget.spent(); state.save()
 
     # run is resumable: a fresh load sees DONE with real recorded spend
-    resumed = RunState.load("run-dry", JsonFileStore(str(tmp_path)))
+    resumed = ProjectState.load("project-dry", JsonFileStore(str(tmp_path)))
     assert resumed.phase == "done"
     assert resumed.deploy_url == "https://guestbook.vercel.app"
     assert 0 < resumed.spent_usd < 100
@@ -81,7 +81,7 @@ def test_happy_slice_reaches_done_under_budget(tmp_path):
 
 def test_empty_diff_build_cannot_reach_done(tmp_path):
     """A no-op build turn must not pass the build gate, at either guard."""
-    tickets = TicketStore(str(tmp_path / "t.db"))
+    tickets = TicketStore(str(tmp_path / "project-1"))
     gh = GitHub(run=gh_runner(checks_rc=0))
     tid = tickets.create_ticket("t", acceptance="a", dod="d", wave=1)
     pr = gh.open_pr(branch="feat", title="t", body="b")

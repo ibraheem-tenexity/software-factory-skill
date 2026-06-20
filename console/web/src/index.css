@@ -111,9 +111,9 @@ select { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(
 .pipeline-strip { display: flex; gap: 8px; margin: 14px 0 24px; flex-wrap: wrap; }
 .pipeline-strip span { background: var(--card); border: 1px solid var(--border); border-radius: 999px;
   padding: 5px 12px; font-weight: 600; font-size: 0.78rem; }
-.run-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
-.run-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.project-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 14px; cursor: pointer; }
-.run-card:hover { border-color: var(--primary); }
-.run-card .name { font-weight: 700; }
-.run-card .meta { color: var(--muted-fg); font-size: 0.76rem; margin-top: 6px; }
+.project-card:hover { border-color: var(--primary); }
+.project-card .name { font-weight: 700; }
+.project-card .meta { color: var(--muted-fg); font-size: 0.76rem; margin-top: 6px; }

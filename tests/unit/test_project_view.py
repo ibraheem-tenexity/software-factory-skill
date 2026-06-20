@@ -22,12 +22,12 @@ def test_build_status_no_tickets_is_zero_pct():
 
 def test_services_at_work_from_real_signals_only():
     org = {"connected_systems": ["epicor"]}
-    deployments = [{"service_name": "sf-run-ab12", "app": "web", "url": "https://x", "status": "live"}]
+    deployments = [{"service_name": "sf-project-ab12", "app": "web", "url": "https://x", "status": "live"}]
     svc = pv.services_at_work(org, deployments, impl_model="claude-opus-4-8",
                               has_verification=True, in_build=True)
     kinds = [(s["kind"], s["label"], s["status"]) for s in svc]
     assert ("Integration", "epicor", "connected") in kinds
-    assert ("Hosting", "sf-run-ab12", "live") in kinds
+    assert ("Hosting", "sf-project-ab12", "live") in kinds
     assert ("LLM", "claude-opus-4-8", "active") in kinds
     assert ("Testing", "Playwright", "passed") in kinds
     host = next(s for s in svc if s["kind"] == "Hosting")
@@ -52,7 +52,7 @@ def test_agents_projection_joins_ticket_title():
 
 
 def test_documents_uploaded_name_from_storage_key_and_kind():
-    blobs = [{"storage_key": "run-abc/inputs/sample-rfq-email.pdf", "size_bytes": 94208,
+    blobs = [{"storage_key": "project-abc/inputs/sample-rfq-email.pdf", "size_bytes": 94208,
               "content_type": "application/pdf", "created_at": 1718000000.0}]
     artifacts = [{"title": "Architecture", "path": "workspace/ARCHITECTURE.md", "kind": "plan",
                   "agent": "architect", "ts": 1718000500.0}]

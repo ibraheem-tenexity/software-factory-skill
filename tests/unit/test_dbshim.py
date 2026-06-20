@@ -63,16 +63,16 @@ def pg(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@pooler:6543/postgres")
     fake = FakePgConn()
     monkeypatch.setattr(dbshim, "_pg_connect", lambda url: fake)
-    conn = dbshim.connect(str(tmp_path / "run-abc12345" / "run.db"))
+    conn = dbshim.connect(str(tmp_path / "project-abc12345"))
     return conn, fake
 
 
 def test_pg_runs_against_public_no_schema_per_run(pg):
-    # Flat schema: there is no per-run schema and no search_path — statements run against public.
+    # Flat schema: there is no per-project schema and no search_path — statements run against public.
     conn, fake = pg
     conn.execute("SELECT * FROM phases WHERE name = ?", ("build",))
     sqls = [s for s, _ in fake.statements]
-    assert not any("SET LOCAL search_path" in s for s in sqls)     # schema-per-run is gone
+    assert not any("SET LOCAL search_path" in s for s in sqls)     # schema-per-project is gone
     assert not any("CREATE SCHEMA" in s for s in sqls)
     assert any("FROM phases WHERE name = %s" in s for s in sqls)    # ?->%s still translated
     assert fake.tx_count >= 1                                       # every stmt inside a tx
@@ -106,7 +106,7 @@ def test_pg_write_retries_then_raises(monkeypatch, tmp_path):
 
     monkeypatch.setattr(dbshim, "_pg_connect", lambda url: Boom())
     monkeypatch.setattr(dbshim, "_RETRY_SLEEP", 0)
-    conn = dbshim.connect(str(tmp_path / "run-r" / "run.db"))
+    conn = dbshim.connect(str(tmp_path / "project-r"))
     with pytest.raises(ConnectionError):
         conn.execute("INSERT INTO phases (name) VALUES (?)", ("x",))
     assert len(attempts) == 3                                          # 3 tries, then surface
@@ -114,14 +114,14 @@ def test_pg_write_retries_then_raises(monkeypatch, tmp_path):
 
 def test_pg_connect_creates_no_schema_or_registry(monkeypatch, tmp_path):
     # Flat schema: connecting performs NO side effects — no CREATE SCHEMA, no sf_runs registry
-    # write (those were the schema-per-run machinery, now retired). The first statement is the
+    # write (those were the schema-per-project machinery, now retired). The first statement is the
     # caller's own; nothing is injected ahead of it.
     monkeypatch.setenv("SF_ENVIRONMENT", "test")
     monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@x:6543/postgres")
     fake = FakePgConn()
     monkeypatch.setattr(dbshim, "_pg_connect", lambda url: fake)
-    conn = dbshim.connect(str(tmp_path / "run-abc12345" / "run.db"))
+    conn = dbshim.connect(str(tmp_path / "project-abc12345"))
     assert fake.statements == []                                    # connect() is side-effect free
     conn.execute("SELECT 1")
     sqls = [s for s, _ in fake.statements]
@@ -130,7 +130,7 @@ def test_pg_connect_creates_no_schema_or_registry(monkeypatch, tmp_path):
 
 
 def test_registry_runs_reads_runstate(monkeypatch):
-    # Run discovery in flat mode comes from public.runstate (the sf_runs registry is retired).
+    # Run discovery in flat mode comes from public.projectstate (the sf_runs registry is retired).
     monkeypatch.setenv("SF_ENVIRONMENT", "test")
     monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@x:6543/postgres")
@@ -138,8 +138,8 @@ def test_registry_runs_reads_runstate(monkeypatch):
     class RunstateCursor(FakeCursor):
         def execute(self, sql, params=None):
             self.log.append((sql.strip(), tuple(params or ())))
-            if "FROM public.runstate" in sql:
-                self._rows = [{"run_id": "run-aaaaaaaa"}, {"run_id": "run-bbbbbbbb"}]
+            if "FROM public.projectstate" in sql:
+                self._rows = [{"project_id": "project-aaaaaaaa"}, {"project_id": "project-bbbbbbbb"}]
             return self
 
     class RunstateConn(FakePgConn):
@@ -147,7 +147,7 @@ def test_registry_runs_reads_runstate(monkeypatch):
             return RunstateCursor(self.statements)
 
     monkeypatch.setattr(dbshim, "_pg_connect", lambda url: RunstateConn())
-    runs = dbshim.registry_runs()
-    assert sorted(r["run_id"] for r in runs) == ["run-aaaaaaaa", "run-bbbbbbbb"]
+    runs = dbshim.registry_projects()
+    assert sorted(r["project_id"] for r in runs) == ["project-aaaaaaaa", "project-bbbbbbbb"]
 
 

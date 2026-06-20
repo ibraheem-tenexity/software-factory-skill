@@ -1,6 +1,6 @@
 """Proposal §4 — pull-not-push memory + ReasoningBank precedent loop.
 
-Namespaces match the proposal: project/<id>, run/<id>, tickets/<id>, coordination. Agents PULL
+Namespaces match the proposal: project/<id>, tickets/<id>, coordination. Agents PULL
 the slice they need (never a pushed bundle). The ReasoningBank loop records each agent's
 trajectory→verdict, recalls precedent by similarity (with confidence/success counts), and
 consolidates (distill + prune) between phases so memory stays small.
@@ -19,10 +19,6 @@ COORDINATION = "coordination"
 
 def project_ns(pid: str) -> str:
     return f"project/{pid}"
-
-
-def run_ns(rid: str) -> str:
-    return f"run/{rid}"
 
 
 def ticket_ns(tid) -> str:

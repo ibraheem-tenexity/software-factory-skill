@@ -13,9 +13,9 @@ from software_factory.chat_store import ChatMessage
 @pytest.fixture
 def mock_console():
     c = MagicMock()
-    c.start_run = MagicMock(return_value="run-test123")
+    c.start_project = MagicMock(return_value="project-test123")
     c.status = MagicMock(return_value={
-        "run_id": "run-test123", "phase": "research", "stage": 1,
+        "project_id": "project-test123", "phase": "research", "stage": 1,
         "stage1_done": False, "stage2_done": False,
         "deps_required": [], "deps_satisfied": False,
         "spent_usd": 1.23, "status": "running",
@@ -33,7 +33,7 @@ def mock_console():
         "url": "https://sf-test123.up.railway.app",
         "artifacts": ["PRD.md", "architecture.md"],
     })
-    c._runs_dir = "/tmp/test-runs"
+    c._projects_dir = "/tmp/test-runs"
     return c
 
 
@@ -61,31 +61,31 @@ class TestMakeTools:
         assert "record_brief_section" not in names and "start_pipeline" not in names
 
     def test_hand_off_to_factory_promotes_the_active_draft(self, mock_console):
-        mock_console.promote_draft = MagicMock(return_value="run-test123")
-        tools = make_tools(mock_console, draft_id=lambda: "run-test123",
+        mock_console.promote_draft = MagicMock(return_value="project-test123")
+        tools = make_tools(mock_console, draft_id=lambda: "project-test123",
                            interview=lambda: "USER: build a guestbook")
         h = next(t for t in tools if t.name == "hand_off_to_factory")
         result = asyncio.get_event_loop().run_until_complete(h.on_invoke_tool(None, json.dumps({})))
         mock_console.promote_draft.assert_called_once()
-        assert mock_console.promote_draft.call_args[0][0] == "run-test123"
+        assert mock_console.promote_draft.call_args[0][0] == "project-test123"
         assert mock_console.promote_draft.call_args.kwargs["interview_md"].startswith("USER:")
-        assert "run-test123" in result
+        assert "project-test123" in result
 
     def test_set_project_basics_writes_draft(self, mock_console):
         mock_console.set_draft_project = MagicMock(return_value={"name": "Quote-to-Epicor", "goal": "g"})
-        tools = make_tools(mock_console, draft_id=lambda: "run-test123")
+        tools = make_tools(mock_console, draft_id=lambda: "project-test123")
         t = next(t for t in tools if t.name == "set_project_basics")
         asyncio.get_event_loop().run_until_complete(
             t.on_invoke_tool(None, json.dumps({"name": "Quote-to-Epicor", "goal": "g"})))
-        mock_console.set_draft_project.assert_called_once_with("run-test123", name="Quote-to-Epicor", goal="g")
+        mock_console.set_draft_project.assert_called_once_with("project-test123", name="Quote-to-Epicor", goal="g")
 
     def test_set_project_scope_writes_draft(self, mock_console):
         mock_console.set_draft_project = MagicMock(return_value={"scope": ["Inventory"]})
-        tools = make_tools(mock_console, draft_id=lambda: "run-test123")
+        tools = make_tools(mock_console, draft_id=lambda: "project-test123")
         t = next(t for t in tools if t.name == "set_project_scope")
         asyncio.get_event_loop().run_until_complete(
             t.on_invoke_tool(None, json.dumps({"scope": ["Inventory"]})))
-        mock_console.set_draft_project.assert_called_once_with("run-test123", scope=["Inventory"])
+        mock_console.set_draft_project.assert_called_once_with("project-test123", scope=["Inventory"])
 
     def test_get_company_profile_reads_org(self, mock_console, mock_users):
         mock_users.org_for_user = MagicMock(return_value={"id": "org-1", "name": "Acme"})
@@ -116,7 +116,7 @@ class TestMakeTools:
         mock_users.org_for_user = MagicMock(return_value={"id": "org-1", "name": "Acme"})
         mock_console.draft_project = MagicMock(return_value={"name": "P", "goal": "g", "scope": []})
         tools = make_tools(mock_console, users=mock_users, owner=lambda: "op@x.ai",
-                           draft_id=lambda: "run-test123")
+                           draft_id=lambda: "project-test123")
         t = next(t for t in tools if t.name == "get_intake_state")
         out = json.loads(asyncio.get_event_loop().run_until_complete(t.on_invoke_tool(None, "{}")))
         assert out["company"]["name"] == "Acme" and out["project"]["name"] == "P"
@@ -125,9 +125,9 @@ class TestMakeTools:
         tools = make_tools(mock_console)
         check = next(t for t in tools if t.name == "check_status")
         result = asyncio.get_event_loop().run_until_complete(
-            check.on_invoke_tool(None, json.dumps({"run_id": "run-test123"}))
+            check.on_invoke_tool(None, json.dumps({"project_id": "project-test123"}))
         )
-        mock_console.status.assert_called_once_with("run-test123")
+        mock_console.status.assert_called_once_with("project-test123")
         parsed = json.loads(result)
         assert parsed["phase"] == "research"
 
@@ -136,7 +136,7 @@ class TestMakeTools:
         req_dep = next(t for t in tools if t.name == "request_dep_input")
         result = asyncio.get_event_loop().run_until_complete(
             req_dep.on_invoke_tool(None, json.dumps({
-                "run_id": "run-test123",
+                "project_id": "project-test123",
                 "dep_names": ["RAILWAY_TOKEN"],
             }))
         )
@@ -149,37 +149,37 @@ class TestChatToolOwnership:
     """Run-scoped chat tools must enforce the same ownership rules as the HTTP layer."""
 
     def test_member_cannot_check_status_of_foreign_run(self, mock_console):
-        mock_console.run_owner = MagicMock(return_value="other@example.com")
+        mock_console.project_owner = MagicMock(return_value="other@example.com")
         tools = make_tools(mock_console, viewer=lambda: ("user@example.com", "member"))
         check = next(t for t in tools if t.name == "check_status")
         result = asyncio.get_event_loop().run_until_complete(
-            check.on_invoke_tool(None, json.dumps({"run_id": "run-test123"}))
+            check.on_invoke_tool(None, json.dumps({"project_id": "project-test123"}))
         )
         parsed = json.loads(result)
         assert parsed.get("error") == "forbidden"
         mock_console.status.assert_not_called()
 
     def test_member_can_check_status_of_own_run(self, mock_console):
-        mock_console.run_owner = MagicMock(return_value="user@example.com")
+        mock_console.project_owner = MagicMock(return_value="user@example.com")
         tools = make_tools(mock_console, viewer=lambda: ("user@example.com", "member"))
         check = next(t for t in tools if t.name == "check_status")
         result = asyncio.get_event_loop().run_until_complete(
-            check.on_invoke_tool(None, json.dumps({"run_id": "run-test123"}))
+            check.on_invoke_tool(None, json.dumps({"project_id": "project-test123"}))
         )
         parsed = json.loads(result)
         assert "error" not in parsed
-        mock_console.status.assert_called_once_with("run-test123")
+        mock_console.status.assert_called_once_with("project-test123")
 
     def test_admin_bypasses_ownership_check(self, mock_console):
-        mock_console.run_owner = MagicMock(return_value="other@example.com")
+        mock_console.project_owner = MagicMock(return_value="other@example.com")
         tools = make_tools(mock_console, viewer=lambda: ("admin@example.com", "admin"))
         get = next(t for t in tools if t.name == "get_result")
         result = asyncio.get_event_loop().run_until_complete(
-            get.on_invoke_tool(None, json.dumps({"run_id": "run-test123"}))
+            get.on_invoke_tool(None, json.dumps({"project_id": "project-test123"}))
         )
         parsed = json.loads(result)
         assert parsed.get("error") != "forbidden"
-        mock_console.evidence.assert_called_once_with("run-test123")
+        mock_console.evidence.assert_called_once_with("project-test123")
 
 
 def _fake_run_result(new_items, final_output=None):
@@ -232,7 +232,7 @@ class TestHandleMessage:
         runner = ChatAgentRunner(mock_console)
         with patch("agents.Runner.run", new=AsyncMock(return_value=_fake_run_result(items))):
             rid, msgs = asyncio.get_event_loop().run_until_complete(
-                runner.handle_message("run-abcd1234", "university success office", [], [])
+                runner.handle_message("project-abcd1234", "university success office", [], [])
             )
         text_msgs = [m for m in msgs if m.msg_type == "text"]
         assert len(text_msgs) == 1
@@ -252,9 +252,9 @@ class TestHandleMessage:
         with patch("agents.Runner.run", new=AsyncMock(return_value=_fake_run_result([item]))):
             rid, msgs = asyncio.get_event_loop().run_until_complete(
                 # the server mints the draft id and passes it in; promotion keeps that same id
-                runner.handle_message("run-abcd1234", "build a guestbook", [], [])
+                runner.handle_message("project-abcd1234", "build a guestbook", [], [])
             )
-        assert rid == "run-abcd1234"
+        assert rid == "project-abcd1234"
         assert any(m.msg_type == "pipeline_started" for m in msgs)
 
     def test_request_dep_input_tool_call_is_parsed(self, mock_console):
@@ -270,7 +270,7 @@ class TestHandleMessage:
         runner = ChatAgentRunner(mock_console)
         with patch("agents.Runner.run", new=AsyncMock(return_value=_fake_run_result([item]))):
             rid, msgs = asyncio.get_event_loop().run_until_complete(
-                runner.handle_message("run-test123", "here are deps", [], [])
+                runner.handle_message("project-test123", "here are deps", [], [])
             )
         dep_msg = next(m for m in msgs if m.msg_type == "dep_request")
         assert "RAILWAY_TOKEN" in dep_msg.metadata["dep_names"]
@@ -308,7 +308,7 @@ class TestHandleMessage:
         runner = ChatAgentRunner(mock_console)
         with patch("agents.Runner.run", new=AsyncMock(return_value=_fake_run_result([item]))):
             _, msgs = asyncio.get_event_loop().run_until_complete(
-                runner.handle_message("run-abcd1234", "deps", [], [])
+                runner.handle_message("project-abcd1234", "deps", [], [])
             )
         assert all(m.msg_type != "dep_request" for m in msgs)
 
@@ -324,36 +324,36 @@ class TestChatAgentRunner:
 
     def test_check_and_notify_stage1_done(self, mock_console):
         mock_console.status.return_value = {
-            "run_id": "run-test123", "phase": "architect", "stage": 2,
+            "project_id": "project-test123", "phase": "architect", "stage": 2,
             "stage1_done": True, "stage2_done": False,
             "deps_required": [], "deps_satisfied": False,
             "spent_usd": 2.0, "status": "running",
         }
         runner = ChatAgentRunner(mock_console)
-        msgs = runner.check_and_notify("run-test123", prev_stage=1)
+        msgs = runner.check_and_notify("project-test123", prev_stage=1)
         assert any(m.msg_type == "status_update" for m in msgs)
 
     def test_check_and_notify_deps_needed(self, mock_console):
         mock_console.status.return_value = {
-            "run_id": "run-test123", "phase": "tickets", "stage": 2,
+            "project_id": "project-test123", "phase": "tickets", "stage": 2,
             "stage1_done": True, "stage2_done": True,
             "deps_required": ["RAILWAY_TOKEN"], "deps_satisfied": False,
             "spent_usd": 3.0, "status": "running",
         }
         runner = ChatAgentRunner(mock_console)
-        msgs = runner.check_and_notify("run-test123", prev_stage=2)
+        msgs = runner.check_and_notify("project-test123", prev_stage=2)
         assert any(m.msg_type == "dep_request" for m in msgs)
 
     def test_check_and_notify_complete(self, mock_console):
         mock_console.status.return_value = {
-            "run_id": "run-test123", "phase": "done", "stage": 3,
+            "project_id": "project-test123", "phase": "done", "stage": 3,
             "stage1_done": True, "stage2_done": True,
             "deps_required": [], "deps_satisfied": True,
             "spent_usd": 8.0, "done": True,
             "deploy_url": "https://sf-test123.up.railway.app",
         }
         runner = ChatAgentRunner(mock_console)
-        msgs = runner.check_and_notify("run-test123", prev_stage=3)
+        msgs = runner.check_and_notify("project-test123", prev_stage=3)
         assert any(m.msg_type == "complete" for m in msgs)
         complete_msg = next(m for m in msgs if m.msg_type == "complete")
         assert "sf-test123" in complete_msg.content
@@ -366,7 +366,7 @@ class TestModelPickThreading:
 
     def _real_console(self, tmp_path):
         from software_factory.console import Console
-        ids = iter([f"run-{i:08x}" for i in range(1, 9)])
+        ids = iter([f"project-{i:08x}" for i in range(1, 9)])
         return Console(str(tmp_path), launch=lambda *a, **k: {"pid": 1}, new_id=lambda: next(ids))
 
     def test_create_draft_threads_model_picks_and_name(self, tmp_path):

@@ -6,8 +6,8 @@ This is the harness around the skill — it launches the skill and reads back th
 artifacts; it does not do the building itself.
 """
 from software_factory.console import (
-    Console, RunRequest, make_prompt, make_prompt_stage1, make_prompt_stage2,
-    make_prompt_stage3, run_paths,
+    Console, ProjectRequest, make_prompt, make_prompt_stage1, make_prompt_stage2,
+    make_prompt_stage3, project_paths,
 )
 from software_factory.agents import AgentRegistry
 from software_factory.budget import Usage
@@ -27,37 +27,37 @@ class FakeLauncher:
 
 
 def console(tmp_path, launcher, extract=lambda path: "# Extracted\n\nbrief contents"):
-    ids = iter(["run-xyz"])
+    ids = iter(["project-xyz"])
     return Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids), extract=extract)
 
 
 def test_make_prompt_invokes_the_skill_with_run_id_target_and_budget():
-    req = RunRequest(description="a guestbook app", context="dark theme", budget=100.0, target="railway")
-    p = make_prompt(req, "run-xyz", runs_dir="/runs")
+    req = ProjectRequest(description="a guestbook app", context="dark theme", budget=100.0, target="railway")
+    p = make_prompt(req, "project-xyz", projects_dir="/runs")
     assert "software-factory" in p          # explicit, deterministic invocation
-    assert "run-xyz" in p
+    assert "project-xyz" in p
     assert "100" in p
     assert "guestbook" in p
-    assert "/runs/run-xyz" in p             # tells the orchestrator where to write artifacts
+    assert "/runs/project-xyz" in p          # tells the orchestrator where to write artifacts
     # Stage 3 prompt carries the deploy target
-    p3 = make_prompt_stage3(req, "run-xyz", runs_dir="/runs")
+    p3 = make_prompt_stage3(req, "project-xyz", projects_dir="/runs")
     assert "railway" in p3
-    assert "sf-run-xyz" in p3
+    assert "sf-project-xyz" in p3
 
 
 def test_start_run_stamps_proof_marker_and_launches_headless_claude(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="a guestbook app", target="railway"))
+    project_id = c.start_project(ProjectRequest(description="a guestbook app", target="railway"))
 
-    assert run_id == "run-xyz"
+    assert project_id == "project-xyz"
     # headless claude was launched with our prompt
     assert launcher.argv is not None
     assert "claude" in launcher.argv[0]
     assert any("software-factory" in a for a in launcher.argv)
 
     # the run is stamped at launch: this is the receipt of intent (teeth are in verify_evidence)
-    st = c.status(run_id)
+    st = c.status(project_id)
     assert st["skill"] == "software-factory"
     assert st["description"] == "a guestbook app"
     assert st["deploy_target"] == "railway"
@@ -68,22 +68,22 @@ def test_start_run_stamps_proof_marker_and_launches_headless_claude(tmp_path):
 def test_status_reflects_agents_phase_and_deployed_url(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook", target="railway"))
+    project_id = c.start_project(ProjectRequest(description="guestbook", target="railway"))
 
     # simulate the skill making progress in the SAME artifact locations the console reads
-    paths = run_paths(str(tmp_path), run_id)
+    paths = project_paths(str(tmp_path), project_id)
     reg = AgentRegistry(paths["agents_db"], clock=lambda: 1)
-    reg.spawn("a1", run_id, 1, "build", "claude-opus-4-8")
+    reg.spawn("a1", project_id, 1, "build", "claude-opus-4-8")
     reg.record("a1", outcome="real_diff", usage=Usage("claude-opus-4-8", output_tokens=4000),
                cost_usd=0.42, provenance="7", diff_lines=120)
 
-    state = c._load_state(run_id)
+    state = c._load_state(project_id)
     state.phase = "done"
     state.deploy_url = "https://guestbook.up.railway.app"
     state.spent_usd = 0.42
     state.save()
 
-    st = c.status(run_id)
+    st = c.status(project_id)
     assert st["phase"] == "done"
     assert st["done"] is True
     assert st["deploy_url"] == "https://guestbook.up.railway.app"
@@ -97,7 +97,7 @@ SECRET = "rwt_super_secret_token_value_123"
 def test_byo_railway_token_is_passed_as_env_not_in_prompt_or_argv(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    c.start_run(RunRequest(description="guestbook", target="railway",
+    c.start_project(ProjectRequest(description="guestbook", target="railway",
                            credentials={"RAILWAY_TOKEN": SECRET}))
     # injected into the child env...
     assert launcher.env["RAILWAY_TOKEN"] == SECRET
@@ -108,7 +108,7 @@ def test_byo_railway_token_is_passed_as_env_not_in_prompt_or_argv(tmp_path):
 def test_credentials_are_never_written_to_disk(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook", target="railway",
+    project_id = c.start_project(ProjectRequest(description="guestbook", target="railway",
                                     credentials={"RAILWAY_TOKEN": SECRET}))
     # scan every file under the runs dir — the token value must not appear anywhere
     import os
@@ -117,24 +117,24 @@ def test_credentials_are_never_written_to_disk(tmp_path):
             with open(os.path.join(root, fn), "rb") as f:
                 assert SECRET.encode() not in f.read(), f"secret leaked into {fn}"
     # but the run records WHICH creds were provided (names only) for the live view
-    assert "RAILWAY_TOKEN" in c.status(run_id)["creds_provided"]
+    assert "RAILWAY_TOKEN" in c.status(project_id)["creds_provided"]
 
 
 def test_status_and_evidence_never_expose_secret_values(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook", target="railway",
+    project_id = c.start_project(ProjectRequest(description="guestbook", target="railway",
                                     credentials={"RAILWAY_TOKEN": SECRET}))
     import json
-    assert SECRET not in json.dumps(c.status(run_id))
-    assert SECRET not in json.dumps(c.evidence(run_id))
+    assert SECRET not in json.dumps(c.status(project_id))
+    assert SECRET not in json.dumps(c.evidence(project_id))
 
 
 def test_empty_credentials_are_ignored(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook", credentials={"RAILWAY_TOKEN": ""}))
-    assert c.status(run_id)["creds_provided"] == []
+    project_id = c.start_project(ProjectRequest(description="guestbook", credentials={"RAILWAY_TOKEN": ""}))
+    assert c.status(project_id)["creds_provided"] == []
     assert "RAILWAY_TOKEN" not in launcher.env
 
 
@@ -142,9 +142,9 @@ def test_uploaded_pdf_is_extracted_to_markdown_and_composed_into_stage1_input(tm
     import base64, os
     c = console(tmp_path, FakeLauncher(), extract=lambda path: "# Brief\n\nEPC contract T&C")
     b64 = base64.b64encode(b"%PDF-1.4 ...").decode()
-    run_id = c.start_run(RunRequest(description="analyze this",
+    project_id = c.start_project(ProjectRequest(description="analyze this",
                                     context_files=[{"name": "brief.pdf", "content_b64": b64}]))
-    input_dir = os.path.join(str(tmp_path), run_id, "input")
+    input_dir = os.path.join(str(tmp_path), project_id, "input")
     # raw PDF is consumed by the conversion; the markdown is what Stage 1 reads
     assert not os.path.exists(os.path.join(input_dir, "brief.pdf"))
     assert "EPC contract T&C" in open(os.path.join(input_dir, "brief.pdf.md")).read()
@@ -157,60 +157,60 @@ def test_uploaded_pdf_is_extracted_to_markdown_and_composed_into_stage1_input(tm
 def test_retry_stage2_relaunches_with_the_stage2_prompt(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="x", target="railway"))
-    st = c._load_state(run_id); st.stage1_done = True; st.save()
+    project_id = c.start_project(ProjectRequest(description="x", target="railway"))
+    st = c._load_state(project_id); st.stage1_done = True; st.save()
     launcher.argv = None
 
-    out = c.retry_stage(run_id, 2)
+    out = c.retry_stage(project_id, 2)
 
-    assert out == run_id
+    assert out == project_id
     assert launcher.argv is not None and "claude" in launcher.argv[0]
     assert "Stage 2" in launcher.argv[2]        # the rebuilt prompt is for stage 2
-    assert c.status(run_id)["stage"] == 2
+    assert c.status(project_id)["stage"] == 2
 
 
 def test_retry_stage2_blocked_when_stage1_not_done(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="x"))
-    st = c._load_state(run_id); st.stage1_done = False; st.save()
+    project_id = c.start_project(ProjectRequest(description="x"))
+    st = c._load_state(project_id); st.stage1_done = False; st.save()
     launcher.argv = None
 
-    assert c.retry_stage(run_id, 2) is None
+    assert c.retry_stage(project_id, 2) is None
     assert launcher.argv is None                # nothing relaunched
 
 
 def test_retry_clears_the_target_stage_done_flag(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="x"))
-    st = c._load_state(run_id); st.stage1_done = True; st.stage2_done = True; st.save()
+    project_id = c.start_project(ProjectRequest(description="x"))
+    st = c._load_state(project_id); st.stage1_done = True; st.stage2_done = True; st.save()
 
-    c.retry_stage(run_id, 2)
+    c.retry_stage(project_id, 2)
 
-    assert c.status(run_id)["stage2_done"] is False   # re-runs so the gate re-evaluates
+    assert c.status(project_id)["stage2_done"] is False   # re-runs so the gate re-evaluates
 
 
 def test_retry_invalid_stage_returns_none(tmp_path):
     c = console(tmp_path, FakeLauncher())
-    run_id = c.start_run(RunRequest(description="x"))
-    assert c.retry_stage(run_id, 9) is None
+    project_id = c.start_project(ProjectRequest(description="x"))
+    assert c.retry_stage(project_id, 9) is None
 
 
 def test_uploaded_filenames_are_basename_only_no_traversal(tmp_path):
     import base64, os
     c = console(tmp_path, FakeLauncher())
     b64 = base64.b64encode(b"x").decode()
-    run_id = c.start_run(RunRequest(description="d",
+    project_id = c.start_project(ProjectRequest(description="d",
                                     context_files=[{"name": "../../evil.txt", "content_b64": b64}]))
-    assert os.path.exists(os.path.join(str(tmp_path), run_id, "input", "evil.txt"))
+    assert os.path.exists(os.path.join(str(tmp_path), project_id, "input", "evil.txt"))
     assert not os.path.exists(os.path.join(str(tmp_path), "evil.txt"))
 
 
 def test_make_prompt_targets_a_dedicated_service_not_the_runner(tmp_path):
     # Spec 1: the built app must deploy to its OWN service, never the runner's own.
-    p = make_prompt_stage3(RunRequest(description="x", target="railway"), "run-xyz", runs_dir="/runs")
-    assert "sf-run-xyz" in p           # per-run dedicated service name
+    p = make_prompt_stage3(ProjectRequest(description="x", target="railway"), "project-xyz", projects_dir="/runs")
+    assert "sf-project-xyz" in p        # per-project dedicated service name
     assert "never" in p.lower()  # explicit don't-clobber warning
 
 
@@ -218,10 +218,10 @@ def test_status_cost_is_derived_from_the_run_log(tmp_path):
     # Spec 2: live cost comes from the real claude stream, not self-reported state.
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook"))
+    project_id = c.start_project(ProjectRequest(description="guestbook"))
     with open(launcher.log_path, "w") as f:
         f.write('{"type":"result","subtype":"success","total_cost_usd":0.0731}\n')
-    assert c.status(run_id)["spent_usd"] == 0.0731
+    assert c.status(project_id)["spent_usd"] == 0.0731
 
 
 def test_list_runs_returns_launched_runs_for_reconnect(tmp_path):
@@ -229,11 +229,11 @@ def test_list_runs_returns_launched_runs_for_reconnect(tmp_path):
     c = console(tmp_path, FakeLauncher())
     ids = []
     for i in range(2):
-        c._new_id = lambda i=i: f"run-{i}"
-        ids.append(c.start_run(RunRequest(description=f"app {i}")))
-    listed = {r["run_id"] for r in c.list_runs()}
+        c._new_id = lambda i=i: f"project-{i}"
+        ids.append(c.start_project(ProjectRequest(description=f"app {i}")))
+    listed = {r["project_id"] for r in c.list_projects()}
     assert set(ids) <= listed
-    one = [r for r in c.list_runs() if r["run_id"] == "run-0"][0]
+    one = [r for r in c.list_projects() if r["project_id"] == "project-0"][0]
     assert one["description"] == "app 0" and "phase" in one
 
 
@@ -241,41 +241,41 @@ def test_list_runs_includes_distinct_agent_roles_and_updated_timestamp(tmp_path)
     # The projects dashboard (PRD §2.2) renders a per-project agent avatar-stack + last-activity,
     # so each run carries `agents` (distinct roles, first-seen order) and an `updated` epoch.
     c = console(tmp_path, FakeLauncher())
-    c._new_id = lambda: "run-0"
-    rid = c.start_run(RunRequest(description="app"))
-    paths = run_paths(str(tmp_path), rid)
+    c._new_id = lambda: "project-0"
+    rid = c.start_project(ProjectRequest(description="app"))
+    paths = project_paths(str(tmp_path), rid)
     reg = AgentRegistry(paths["agents_db"], clock=lambda: 1)
     reg.spawn("a1", rid, 1, "architect", "claude-opus-4-8", phase="architect")
     reg.spawn("a2", rid, 2, "build", "claude-sonnet-4-6", phase="build")
     reg.spawn("a3", rid, 3, "build", "claude-sonnet-4-6", phase="build")  # dup role collapses
 
-    row = [r for r in c.list_runs() if r["run_id"] == rid][0]
+    row = [r for r in c.list_projects() if r["project_id"] == rid][0]
     assert row["agents"] == ["architect", "build"]      # distinct, first-seen order
     assert isinstance(row["updated"], (int, float)) and row["updated"] > 0
 
 
 def test_list_runs_agents_empty_when_none_spawned(tmp_path):
     c = console(tmp_path, FakeLauncher())
-    c._new_id = lambda: "run-0"
-    rid = c.start_run(RunRequest(description="app"))
-    row = [r for r in c.list_runs() if r["run_id"] == rid][0]
+    c._new_id = lambda: "project-0"
+    rid = c.start_project(ProjectRequest(description="app"))
+    row = [r for r in c.list_projects() if r["project_id"] == rid][0]
     assert row["agents"] == []
 
 
 def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     from software_factory.agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
-    run_id = c.start_run(RunRequest(description="guestbook"))
+    project_id = c.start_project(ProjectRequest(description="guestbook"))
     d = str(tmp_path)
-    # an agent, an artifact, a blocker, and an open gate — ALL recorded in run.db (no events)
-    AgentRegistry(db_path(d, run_id)).spawn("t1", run_id, None, "build form", "claude-sonnet-4-6", phase="build")
-    db = RunDB(db_path(d, run_id))
+    # an agent, an artifact, a blocker, and an open gate — ALL recorded in project.db (no events)
+    AgentRegistry(db_path(d, project_id)).spawn("t1", project_id, None, "build form", "claude-sonnet-4-6", phase="build")
+    db = ProjectStore(db_path(d, project_id))
     db.record_artifact("PRD", "PRD.md", kind="prd")
     db.add_blocker("Supabase project not ready", blocks="wait-for-deps")
     db.set_gate("prd", "awaiting")
 
-    g = c.graph(run_id)
+    g = c.graph(project_id)
     kinds = {n["data"]["kind"] for n in g["nodes"]}
     assert {"orchestrator", "phase", "agent", "artifact", "blocker", "gate"} <= kinds
     phase_labels = {n["data"]["label"] for n in g["nodes"] if n["data"]["kind"] == "phase"}
@@ -296,9 +296,9 @@ def test_auto_resume_relaunches_a_dead_incomplete_stage(tmp_path):
     proc = FakeProc(); argvs = []
     def launcher(argv, env=None, log_path=None, cwd=None):
         argvs.append(argv); return proc
-    ids = iter(["run-ar"])
+    ids = iter(["project-ar"])
     c = Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids))
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid)
     st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True; st.stage = 3
     st.save()
@@ -314,26 +314,26 @@ def test_auto_resume_does_not_fire_at_the_deps_gate_or_when_budget_blocked(tmp_p
     class FakeProc:
         def __init__(self): self.exit_code = 0
         def poll(self): return self.exit_code
-    ids = iter(["run-ng"])
+    ids = iter(["project-ng"])
     c = Console(str(tmp_path), launch=lambda *a, **k: FakeProc(), new_id=lambda: next(ids))
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid)
     st.stage1_done = True; st.stage2_done = True; st.stage = 2   # finished S2, waiting on deps
     st.save()
     assert c.auto_resume_dead_stage(rid) is False
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     st = c._load_state(rid); st.stage = 3; st.deps_satisfied = True; st.save()
-    RunDB(db_path(str(tmp_path), rid)).add_blocker("Budget cap reached", blocks="budget")
+    ProjectStore(db_path(str(tmp_path), rid)).add_blocker("Budget cap reached", blocks="budget")
     assert c.auto_resume_dead_stage(rid) is False    # budget-stopped: waits for the operator
 
 
 def test_no_launch_path_can_resurrect_a_stopped_run(tmp_path):
-    # run-b71e06a3 scar: cancel marked phase='stopped', but the poller's auto-deps + auto-S3
+    # project-b71e06a3 scar: cancel marked phase='stopped', but the poller's auto-deps + auto-S3
     # path didn't check phase — the canceled run auto-satisfied deps and LAUNCHED Stage 3.
     # Every launch path must refuse terminal runs, and status must surface 'stopped'.
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid)
     st.stage1_done = True; st.stage2_done = True; st.phase = "stopped"
     st.deps_required = ["SUPABASE_URL"]                      # auto-satisfiable (mcp)
@@ -352,17 +352,17 @@ def test_auto_resume_never_resurrects_a_canceled_run(tmp_path):
     # phase='stopped' (operator cancel) is terminal — auto-resume must not bring it back.
     class DeadProc:
         def poll(self): return -9
-    ids = iter(["run-cx"])
+    ids = iter(["project-cx"])
     c = Console(str(tmp_path), launch=lambda *a, **k: DeadProc(), new_id=lambda: next(ids))
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid); st.phase = "stopped"; st.save()
     assert c.auto_resume_dead_stage(rid) is False
 
 
 def test_budget_kill_is_recoverable_raise_and_resume(tmp_path, monkeypatch):
-    # SPEC §4: at the per-run ceiling the poller kills the stage process and records a budget
+    # SPEC §4: at the per-project ceiling the poller kills the stage process and records a budget
     # blocker — but the run is RECOVERABLE: raise_budget(ceiling) clears the blocker and the
-    # higher per-run ceiling lets the stage relaunch.
+    # higher per-project ceiling lets the stage relaunch.
     monkeypatch.setenv("SF_COST_CEILING", "10")
     monkeypatch.setenv("SF_STAGE_RESERVE", "0")
     class FakeProc:
@@ -370,17 +370,17 @@ def test_budget_kill_is_recoverable_raise_and_resume(tmp_path, monkeypatch):
         def poll(self): return self.exit_code
         def terminate(self): self.terminated = True; self.exit_code = -15
     proc = FakeProc()
-    ids = iter(["run-bk"])
+    ids = iter(["project-bk"])
     c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid); st.spent_usd = 11.0; st.save()       # over the $10 ceiling
     assert c.enforce_budget(rid) is True                          # killed
     assert proc.terminated is True
-    from software_factory.db import RunDB, db_path
-    db = RunDB(db_path(str(tmp_path), rid))
+    from software_factory.db import ProjectStore, db_path
+    db = ProjectStore(db_path(str(tmp_path), rid))
     open_blockers = [b for b in db.blockers() if not b["cleared"]]
     assert any(b.get("blocks") == "budget" for b in open_blockers)
-    # recovery: raise the per-run ceiling -> blocker cleared, persisted override honored
+    # recovery: raise the per-project ceiling -> blocker cleared, persisted override honored
     c.raise_budget(rid, 40.0)
     assert c._load_state(rid).budget_ceiling == 40.0
     assert not [b for b in db.blockers() if not b["cleared"]]
@@ -390,32 +390,32 @@ def test_budget_kill_is_recoverable_raise_and_resume(tmp_path, monkeypatch):
 
 
 def test_run_spend_is_per_run_not_cumulative(tmp_path):
-    # Per-run budget: each run/project is capped independently. _run_spend reflects ONLY this run's
+    # Per-run budget: each run/project is capped independently. _project_spend reflects ONLY this run's
     # own spend; a prior run's spend does not count against another.
-    ids = iter(["run-a", "run-b"])
+    ids = iter(["project-a", "project-b"])
     c = Console(str(tmp_path), launch=FakeLauncher(), new_id=lambda: next(ids))
-    a = c.start_run(RunRequest(description="x"))
+    a = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(a); st.spent_usd = 4.0; st.save()
-    b = c.start_run(RunRequest(description="y"))
+    b = c.start_project(ProjectRequest(description="y"))
     st = c._load_state(b); st.spent_usd = 9.0; st.save()
-    assert c._run_spend(a) == 4.0                         # only run-a's spend
-    assert c._run_spend(b) == 9.0                         # run-a's $4 does NOT count against run-b
+    assert c._project_spend(a) == 4.0                         # only project-a's spend
+    assert c._project_spend(b) == 9.0                         # project-a's $4 does NOT count against project-b
 
 
 def test_launch_refused_when_this_runs_spend_crosses_ceiling(tmp_path, monkeypatch):
-    # Mechanical per-run hard stop: refuse a stage launch when THIS run's spend + a stage reserve
+    # Mechanical per-project hard stop: refuse a stage launch when THIS run's spend + a stage reserve
     # would cross SF_COST_CEILING — so the advisory in-prompt budget can't silently blow past it.
     monkeypatch.setenv("SF_COST_CEILING", "10")
     monkeypatch.setenv("SF_STAGE_RESERVE", "5")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid); st.spent_usd = 8.0; st.stage1_done = True; st.save()  # 8 + 5 reserve > 10
     launcher.argv = None
     assert c.start_stage2(rid) is None                   # refused
     assert launcher.argv is None                          # no process launched
-    from software_factory.db import RunDB, db_path
-    blockers = " ".join(b.get("what", "") for b in RunDB(db_path(str(tmp_path), rid)).blockers())
+    from software_factory.db import ProjectStore, db_path
+    blockers = " ".join(b.get("what", "") for b in ProjectStore(db_path(str(tmp_path), rid)).blockers())
     assert "budget" in blockers.lower()
 
 
@@ -424,14 +424,14 @@ def test_launch_proceeds_when_under_ceiling(tmp_path, monkeypatch):
     monkeypatch.setenv("SF_STAGE_RESERVE", "5")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid); st.spent_usd = 2.0; st.stage1_done = True; st.save()
     assert c.start_stage2(rid) == rid                     # well under ceiling -> launches
     assert launcher.argv is not None
 
 
 def test_next_stage_waits_for_prior_stage_process_to_exit(tmp_path):
-    # run-d329e57c scar: detect_stage1_done is mechanical (PRD passes -> poller launches S2)
+    # project-d329e57c scar: detect_stage1_done is mechanical (PRD passes -> poller launches S2)
     # and did NOT wait for the S1 orchestrator PROCESS to exit — two opus orchestrators ran
     # concurrently ~9 min (double burn + S2 reading a workspace S1 was still writing).
     # start_stage2 must refuse while the prior stage's process is alive, then proceed once it exits.
@@ -442,9 +442,9 @@ def test_next_stage_waits_for_prior_stage_process_to_exit(tmp_path):
     launches = []
     def launcher(argv, env=None, log_path=None, cwd=None):
         launches.append(argv); return proc
-    ids = iter(["run-ov"])
+    ids = iter(["project-ov"])
     c = Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids))
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid); st.stage1_done = True; st.save()
     assert c.start_stage2(rid) is None          # S1 process still alive -> refuse
     assert len(launches) == 1                    # no second claude process spawned
@@ -457,7 +457,7 @@ def test_deps_auto_satisfy_when_no_human_secret_needed(tmp_path):
     # SPEC §3: if NO required token classifies as 'provide', the host auto-satisfies deps
     # (mock/mcp dispositions apply) — the deps gate must not be a hidden manual pause.
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid)
     st.stage2_done = True
     st.deps_required = ["SUPABASE_URL", "NEXTAUTH_SECRET"]   # both classify 'mcp' -> no human
@@ -470,7 +470,7 @@ def test_deps_do_not_auto_satisfy_when_a_provide_token_is_required(tmp_path):
     # SPEC §3: 'provide' now ONLY happens when the operator explicitly sets it at the gate —
     # and when they do, the run waits for the real secret instead of auto-launching.
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid)
     st.stage2_done = True
     st.deps_required = ["PARTNER_SSO_SECRET"]
@@ -484,7 +484,7 @@ def test_openrouter_in_runner_env_auto_satisfies_zero_touch(tmp_path, monkeypatc
     # SPEC §3 zero-touch: OPENROUTER present in the runner env classifies 'env' -> no pause.
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-x")
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid)
     st.stage2_done = True
     st.deps_required = ["OPENROUTER_API_KEY"]
@@ -495,15 +495,15 @@ def test_openrouter_in_runner_env_auto_satisfies_zero_touch(tmp_path, monkeypatc
 
 def test_stage_done_requires_the_orchestrator_process_to_have_finished(tmp_path):
     # SPEC §1: a stage is done only when its artifact gate passes AND the process finished.
-    # run-d329e57c scar: the PRD passed while S1 was still alive -> S1+S2 ran concurrently.
+    # project-d329e57c scar: the PRD passed while S1 was still alive -> S1+S2 ran concurrently.
     import os
     class FakeProc:
         def __init__(self): self.exit_code = None
         def poll(self): return self.exit_code
     proc = FakeProc()
-    ids = iter(["run-sf"])
+    ids = iter(["project-sf"])
     c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     ws = os.path.join(str(tmp_path), rid, "workspace"); os.makedirs(ws, exist_ok=True)
     prd = ("# PRD\n" + "\n".join(f"- https://product{i}.example.com real product" for i in range(3))
            + "\n## Acceptance Criteria\n- works\n## Ticket Seeds\n- t1\n")
@@ -516,45 +516,45 @@ def test_stage_done_requires_the_orchestrator_process_to_have_finished(tmp_path)
 
 def test_resurfaced_pre_redesign_run_is_not_a_pipeline_run(tmp_path):
     # Budget-bleed scar: an old run dir (PRD.md on disk, but never started by THIS pipeline)
-    # must NOT auto-advance. start_run records an "input" artifact in run.db; a resurfaced dir
-    # whose run.db is empty (created fresh on load) is_pipeline_run -> False, so the poller skips it.
+    # must NOT auto-advance. start_project records an "input" artifact in project.db; a resurfaced dir
+    # whose project.db is empty (created fresh on load) is_pipeline_project -> False, so the poller skips it.
     import os
     c = console(tmp_path, FakeLauncher())
-    # a real run created by start_run has recorded input artifacts:
-    rid = c.start_run(RunRequest(description="x"))
-    assert c.is_pipeline_run(rid) is True
-    # a resurfaced old dir: just a PRD on disk, no run.db activity.
-    old = os.path.join(str(tmp_path), "run-old")
+    # a real run created by start_project has recorded input artifacts:
+    rid = c.start_project(ProjectRequest(description="x"))
+    assert c.is_pipeline_project(rid) is True
+    # a resurfaced old dir: just a PRD on disk, no project.db activity.
+    old = os.path.join(str(tmp_path), "project-old")
     os.makedirs(os.path.join(old, "workspace"), exist_ok=True)
     open(os.path.join(old, "workspace", "PRD.md"), "w").write("# PRD")
-    assert c.is_pipeline_run("run-old") is False
+    assert c.is_pipeline_project("project-old") is False
 
 
 def test_run_links_surface_repo_and_live_urls(tmp_path):
     # SPEC §6 delivery: repo + live urls projected from the artifacts table for the toolbar,
     # chat narration and the done message.
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
-    assert c.run_links(rid) == {"repo": None, "live": None}
-    db = RunDB(db_path(str(tmp_path), rid))
+    rid = c.start_project(ProjectRequest(description="x"))
+    assert c.project_links(rid) == {"repo": None, "live": None}
+    db = ProjectStore(db_path(str(tmp_path), rid))
     db.record_artifact("GitHub Repo", "https://github.com/acme/app", kind="repo")
     db.record_artifact("Live URL", "https://sf-run.up.railway.app", kind="deploy")
-    links = c.run_links(rid)
+    links = c.project_links(rid)
     assert links["repo"] == "https://github.com/acme/app"
     assert links["live"] == "https://sf-run.up.railway.app"
 
 
 def test_stage1_prompt_records_repo_artifact_at_creation(tmp_path):
-    p1 = make_prompt_stage1(RunRequest(description="x"), "run-r", "/runs")
+    p1 = make_prompt_stage1(ProjectRequest(description="x"), "project-r", "/runs")
     assert "GitHub Repo" in p1 and "repo" in p1            # surfaced from the start (SPEC §7)
 
 
 def test_derive_phases_start_of_run(tmp_path):
-    # SPEC §1: the host performs extraction at start_run and records it — extract=done,
+    # SPEC §1: the host performs extraction at start_project and records it — extract=done,
     # provision=active, everything later pending. No phase is trust-based.
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     ph = c.derive_phases(rid)
     assert ph["extract"] == "done"
     assert ph["provision"] == "active"
@@ -562,12 +562,12 @@ def test_derive_phases_start_of_run(tmp_path):
 
 
 def test_derive_phases_never_leaves_passed_phases_pending_or_active(tmp_path):
-    # run-d329e57c scar: provision painted 'active' during build; extract stuck 'pending'.
+    # project-d329e57c scar: provision painted 'active' during build; extract stuck 'pending'.
     # Once a later phase has activity, earlier phases with activity are done; without -> skipped.
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
-    db = RunDB(db_path(str(tmp_path), rid))
+    rid = c.start_project(ProjectRequest(description="x"))
+    db = ProjectStore(db_path(str(tmp_path), rid))
     db.set_phase("research", "done")
     db.set_phase("architect", "active")     # S2 mid-flight; never closed its row
     db.set_phase("build", "active")         # S3 started later (architect forgot to close)
@@ -581,10 +581,10 @@ def test_derive_phases_never_leaves_passed_phases_pending_or_active(tmp_path):
 
 
 def test_derive_phases_done_run_and_header(tmp_path):
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
-    db = RunDB(db_path(str(tmp_path), rid))
+    rid = c.start_project(ProjectRequest(description="x"))
+    db = ProjectStore(db_path(str(tmp_path), rid))
     db.set_phase("build", "active")
     st = c._load_state(rid); st.phase = "done"; st.save()
     ph = c.derive_phases(rid)
@@ -594,11 +594,11 @@ def test_derive_phases_done_run_and_header(tmp_path):
 
 
 def test_status_phase_is_derived_not_stale_provision(tmp_path):
-    # The header must reflect the derived current phase, not RunState.phase's initial value.
-    from software_factory.db import RunDB, db_path
+    # The header must reflect the derived current phase, not ProjectState.phase's initial value.
+    from software_factory.db import ProjectStore, db_path
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
-    RunDB(db_path(str(tmp_path), rid)).set_phase("build", "active")
+    rid = c.start_project(ProjectRequest(description="x"))
+    ProjectStore(db_path(str(tmp_path), rid)).set_phase("build", "active")
     assert c.status(rid)["phase"] == "build"   # NOT "provision"
 
 
@@ -607,10 +607,10 @@ def test_graph_resolves_workspace_relative_artifact_paths(tmp_path):
     # not "workspace/architecture.md"). graph() must resolve those against the workspace dir too,
     # else every real artifact reads "missing/hollow" (the canvas-all-red bug).
     import os
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
-    RunDB(db_path(str(tmp_path), rid)).record_artifact("Architecture", "architecture.md", kind="doc")
+    rid = c.start_project(ProjectRequest(description="x"))
+    ProjectStore(db_path(str(tmp_path), rid)).record_artifact("Architecture", "architecture.md", kind="doc")
     art = lambda: [n["data"] for n in c.graph(rid)["nodes"] if n["data"].get("path") == "architecture.md"][0]
     assert art()["status"] == "missing"                      # not written yet
     ws = os.path.join(str(tmp_path), rid, "workspace"); os.makedirs(ws, exist_ok=True)
@@ -619,19 +619,19 @@ def test_graph_resolves_workspace_relative_artifact_paths(tmp_path):
 
 
 def test_graph_resolves_project_subdir_relative_artifact_paths(tmp_path):
-    # run-1e17ea6a scar (3rd path variant): S1 agents work INSIDE the cloned repo
+    # project-1e17ea6a scar (3rd path variant): S1 agents work INSIDE the cloned repo
     # (workspace/<project>/) and record paths relative to it ("PRD.md", "research/x.md").
     # The resolver must try each first-level workspace subdir too — else real artifacts
     # render 'missing' on the canvas.
     import os
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     proj = os.path.join(str(tmp_path), rid, "workspace", "autobuilder-singer")
     os.makedirs(os.path.join(proj, "research"), exist_ok=True)
     open(os.path.join(proj, "PRD.md"), "w").write("# PRD")
     open(os.path.join(proj, "research", "horizon.md"), "w").write("# ctx")
-    db = RunDB(db_path(str(tmp_path), rid))
+    db = ProjectStore(db_path(str(tmp_path), rid))
     db.record_artifact("PRD", "PRD.md", kind="prd")
     db.record_artifact("Context", "research/horizon.md", kind="doc")
     statuses = {n["data"]["label"]: n["data"]["status"]
@@ -644,10 +644,10 @@ def test_graph_marks_artifacts_missing_until_the_file_really_exists(tmp_path):
     # The "no hollow done" scar at the artifact level: a recorded artifact whose file does not
     # exist is status="missing" (red on the canvas), not a fake green "created".
     import os
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
-    RunDB(db_path(str(tmp_path), rid)).record_artifact("PRD", "workspace/PRD.md", kind="prd")
+    rid = c.start_project(ProjectRequest(description="x"))
+    ProjectStore(db_path(str(tmp_path), rid)).record_artifact("PRD", "workspace/PRD.md", kind="prd")
     art = lambda: [n["data"] for n in c.graph(rid)["nodes"] if n["data"].get("path") == "workspace/PRD.md"][0]
     assert art()["status"] == "missing"                     # recorded but no file -> hollow
     os.makedirs(os.path.join(str(tmp_path), rid, "workspace"), exist_ok=True)
@@ -656,12 +656,12 @@ def test_graph_marks_artifacts_missing_until_the_file_really_exists(tmp_path):
 
 
 def test_graph_agents_are_projected_from_the_agents_table(tmp_path):
-    # Agents appear on the canvas ONLY when recorded in run.db (no planned roster). A recorded
+    # Agents appear on the canvas ONLY when recorded in project.db (no planned roster). A recorded
     # agent hangs off its phase, is real=True, and its status comes from the agents table.
     from software_factory.db import db_path
     from software_factory.agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     assert not [n for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "agent"]  # nothing recorded yet
     AgentRegistry(db_path(str(tmp_path), rid)).spawn("horizon", rid, None, "HORIZON", "claude-opus-4-8", phase="research")
     g = c.graph(rid)
@@ -675,7 +675,7 @@ def test_graph_agent_status_reflects_outcome(tmp_path):
     from software_factory.agents import AgentRegistry
     from software_factory.budget import Usage
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     reg = AgentRegistry(db_path(str(tmp_path), rid))
     reg.spawn("a1", rid, 1, "builder", "claude-sonnet-4-6", phase="build")
     reg.record("a1", outcome="real_diff", usage=Usage(model="claude-sonnet-4-6"), cost_usd=0.1, provenance="7", diff_lines=10)
@@ -688,32 +688,32 @@ def test_pasted_description_is_persisted_and_input_artifact_is_real(tmp_path):
     # is a REAL green node, not a hollow placeholder.
     import os
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="the full SOW text"))
+    rid = c.start_project(ProjectRequest(description="the full SOW text"))
     assert open(os.path.join(str(tmp_path), rid, "input", "context.txt")).read() == "the full SOW text"
     inp = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "artifact" and n["data"]["label"] == "input"]
     assert inp and inp[0]["status"] == "created"
 
 
 def test_url_artifacts_are_links_not_missing(tmp_path):
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
-    RunDB(db_path(str(tmp_path), rid)).record_artifact("GitHub Repo", "https://github.com/a/b", kind="repo")
+    rid = c.start_project(ProjectRequest(description="x"))
+    ProjectStore(db_path(str(tmp_path), rid)).record_artifact("GitHub Repo", "https://github.com/a/b", kind="repo")
     repo = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["label"] == "GitHub Repo"][0]
     assert repo["status"] == "created" and repo["url"] == "https://github.com/a/b"
 
 
 def test_artifacts_are_children_of_the_agent_that_created_them(tmp_path):
     import os
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     from software_factory.agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     d = str(tmp_path)
     AgentRegistry(db_path(d, rid)).spawn("horizon", rid, None, "HORIZON", "claude-opus-4-8", phase="research")
     os.makedirs(os.path.join(d, rid, "workspace"), exist_ok=True)
     open(os.path.join(d, rid, "workspace", "PRD.md"), "w").write("real")
-    RunDB(db_path(d, rid)).record_artifact("PRD", "workspace/PRD.md", kind="prd", agent="horizon")
+    ProjectStore(db_path(d, rid)).record_artifact("PRD", "workspace/PRD.md", kind="prd", agent="horizon")
     g = c.graph(rid)
     ids = {n["data"]["id"]: n["data"] for n in g["nodes"]}
     assert "agent:horizon" in ids and ids["agent:horizon"]["label"] == "HORIZON"
@@ -726,21 +726,21 @@ def test_artifacts_are_children_of_the_agent_that_created_them(tmp_path):
 
 def test_gate_continue_and_artifact(tmp_path):
     from software_factory import gates
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     c = console(tmp_path, FakeLauncher())
-    run_id = c.start_run(RunRequest(description="guestbook"))
+    project_id = c.start_project(ProjectRequest(description="guestbook"))
     d = str(tmp_path)
-    RunDB(db_path(d, run_id)).set_gate("prd", "awaiting")
-    assert gates.pending_gate(d, run_id) == "prd"
-    c.continue_run(run_id, "prd")                       # dashboard "Continue"
-    assert gates.pending_gate(d, run_id) is None
+    ProjectStore(db_path(d, project_id)).set_gate("prd", "awaiting")
+    assert gates.pending_gate(d, project_id) == "prd"
+    c.continue_project(project_id, "prd")                       # dashboard "Continue"
+    assert gates.pending_gate(d, project_id) is None
 
     # artifact read stays inside the run dir
     import os
-    os.makedirs(os.path.join(d, run_id, "workspace"), exist_ok=True)
-    open(os.path.join(d, run_id, "workspace", "PRD.md"), "w").write("# PRD\nproblem...")
-    assert "PRD" in c.artifact(run_id, "workspace/PRD.md")["content"]
-    assert "error" in c.artifact(run_id, "../../etc/passwd")  # traversal rejected
+    os.makedirs(os.path.join(d, project_id, "workspace"), exist_ok=True)
+    open(os.path.join(d, project_id, "workspace", "PRD.md"), "w").write("# PRD\nproblem...")
+    assert "PRD" in c.artifact(project_id, "workspace/PRD.md")["content"]
+    assert "error" in c.artifact(project_id, "../../etc/passwd")  # traversal rejected
 
 
 def _model_of(launcher):
@@ -751,13 +751,13 @@ def _model_of(launcher):
 def test_stage3_done_requires_playwright_pass_and_real_agents(tmp_path):
     # The two NON-NEGOTIABLE Stage-3 gates: (a) done tickets trace to recorded native-Task agents,
     # (b) a PASSING Playwright happy-flow on the live url is recorded. No hollow done.
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     from software_factory.tickets import TicketStore
     from software_factory.agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     dbp = db_path(str(tmp_path), rid)
-    db = RunDB(dbp)
+    db = ProjectStore(dbp)
     ts = TicketStore(dbp)
     reg = AgentRegistry(dbp)
 
@@ -785,17 +785,17 @@ def test_stage3_done_requires_playwright_pass_and_real_agents(tmp_path):
 
 def test_stage3_prompt_is_plan_first_orchestrator_only_with_playwright_gate(tmp_path):
     from software_factory.console import make_prompt_stage3, make_prompt_stage1
-    p3 = make_prompt_stage3(RunRequest(description="x"), "run-z", "/tmp/r",
+    p3 = make_prompt_stage3(ProjectRequest(description="x"), "project-z", "/tmp/r",
                             dispositions={"ADP_CLIENT_ID": "mock", "SUPABASE_URL": "mcp"})
     for needle in ["build-plan.md", "Playwright", "record-verification", "Task sub-agent",
-                   "software_factory.db", "sf-run-z", "ORCHESTRATOR-ONLY",
-                   # deploy hardening (run-ce47692e gaps) baked into the prompt backstop:
+                   "software_factory.db", "sf-project-z", "ORCHESTRATOR-ONLY",
+                   # deploy hardening (project-ce47692e gaps) baked into the prompt backstop:
                    "Railway MCP", "generate_domain", "npm audit", "get_logs", "GitHub Repo"]:
         assert needle in p3, needle
     # prompts defer to SKILL.md and carry NO event/ruflo instructions
     for bad in ["events emit", "swarm_init", "agent_spawn ", "ruflo"]:
-        assert bad not in p3 and bad not in make_prompt_stage1(RunRequest(description="x"), "r", "/t")
-    assert "SKILL.md" in make_prompt_stage1(RunRequest(description="x"), "r", "/t")
+        assert bad not in p3 and bad not in make_prompt_stage1(ProjectRequest(description="x"), "r", "/t")
+    assert "SKILL.md" in make_prompt_stage1(ProjectRequest(description="x"), "r", "/t")
 
 
 def test_per_stage_models_opus_for_1_and_2_sonnet_for_3(tmp_path):
@@ -803,7 +803,7 @@ def test_per_stage_models_opus_for_1_and_2_sonnet_for_3(tmp_path):
     import os
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="guestbook"))           # Stage 1
+    rid = c.start_project(ProjectRequest(description="guestbook"))           # Stage 1
     assert _model_of(launcher) == "claude-opus-4-8"
     assert "--max-turns" in launcher.argv
     assert launcher.cwd == os.path.join(str(tmp_path), rid, "workspace")
@@ -820,20 +820,20 @@ def test_per_stage_models_opus_for_1_and_2_sonnet_for_3(tmp_path):
 def test_read_log_tails_by_default_but_full_returns_everything(tmp_path):
     import os
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
+    rid = c.start_project(ProjectRequest(description="x"))
     big = "L\n" * 30000  # ~60KB of saved log
-    with open(os.path.join(str(tmp_path), rid, "run.log"), "w") as f:
+    with open(os.path.join(str(tmp_path), rid, "project.log"), "w") as f:
         f.write(big)
     assert len(c.read_log(rid)) <= 20000              # feed gets the tail
     assert len(c.read_log(rid, max_bytes=None)) == len(big)  # full saved log is retrievable
 
 
 def test_default_launch_tees_agent_output_to_the_log_file(tmp_path):
-    # Real subprocess: the launcher tees child output to run.log (and to container stdout,
+    # Real subprocess: the launcher tees child output to project.log (and to container stdout,
     # which Railway captures — verified live, not here).
     import time
     from software_factory.console import _default_launch
-    log = str(tmp_path / "run.log")
+    log = str(tmp_path / "project.log")
     proc = _default_launch(["python3", "-c", "print('hello-from-agent')"], {}, log)
     proc.wait()
     time.sleep(0.3)  # let the pump thread flush
@@ -843,14 +843,14 @@ def test_default_launch_tees_agent_output_to_the_log_file(tmp_path):
 def test_run_output_is_captured_to_a_readable_log(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook"))
+    project_id = c.start_project(ProjectRequest(description="guestbook"))
     # the launcher is told where to capture the run's stdout/stderr
-    assert launcher.log_path.endswith("run.log")
+    assert launcher.log_path.endswith("project.log")
     # and read_log surfaces whatever lands there
     import os
     with open(launcher.log_path, "w") as f:
         f.write("provision: checking creds\nhello from claude\n")
-    assert "hello from claude" in c.read_log(run_id)
+    assert "hello from claude" in c.read_log(project_id)
 
 
 def test_status_reports_workspace_lifecycle(tmp_path):
@@ -858,36 +858,36 @@ def test_status_reports_workspace_lifecycle(tmp_path):
     from software_factory import workspace
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook"))
-    # start_run calls _launch_stage which calls prepare_workspace -> workspace exists immediately
-    assert c.status(run_id)["workspace"] == "active"
+    project_id = c.start_project(ProjectRequest(description="guestbook"))
+    # start_project calls _launch_stage which calls prepare_workspace -> workspace exists immediately
+    assert c.status(project_id)["workspace"] == "active"
 
     # terminal + torn down -> cleaned
-    ws = os.path.join(str(tmp_path), run_id, "workspace")
-    st = c._load_state(run_id); st.phase = "done"; st.deploy_url = "https://x"; st.save()
-    workspace.destroy(ws, runs_dir=str(tmp_path))
-    assert c.status(run_id)["workspace"] == "cleaned"
+    ws = os.path.join(str(tmp_path), project_id, "workspace")
+    st = c._load_state(project_id); st.phase = "done"; st.deploy_url = "https://x"; st.save()
+    workspace.destroy(ws, projects_dir=str(tmp_path))
+    assert c.status(project_id)["workspace"] == "cleaned"
 
 
 def test_evidence_verifies_the_run_was_really_built_by_the_skill(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook", target="railway"))
+    project_id = c.start_project(ProjectRequest(description="guestbook", target="railway"))
 
-    paths = run_paths(str(tmp_path), run_id)
+    paths = project_paths(str(tmp_path), project_id)
     reg = AgentRegistry(paths["agents_db"], clock=lambda: 1)
-    reg.spawn("a1", run_id, 1, "build", "claude-opus-4-8")
+    reg.spawn("a1", project_id, 1, "build", "claude-opus-4-8")
     reg.record("a1", outcome="real_diff", cost_usd=0.42, provenance="7", diff_lines=120)
     from software_factory.tickets import TicketStore
     ts = TicketStore(paths["tickets_db"])
     tid = ts.create_ticket("guestbook", acceptance="a", dod="d", wave=1)
     ts.mark_done(tid, provenance="7", diff_lines=120)
 
-    state = c._load_state(run_id)
+    state = c._load_state(project_id)
     state.phase = "done"; state.deploy_url = "https://g.up.railway.app"; state.spent_usd = 0.42
     state.save()
 
-    ev = c.evidence(run_id)
+    ev = c.evidence(project_id)
     assert ev["verified"] is True
     assert ev["reasons"] == []
     assert ev["bundle"]["skill"] == "software-factory"
@@ -898,13 +898,13 @@ def test_stage_handoff_stage1_done_enables_stage2(tmp_path):
     import os
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook"))
+    project_id = c.start_project(ProjectRequest(description="guestbook"))
 
-    assert c.detect_stage1_done(run_id) is False
+    assert c.detect_stage1_done(project_id) is False
 
     # Simulate Stage 1 completing: write a real PRD (the mechanical proof — no event needed)
     d = str(tmp_path)
-    base = os.path.join(d, run_id)
+    base = os.path.join(d, project_id)
     ws = os.path.join(base, "workspace")
     os.makedirs(ws, exist_ok=True)
     prd = (
@@ -915,12 +915,12 @@ def test_stage_handoff_stage1_done_enables_stage2(tmp_path):
     with open(os.path.join(ws, "PRD.md"), "w") as f:
         f.write(prd)
 
-    assert c.detect_stage1_done(run_id) is True
+    assert c.detect_stage1_done(project_id) is True
 
-    state = c._load_state(run_id)
+    state = c._load_state(project_id)
     assert state.stage1_done is True
 
-    st = c.status(run_id)
+    st = c.status(project_id)
     assert st["stage1_done"] is True
 
 
@@ -930,16 +930,16 @@ def test_stage2_not_done_when_ticket_store_is_empty(tmp_path):
     import os
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="x"))
-    d = str(tmp_path); base = os.path.join(d, run_id)
-    state = c._load_state(run_id); state.stage1_done = True; state.save()
+    project_id = c.start_project(ProjectRequest(description="x"))
+    d = str(tmp_path); base = os.path.join(d, project_id)
+    state = c._load_state(project_id); state.stage1_done = True; state.save()
     ws = os.path.join(base, "workspace"); os.makedirs(ws, exist_ok=True)
     for name, body in [("PRD.md", "# PRD"), ("architecture.md", "# A\n## Required Tokens\n- X_KEY — y\n"),
                        ("architecture.svg", "<svg/>")]:
         with open(os.path.join(ws, name), "w") as f:
             f.write(body)
     # No tickets persisted → not done
-    assert c.detect_stage2_done(run_id) is False
+    assert c.detect_stage2_done(project_id) is False
 
 
 def test_stage2_done_and_deps_flow(tmp_path):
@@ -948,12 +948,12 @@ def test_stage2_done_and_deps_flow(tmp_path):
     from software_factory.tickets import TicketStore
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook"))
+    project_id = c.start_project(ProjectRequest(description="guestbook"))
     d = str(tmp_path)
-    base = os.path.join(d, run_id)
+    base = os.path.join(d, project_id)
 
     # Mark stage 1 done
-    state = c._load_state(run_id)
+    state = c._load_state(project_id)
     state.stage1_done = True
     state.save()
 
@@ -970,26 +970,26 @@ def test_stage2_done_and_deps_flow(tmp_path):
         f.write(arch_text)
     with open(os.path.join(ws, "architecture.svg"), "w") as f:
         f.write("<svg/>")
-    ts = TicketStore(run_paths(d, run_id)["tickets_db"])
+    ts = TicketStore(project_paths(d, project_id)["tickets_db"])
     ts.create_ticket("build form", acceptance="a", dod="d", wave=1)
 
-    assert c.detect_stage2_done(run_id) is True
-    state = c._load_state(run_id)
+    assert c.detect_stage2_done(project_id) is True
+    state = c._load_state(project_id)
     assert state.stage2_done is True
     assert "RAILWAY_TOKEN" in state.deps_required
     assert "SUPABASE_URL" in state.deps_required
 
     # Deps not satisfied yet
     assert state.deps_satisfied is False
-    assert c.start_stage3(run_id) is None
+    assert c.start_stage3(project_id) is None
 
     # Submit deps
-    result = c.submit_deps(run_id, {"RAILWAY_TOKEN": "tok1", "SUPABASE_URL": "url1"})
+    result = c.submit_deps(project_id, {"RAILWAY_TOKEN": "tok1", "SUPABASE_URL": "url1"})
     assert result["satisfied"] is True
     assert result["missing"] == []
 
     # Status reflects deps
-    st = c.status(run_id)
+    st = c.status(project_id)
     assert st["stage2_done"] is True
     assert st["deps_satisfied"] is True
     assert "RAILWAY_TOKEN" in st["deps_provided"]
@@ -997,11 +997,11 @@ def test_stage2_done_and_deps_flow(tmp_path):
 
 def test_submit_deps_unsatisfied_when_provide_lacks_value(tmp_path):
     c = console(tmp_path, FakeLauncher())
-    run_id = c.start_run(RunRequest(description="x"))
-    state = c._load_state(run_id)
+    project_id = c.start_project(ProjectRequest(description="x"))
+    state = c._load_state(project_id)
     state.deps_required = ["OPENROUTER_API_KEY"]
     state.save()
-    result = c.submit_deps(run_id, {"OPENROUTER_API_KEY": {"disposition": "provide"}})  # no value
+    result = c.submit_deps(project_id, {"OPENROUTER_API_KEY": {"disposition": "provide"}})  # no value
     assert result["satisfied"] is False
     assert "OPENROUTER_API_KEY" in result["missing"]
 
@@ -1009,8 +1009,8 @@ def test_submit_deps_unsatisfied_when_provide_lacks_value(tmp_path):
 def test_graph_includes_stage_gates_and_deps_node(tmp_path):
     """The graph always includes stage gates and a deps node."""
     c = console(tmp_path, FakeLauncher())
-    run_id = c.start_run(RunRequest(description="x"))
-    g = c.graph(run_id)
+    project_id = c.start_project(ProjectRequest(description="x"))
+    g = c.graph(project_id)
 
     # Stage gates
     gate_nodes = [n for n in g["nodes"] if n["data"]["kind"] == "gate"]
@@ -1025,18 +1025,18 @@ def test_graph_includes_stage_gates_and_deps_node(tmp_path):
     assert deps_nodes[0]["data"]["status"] == "pending"
 
     # When stage1 is done, gate shows passed
-    state = c._load_state(run_id)
+    state = c._load_state(project_id)
     state.stage1_done = True
     state.save()
-    g2 = c.graph(run_id)
+    g2 = c.graph(project_id)
     s1gate = [n for n in g2["nodes"] if n["data"]["id"] == "gate:stage1"][0]
     assert s1gate["data"]["status"] == "passed"
 
 
 def test_status_includes_stage_fields(tmp_path):
     c = console(tmp_path, FakeLauncher())
-    run_id = c.start_run(RunRequest(description="x"))
-    st = c.status(run_id)
+    project_id = c.start_project(ProjectRequest(description="x"))
+    st = c.status(project_id)
     assert "stage" in st
     assert st["stage"] == 1
     assert st["stage1_done"] is False
@@ -1045,14 +1045,14 @@ def test_status_includes_stage_fields(tmp_path):
 
 
 def test_auto_resume_never_resurrects_a_ghost_run(tmp_path):
-    # A run.db created by a mere status query (state lost, no artifacts) must NOT auto-resume:
+    # A project.db created by a mere status query (state lost, no artifacts) must NOT auto-resume:
     # there is no brief to build from — resuming burns spend on an empty prompt
-    # (the run-b594a5f4/run-0eb69fdd double-ghost scar).
+    # (the project-b594a5f4/project-0eb69fdd double-ghost scar).
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    c.status("run-ghost")           # creates an empty run.db as a side effect
-    assert c.is_pipeline_run("run-ghost") is False
-    assert c.auto_resume_dead_stage("run-ghost") is False
+    c.status("project-ghost")           # creates an empty project.db as a side effect
+    assert c.is_pipeline_project("project-ghost") is False
+    assert c.auto_resume_dead_stage("project-ghost") is False
     assert launcher.argv is None    # nothing launched
 
 
@@ -1065,7 +1065,7 @@ def _argv_model(argv):
 def test_start_run_launches_stage1_on_the_chosen_planning_model(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="app", planning_model="claude-fable-5",
+    rid = c.start_project(ProjectRequest(description="app", planning_model="claude-fable-5",
                                  impl_model="claude-opus-4-8"))
     assert _argv_model(launcher.argv) == "claude-fable-5"
     st = c.status(rid)
@@ -1076,7 +1076,7 @@ def test_start_run_launches_stage1_on_the_chosen_planning_model(tmp_path):
 def test_model_defaults_unchanged_when_nothing_picked(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="app"))
+    rid = c.start_project(ProjectRequest(description="app"))
     assert _argv_model(launcher.argv) == "claude-opus-4-8"
     st = c.status(rid)
     assert st["planning_model"] == ""
@@ -1092,9 +1092,9 @@ def test_stage3_uses_the_chosen_impl_model_and_mandates_it_for_subagents(tmp_pat
     proc = FakeProc(); argvs = []
     def launcher(argv, env=None, log_path=None, cwd=None):
         argvs.append(argv); return proc
-    ids = iter(["run-im"])
+    ids = iter(["project-im"])
     c = Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids))
-    rid = c.start_run(RunRequest(description="x", impl_model="claude-opus-4-8"))
+    rid = c.start_project(ProjectRequest(description="x", impl_model="claude-opus-4-8"))
     st = c._load_state(rid)
     st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True; st.stage = 3
     st.save()
@@ -1111,7 +1111,7 @@ def test_unknown_model_picks_are_ignored(tmp_path):
     # impl: sonnet-4-6|opus-4-8). Anything else falls back to the defaults.
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="app", planning_model="gpt-5o-mega",
+    rid = c.start_project(ProjectRequest(description="app", planning_model="gpt-5o-mega",
                                  impl_model="claude-haiku-4-5"))
     assert _argv_model(launcher.argv) == "claude-opus-4-8"
     st = c.status(rid)
@@ -1120,21 +1120,21 @@ def test_unknown_model_picks_are_ignored(tmp_path):
 
 
 def test_per_run_model_pick_beats_the_SF_MODEL_env_override(tmp_path, monkeypatch):
-    # SF_MODEL is a deploy-wide default knob; an explicit per-run operator pick is more
+    # SF_MODEL is a deploy-wide default knob; an explicit per-project operator pick is more
     # specific and must win (the env var once silently forced wrong models — never again).
     monkeypatch.setenv("SF_MODEL", "claude-sonnet-4-6")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    c.start_run(RunRequest(description="app", planning_model="claude-fable-5"))
+    c.start_project(ProjectRequest(description="app", planning_model="claude-fable-5"))
     assert _argv_model(launcher.argv) == "claude-fable-5"
 
 
 def test_project_name_is_pinned_and_surfaces_in_status_and_list(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="a crm for plumbers", name="Acme CRM"))
+    rid = c.start_project(ProjectRequest(description="a crm for plumbers", name="Acme CRM"))
     assert c.status(rid)["name"] == "Acme CRM"
-    assert [r["name"] for r in c.list_runs()] == ["Acme CRM"]
+    assert [r["name"] for r in c.list_projects()] == ["Acme CRM"]
 
 
 def test_status_carries_the_effective_budget_ceiling(tmp_path, monkeypatch):
@@ -1143,7 +1143,7 @@ def test_status_carries_the_effective_budget_ceiling(tmp_path, monkeypatch):
     monkeypatch.setenv("SF_COST_CEILING", "30")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="app"))
+    rid = c.start_project(ProjectRequest(description="app"))
     assert c.status(rid)["budget_ceiling"] == 30.0
     c.raise_budget(rid, 55)
     assert c.status(rid)["budget_ceiling"] == 55.0
@@ -1153,14 +1153,14 @@ def test_demo_credentials_surface_from_the_recorded_artifact(tmp_path):
     # SPEC §6 delivery: an app with a sign-in is demo-able only if the seeded demo login
     # reaches the operator — the chat done-message reads it from the demo-creds artifact.
     import os
-    from software_factory.db import RunDB, db_path
+    from software_factory.db import ProjectStore, db_path
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="app"))
+    rid = c.start_project(ProjectRequest(description="app"))
     ws = os.path.join(str(tmp_path), rid)
     with open(os.path.join(ws, "demo_credentials.md"), "w") as f:
         f.write("user: demo@acme.test\npassword: factory-demo-1")
-    RunDB(db_path(str(tmp_path), rid)).record_artifact(
+    ProjectStore(db_path(str(tmp_path), rid)).record_artifact(
         "Demo credentials", "demo_credentials.md", kind="demo-creds")
     creds = c.demo_credentials(rid)
     assert "demo@acme.test" in creds and "factory-demo-1" in creds
@@ -1169,14 +1169,14 @@ def test_demo_credentials_surface_from_the_recorded_artifact(tmp_path):
 def test_demo_credentials_none_when_absent(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="app"))
+    rid = c.start_project(ProjectRequest(description="app"))
     assert c.demo_credentials(rid) is None
 
 
 def test_stage3_prompt_mandates_demo_credentials_recording(tmp_path):
-    req = RunRequest(description="a crm", target="railway")
+    req = ProjectRequest(description="a crm", target="railway")
     for rt in ("claude", "opencode"):
-        p = make_prompt_stage3(req, "run-xyz", runs_dir="/runs", runtime=rt)
+        p = make_prompt_stage3(req, "project-xyz", projects_dir="/runs", runtime=rt)
         assert "demo_credentials.md" in p, rt
         assert "demo-creds" in p, rt
 
@@ -1187,13 +1187,13 @@ def test_list_runs_unions_pg_registry_with_local_dirs(tmp_path, monkeypatch):
     from software_factory import console as console_mod
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid_local = c.start_run(RunRequest(description="local run"))
-    monkeypatch.setattr(console_mod.dbshim, "registry_runs",
-                        lambda: [{"run_id": rid_local, "created": 1.0},
-                                 {"run_id": "run-pgonly", "created": 2.0}])
-    ids = [r["run_id"] for r in c.list_runs()]
+    rid_local = c.start_project(ProjectRequest(description="local run"))
+    monkeypatch.setattr(console_mod.dbshim, "registry_projects",
+                        lambda: [{"project_id": rid_local, "created": 1.0},
+                                 {"project_id": "project-pgonly", "created": 2.0}])
+    ids = [r["project_id"] for r in c.list_projects()]
     assert ids.count(rid_local) == 1            # deduped
-    assert "run-pgonly" in ids                  # registry-only run surfaced
+    assert "project-pgonly" in ids                  # registry-only run surfaced
 
 
 # ---------- run ownership (multi-tenant: members see only their own) ----------
@@ -1201,29 +1201,29 @@ def test_list_runs_unions_pg_registry_with_local_dirs(tmp_path, monkeypatch):
 def test_owner_stamped_and_list_filters_by_owner(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    # console() fixture mints a single id "run-xyz"; mint distinct ids here
-    ids = iter(["run-aaaa1111", "run-bbbb2222", "run-cccc3333"])
+    # console() fixture mints a single id "project-xyz"; mint distinct ids here
+    ids = iter(["project-aaaa1111", "project-bbbb2222", "project-cccc3333"])
     c2 = Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids))
-    a = c2.start_run(RunRequest(description="a", owner="alice@x.com"))
-    b = c2.start_run(RunRequest(description="b", owner="bob@x.com"))
-    leg = c2.start_run(RunRequest(description="legacy"))     # owner ""
-    assert c2.run_owner(a) == "alice@x.com"
-    assert c2.run_owner(leg) == ""
-    allids = {r["run_id"] for r in c2.list_runs()}
+    a = c2.start_project(ProjectRequest(description="a", owner="alice@x.com"))
+    b = c2.start_project(ProjectRequest(description="b", owner="bob@x.com"))
+    leg = c2.start_project(ProjectRequest(description="legacy"))     # owner ""
+    assert c2.project_owner(a) == "alice@x.com"
+    assert c2.project_owner(leg) == ""
+    allids = {r["project_id"] for r in c2.list_projects()}
     assert {a, b, leg} <= allids                             # admin/internal: all
-    assert {r["run_id"] for r in c2.list_runs(owner="alice@x.com")} == {a}
-    assert {r["run_id"] for r in c2.list_runs(owner="ALICE@X.COM")} == {a}   # case-insensitive
-    assert leg not in {r["run_id"] for r in c2.list_runs(owner="bob@x.com")}  # unowned hidden
+    assert {r["project_id"] for r in c2.list_projects(owner="alice@x.com")} == {a}
+    assert {r["project_id"] for r in c2.list_projects(owner="ALICE@X.COM")} == {a}   # case-insensitive
+    assert leg not in {r["project_id"] for r in c2.list_projects(owner="bob@x.com")}  # unowned hidden
     assert c2.status(a)["owner"] == "alice@x.com"
 
 
 def test_assign_unowned_is_idempotent(tmp_path):
     launcher = FakeLauncher()
-    ids = iter(["run-dddd4444", "run-eeee5555"])
+    ids = iter(["project-dddd4444", "project-eeee5555"])
     c = Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids))
-    owned = c.start_run(RunRequest(description="owned", owner="alice@x.com"))
-    leg = c.start_run(RunRequest(description="legacy"))
+    owned = c.start_project(ProjectRequest(description="owned", owner="alice@x.com"))
+    leg = c.start_project(ProjectRequest(description="legacy"))
     assert c.assign_unowned("admin@x.com") == 1
-    assert c.run_owner(leg) == "admin@x.com"
-    assert c.run_owner(owned) == "alice@x.com"               # untouched
+    assert c.project_owner(leg) == "admin@x.com"
+    assert c.project_owner(owned) == "alice@x.com"               # untouched
     assert c.assign_unowned("admin@x.com") == 0              # nothing left

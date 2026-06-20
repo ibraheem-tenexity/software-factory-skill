@@ -12,18 +12,17 @@ from . import dbshim
 
 
 class BlobStore:
-    def __init__(self, sqlite_path: str = ""):
-        # `sqlite_path` is vestigial (Postgres everywhere); kept so existing call sites pass a path.
+    def __init__(self):
         pass
 
     def record(self, scope: str, scope_id: str, storage_key: str, *, kind: str | None = None,
                name: str | None = None, tag: str | None = None,
                content_type: str | None = None, size_bytes: int | None = None,
                sha256: str | None = None) -> int:
-        """Record one stored blob and return its id. `scope` is 'run' or 'org'; `name`/`tag` are
+        """Record one stored blob and return its id. `scope` is 'project' or 'org'; `name`/`tag` are
         the display filename + category shown in the org knowledge base."""
-        if scope not in ("run", "org"):
-            raise ValueError(f"blob scope must be 'run' or 'org', got {scope!r}")
+        if scope not in ("project", "org"):
+            raise ValueError(f"blob scope must be 'project' or 'org', got {scope!r}")
         conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
         try:
             with conn.transaction():
@@ -62,7 +61,7 @@ class BlobStore:
                 cur.execute(
                     "SELECT b.id, b.name, b.tag, b.kind, b.content_type, b.size_bytes, "
                     "extract(epoch from b.created_at) AS updated, "
-                    "count(DISTINCT u.run_id) AS used_count "
+                    "count(DISTINCT u.project_id) AS used_count "
                     "FROM public.blobs b "
                     "LEFT JOIN public.blob_uses u ON u.blob_id = b.id "
                     "WHERE b.scope='org' AND b.scope_id=%s "
@@ -84,18 +83,18 @@ class BlobStore:
         finally:
             conn.close()
 
-    def record_use(self, blob_id: int, run_id: str) -> int:
-        """Note that a project (`run_id`) imported this org doc; return the new distinct-project
+    def record_use(self, blob_id: int, project_id: str) -> int:
+        """Note that a project (`project_id`) imported this org doc; return the new distinct-project
         count. Re-recording the same project is a no-op for the count."""
         conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
         try:
             with conn.transaction():
                 cur = conn.cursor()
                 cur.execute(
-                    "INSERT INTO public.blob_uses (blob_id, run_id) VALUES (%s,%s)",
-                    (blob_id, run_id))
+                    "INSERT INTO public.blob_uses (blob_id, project_id) VALUES (%s,%s)",
+                    (blob_id, project_id))
                 cur.execute(
-                    "SELECT count(DISTINCT run_id) AS n FROM public.blob_uses WHERE blob_id=%s",
+                    "SELECT count(DISTINCT project_id) AS n FROM public.blob_uses WHERE blob_id=%s",
                     (blob_id,))
                 return cur.fetchone()["n"]
         finally:

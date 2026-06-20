@@ -1,12 +1,12 @@
 // OnboardingScreen.tsx — Single-Page Intake + Docked Concierge (design optionC.jsx), on the
 // DRAFT MODEL (docs/plans/concierge-onboarding-api.md):
 //   - EAGER DRAFT on mount (POST /api/drafts) — the form + the Concierge rail share ONE draft id.
-//   - DEBOUNCED write-through (PATCH /api/runs/{id}/draft {name,goal,scope}) — never per-keystroke,
+//   - DEBOUNCED write-through (PATCH /api/projects/{id}/draft {name,goal,scope}) — never per-keystroke,
 //     and the response NEVER overwrites local input state (that would re-introduce focus loss).
 //   - Server composes `description` from goal+scope (composeDescription DELETED from the FE).
-//   - Materials attach via POST /api/runs/{id}/attach (real file → base64).
-//   - Handoff = POST /api/runs/{id}/promote → into the build console.
-//   - Concierge rail Composer → POST /api/chat with the shared draft run_id.
+//   - Materials attach via POST /api/projects/{id}/attach (real file → base64).
+//   - Handoff = POST /api/projects/{id}/promote → into the build console.
+//   - Concierge rail Composer → POST /api/chat with the shared draft project_id.
 //
 // FOCUS-LOSS FIX (Bug B): every field/section component is defined at MODULE scope (a component
 // defined inside render gets a new identity each keystroke → React remounts the <input> → focus
@@ -66,7 +66,7 @@ const fileToB64 = (file: File): Promise<string> => new Promise((resolve) => {
   r.readAsDataURL(file);
 });
 
-export function OnboardingScreen({ onComplete }: { onComplete: (runId: string) => void }) {
+export function OnboardingScreen({ onComplete }: { onComplete: (projectId: string) => void }) {
   const [mode, setMode] = useState<"loading" | "fresh" | "returning">("loading");
   const [onFile, setOnFile] = useState<Org | null>(null);
   const [editOrg, setEditOrg] = useState(false);
@@ -107,7 +107,7 @@ export function OnboardingScreen({ onComplete }: { onComplete: (runId: string) =
       setMode(o ? "returning" : "fresh");
       if (o) setOrg({ name: o.name, size: o.headcount || "", revenue: o.revenue || "", ints: o.connected_systems || [] });
     }).catch(() => setMode("fresh"));
-    api.createDraft().then(({ run_id }) => setDraftId(run_id)).catch(() => {});
+    api.createDraft().then(({ project_id }) => setDraftId(project_id)).catch(() => {});
   }, []);
 
   // DEBOUNCED project write-through. Fire-and-forget — the response is intentionally ignored so it
@@ -182,8 +182,8 @@ export function OnboardingScreen({ onComplete }: { onComplete: (runId: string) =
     try {
       if (fresh) await saveCompanyFresh();                                    // flush company
       await api.patchDraft(draftId, { name: p.name, goal: p.goal, scope: p.scope }).catch(() => {}); // flush project
-      const { run_id } = await api.promote(draftId, { target: "railway" });
-      onComplete(run_id);
+      const { project_id } = await api.promote(draftId, { target: "railway" });
+      onComplete(project_id);
     } catch (e: any) {
       const msg = String(e?.message || e);
       setError(msg.includes("409")
@@ -199,7 +199,7 @@ export function OnboardingScreen({ onComplete }: { onComplete: (runId: string) =
     setMsgs((m) => [...m, { role: "user", content: text }]);
     setComposer(""); setChatBusy(true); setChatErr("");
     try {
-      const r = await api.chat({ message: text, run_id: draftId });
+      const r = await api.chat({ message: text, project_id: draftId });
       const replies = (r.messages || []).filter((x: any) => x && x.role !== "user").map((x: any) => ({ role: x.role || "assistant", content: x.content || "" }));
       setMsgs((m) => [...m, ...replies]);
       // bridge: reflect any company values the concierge wrote (project name/goal/scope have no GET yet)

@@ -21,7 +21,7 @@ const STYLE: any[] = [
   } },
 ];
 
-export function GraphView({ runId }: { runId: string }) {
+export function GraphView({ projectId }: { projectId: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const laidOut = useRef(false);
@@ -35,7 +35,7 @@ export function GraphView({ runId }: { runId: string }) {
 
     const tick = async () => {
       try {
-        const g = await api.graph(runId);
+        const g = await api.graph(projectId);
         if (!live) return;
         cy.json({ elements: { nodes: g.nodes, edges: g.edges } });
         if (!laidOut.current && g.nodes.length) {
@@ -47,7 +47,7 @@ export function GraphView({ runId }: { runId: string }) {
     tick();
     const h = setInterval(tick, 2000);
     return () => { live = false; clearInterval(h); cy.destroy(); cyRef.current = null; };
-  }, [runId]);
+  }, [projectId]);
 
   return <div className="graph" ref={ref} />;
 }

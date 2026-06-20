@@ -20,16 +20,16 @@ def test_disabled_without_creds(local):
 
 
 def test_put_get_roundtrip_bytes(local):
-    u = storage.put("run-abc12345", "qa/ticket-3.png", b"\x89PNG fake")
+    u = storage.put("project-abc12345", "qa/ticket-3.png", b"\x89PNG fake")
     assert u.startswith("file://")
-    assert storage.get("run-abc12345", "qa/ticket-3.png") == b"\x89PNG fake"
+    assert storage.get("project-abc12345", "qa/ticket-3.png") == b"\x89PNG fake"
 
 
 def test_put_from_file_path(local, tmp_path):
     p = tmp_path / "shot.png"
     p.write_bytes(b"imagedata")
-    storage.put("run-abc12345", "qa/shot.png", str(p))
-    assert storage.get("run-abc12345", "qa/shot.png") == b"imagedata"
+    storage.put("project-abc12345", "qa/shot.png", str(p))
+    assert storage.get("project-abc12345", "qa/shot.png") == b"imagedata"
 
 
 def test_org_scope_path(local):
@@ -38,16 +38,16 @@ def test_org_scope_path(local):
 
 
 def test_url_does_not_upload(local):
-    u = storage.url("run-x", "k.txt")
+    u = storage.url("project-x", "k.txt")
     assert u.startswith("file://")
     with pytest.raises(FileNotFoundError):
-        storage.get("run-x", "k.txt")
+        storage.get("project-x", "k.txt")
 
 
 def test_listing(local):
-    storage.put("run-z", "a/1.txt", b"1")
-    storage.put("run-z", "b/2.txt", b"2")
-    assert storage.listing("run-z") == ["a/1.txt", "b/2.txt"]
+    storage.put("project-z", "a/1.txt", b"1")
+    storage.put("project-z", "b/2.txt", b"2")
+    assert storage.listing("project-z") == ["a/1.txt", "b/2.txt"]
 
 
 def test_supabase_public_url_shape(monkeypatch):
@@ -55,8 +55,8 @@ def test_supabase_public_url_shape(monkeypatch):
     monkeypatch.setenv("SUPABASE_SERVICE_KEY", "svc-key")
     monkeypatch.setenv("SF_STORAGE_BUCKET", "factory-run-blobs")
     assert storage.enabled() is True
-    assert storage.url("run-x", "qa/s.png") == (
-        "https://proj.supabase.co/storage/v1/object/public/factory-run-blobs/run-x/qa/s.png")
+    assert storage.url("project-x", "qa/s.png") == (
+        "https://proj.supabase.co/storage/v1/object/public/factory-run-blobs/project-x/qa/s.png")
 
 
 def test_sha256(local):
@@ -68,17 +68,17 @@ def test_sha256(local):
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
     monkeypatch.delenv("SF_DB", raising=False)
-    return BlobStore(str(tmp_path / "blobs.db"))
+    return BlobStore()
 
 
 def test_record_and_list(store):
-    store.record("run", "run-abc12345", "run-abc12345/qa/t3.png", kind="qa-screenshot",
+    store.record("project", "project-abc12345", "project-abc12345/qa/t3.png", kind="qa-screenshot",
                  content_type="image/png", size_bytes=9, sha256="deadbeef")
     store.record("org", "org-9f", "org/org-9f/business-process/v.mp4",
                  kind="business-process-video")
-    runs = store.list_for("run", "run-abc12345")
+    runs = store.list_for("project", "project-abc12345")
     assert len(runs) == 1 and runs[0]["kind"] == "qa-screenshot"
-    assert runs[0]["storage_key"] == "run-abc12345/qa/t3.png"
+    assert runs[0]["storage_key"] == "project-abc12345/qa/t3.png"
     orgs = store.list_for("org", "org-9f")
     assert len(orgs) == 1 and orgs[0]["kind"] == "business-process-video"
 

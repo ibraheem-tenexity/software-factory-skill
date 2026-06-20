@@ -10,7 +10,7 @@ from software_factory.tickets import TicketStore, HollowWorkError, IllegalTransi
 
 
 def fresh(tmp_path):
-    return TicketStore(str(tmp_path / "tickets.db"))
+    return TicketStore(str(tmp_path / "project-1"))
 
 
 def test_buildable_count_zero_on_empty_store(tmp_path):
@@ -77,7 +77,7 @@ def test_mark_done_with_a_real_merged_change_succeeds(tmp_path):
 
 
 def test_state_survives_reopening_the_db(tmp_path):
-    db = str(tmp_path / "t.db")
+    db = str(tmp_path / "project-1")
     tid = TicketStore(db).create_ticket("t", acceptance="a", dod="d", wave=1)
     # Reopen: a /loop re-entry sees the same tickets.
     assert [t.id for t in TicketStore(db).open_tickets(wave=1)] == [tid]
@@ -164,11 +164,11 @@ def test_create_ticket_with_description(tmp_path):
 
 
 def test_flat_run_id_isolation_in_one_shared_db(tmp_path):
-    # In Postgres every run shares ONE tickets table (flat schema); exercise the run_id scoping by
+    # In Postgres every run shares ONE tickets table (flat schema); exercise the project_id scoping by
     # pointing two stores at different run ids.
-    db = str(tmp_path / "shared.db")
-    a = TicketStore(db); a._run_id = "run-aaaaaaaa"
-    b = TicketStore(db); b._run_id = "run-bbbbbbbb"
+    db = str(tmp_path / "project-shared")
+    a = TicketStore(db); a._project_id = "project-aaaaaaaa"
+    b = TicketStore(db); b._project_id = "project-bbbbbbbb"
     ta = a.create_ticket("A-feature", "x", "y", wave=1)
     tb = b.create_ticket("B-feature", "x", "y", wave=1)
     assert [t.title for t in a.all_tickets()] == ["A-feature"]   # each store sees only its run

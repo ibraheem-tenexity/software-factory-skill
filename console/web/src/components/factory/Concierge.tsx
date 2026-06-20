@@ -1,18 +1,18 @@
 // Concierge.tsx — the left rail. v1 is relay/observe + steer:
 //   · prior Concierge conversation (GET /api/chat/{id}/history → {messages:[{role,content,ts}]})
-//   · recent real run activity (GET /api/runs/{id}/events → {events:[{ts,type,payload}]})
-//   · a steer composer that POSTs to /api/chat (api.chat) with the run_id so the operator can
+//   · recent real run activity (GET /api/projects/{id}/events → {events:[{ts,type,payload}]})
+//   · a steer composer that POSTs to /api/chat (api.chat) with the project_id so the operator can
 //     nudge the build mid-flight.
 //   · the produced-artifacts list (passed in from the real graph).
 import { useEffect, useRef, useState } from "react";
 import { T, Icon, Sparkle, Avatar, Composer } from "../onboarding/design";
-import { api, RunEvent } from "../../api";
+import { api, ProjectEvent } from "../../api";
 import { ArtifactList, ArtifactRef } from "./Artifacts";
 
 type ChatMsg = { role: string; content: string; ts: number };
 
 const EVENT_ICON: Record<string, string> = { phase: "layers", artifact: "file", blocker: "x", done: "check" };
-function eventText(e: RunEvent): string {
+function eventText(e: ProjectEvent): string {
   const p = e.payload || {};
   switch (e.type) {
     case "phase": return `${p.name} → ${p.status}`;
@@ -23,24 +23,24 @@ function eventText(e: RunEvent): string {
   }
 }
 
-export function Concierge({ runId, artifacts, onOpenArtifact }:
-  { runId: string; artifacts: ArtifactRef[]; onOpenArtifact: (a: ArtifactRef) => void }) {
+export function Concierge({ projectId, artifacts, onOpenArtifact }:
+  { projectId: string; artifacts: ArtifactRef[]; onOpenArtifact: (a: ArtifactRef) => void }) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [events, setEvents] = useState<RunEvent[]>([]);
+  const [events, setEvents] = useState<ProjectEvent[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const feedRef = useRef<HTMLDivElement>(null);
 
-  const loadHistory = () => api.chatHistory(runId).then((d) => setMessages((d.messages || []) as ChatMsg[])).catch(() => {});
+  const loadHistory = () => api.chatHistory(projectId).then((d) => setMessages((d.messages || []) as ChatMsg[])).catch(() => {});
 
   useEffect(() => {
     let live = true;
     loadHistory();
-    const tick = () => api.events(runId).then((d) => live && setEvents((d.events || []).slice(-8).reverse())).catch(() => {});
+    const tick = () => api.events(projectId).then((d) => live && setEvents((d.events || []).slice(-8).reverse())).catch(() => {});
     tick();
     const h = setInterval(tick, 4000);
     return () => { live = false; clearInterval(h); };
-  }, [runId]);
+  }, [projectId]);
 
   useEffect(() => { if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight; }, [messages]);
 
@@ -51,7 +51,7 @@ export function Concierge({ runId, artifacts, onOpenArtifact }:
     setMessages((m) => [...m, { role: "user", content: text, ts: Date.now() / 1000 }]);
     setDraft("");
     try {
-      const r = await api.chat({ run_id: runId, message: text });
+      const r = await api.chat({ project_id: projectId, message: text });
       const reply = (r.messages || []) as ChatMsg[];
       setMessages((m) => [...m, ...reply]);
     } catch { /* leave the optimistic user line; surface nothing destructive */ }

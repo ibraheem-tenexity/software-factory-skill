@@ -12,11 +12,11 @@ import os
 import re
 
 
-def verify(run_dir: str, paths: list[str]) -> tuple[bool, list[str]]:
-    """True only if every path exists under run_dir AND is non-empty. Returns the missing/empty ones."""
+def verify(project_dir: str, paths: list[str]) -> tuple[bool, list[str]]:
+    """True only if every path exists under project_dir AND is non-empty. Returns the missing/empty ones."""
     missing = []
     for p in paths:
-        full = os.path.join(run_dir, p)
+        full = os.path.join(project_dir, p)
         if not os.path.isfile(full) or os.path.getsize(full) == 0:
             missing.append(p)
     return (len(missing) == 0, missing)

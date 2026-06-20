@@ -5,9 +5,9 @@ against the test Postgres in the suite — both build from THIS `metadata`, so t
 Query routing goes through `dbshim` (the Postgres connection wrapper that handles the Supabase 6543
 transaction pooler) — the recorded "hybrid": ORM for schema definition, `dbshim` for DML.
 
-Flat schema: one set of tables, every per-run table keyed by `run_id`. `gates`/`agents` use composite
-`(run_id, …)` PKs since their natural keys are only unique within a run. The global directory tables
-(organizations, users, blobs) are single row-sets, not per-run.
+Flat schema: one set of tables, every per-project table keyed by `project_id`. `gates`/`agents` use composite
+`(project_id, …)` PKs since their natural keys are only unique within a run. The global directory tables
+(organizations, users, blobs) are single row-sets, not per-project.
 """
 from __future__ import annotations
 
@@ -15,16 +15,16 @@ from sqlalchemy import (Column, DateTime, Float, Integer, MetaData, Table, Text,
 
 metadata = MetaData()
 
-runstate = Table(
-    "runstate", metadata,
-    Column("run_id", Text, primary_key=True),
+projectstate = Table(
+    "projectstate", metadata,
+    Column("project_id", Text, primary_key=True),
     Column("data", Text, nullable=False),
 )
 
 phases = Table(
     "phases", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("run_id", Text, nullable=False),
+    Column("project_id", Text, nullable=False),
     Column("name", Text, nullable=False),
     Column("status", Text, nullable=False, server_default="active"),
     Column("stage", Integer),
@@ -34,7 +34,7 @@ phases = Table(
 artifacts = Table(
     "artifacts", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("run_id", Text, nullable=False),
+    Column("project_id", Text, nullable=False),
     Column("title", Text),
     Column("path", Text),
     Column("kind", Text),
@@ -45,7 +45,7 @@ artifacts = Table(
 blockers = Table(
     "blockers", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("run_id", Text, nullable=False),
+    Column("project_id", Text, nullable=False),
     Column("what", Text),
     Column("blocks", Text),
     Column("cleared", Integer, nullable=False, server_default="0"),
@@ -54,7 +54,7 @@ blockers = Table(
 
 gates = Table(
     "gates", metadata,
-    Column("run_id", Text, primary_key=True),
+    Column("project_id", Text, primary_key=True),
     Column("name", Text, primary_key=True),
     Column("status", Text, nullable=False),
     Column("ts", Float, nullable=False),
@@ -63,7 +63,7 @@ gates = Table(
 verifications = Table(
     "verifications", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("run_id", Text, nullable=False),
+    Column("project_id", Text, nullable=False),
     Column("url", Text),
     Column("passed", Integer, nullable=False),
     Column("result", Text),
@@ -73,7 +73,7 @@ verifications = Table(
 deployments = Table(
     "deployments", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("run_id", Text, nullable=False),
+    Column("project_id", Text, nullable=False),
     Column("app", Text),
     Column("service_name", Text),
     Column("url", Text),
@@ -85,7 +85,7 @@ deployments = Table(
 tickets = Table(
     "tickets", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("run_id", Text, nullable=False),
+    Column("project_id", Text, nullable=False),
     Column("title", Text, nullable=False),
     Column("acceptance", Text, nullable=False),
     Column("dod", Text, nullable=False),
@@ -102,7 +102,7 @@ tickets = Table(
 agents = Table(
     "agents", metadata,
     Column("agent_id", Text, primary_key=True),
-    Column("run_id", Text, primary_key=True),
+    Column("project_id", Text, primary_key=True),
     Column("ticket_id", Integer),
     Column("role", Text, nullable=False),
     Column("model", Text, nullable=False),
@@ -121,7 +121,7 @@ agents = Table(
     Column("ended_at", Float),
 )
 
-# ---- global directory tables (one row-set, not per-run) ------------------------------
+# ---- global directory tables (one row-set, not per-project) ------------------------------
 organizations = Table(
     "organizations", metadata,
     Column("id", Text, primary_key=True),
@@ -154,7 +154,7 @@ users = Table(
 blobs = Table(
     "blobs", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("scope", Text, nullable=False),     # 'run' | 'org'
+    Column("scope", Text, nullable=False),     # 'project' | 'org'
     Column("scope_id", Text, nullable=False),
     Column("kind", Text),
     Column("name", Text),                       # display filename, e.g. "standard-pricing.xlsx"
@@ -167,17 +167,17 @@ blobs = Table(
 )
 
 # A project (run) drawing on an org-scoped knowledge-base doc. One row per (blob, run); the
-# knowledge-base "used by N projects" count is COUNT(DISTINCT run_id) over these rows.
+# knowledge-base "used by N projects" count is COUNT(DISTINCT project_id) over these rows.
 blob_uses = Table(
     "blob_uses", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("blob_id", Integer, nullable=False),
-    Column("run_id", Text, nullable=False),
+    Column("project_id", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
 )
 
-# Groupings: the flat per-run tables, the global directory tables, and everything (Alembic + tests).
-RUNDB = (runstate, phases, artifacts, blockers, gates, verifications, deployments)
-FLAT_TABLES = RUNDB + (tickets, agents)
+# Groupings: the flat per-project tables, the global directory tables, and everything (Alembic + tests).
+PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
+FLAT_TABLES = PROJECTDB + (tickets, agents)
 GLOBAL_TABLES = (organizations, users, blobs, blob_uses)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES

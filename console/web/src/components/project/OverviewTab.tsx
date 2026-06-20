@@ -1,7 +1,7 @@
 // OverviewTab.tsx — Project view §2.5 Overview: a mission-control board of zone panels over a
 // dotted canvas (design orgproject.jsx → ProjectDashboard Overview). Driven by tjyb5gmy's locked
-// endpoints (PR #13): GET /api/runs/{id}/overview (brief/build/services/agents/org + counts) and
-// GET /api/runs/{id}/documents (the materials + produced LISTS). Every panel degrades to an
+// endpoints (PR #13): GET /api/projects/{id}/overview (brief/build/services/agents/org + counts) and
+// GET /api/projects/{id}/documents (the materials + produced LISTS). Every panel degrades to an
 // empty/“—” state until the data is live.
 import { useEffect, useState } from "react";
 import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact } from "../../api";
@@ -64,14 +64,14 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div style={{ font: `400 12px/1.4 ${T.sans}`, color: T.tertiary }}>{children}</div>;
 }
 
-export function OverviewTab({ runId, onOpenFactory }: { runId: string; onOpenFactory: () => void }) {
+export function OverviewTab({ projectId, onOpenFactory }: { projectId: string; onOpenFactory: () => void }) {
   const [ov, setOv] = useState<ProjectOverview | null>(null);
   const [docs, setDocs] = useState<ProjectDocuments | null>(null);
 
   useEffect(() => {
-    api.overview(runId).then(setOv).catch(() => setOv(null));      // backend pending → graceful empty
-    api.documents(runId).then(setDocs).catch(() => setDocs(null)); // materials + produced lists
-  }, [runId]);
+    api.overview(projectId).then(setOv).catch(() => setOv(null));      // backend pending → graceful empty
+    api.documents(projectId).then(setDocs).catch(() => setDocs(null)); // materials + produced lists
+  }, [projectId]);
 
   const brief = ov?.brief || {};
   const build = ov?.build || {};
@@ -179,7 +179,7 @@ export function OverviewTab({ runId, onOpenFactory }: { runId: string; onOpenFac
           <Panel title="Produced documents" count={produced.length || undefined} span={2}>
             {produced.length ? (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
-                {produced.map((d, i) => <FileRow key={d.title + i} label={d.title} kind={d.kind} sub={d.agent} onOpen={d.path ? () => window.open(`/api/runs/${runId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
+                {produced.map((d, i) => <FileRow key={d.title + i} label={d.title} kind={d.kind} sub={d.agent} onOpen={d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
               </div>
             ) : <Empty>The factory hasn’t produced documents yet.</Empty>}
           </Panel>

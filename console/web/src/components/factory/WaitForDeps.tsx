@@ -5,7 +5,7 @@
 //
 // Per dep the operator picks a disposition (matches the server's deps model in console.submit_deps):
 //   Get-from-MCP (mcp) · Mock-it (mock) · Input-key (provide, with a value field).
-// Submitting POSTs to /api/runs/{id}/deps via api.submitDeps; provided values ride into the
+// Submitting POSTs to /api/projects/{id}/deps via api.submitDeps; provided values ride into the
 // Stage-3 env only and are never persisted to disk (see console.submit_deps docstring).
 import { useEffect, useState } from "react";
 import { T, Icon, Btn } from "../onboarding/design";
@@ -23,7 +23,7 @@ function isSatisfied(name: string, disp: Disp, value: string): boolean {
   return disp !== "provide" || value.trim().length > 0;
 }
 
-export function WaitForDeps({ runId, onResolved }: { runId: string; onResolved?: () => void }) {
+export function WaitForDeps({ projectId, onResolved }: { projectId: string; onResolved?: () => void }) {
   const [deps, setDeps] = useState<DepsResponse | null>(null);
   const [disp, setDisp] = useState<Record<string, Disp>>({});
   const [vals, setVals] = useState<Record<string, string>>({});
@@ -31,7 +31,7 @@ export function WaitForDeps({ runId, onResolved }: { runId: string; onResolved?:
 
   useEffect(() => {
     let live = true;
-    api.deps(runId).then((d) => {
+    api.deps(projectId).then((d) => {
       if (!live) return;
       setDeps(d);
       // seed from the server-classified disposition (smart default per token).
@@ -43,7 +43,7 @@ export function WaitForDeps({ runId, onResolved }: { runId: string; onResolved?:
       setDisp(seed);
     }).catch(() => {});
     return () => { live = false; };
-  }, [runId]);
+  }, [projectId]);
 
   if (!deps) return null;
   const names = deps.deps_required;
@@ -58,7 +58,7 @@ export function WaitForDeps({ runId, onResolved }: { runId: string; onResolved?:
       body[name] = d === "provide" ? { disposition: "provide", value: vals[name] || "" } : { disposition: d };
     }
     try {
-      const r = await api.submitDeps(runId, body);
+      const r = await api.submitDeps(projectId, body);
       if (r.satisfied && onResolved) onResolved();
     } finally {
       setSubmitting(false);

@@ -1,7 +1,7 @@
 """Factory-side provisioning of a run's DEPLOY DATABASE.
 
 Stage-3 agents have NO Supabase access and must never provision a database themselves. Instead
-the FACTORY provisions a per-run Railway Postgres and writes its connection details into the
+the FACTORY provisions a per-project Railway Postgres and writes its connection details into the
 stage-3 workspace as `context/deploy-db.json`; the agent reads that file and wires the built app
 to it (and sets it on the app's own service at deploy).
 
@@ -38,15 +38,15 @@ def _pg_url_from(text: str) -> str | None:
     return m.group(0).rstrip("/") if m else None
 
 
-def provision(run_id: str, run: Callable[[list[str]], RunResult] = _real_runner) -> dict:
+def provision(project_id: str, run: Callable[[list[str]], RunResult] = _real_runner) -> dict:
     """Create a Railway Postgres for this run and return its connection info:
-    {DATABASE_URL, provider, service, run_id}. Raises RuntimeError if no URL can be obtained —
+    {DATABASE_URL, provider, service, project_id}. Raises RuntimeError if no URL can be obtained —
     the caller turns that into a deps blocker rather than letting the run proceed DB-less."""
-    project_id = os.environ.get("RAILWAY_PROJECT_ID")
-    if not env.railway_project_allowed(project_id):
+    railway_project_id = os.environ.get("RAILWAY_PROJECT_ID")
+    if not env.railway_project_allowed(railway_project_id):
         raise RuntimeError(
-            f"RAILWAY_PROJECT_ID={project_id!r} is not allowed for run-app DB provisioning")
-    svc = f"sf-{run_id}-db"
+            f"RAILWAY_PROJECT_ID={railway_project_id!r} is not allowed for run-app DB provisioning")
+    svc = f"sf-{project_id}-db"
     # Add a managed Postgres to the run-app project. Re-runs are tolerated: an "already exists"
     # is not fatal — we still read the connection string below.
     run(["railway", "add", "--database", "postgres", "--service", svc])
@@ -60,7 +60,7 @@ def provision(run_id: str, run: Callable[[list[str]], RunResult] = _real_runner)
     url = url or _pg_url_from(out)
     if not url:
         raise RuntimeError(f"could not obtain a Postgres DATABASE_URL for {svc}")
-    return {"DATABASE_URL": url, "provider": "railway-postgres", "service": svc, "run_id": run_id}
+    return {"DATABASE_URL": url, "provider": "railway-postgres", "service": svc, "project_id": project_id}
 
 
 def write_file(context_dir: str, info: dict) -> str:

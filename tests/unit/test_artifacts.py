@@ -144,7 +144,7 @@ def test_parse_required_tokens_no_section():
 def test_parse_required_tokens_keeps_h3_subsections():
     # Real Stage-2 architecture.md groups tokens under '### Operator must supply' /
     # '### Agent-provisionable' subheadings. The parser must NOT treat an h3 as section-end
-    # (it did, breaking on '#{1,3}', so deps_required came back EMPTY on run-ce47692e).
+    # (it did, breaking on '#{1,3}', so deps_required came back EMPTY on project-ce47692e).
     text = (
         "## Required Tokens\n\n"
         "### Operator must supply\n"

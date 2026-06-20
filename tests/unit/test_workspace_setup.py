@@ -38,7 +38,7 @@ def test_stage1_workspace_has_mcp_and_settings(tmp_path):
     skills_dir = _make_skills_dir(tmp_path)
     phase_dir = _make_phase_dir(tmp_path)
 
-    ws = prepare_workspace(str(runs), "run-test", 1,
+    ws = prepare_workspace(str(runs), "project-test", 1,
                            skills_dir=skills_dir, phase_dir=phase_dir)
 
     mcp = json.loads(open(os.path.join(ws, ".mcp.json")).read())
@@ -53,7 +53,7 @@ def test_stage3_workspace_wires_railway_mcp_and_no_supabase(tmp_path):
     # Stage 3 deploys, so its workspace gets the Railway MCP + playwright — but NEVER Supabase
     # (agents have no Supabase access; the DB is factory-provided via context/deploy-db.json).
     runs = tmp_path / "runs"; runs.mkdir()
-    ws = prepare_workspace(str(runs), "run-s3mcp", 3,
+    ws = prepare_workspace(str(runs), "project-s3mcp", 3,
                            skills_dir=_make_skills_dir(tmp_path), phase_dir=_make_phase_dir(tmp_path))
     mcp = json.loads(open(os.path.join(ws, ".mcp.json")).read())["mcpServers"]
     assert {"playwright", "railway"}.issubset(set(mcp))
@@ -65,7 +65,7 @@ def test_stage1_and_2_workspace_is_playwright_only(tmp_path):
     runs = tmp_path / "runs"; runs.mkdir()
     skills_dir = _make_skills_dir(tmp_path); phase_dir = _make_phase_dir(tmp_path)
     for stage in (1, 2):
-        ws = prepare_workspace(str(runs), "run-s%d" % stage, stage,
+        ws = prepare_workspace(str(runs), "project-s%d" % stage, stage,
                                skills_dir=skills_dir, phase_dir=phase_dir)
         mcp = json.loads(open(os.path.join(ws, ".mcp.json")).read())["mcpServers"]
         assert set(mcp) == {"playwright"}, "stages 1-2 must not get the deploy MCPs"
@@ -76,7 +76,7 @@ def test_stage1_includes_design_skills(tmp_path):
     runs.mkdir()
     skills_dir = _make_skills_dir(tmp_path)
 
-    ws = prepare_workspace(str(runs), "run-ds", 1,
+    ws = prepare_workspace(str(runs), "project-ds", 1,
                            skills_dir=skills_dir,
                            phase_dir=_make_phase_dir(tmp_path))
 
@@ -89,7 +89,7 @@ def test_stage2_excludes_design_skills(tmp_path):
     runs.mkdir()
     skills_dir = _make_skills_dir(tmp_path)
 
-    ws = prepare_workspace(str(runs), "run-s2", 2,
+    ws = prepare_workspace(str(runs), "project-s2", 2,
                            skills_dir=skills_dir,
                            phase_dir=_make_phase_dir(tmp_path))
 
@@ -99,15 +99,15 @@ def test_stage2_excludes_design_skills(tmp_path):
 def test_stage2_copies_stage1_artifacts(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
-    run_dir = runs / "run-art"
-    run_dir.mkdir()
-    ws_old = run_dir / "workspace"
+    project_dir = runs / "project-art"
+    project_dir.mkdir()
+    ws_old = project_dir / "workspace"
     ws_old.mkdir()
     (ws_old / ".sf-workspace").touch()
     (ws_old / "PRD.md").write_text("# PRD content")
 
     skills_dir = _make_skills_dir(tmp_path)
-    ws = prepare_workspace(str(runs), "run-art", 2,
+    ws = prepare_workspace(str(runs), "project-art", 2,
                            skills_dir=skills_dir, phase_dir=_make_phase_dir(tmp_path))
 
     assert os.path.isfile(os.path.join(ws, "context", "PRD.md"))
@@ -116,12 +116,12 @@ def test_stage2_copies_stage1_artifacts(tmp_path):
 def test_prepare_workspace_is_idempotent_on_rerun(tmp_path):
     """Re-running a stage (retry) must not crash when context/ already holds the prior
     artifact — the walk must skip the destination, not copy a file onto itself.
-    Reproduces the SameFileError that crashed the /retry handler on run-79e88589."""
+    Reproduces the SameFileError that crashed the /retry handler on project-79e88589."""
     runs = tmp_path / "runs"
     runs.mkdir()
-    run_dir = runs / "run-rt"
-    run_dir.mkdir()
-    ws_old = run_dir / "workspace"
+    project_dir = runs / "project-rt"
+    project_dir.mkdir()
+    ws_old = project_dir / "workspace"
     ws_old.mkdir()
     (ws_old / ".sf-workspace").touch()
     # Simulate the post-first-Stage-2 state: PRD.md already sits in the destination context/.
@@ -132,16 +132,16 @@ def test_prepare_workspace_is_idempotent_on_rerun(tmp_path):
     skills_dir = _make_skills_dir(tmp_path)
     phase_dir = _make_phase_dir(tmp_path)
     # Must not raise SameFileError; the prior artifact stays put.
-    ws = prepare_workspace(str(runs), "run-rt", 2, skills_dir=skills_dir, phase_dir=phase_dir)
+    ws = prepare_workspace(str(runs), "project-rt", 2, skills_dir=skills_dir, phase_dir=phase_dir)
     assert os.path.isfile(os.path.join(ws, "context", "PRD.md"))
 
 
 def test_stage3_copies_architecture_artifacts(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
-    run_dir = runs / "run-s3"
-    run_dir.mkdir()
-    ws_old = run_dir / "workspace"
+    project_dir = runs / "project-s3"
+    project_dir.mkdir()
+    ws_old = project_dir / "workspace"
     ws_old.mkdir()
     (ws_old / ".sf-workspace").touch()
     (ws_old / "PRD.md").write_text("# PRD")
@@ -149,7 +149,7 @@ def test_stage3_copies_architecture_artifacts(tmp_path):
     (ws_old / "architecture.svg").write_text("<svg/>")
 
     skills_dir = _make_skills_dir(tmp_path)
-    ws = prepare_workspace(str(runs), "run-s3", 3,
+    ws = prepare_workspace(str(runs), "project-s3", 3,
                            skills_dir=skills_dir, phase_dir=_make_phase_dir(tmp_path))
 
     assert os.path.isfile(os.path.join(ws, "context", "architecture.md"))
@@ -162,7 +162,7 @@ def test_workspace_copies_skill_file(tmp_path):
     runs.mkdir()
     skills_dir = _make_skills_dir(tmp_path)
 
-    ws = prepare_workspace(str(runs), "run-sk", 1,
+    ws = prepare_workspace(str(runs), "project-sk", 1,
                            skills_dir=skills_dir, phase_dir=_make_phase_dir(tmp_path))
 
     content = open(os.path.join(ws, "SKILL.md")).read()
@@ -175,7 +175,7 @@ def test_workspace_copies_phase_files(tmp_path):
     skills_dir = _make_skills_dir(tmp_path)
     phase_dir = _make_phase_dir(tmp_path)
 
-    ws = prepare_workspace(str(runs), "run-ph", 1,
+    ws = prepare_workspace(str(runs), "project-ph", 1,
                            skills_dir=skills_dir, phase_dir=phase_dir)
 
     assert os.path.isfile(os.path.join(ws, "phases", "00-provision.md"))
@@ -187,7 +187,7 @@ def test_tenexity_design_canon_ships_to_every_stage(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
     for stage in (1, 2, 3):
-        ws = prepare_workspace(str(runs), "run-tnx%d" % stage, stage)
+        ws = prepare_workspace(str(runs), "project-tnx%d" % stage, stage)
         canon = os.path.join(ws, "skills", "tenexity-design")
         assert os.path.isfile(os.path.join(canon, "SKILL.md")), f"stage {stage} missing canon"
         tokens = open(os.path.join(canon, "tokens.css")).read()
@@ -207,7 +207,7 @@ def test_stage_contracts_reference_the_canon():
 
 
 def test_opencode_config_pins_provider_key_to_the_env_var():
-    # run-d81f37da scar: SDK-spawned `opencode serve` fell back to the host's global
+    # project-d81f37da scar: SDK-spawned `opencode serve` fell back to the host's global
     # auth.json (spend-limited key) — the workspace config must pin the env key so every
     # opencode entrypoint (run AND serve) uses the run's credential.
     from software_factory.workspace_setup import opencode_config

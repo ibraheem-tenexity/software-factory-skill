@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
-import { api, RunSummary } from "../api";
+import { api, ProjectSummary } from "../api";
 
 export function ProjectsScreen({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () => void }) {
-  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
 
   useEffect(() => {
-    api.runs().then((d) => setRuns(d.runs || [])).catch(() => setRuns([]));
+    api.projects().then((d) => setProjects(d.projects || [])).catch(() => setProjects([]));
   }, []);
 
   // Drafts (the interview-in-progress) surface first so a refresh resumes onboarding.
-  const drafts = runs.filter((r) => r.phase === "draft");
-  const live = runs.filter((r) => r.phase !== "draft");
+  const drafts = projects.filter((r) => r.phase === "draft");
+  const live = projects.filter((r) => r.phase !== "draft");
 
   return (
     <div className="projects">
@@ -22,26 +22,26 @@ export function ProjectsScreen({ onOpen, onNew }: { onOpen: (id: string) => void
       <button className="btn" onClick={onNew}>+ New project</button>
       <div style={{ height: 20 }} />
       {drafts.length > 0 && <h3>Drafts</h3>}
-      <div className="run-grid">
+      <div className="project-grid">
         {drafts.map((r) => (
-          <div className="run-card" key={r.run_id} onClick={() => onOpen(r.run_id)}>
+          <div className="project-card" key={r.project_id} onClick={() => onOpen(r.project_id)}>
             <div className="name">{r.name || "Untitled draft"}</div>
             <div className="meta">interview in progress</div>
           </div>
         ))}
       </div>
       {live.length > 0 && <h3 style={{ marginTop: 24 }}>Projects</h3>}
-      <div className="run-grid">
+      <div className="project-grid">
         {live.map((r) => (
-          <div className="run-card" key={r.run_id} onClick={() => onOpen(r.run_id)}>
-            <div className="name">{r.name || r.run_id}</div>
+          <div className="project-card" key={r.project_id} onClick={() => onOpen(r.project_id)}>
+            <div className="name">{r.name || r.project_id}</div>
             <div className="meta">
               {r.phase || "—"} · ${(r.spent_usd || 0).toFixed(2)}
             </div>
           </div>
         ))}
       </div>
-      {runs.length === 0 && <div className="empty">Start your first autonomous build above.</div>}
+      {projects.length === 0 && <div className="empty">Start your first autonomous build above.</div>}
     </div>
   );
 }

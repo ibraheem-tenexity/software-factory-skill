@@ -4,11 +4,11 @@ Launched by the console INSTEAD of `opencode run` when SF_SWARM=1 (opencode runt
 stage 3 only). One Kimi agent per open ticket, wave by wave: parallel within a wave,
 waves in sequence. The driver is the stage's single tracked process; when the swarm
 phase ends it EXECS the standard monolithic stage-3 agent (the argv after `--`) — same
-PID, so the console's process handle, run.log redirection and budget teeth carry
+PID, so the console's process handle, project.log redirection and budget teeth carry
 straight through. That agent then finishes whatever the swarm left (failed/unclaimed
 tickets), deploys, tests and fix-loops — graceful degradation, no contract fork.
 
-Accounting: every swarm `agent-turn-done` is re-emitted on stdout (which IS run.log) as
+Accounting: every swarm `agent-turn-done` is re-emitted on stdout (which IS project.log) as
 an opencode `step_finish` line, so streamlog.cost_usd sees ONE spend stream and the
 poller's mid-stage brake fires during the swarm too. Synthesized lines NEVER carry
 part.reason="stop" — the zombie-session detector must not read a mid-swarm log as a
@@ -36,7 +36,7 @@ from .tickets import TicketStore
 
 
 def synth_step_finish(ev: dict) -> str | None:
-    """agent-turn-done -> a run.log step_finish line streamlog already knows how to sum.
+    """agent-turn-done -> a project.log step_finish line streamlog already knows how to sum.
     A 0/absent cost is OMITTED (not 0): part.cost=0 would read as authoritative-free and
     skip the token-price fallback."""
     if ev.get("type") != "agent-turn-done":
@@ -50,9 +50,9 @@ def synth_step_finish(ev: dict) -> str | None:
     )
 
 
-def fold_once(events_path: str, emitted: int, registry: AgentRegistry, run_id: str,
+def fold_once(events_path: str, emitted: int, registry: AgentRegistry, project_id: str,
               model: str, out=sys.stdout) -> int:
-    """One poll iteration: re-emit NEW turn-done events into run.log and re-fold agent
+    """One poll iteration: re-emit NEW turn-done events into project.log and re-fold agent
     rows (bridge_events is idempotent over the growing file). Returns the new emit
     watermark — the count of events already translated."""
     events = read_events(events_path)
@@ -61,18 +61,18 @@ def fold_once(events_path: str, emitted: int, registry: AgentRegistry, run_id: s
         if line:
             out.write(line + "\n")
     out.flush()
-    bridge_events(events, registry, run_id, model)
+    bridge_events(events, registry, project_id, model)
     return len(events)
 
 
-def run_swarm_waves(base: str, run_id: str, ws: str, model: str, budget_usd: float,
+def run_swarm_waves(base: str, project_id: str, ws: str, model: str, budget_usd: float,
                     max_concurrent: int = 2, spawn=subprocess.Popen, poll_s: float = 10.0,
                     settle_grace_s: float = 120.0, out=sys.stdout) -> float:
     """Run every open wave as a swarm. Returns total swarm spend. Never raises on a
     failed wave — the monolithic agent after exec is the recovery path."""
-    run_db = os.path.join(base, "run.db")
-    store = TicketStore(run_db)
-    registry = AgentRegistry(run_db)
+    project_db = base   # per-project dir (storage is Postgres)
+    store = TicketStore(project_db)
+    registry = AgentRegistry(project_db)
     remaining = budget_usd
     spent_total = 0.0
 
@@ -83,7 +83,7 @@ def run_swarm_waves(base: str, run_id: str, ws: str, model: str, budget_usd: flo
         if not tickets:
             continue
         cfg = swarm_config_for_tickets(
-            tickets, model=model, run_db_path=run_db,
+            tickets, model=model, project_db_path=project_db,
             budget_usd=remaining, max_concurrent=max_concurrent,
         )
         cfg_path = os.path.join(ws, f"swarm-wave{wave}.json")
@@ -105,7 +105,7 @@ def run_swarm_waves(base: str, run_id: str, ws: str, model: str, budget_usd: flo
         settled_at = None
         while proc.poll() is None:
             time.sleep(poll_s)
-            emitted = fold_once(events_path, emitted, registry, run_id, model, out=out)
+            emitted = fold_once(events_path, emitted, registry, project_id, model, out=out)
             # The swarm CLI can LINGER after swarm-done (live scar: wave-2 of run-5b7aef7a
             # finished cleanly but the CLI + its opencode serve never exited, wedging this
             # loop for 2h). A ledger-finished swarm whose process outlives the grace is
@@ -120,7 +120,7 @@ def run_swarm_waves(base: str, run_id: str, ws: str, model: str, budget_usd: flo
                 except Exception:
                     proc.kill()
                 break
-        fold_once(events_path, emitted, registry, run_id, model, out=out)
+        fold_once(events_path, emitted, registry, project_id, model, out=out)
         _CURRENT["proc"] = None
 
         wave_spend = spend_usd(read_events(events_path))
@@ -150,12 +150,12 @@ def _terminate(signum, frame):
 def main(argv: list[str]) -> int:
     if "--" not in argv:
         sys.stderr.write(
-            "usage: python3 -m software_factory.swarm_stage3 <runs_dir> <run_id> <ws> "
+            "usage: python3 -m software_factory.swarm_stage3 <projects_dir> <project_id> <ws> "
             "--budget <usd> --model <model> [--max-concurrent N] -- <stage-3 agent argv...>\n")
         return 2
     split = argv.index("--")
     head, agent_argv = argv[:split], argv[split + 1:]
-    runs_dir, run_id, ws = head[0], head[1], head[2]
+    projects_dir, project_id, ws = head[0], head[1], head[2]
     opts = dict(zip(head[3::2], head[4::2]))
     model = opts.get("--model", "openrouter/moonshotai/kimi-k2.7-code")
     budget = float(opts.get("--budget", "0"))
@@ -165,14 +165,14 @@ def main(argv: list[str]) -> int:
     signal.signal(signal.SIGTERM, _terminate)
     signal.signal(signal.SIGINT, _terminate)
 
-    base = os.path.join(runs_dir, run_id)
+    base = os.path.join(projects_dir, project_id)
     # Restart-survivable liveness: a console that lost its process handle (server restart,
     # port eviction) must not read a mid-swarm quiet log as "stage finished" and relaunch a
     # second orchestrator (§1 race — happened live on run-5b7aef7a). The pid survives the
     # exec below, so this one file covers the whole stage.
     with open(os.path.join(base, "stage3.pid"), "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
-    spent = run_swarm_waves(base, run_id, ws, model, budget, max_concurrent=max_concurrent)
+    spent = run_swarm_waves(base, project_id, ws, model, budget, max_concurrent=max_concurrent)
     sys.stderr.write(f"[swarm_stage3] swarm phase done: ${spent:.4f}; exec stage-3 agent\n")
     sys.stderr.flush()
     sys.stdout.flush()

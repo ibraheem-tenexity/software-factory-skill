@@ -37,7 +37,7 @@ def test_sf_chat_model_gpt4o_is_the_rollback(monkeypatch):
 
 
 def _runner():
-    return ChatAgentRunner(MagicMock(_runs_dir="/tmp/x"))
+    return ChatAgentRunner(MagicMock(_projects_dir="/tmp/x"))
 
 
 def _fake_result(items):
@@ -56,7 +56,7 @@ def test_malformed_tool_arguments_degrade_to_text_not_crash(monkeypatch):
     runner = _runner()
     bad = _tool_call_item(runner._agent, "request_dep_input", "NOT VALID JSON {")
     with patch("agents.Runner.run", new=AsyncMock(return_value=_fake_result([bad]))):
-        run_id, msgs = asyncio.get_event_loop().run_until_complete(
+        project_id, msgs = asyncio.get_event_loop().run_until_complete(
             runner.handle_message(None, "hi", [], []))
     # no dep_request emitted, no exception — final_output text is the fallback reply
     assert all(m.msg_type != "dep_request" for m in msgs)
@@ -77,26 +77,26 @@ def test_wellformed_tool_call_still_fires(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
     runner = _runner()
     good = _tool_call_item(runner._agent, "request_dep_input",
-                           '{"run_id": "run-1", "dep_names": ["RAILWAY_TOKEN"]}')
+                           '{"project_id": "project-1", "dep_names": ["RAILWAY_TOKEN"]}')
     with patch("agents.Runner.run", new=AsyncMock(return_value=_fake_result([good]))):
         _, msgs = asyncio.get_event_loop().run_until_complete(
-            runner.handle_message("run-1", "hi", [], []))
+            runner.handle_message("project-1", "hi", [], []))
     dep = next(m for m in msgs if m.msg_type == "dep_request")
     assert dep.metadata["dep_names"] == ["RAILWAY_TOKEN"]
 
 
 def test_hand_off_to_factory_promotes_draft(monkeypatch):
     # hand_off_to_factory promotes the interview draft (runtime/picks already on the draft from
-    # create_draft); it no longer calls start_run with a fresh RunRequest.
+    # create_draft); it no longer calls start_project with a fresh ProjectRequest.
     import json
     from unittest.mock import MagicMock
     from software_factory.chat_agent import make_tools
     monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
     captured = {}
     mock_console = MagicMock()
-    mock_console.promote_draft = lambda rid, **kw: captured.update(rid=rid) or "run-x"
-    tools = make_tools(mock_console, draft_id=lambda: "run-draft01")
+    mock_console.promote_draft = lambda rid, **kw: captured.update(rid=rid) or "project-x"
+    tools = make_tools(mock_console, draft_id=lambda: "project-draft01")
     hand = next(t for t in tools if t.name == "hand_off_to_factory")
     asyncio.get_event_loop().run_until_complete(
         hand.on_invoke_tool(None, json.dumps({})))
-    assert captured["rid"] == "run-draft01"
+    assert captured["rid"] == "project-draft01"

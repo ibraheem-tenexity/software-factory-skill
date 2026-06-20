@@ -88,7 +88,7 @@ def test_read_events_missing_file_is_empty_not_fatal(tmp_path):
 
 def test_config_one_agent_per_ticket_with_contract_and_tools_cap():
     t = _ticket()
-    cfg = swarm_config_for_tickets([t], model=KIMI, run_db_path="/runs/r1/run.db",
+    cfg = swarm_config_for_tickets([t], model=KIMI, project_db_path="/runs/r1",
                                    budget_usd=12.5, max_concurrent=3)
     assert cfg["model"] == KIMI
     assert cfg["budgetUsd"] == 12.5
@@ -103,7 +103,7 @@ def test_config_one_agent_per_ticket_with_contract_and_tools_cap():
     assert "Add login form" in task and "form submits" in task and "tests pass" in task
     # claim id == agent name (detect_stage3_done traceability), concrete db path
     assert "claim(7, 'ticket-7')" in task
-    assert "/runs/r1/run.db" in task
+    assert "/runs/r1" in task
     assert "mark_done(7" in task
     # host owns lifecycle records — the agent must not double-record
     assert "spawn-agent" in task and "host records" in task
@@ -142,10 +142,10 @@ def test_env_sets_pwd_xdg_isolation_and_db_inside_workspace():
 # ---- event bridge ---------------------------------------------------------------------
 
 def test_bridge_records_spawn_and_final_costs_from_fixture(tmp_path):
-    reg = AgentRegistry(str(tmp_path / "run-x" / "run.db"))
+    reg = AgentRegistry(str(tmp_path / "project-x"))
     events = read_events(FIXTURE)
-    folded = bridge_events(events, reg, "run-x", KIMI)
-    rows = {r.agent_id: r for r in reg.agents_for("run-x")}
+    folded = bridge_events(events, reg, "project-x", KIMI)
+    rows = {r.agent_id: r for r in reg.agents_for("project-x")}
     assert set(rows) == {"asker", "oracle"}
     # agent-done.costUsd is NOT final (sweep turns land after it); the bridge must fold
     # ALL turn-done events. Fixture truth: oracle $0.00478 at agent-done, $0.00964 final.
@@ -157,20 +157,20 @@ def test_bridge_records_spawn_and_final_costs_from_fixture(tmp_path):
 
 
 def test_bridge_is_idempotent_over_a_growing_file(tmp_path):
-    reg = AgentRegistry(str(tmp_path / "run-x" / "run.db"))
+    reg = AgentRegistry(str(tmp_path / "project-x"))
     events = read_events(FIXTURE)
-    bridge_events(events[:4], reg, "run-x", KIMI)   # mid-run poll: spawned, no outcomes yet
-    running = {r.agent_id: r for r in reg.agents_for("run-x")}
+    bridge_events(events[:4], reg, "project-x", KIMI)   # mid-run poll: spawned, no outcomes yet
+    running = {r.agent_id: r for r in reg.agents_for("project-x")}
     assert running["asker"].status == "running"
-    bridge_events(events, reg, "run-x", KIMI)       # full file later
-    bridge_events(events, reg, "run-x", KIMI)       # and again — no dup rows, same totals
-    rows = {r.agent_id: r for r in reg.agents_for("run-x")}
-    assert len(reg.agents_for("run-x")) == 2
+    bridge_events(events, reg, "project-x", KIMI)       # full file later
+    bridge_events(events, reg, "project-x", KIMI)       # and again — no dup rows, same totals
+    rows = {r.agent_id: r for r in reg.agents_for("project-x")}
+    assert len(reg.agents_for("project-x")) == 2
     assert abs(rows["oracle"].cost_usd - 0.00964201) < 1e-6
 
 
 def test_bridge_maps_ticket_agents_to_ticket_ids_and_failures(tmp_path):
-    reg = AgentRegistry(str(tmp_path / "run-x" / "run.db"))
+    reg = AgentRegistry(str(tmp_path / "project-x"))
     events = [
         {"type": "agent-spawned", "agent": "ticket-3", "sessionId": "s1"},
         {"type": "agent-turn-done", "agent": "ticket-3", "round": 0, "model": KIMI,
@@ -179,8 +179,8 @@ def test_bridge_maps_ticket_agents_to_ticket_ids_and_failures(tmp_path):
          "totalCostUsd": 0.01},
         {"type": "agent-failed", "agent": "ticket-3", "error": "boom"},
     ]
-    bridge_events(events, reg, "run-x", KIMI)
-    (row,) = reg.agents_for("run-x")
+    bridge_events(events, reg, "project-x", KIMI)
+    (row,) = reg.agents_for("project-x")
     assert row.ticket_id == 3
     assert row.role == "swarm-ticket"
     assert row.status == "failed" and row.outcome == "failed"
@@ -190,7 +190,7 @@ def test_bridge_maps_ticket_agents_to_ticket_ids_and_failures(tmp_path):
 def test_bridge_agent_settled_supersedes_agent_done(tmp_path):
     # opencode-swarm >= df0a10d emits agent-settled AFTER the sweep with the true final
     # cost/status; agent-done remains the realtime (pre-sweep) signal.
-    reg = AgentRegistry(str(tmp_path / "run-x" / "run.db"))
+    reg = AgentRegistry(str(tmp_path / "project-x"))
     tok = {"input": 100, "output": 10, "reasoning": 0, "cache": {"read": 0, "write": 0}}
     events = [
         {"type": "agent-spawned", "agent": "ticket-9", "sessionId": "s"},
@@ -202,22 +202,22 @@ def test_bridge_agent_settled_supersedes_agent_done(tmp_path):
         {"type": "agent-settled", "agent": "ticket-9", "status": "done",
          "costUsd": 0.015, "result": "ok"},
     ]
-    bridge_events(events, reg, "run-x", KIMI)
-    (row,) = reg.agents_for("run-x")
+    bridge_events(events, reg, "project-x", KIMI)
+    (row,) = reg.agents_for("project-x")
     assert abs(row.cost_usd - 0.015) < 1e-9      # settled cost, not agent-done's 0.01
     assert row.status == "done" and row.outcome == "success"
 
 
 def test_bridge_settled_failure_wins_over_earlier_done(tmp_path):
-    reg = AgentRegistry(str(tmp_path / "run-x" / "run.db"))
+    reg = AgentRegistry(str(tmp_path / "project-x"))
     events = [
         {"type": "agent-spawned", "agent": "a", "sessionId": "s"},
         {"type": "agent-done", "agent": "a", "result": "ok", "costUsd": 0.01},
         {"type": "agent-settled", "agent": "a", "status": "failed", "costUsd": 0.01,
          "result": "boom"},
     ]
-    bridge_events(events, reg, "run-x", KIMI)
-    (row,) = reg.agents_for("run-x")
+    bridge_events(events, reg, "project-x", KIMI)
+    (row,) = reg.agents_for("project-x")
     assert row.status == "failed" and row.outcome == "failed"
 
 
@@ -251,11 +251,11 @@ def test_v020_fixture_rounds_are_monotonic_ordinals():
 
 
 def test_v020_fixture_bridge_settles_to_the_settled_costs(tmp_path):
-    reg = AgentRegistry(str(tmp_path / "run-x" / "run.db"))
+    reg = AgentRegistry(str(tmp_path / "project-x"))
     events = read_events(FIXTURE_V020)
-    bridge_events(events, reg, "run-x", KIMI)
+    bridge_events(events, reg, "project-x", KIMI)
     settled = {e["agent"]: e["costUsd"] for e in events if e["type"] == "agent-settled"}
-    rows = {r.agent_id: r for r in reg.agents_for("run-x")}
+    rows = {r.agent_id: r for r in reg.agents_for("project-x")}
     for agent, cost in settled.items():
         assert abs(rows[agent].cost_usd - cost) < 1e-9
         assert rows[agent].status == "done"

@@ -2,15 +2,15 @@ import { useEffect, useState } from "react";
 import { api, BRIEF_SECTIONS, Brief } from "../api";
 
 // The structured brief, editable alongside the chat interview — both write the same brief
-// (PUT /api/runs/{id}/brief). A filled dot marks a covered section.
-export function BriefForm({ runId }: { runId: string }) {
+// (PUT /api/projects/{id}/brief). A filled dot marks a covered section.
+export function BriefForm({ projectId }: { projectId: string }) {
   const [brief, setBrief] = useState<Brief>({});
   const [coverage, setCoverage] = useState<Record<string, boolean>>({});
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let live = true;
-    const load = () => api.brief(runId).then((d) => {
+    const load = () => api.brief(projectId).then((d) => {
       if (!live) return;
       setBrief((prev) => {
         const next = { ...d.brief };
@@ -23,10 +23,10 @@ export function BriefForm({ runId }: { runId: string }) {
     load();
     const h = setInterval(load, 4000);
     return () => { live = false; clearInterval(h); };
-  }, [runId]);
+  }, [projectId]);
 
   const save = async (key: string) => {
-    const d = await api.putBrief(runId, { [key]: brief[key] || "" });
+    const d = await api.putBrief(projectId, { [key]: brief[key] || "" });
     setCoverage(d.coverage);
     setDirty((p) => ({ ...p, [key]: false }));
   };

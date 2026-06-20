@@ -14,15 +14,15 @@ native **Task** sub-agent (real, isolated); it does the work and returns. You co
 
 ## Record state in the datastore (there are NO events)
 
-The canvas is a pure projection of the per-run datastore (`run.db`). Record state by calling:
+The canvas is a pure projection of the per-project datastore (`project.db`). Record state by calling:
 ```bash
-python3 -m software_factory.db <verb> <runs_dir> <run_id> ...
+python3 -m software_factory.db <verb> <projects_dir> <project_id> ...
 ```
-`<runs_dir>` and `<run_id>` ALWAYS come first (right after the verb), THEN the verb's own args:
-- entering a phase → `python3 -m software_factory.db set-phase <runs_dir> <run_id> <name>`
-- launching a Task sub-agent → `python3 -m software_factory.db spawn-agent <runs_dir> <run_id> <id> <role> <model> <phase>`; when it returns → `python3 -m software_factory.db finish-agent <runs_dir> <run_id> <id> <outcome>`
-- a file produced → `python3 -m software_factory.db record-artifact <runs_dir> <run_id> <title> <path> <kind> [agent-id]`
-- a blocker → `python3 -m software_factory.db add-blocker <runs_dir> <run_id> <what> [blocks]`; when resolved → `python3 -m software_factory.db clear-blocker <runs_dir> <run_id> <what>`
+`<projects_dir>` and `<project_id>` ALWAYS come first (right after the verb), THEN the verb's own args:
+- entering a phase → `python3 -m software_factory.db set-phase <projects_dir> <project_id> <name>`
+- launching a Task sub-agent → `python3 -m software_factory.db spawn-agent <projects_dir> <project_id> <id> <role> <model> <phase>`; when it returns → `python3 -m software_factory.db finish-agent <projects_dir> <project_id> <id> <outcome>`
+- a file produced → `python3 -m software_factory.db record-artifact <projects_dir> <project_id> <title> <path> <kind> [agent-id]`
+- a blocker → `python3 -m software_factory.db add-blocker <projects_dir> <project_id> <what> [blocks]`; when resolved → `python3 -m software_factory.db clear-blocker <projects_dir> <project_id> <what>`
 
 Do NOT try to "emit" events — that mechanism is gone. The datastore is the single source of truth.
 
@@ -42,7 +42,7 @@ Turn it into usable scope. Do NOT re-record an input artifact — the console al
 ## Phase 2: provision  (`set-phase provision`)
 
 - `creds.check_all(target, env)` — any failure is a hard block (`add-blocker`), recorded, never guessed.
-- `GitHub.create_repo(name)`; seed `RunState`; `workspace.create` (the repo clones into your cwd's workspace).
+- `GitHub.create_repo(name)`; seed `ProjectState`; `workspace.create` (the repo clones into your cwd's workspace).
 - **Record the repo IMMEDIATELY** so the operator sees the source link from the start — use the CLEAN
   https url (NEVER a tokenized remote): `record-artifact "GitHub Repo" https://github.com/<org>/<repo> repo`.
 
@@ -97,10 +97,10 @@ Stage 2. (No "done" event — the committed PRD in the datastore IS the signal.)
 
 | Need | Call |
 |------|------|
-| Record canvas state | `python3 -m software_factory.db <verb> <runs_dir> <run_id> ...` (above) |
+| Record canvas state | `python3 -m software_factory.db <verb> <projects_dir> <project_id> ...` (above) |
 | Verify creds | `creds.check_all(target, env)` |
 | PRD done-gate | `artifacts.prd_is_complete(text)` |
-| Isolated workspace | `workspace.create(runs_dir, run_id)` |
+| Isolated workspace | `workspace.create(projects_dir, project_id)` |
 
 ## Guardrails
 

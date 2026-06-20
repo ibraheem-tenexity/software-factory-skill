@@ -3,7 +3,7 @@
 Dispositions (SPEC §3), with smart defaults by token name:
   provide   — operator supplies a real value (value -> Stage 3 env, NEVER written to disk)
   mock      — Stage 3 builds a WORKING LOCAL FAKE for that capability
-  deploy-db — a DATABASE the FACTORY provisions (per-run Railway Postgres) and hands the agent
+  deploy-db — a DATABASE the FACTORY provisions (per-project Railway Postgres) and hands the agent
               as context/deploy-db.json; the agent NEVER provisions a DB and has NO Supabase access
   mcp       — Stage 3 self-handles via the Railway MCP / generates it (e.g. NEXTAUTH_SECRET)
 

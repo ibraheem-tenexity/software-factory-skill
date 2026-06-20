@@ -53,7 +53,7 @@ def ticket_id_for(agent_name: str) -> Optional[int]:
         return None
 
 
-def _ticket_task(t: Ticket, run_db_path: str) -> str:
+def _ticket_task(t: Ticket, project_db_path: str) -> str:
     """The per-ticket contract — SKILL.opencode.md's claim/mark_done discipline, minus the
     spawn-agent/finish-agent verbs: in host-driven swarm mode the HOST records agent rows
     from the event stream (bridge_events), so an agent recording itself would double-count.
@@ -66,12 +66,12 @@ def _ticket_task(t: Ticket, run_db_path: str) -> str:
         f"Definition of done: {t.dod}\n\n"
         "Work ONLY this ticket, in the current workspace repo. Protocol (mandatory, in order):\n"
         f"1. Claim it: python3 -c \"from software_factory.tickets import TicketStore; "
-        f"TicketStore('{run_db_path}').claim({t.id}, '{name}')\"\n"
+        f"TicketStore('{project_db_path}').claim({t.id}, '{name}')\"\n"
         "2. Implement until the acceptance criteria pass locally. Run the relevant checks yourself.\n"
         "3. Commit your work as ONE commit on main whose message names the ticket. Capture provenance:\n"
         "   SHA=$(git rev-parse HEAD) and the changed-lines count from `git show --stat HEAD | tail -1`.\n"
         f"4. Close it IMMEDIATELY after the commit: python3 -c \"from software_factory.tickets import "
-        f"TicketStore; TicketStore('{run_db_path}').mark_done({t.id}, '<SHA>', <diff_lines>)\"\n"
+        f"TicketStore; TicketStore('{project_db_path}').mark_done({t.id}, '<SHA>', <diff_lines>)\"\n"
         "   (diff_lines must be the real non-zero count — a hollow close is refused by the store.)\n"
         "An attempt that produced an empty diff is a no-op: never mark it done; report what blocked you.\n"
         "If you are blocked by another ticket's files, say so via swarm_send to that ticket's agent "
@@ -84,7 +84,7 @@ def swarm_config_for_tickets(
     tickets: list[Ticket],
     *,
     model: str,
-    run_db_path: str,
+    project_db_path: str,
     budget_usd: float,
     max_concurrent: int = 2,
 ) -> dict:
@@ -98,7 +98,7 @@ def swarm_config_for_tickets(
         "agents": [
             {
                 "name": agent_name_for(t.id),
-                "task": _ticket_task(t, run_db_path),
+                "task": _ticket_task(t, project_db_path),
                 "tools": dict(_TICKET_AGENT_TOOLS),
             }
             for t in tickets
@@ -203,7 +203,7 @@ _OUTCOME_FOR = {"agent-done": "success", "agent-failed": "failed"}
 _SETTLED_OUTCOME = {"done": "success", "failed": "failed"}
 
 
-def bridge_events(events: list[dict], registry, run_id: str, model: str,
+def bridge_events(events: list[dict], registry, project_id: str, model: str,
                   prices: dict = PRICES) -> dict:
     """Fold a swarm event stream into AgentRegistry rows. Idempotent: safe to re-run
     over the growing file while the swarm is live (the poller's model). Agents the
@@ -237,11 +237,11 @@ def bridge_events(events: list[dict], registry, run_id: str, model: str,
         elif kind in _OUTCOME_FOR and not a["settled"]:
             a["outcome"] = _OUTCOME_FOR[kind]
 
-    known = {r.agent_id for r in registry.agents_for(run_id)}
+    known = {r.agent_id for r in registry.agents_for(project_id)}
     folded: dict[str, float] = {}
     for name, a in per_agent.items():
         if name not in known:
-            registry.spawn(name, run_id, ticket_id_for(name), role="swarm-ticket",
+            registry.spawn(name, project_id, ticket_id_for(name), role="swarm-ticket",
                            model=a["usage"].model or model, phase="build")
         if a["outcome"] is not None:
             registry.record(name, a["outcome"], usage=a["usage"], cost_usd=a["cost"])

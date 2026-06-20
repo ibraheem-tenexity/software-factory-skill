@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1320" height="940" viewBox="0 0 1320 940" role="img" aria-labelledby="title desc">
   <title id="title">Software Factory Console Schema ERD</title>
-  <desc id="desc">Entity relationship diagram for the target console schema, including run index, per-run detail tables, chat messages, and run blobs.</desc>
+  <desc id="desc">Entity relationship diagram for the target console schema, including run index, per-project detail tables, chat messages, and run blobs.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
@@ -24,7 +24,7 @@
 
   <rect class="bg" x="0" y="0" width="1320" height="940"/>
   <text class="title" x="40" y="42">Console Schema ERD</text>
-  <text class="subtitle" x="40" y="66">Target relational shape: public run index + per-run detail state + later chat/blob tables.</text>
+  <text class="subtitle" x="40" y="66">Target relational shape: public run index + per-project detail state + later chat/blob tables.</text>
 
   <rect class="group" x="30" y="92" width="1260" height="802"/>
   <text class="subtitle" x="50" y="120">Global public schema</text>

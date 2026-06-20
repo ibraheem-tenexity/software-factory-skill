@@ -18,10 +18,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 # The factory's run-id shape — discovery (local dirs AND the pg registry) only trusts
-# ids that look like this; anything else under runs_dir is debris, not a run ("build-plan.md",
+# ids that look like this; anything else under projects_dir is debris, not a run ("build-plan.md",
 # "tenexity-guestbook", a deploy URL…). Loose on the suffix (tests mint run-xyz style ids);
 # the pg registry's write guard (dbshim._ensure) stays strict 8-hex.
-RUN_ID_RE = re.compile(r"run-[A-Za-z0-9-]+")
+PROJECT_ID_RE = re.compile(r"project-[A-Za-z0-9-]+")
 
 from . import artifacts, deploy_db, env as _env, gates, streamlog
 from .agents import AgentRegistry
@@ -30,8 +30,8 @@ from .input_pipeline import persist_and_compose
 from .pdf_extract import extract_to_markdown
 from . import deps as deps_mod
 from .mcp_health import check_mcp
-from .runstate import RunState
-from .db import RunDB
+from .projectstate import ProjectState
+from .db import ProjectStore
 from . import dbshim
 from .tickets import TicketStore
 from .workspace_setup import prepare_workspace
@@ -70,14 +70,14 @@ _STAGE_MODEL_OPENCODE = {
     2: "openrouter/moonshotai/kimi-k2.7-code",
     3: "openrouter/moonshotai/kimi-k2.7-code",
 }
-# Operator-pickable per-run models (claude runtime). The UI offers exactly these; anything
-# else is ignored at start_run so a bad request can never launch an unknown/unpriced model.
+# Operator-pickable per-project models (claude runtime). The UI offers exactly these; anything
+# else is ignored at start_project so a bad request can never launch an unknown/unpriced model.
 PLANNING_MODELS = {"claude-opus-4-8", "claude-fable-5"}
 IMPL_MODELS = {"claude-sonnet-4-6", "claude-opus-4-8"}
 
 
 @dataclass
-class RunRequest:
+class ProjectRequest:
     description: str
     context: str = ""
     budget: float = 25.0
@@ -92,11 +92,11 @@ class RunRequest:
     owner: str = ""           # email of the creating user (multi-tenant: members see only their own)
 
 
-def run_paths(runs_dir: str, run_id: str) -> dict:
-    base = os.path.join(runs_dir, run_id)
-    # The flat Postgres tables are the source of truth: runstate + tickets + agents + the
-    # canvas-projected tables (phases/artifacts/blockers/gates/verifications), all keyed by run_id.
-    db = os.path.join(base, "run.db")
+def project_paths(projects_dir: str, project_id: str) -> dict:
+    base = os.path.join(projects_dir, project_id)
+    # The flat Postgres tables are the source of truth: projectstate + tickets + agents + the
+    # canvas-projected tables (phases/artifacts/blockers/gates/verifications), all keyed by project_id.
+    db = base
     return {
         "base": base,
         "state_dir": base,
@@ -107,7 +107,7 @@ def run_paths(runs_dir: str, run_id: str) -> dict:
     }
 
 
-def _orchestration_preamble(stage_title: str, run_id: str, runs_dir: str, budget: float,
+def _orchestration_preamble(stage_title: str, project_id: str, projects_dir: str, budget: float,
                             runtime: str = "claude") -> str:
     db = "python3 -m software_factory.db"
     if runtime == "opencode":
@@ -136,21 +136,21 @@ def _orchestration_preamble(stage_title: str, run_id: str, runs_dir: str, budget
         f"Use the **software-factory** skill ({stage_title}), FULLY AUTONOMOUSLY — never wait on a human.\n"
         f"**Your contract is SKILL.md in this workspace (your cwd). Read it and follow it exactly.** "
         f"Prior-stage artifacts are in context/.\n"
-        f"run_id={run_id}. runs_dir={runs_dir}. Run base: {os.path.join(runs_dir, run_id)} "
+        f"project_id={project_id}. projects_dir={projects_dir}. Run base: {os.path.join(projects_dir, project_id)} "
         f"(your cwd is its workspace/). Budget ${budget:.0f} (HARD cutoff).\n\n"
         + work_model
-        + f"RECORD canvas state in the datastore (there are NO events): `{db} <verb> {runs_dir} {run_id} ...`\n"
+        + f"RECORD canvas state in the datastore (there are NO events): `{db} <verb> {projects_dir} {project_id} ...`\n"
         f"  set-phase <name> [status]            — at each phase you enter\n"
         + spawn_line
         + finish_line
         + f"      real_diff|success (worked) · no_op (empty turn) · blocked · failed — anything else records as failed\n"
         f"  record-artifact <title> <path> [kind] [agent]  — for each file produced\n"
         f"  add-blocker <what> [blocks] / clear-blocker <what>\n"
-        f"Tickets go in the TicketStore; runstate is written by the host.\n"
+        f"Tickets go in the TicketStore; projectstate is written by the host.\n"
     )
 
 
-def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str, runtime: str = "claude",
+def make_prompt_stage1(req: ProjectRequest, project_id: str, projects_dir: str, runtime: str = "claude",
                        brief_block: str = "") -> str:
     ctx = f"\n\nContext / detailed input:\n{req.context}" if req.context else ""
     # The structured onboarding brief (from the interview) is the richest context — inject it
@@ -166,7 +166,7 @@ def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str, runtime: str
         units = ("The named research sub-agents and the done-gate are in SKILL.md. Launch each as a "
                  "Task sub-agent.")
     return (
-        _orchestration_preamble("Stage 1 — Research", run_id, runs_dir, req.budget, runtime)
+        _orchestration_preamble("Stage 1 — Research", project_id, projects_dir, req.budget, runtime)
         + "Goal: a validated PRD (PRD.md) that passes `artifacts.prd_is_complete` (≥3 real product "
           "URLs + acceptance criteria + ticket seeds). " + units + " THE MOMENT you create the "
           "GitHub repo, record it (CLEAN token-free https url): `record-artifact 'GitHub Repo' "
@@ -176,13 +176,13 @@ def make_prompt_stage1(req: RunRequest, run_id: str, runs_dir: str, runtime: str
     )
 
 
-def make_prompt_stage2(req: RunRequest, run_id: str, runs_dir: str, runtime: str = "claude") -> str:
+def make_prompt_stage2(req: ProjectRequest, project_id: str, projects_dir: str, runtime: str = "claude") -> str:
     return (
-        _orchestration_preamble("Stage 2 — Design & Plan", run_id, runs_dir, req.budget, runtime)
+        _orchestration_preamble("Stage 2 — Design & Plan", project_id, projects_dir, req.budget, runtime)
         + "Goal (per SKILL.md): architecture.md + architecture.svg (fewest services; data model; a "
           "`## Required Tokens` section, UPPER_SNAKE_CASE) AND PERSISTED buildable tickets — "
           "`TicketStore.create_ticket` with real acceptance + DoD (an empty store dead-ends Stage 3). "
-          "The app's DATABASE is provisioned BY THE FACTORY (a per-run Postgres handed to Stage 3 as "
+          "The app's DATABASE is provisioned BY THE FACTORY (a per-project Postgres handed to Stage 3 as "
           "context/deploy-db.json) — design the data model on plain Postgres via DATABASE_URL; do NOT "
           "design around Supabase (Stage 3 has no Supabase access). Use demo/mock auth, not a real IdP; "
           "route every LLM/AI feature via OpenRouter (OPENROUTER_API_KEY). When PRD+architecture+svg exist and the store has buildable "
@@ -216,9 +216,9 @@ def _disposition_guidance(dispositions: dict | None) -> str:
     )
 
 
-def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions: dict | None = None,
+def make_prompt_stage3(req: ProjectRequest, project_id: str, projects_dir: str, dispositions: dict | None = None,
                        runtime: str = "claude") -> str:
-    service = f"sf-{run_id}"
+    service = f"sf-{project_id}"
     if runtime == "opencode":
         build_line = (
             f"BUILD: work ONE ticket at a time yourself, recording each as a logical agent "
@@ -235,7 +235,7 @@ def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions
         fix_one = "fix it (one Task sub-agent)"
         fix_bug = "a Task sub-agent per bug"
     return (
-        _orchestration_preamble("Stage 3 — Build & Ship", run_id, runs_dir, req.budget, runtime)
+        _orchestration_preamble("Stage 3 — Build & Ship", project_id, projects_dir, req.budget, runtime)
         + _disposition_guidance(dispositions)
         + f"Deploy target: {req.target}. DEPLOY VIA THE **Railway MCP** (its project-scoped tools work "
           f"with the env's RAILWAY_TOKEN; `whoami`/`list_projects` do NOT — don't call them). Create + deploy "
@@ -268,14 +268,14 @@ def make_prompt_stage3(req: RunRequest, run_id: str, runs_dir: str, dispositions
 
 
 # Keep the old prompt generator for backward compat with existing runs
-def make_prompt(req: RunRequest, run_id: str, runs_dir: str) -> str:
-    return make_prompt_stage1(req, run_id, runs_dir)
+def make_prompt(req: ProjectRequest, project_id: str, projects_dir: str) -> str:
+    return make_prompt_stage1(req, project_id, projects_dir)
 
 
 def _default_launch(argv: list[str], env: dict, log_path: str | None = None, cwd: str | None = None) -> Any:
-    """Launch a stage with stdout appended DIRECTLY to run.log — never through a pipe
+    """Launch a stage with stdout appended DIRECTLY to project.log — never through a pipe
     pumped by this server. A pump thread dies with the server, leaving the orchestrator
-    writing into a readerless pipe: run.log freezes, the §4 brake goes spend-blind, and
+    writing into a readerless pipe: project.log freezes, the §4 brake goes spend-blind, and
     the child can wedge on the full pipe buffer (run-5b7aef7a live scar — the monolithic
     agent built for an hour with zero log visibility after a server restart). The child
     owning its own log fd survives any number of server deaths."""
@@ -296,32 +296,32 @@ def _default_launch(argv: list[str], env: dict, log_path: str | None = None, cwd
 class Console:
     def __init__(
         self,
-        runs_dir: str,
+        projects_dir: str,
         launch: Callable[..., Any] = _default_launch,
-        new_id: Callable[[], str] = lambda: "run-" + uuid.uuid4().hex[:8],
+        new_id: Callable[[], str] = lambda: "project-" + uuid.uuid4().hex[:8],
         extract: Callable[[str], str] = extract_to_markdown,
     ):
-        self._runs_dir = runs_dir
+        self._projects_dir = projects_dir
         self._launch = launch
         self._new_id = new_id
         self._extract = extract
-        self._procs: dict = {}   # run_id -> last launched stage process (SPEC §1 handoff guard)
-        # run_id -> ((mtime_ns, size), cost): the full-log cost reparse on EVERY status/poll
+        self._procs: dict = {}   # project_id -> last launched stage process (SPEC §1 handoff guard)
+        # project_id -> ((mtime_ns, size), cost): the full-log cost reparse on EVERY status/poll
         # was the console's dominant CPU+IO — two pollers × every run × multi-MB stream logs.
         self._cost_cache: dict = {}
-        os.makedirs(runs_dir, exist_ok=True)
+        os.makedirs(projects_dir, exist_ok=True)
 
-    def _paths(self, run_id: str) -> dict:
-        return run_paths(self._runs_dir, run_id)
+    def _paths(self, project_id: str) -> dict:
+        return project_paths(self._projects_dir, project_id)
 
     # ---- SPEC §1: stage process lifecycle ------------------------------------------------
-    def _stage_process_alive(self, run_id: str) -> bool:
-        p = self._procs.get(run_id)
+    def _stage_process_alive(self, project_id: str) -> bool:
+        p = self._procs.get(project_id)
         return p is not None and hasattr(p, "poll") and p.poll() is None
 
-    def stage_finished(self, run_id: str) -> bool:
+    def stage_finished(self, project_id: str) -> bool:
         """SPEC §1: the stage's orchestrator process has finished — the tracked process exited,
-        or (no usable handle, e.g. after a server restart) the run.log has been idle past a
+        or (no usable handle, e.g. after a server restart) the project.log has been idle past a
         2-minute grace (covers crash/OOM without wedging the run).
 
         Opencode-runtime exception: a LIVE handle is not proof of life — opencode processes
@@ -331,12 +331,12 @@ class Console:
         grace, the stage is finished regardless of the handle. Claude stages are exempt: their
         long quiet tool calls (health-waits, builds) must never false-finish into a concurrent
         relaunch (the §1 double-orchestrator race)."""
-        log = os.path.join(self._paths(run_id)["base"], "run.log")
-        p = self._procs.get(run_id)
+        log = os.path.join(self._paths(project_id)["base"], "project.log")
+        p = self._procs.get(project_id)
         if p is not None and hasattr(p, "poll"):
             if p.poll() is not None:
                 return True
-            if (self._load_state(run_id).runtime == "opencode"
+            if (self._load_state(project_id).runtime == "opencode"
                     and os.path.exists(log)
                     and (time.time() - os.path.getmtime(log)) > 300
                     and self._log_session_completed(log)):
@@ -345,22 +345,22 @@ class Console:
         if not os.path.exists(log):
             return True
         # No handle (server restart / port eviction): a live stage3.pid is proof of life —
-        # the swarm driver can sit quiet in run.log for >2min mid-Kimi-turn, and treating
+        # the swarm driver can sit quiet in project.log for >2min mid-Kimi-turn, and treating
         # that as finished relaunched a second orchestrator on run-5b7aef7a (§1 race).
-        if self._stage_pid_alive(run_id):
+        if self._stage_pid_alive(project_id):
             return False
         return (time.time() - os.path.getmtime(log)) > 120
 
-    def _stage_pid_alive(self, run_id: str) -> bool:
+    def _stage_pid_alive(self, project_id: str) -> bool:
         """True iff the run's stage3.pid names a live process whose cmdline mentions this
         run (pid-recycling guard). The pid survives the driver's exec into the agent, so
         one file covers the whole stage."""
-        pid_path = os.path.join(self._paths(run_id)["base"], "stage3.pid")
+        pid_path = os.path.join(self._paths(project_id)["base"], "stage3.pid")
         try:
             with open(pid_path, encoding="utf-8") as f:
                 pid = int(f.read().strip())
             with open(f"/proc/{pid}/cmdline", "rb") as f:
-                return run_id.encode() in f.read()
+                return project_id.encode() in f.read()
         except (OSError, ValueError):
             return False
 
@@ -396,7 +396,7 @@ class Console:
     # ---- SPEC §1: host-derived phase state machine ----------------------------------------
     _CLOSED = ("done", "passed", "completed")
 
-    def derive_phases(self, run_id: str) -> dict:
+    def derive_phases(self, project_id: str) -> dict:
         """Phase states derived from recorded signals — agent set-phase calls are hints,
         never the source of truth. States: pending | active | done | skipped.
 
@@ -410,8 +410,8 @@ class Console:
           test→build fix loop truthfully bounces the canvas back to build.
         - Later phases that ran but didn't close render pending (they will run again);
           bypassed phases read skipped."""
-        db = RunDB(self._paths(run_id)["db"])
-        state = self._load_state(run_id)
+        db = ProjectStore(self._paths(project_id)["db"])
+        state = self._load_state(project_id)
         rows = db.phases()                                # append-only, ts-ordered
         last_ts = {}
         for r in rows:
@@ -437,11 +437,11 @@ class Console:
         closed.update(n for n in PIPELINE if recorded.get(n) in self._CLOSED)
 
         activity = set(last_ts) | closed
-        run_done = state.phase == "done"
+        project_done = state.phase == "done"
         idx = {n: i for i, n in enumerate(PIPELINE)}
         furthest = max((idx[n] for n in activity), default=-1)
         active = None
-        if not run_done:
+        if not project_done:
             open_with_ts = {n: t for n, t in last_ts.items() if n not in closed}
             if open_with_ts:
                 active = max(open_with_ts, key=open_with_ts.get)
@@ -449,7 +449,7 @@ class Console:
         for i, n in enumerate(PIPELINE):
             if n == active:
                 out[n] = "active"
-            elif n in closed or (run_done and n in activity):
+            elif n in closed or (project_done and n in activity):
                 out[n] = "done"
             elif n in activity:
                 # ran without closing: behind the active phase it's spent (done); ahead of it
@@ -461,12 +461,12 @@ class Console:
                 out[n] = "skipped"
         return out
 
-    def current_phase(self, run_id: str) -> str:
-        """The derived current phase for the header/API — never the stale RunState value."""
-        state = self._load_state(run_id)
+    def current_phase(self, project_id: str) -> str:
+        """The derived current phase for the header/API — never the stale ProjectState value."""
+        state = self._load_state(project_id)
         if state.phase in ("done", "stopped"):
             return state.phase
-        db = RunDB(self._paths(run_id)["db"])
+        db = ProjectStore(self._paths(project_id)["db"])
         recorded = db.phase_status()
         implied = set()
         if state.stage2_done:
@@ -482,11 +482,11 @@ class Console:
     def _terminal(self, state) -> bool:
         return state.phase in ("done", "stopped")
 
-    def maybe_autosatisfy_deps(self, run_id: str) -> bool:
+    def maybe_autosatisfy_deps(self, project_id: str) -> bool:
         """SPEC §3: if NO required token classifies as 'provide' (human secret), auto-satisfy
         deps (mock/mcp defaults apply) so the deps gate never becomes a hidden manual pause.
         Returns True iff deps are satisfied after the call."""
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         if self._terminal(state) or not state.stage2_done:
             return False
         if state.deps_satisfied:
@@ -495,35 +495,35 @@ class Console:
         disp.update(state.deps_disposition or {})
         if any(d == "provide" for d in disp.values()):
             return False
-        return bool(self.submit_deps(run_id, {}).get("satisfied"))
+        return bool(self.submit_deps(project_id, {}).get("satisfied"))
 
-    def _load_state(self, run_id: str) -> RunState:
-        return RunState.load(run_id, RunDB(self._paths(run_id)["db"]))
+    def _load_state(self, project_id: str) -> ProjectState:
+        return ProjectState.load(project_id, ProjectStore(self._paths(project_id)["db"]))
 
-    def _run_spend(self, run_id: str) -> float:
-        """THIS run's own spend (the per-run budget basis). Prior runs/projects do NOT count —
-        each run/project is independently capped. Authoritative cost from the run.log, falling
-        back to the recorded runstate spend."""
-        # max(): the log-derived figure normally leads, but the persisted runstate spend survives
+    def _project_spend(self, project_id: str) -> float:
+        """THIS run's own spend (the per-project budget basis). Prior runs/projects do NOT count —
+        each run/project is independently capped. Authoritative cost from the project.log, falling
+        back to the recorded projectstate spend."""
+        # max(): the log-derived figure normally leads, but the persisted projectstate spend survives
         # log loss / parser regressions — the budget guard must never silently under-count.
-        return max(self._cost(run_id), self._load_state(run_id).spent_usd or 0)
+        return max(self._cost(project_id), self._load_state(project_id).spent_usd or 0)
 
-    def _budget_ceiling(self, run_id: str) -> float:
-        """SPEC §4: per-run ceiling — the run's own override, else SF_COST_CEILING (default 30)."""
-        state = self._load_state(run_id)
+    def _budget_ceiling(self, project_id: str) -> float:
+        """SPEC §4: per-project ceiling — the run's own override, else SF_COST_CEILING (default 30)."""
+        state = self._load_state(project_id)
         if state.budget_ceiling:
             return float(state.budget_ceiling)
         return float(os.environ.get("SF_COST_CEILING", "30") or 30)
 
-    def enforce_budget(self, run_id: str) -> bool:
+    def enforce_budget(self, project_id: str) -> bool:
         """SPEC §4 mid-stage teeth: if this run's spend crossed its ceiling, terminate the live
         stage process, record a recoverable 'budget' blocker, and finalize orphaned agents.
         Returns True iff the run was (or already had been) stopped for budget this call."""
-        ceiling = self._budget_ceiling(run_id)
-        spend = self._run_spend(run_id)
+        ceiling = self._budget_ceiling(project_id)
+        spend = self._project_spend(project_id)
         if spend <= ceiling:
             return False
-        p = self._procs.get(run_id)
+        p = self._procs.get(project_id)
         killed = False
         if p is not None and hasattr(p, "poll") and p.poll() is None and hasattr(p, "terminate"):
             p.terminate()
@@ -537,29 +537,29 @@ class Console:
                 except Exception:
                     p.kill()
             killed = True
-        db = RunDB(self._paths(run_id)["db"])
+        db = ProjectStore(self._paths(project_id)["db"])
         already = any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers())
         if not already:
             db.add_blocker(
                 f"Budget cap ${ceiling:.2f} reached (spent ${spend:.2f}) — stage stopped. "
                 f"Raise the cap to continue.", blocks="budget")
-            AgentRegistry(self._paths(run_id)["agents_db"]).finalize_orphans(run_id, stage_ok=False)
+            AgentRegistry(self._paths(project_id)["agents_db"]).finalize_orphans(project_id, stage_ok=False)
         return True   # over-ceiling: stopped now (killed) or already stopped
 
-    def auto_resume_dead_stage(self, run_id: str) -> bool:
+    def auto_resume_dead_stage(self, project_id: str) -> bool:
         """SPEC §3 zero-touch: a stage whose process died without passing its gate (OOM/crash)
         is resumed by the HOST — a human noticing the stall is an intervention. Never fires at
         the deps gate (stage complete, waiting by design) or on a budget stop (operator's call).
-        Never resurrects a GHOST: a run.db with no recorded artifacts (e.g. created by a mere
+        Never resurrects a GHOST: a project store with no recorded artifacts (e.g. created by a mere
         status query after state loss) has no brief to build from — resuming it burns spend on
         an empty prompt (the run-b594a5f4/run-0eb69fdd double-ghost scar)."""
-        if not self.is_pipeline_run(run_id):
+        if not self.is_pipeline_project(project_id):
             return False
-        state = self._load_state(run_id)
-        if state.phase in ("done", "stopped") or not self.stage_finished(run_id):
+        state = self._load_state(project_id)
+        if state.phase in ("done", "stopped") or not self.stage_finished(project_id):
             return False   # terminal/canceled runs are never resurrected
         stage = state.stage
-        db = RunDB(self._paths(run_id)["db"])
+        db = ProjectStore(self._paths(project_id)["db"])
         if any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers()):
             return False
         incomplete = (
@@ -569,56 +569,56 @@ class Console:
         )
         if not incomplete:
             return False
-        return self.retry_stage(run_id, stage) is not None
+        return self.retry_stage(project_id, stage) is not None
 
-    def raise_budget(self, run_id: str, ceiling: float) -> dict:
-        """SPEC §4 recovery: persist a higher per-run ceiling and clear the budget blocker(s);
+    def raise_budget(self, project_id: str, ceiling: float) -> dict:
+        """SPEC §4 recovery: persist a higher per-project ceiling and clear the budget blocker(s);
         the operator then resumes via /retry against the preserved workspace."""
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         state.budget_ceiling = float(ceiling)
         state.save()
-        db = RunDB(self._paths(run_id)["db"])
+        db = ProjectStore(self._paths(project_id)["db"])
         for b in db.blockers():
             if b.get("blocks") == "budget" and not b["cleared"]:
                 db.clear_blocker(b["what"])
-        return {"run_id": run_id, "budget_ceiling": float(ceiling)}
+        return {"project_id": project_id, "budget_ceiling": float(ceiling)}
 
-    def _launch_stage(self, run_id: str, stage: int, prompt: str, env: dict) -> Any:
+    def _launch_stage(self, project_id: str, stage: int, prompt: str, env: dict) -> Any:
         """Prepare workspace, health-check MCP, and launch a claude -p process for a stage."""
-        paths = self._paths(run_id)
+        paths = self._paths(project_id)
 
         # Mechanical PER-RUN cost ceiling: the in-prompt budget is advisory-only and stages don't
         # share a counter, so refuse to launch the next stage when THIS run's own spend (+ a stage
-        # reserve) would cross the run's ceiling (per-run override else SF_COST_CEILING).
-        ceiling = self._budget_ceiling(run_id)
+        # reserve) would cross the run's ceiling (per-project override else SF_COST_CEILING).
+        ceiling = self._budget_ceiling(project_id)
         reserve = float(os.environ.get("SF_STAGE_RESERVE", "5") or 5)
-        spend = self._run_spend(run_id)
+        spend = self._project_spend(project_id)
         if spend + reserve > ceiling:
-            RunDB(paths["db"]).add_blocker(
+            ProjectStore(paths["db"]).add_blocker(
                 f"Per-run budget: this run ${spend:.2f} + reserve ${reserve:.2f} "
                 f"> ceiling ${ceiling:.2f} — stage {stage} launch refused",
                 blocks="budget",
             )
             return None
 
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         runtime = state.runtime or "claude"
         ws = prepare_workspace(
-            self._runs_dir, run_id, stage, runtime=runtime,
+            self._projects_dir, project_id, stage, runtime=runtime,
         )
-        # Stage 3 with a database dependency: the FACTORY provisions the DB (per-run Railway
+        # Stage 3 with a database dependency: the FACTORY provisions the DB (per-project Railway
         # Postgres) and hands the agent context/deploy-db.json — the agent has no Supabase access
         # and never provisions a DB. Provision failure blocks the launch (don't build DB-less).
         if stage == 3 and deploy_db.needs_deploy_db(state.deps_required):
             ctx = os.path.join(ws, "context")
             if not os.path.exists(os.path.join(ctx, deploy_db.DEPLOY_DB_FILE)):
                 try:
-                    info = deploy_db.provision(run_id)
+                    info = deploy_db.provision(project_id)
                     deploy_db.write_file(ctx, info)
-                    RunDB(paths["db"]).record_artifact(
+                    ProjectStore(paths["db"]).record_artifact(
                         "Deploy DB", "context/" + deploy_db.DEPLOY_DB_FILE, kind="deploy-db")
                 except Exception as e:
-                    RunDB(paths["db"]).add_blocker(
+                    ProjectStore(paths["db"]).add_blocker(
                         f"deploy-db provisioning failed: {e}", blocks="deploy-db")
                     return None
         mcp_path = os.path.join(ws, ".mcp.json")
@@ -630,7 +630,7 @@ class Console:
         # deploy-tool failures itself (bounded health-wait + get_logs).
         _HARD = {"playwright", "config"}
         if unhealthy:
-            db = RunDB(paths["db"])
+            db = ProjectStore(paths["db"])
             for c in unhealthy:
                 db.add_blocker(f"MCP:{c.name} — {c.detail}", blocks="mcp")
             if any(c.name in _HARD for c in unhealthy):
@@ -671,7 +671,7 @@ class Console:
             if stage == 3 and os.environ.get("SF_SWARM") == "1":
                 # §9 swarm build mode: the tracked process becomes the swarm driver, which
                 # runs the open tickets as parallel swarm agents and then EXECS this exact
-                # opencode argv (same PID — handle, run.log and budget teeth carry through).
+                # opencode argv (same PID — handle, project.log and budget teeth carry through).
                 swarm_budget = max(0.0, ceiling - spend - reserve)
                 src_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 env["PYTHONPATH"] = (
@@ -680,14 +680,14 @@ class Console:
                 )
                 argv = [
                     sys.executable, "-m", "software_factory.swarm_stage3",
-                    os.path.abspath(self._runs_dir), run_id, ws,
+                    os.path.abspath(self._projects_dir), project_id, ws,
                     "--budget", f"{swarm_budget:.2f}",
                     "--model", model,
                     "--",
                 ] + argv
         else:
-            # Model precedence: the operator's per-run pick (most specific — pinned in state at
-            # start_run, so retries keep it) > SF_MODEL env (deploy-wide knob) > stage defaults
+            # Model precedence: the operator's per-project pick (most specific — pinned in state at
+            # start_project, so retries keep it) > SF_MODEL env (deploy-wide knob) > stage defaults
             # (research & design on Opus 4.8; build on Sonnet, cheaper for code volume).
             pick = state.planning_model if stage in (1, 2) else state.impl_model
             model = pick or os.environ.get("SF_MODEL") \
@@ -707,9 +707,9 @@ class Console:
                 "--output-format", "stream-json", "--verbose",
             ]
         # cwd = the workspace so the stage's SKILL.md / phases/ / context/ (its contract) load.
-        result = self._launch(argv, env, os.path.join(paths["base"], "run.log"), cwd=ws)
+        result = self._launch(argv, env, os.path.join(paths["base"], "project.log"), cwd=ws)
         if result is not None:
-            self._procs[run_id] = result   # SPEC §1: tracked for the stage-handoff guard
+            self._procs[project_id] = result   # SPEC §1: tracked for the stage-handoff guard
         return result
 
     def name_taken(self, name: str, exclude: str | None = None) -> bool:
@@ -718,26 +718,26 @@ class Console:
         n = (name or "").strip().lower()
         if not n:
             return False
-        for r in self.list_runs():
-            if r["run_id"] == exclude:
+        for r in self.list_projects():
+            if r["project_id"] == exclude:
                 continue
             if (r.get("name") or "").strip().lower() == n:
                 return True
         return False
 
-    def start_run(self, req: RunRequest) -> str:
-        """Start a new run (Stage 1). Returns run_id. Raises ValueError if the project name
+    def start_project(self, req: ProjectRequest) -> str:
+        """Start a new run (Stage 1). Returns project_id. Raises ValueError if the project name
         is already taken (names are the unique, user-facing project identity)."""
         if req.name and self.name_taken(req.name):
             raise ValueError(f"A project named {req.name!r} already exists — names must be unique.")
-        run_id = self._new_id()
-        return self._provision_and_launch(run_id, req, gated=req.gated)
+        project_id = self._new_id()
+        return self._provision_and_launch(project_id, req, gated=req.gated)
 
-    def _provision_and_launch(self, run_id: str, req: RunRequest, *, gated: bool = False,
+    def _provision_and_launch(self, project_id: str, req: ProjectRequest, *, gated: bool = False,
                               brief: dict | None = None, interview_md: str | None = None) -> str:
         """Provision a run dir (id already minted), persist state, and launch Stage 1 (unless
-        gated). Shared by start_run (fresh mint) and promote_draft (existing draft id)."""
-        paths = self._paths(run_id)
+        gated). Shared by start_project (fresh mint) and promote_draft (existing draft id)."""
+        paths = self._paths(project_id)
         os.makedirs(paths["base"], exist_ok=True)
 
         # input -> (pdf/docx->markdown[+images]) -> markdown + prompt -> composed Stage 1 input,
@@ -746,7 +746,7 @@ class Console:
             paths["input_dir"], req.description, req.context_files or [],
             extract=self._extract, brief=brief, interview_md=interview_md,
         )
-        input_db = RunDB(paths["db"])
+        input_db = ProjectStore(paths["db"])
         for name in written:
             input_db.record_artifact("input", "input/" + name, kind="context")
         # SPEC §1: the HOST performs extraction — record it (and provision opening) itself,
@@ -755,7 +755,7 @@ class Console:
         if not gated:
             input_db.set_phase("provision", "active")
 
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         env = {k: v for k, v in (req.credentials or {}).items() if v}
         state.skill = "software-factory"
         state.skill_version = SKILL_VERSION
@@ -778,31 +778,31 @@ class Console:
         state.save()
 
         if gated:
-            # Held: registered + visible at $0; stage 1 launches on release_run. Create-time
+            # Held: registered + visible at $0; stage 1 launches on release_project. Create-time
             # credential VALUES are not persisted (names only), so gated runs rely on the
             # stage-3 deps flow for app credentials.
-            return run_id
+            return project_id
         brief_block = ""
         if brief:
             from .brief import brief_to_prompt_block
             brief_block = brief_to_prompt_block(brief)
-        prompt = make_prompt_stage1(req, run_id, self._runs_dir, runtime=state.runtime,
+        prompt = make_prompt_stage1(req, project_id, self._projects_dir, runtime=state.runtime,
                                     brief_block=brief_block)
-        self._launch_stage(run_id, 1, prompt, env)
-        return run_id
+        self._launch_stage(project_id, 1, prompt, env)
+        return project_id
 
     # ---- Durable drafts: an interview before a run exists -------------------------------
     def create_draft(self, owner: str = "", name: str = "", runtime: str = "",
                      planning_model: str = "", impl_model: str = "") -> str:
         """Mint a CANONICAL run-<8hex> id at the START of the onboarding interview and persist a
-        draft RunState (phase='draft', held, NO artifact recorded → is_pipeline_run False, so the
+        draft ProjectState (phase='draft', held, NO artifact recorded → is_pipeline_project False, so the
         poller/ghost-resume guard ignore it until promotion). Using a canonical id up front means
         the `db` CLI + sf_runs registry guards are satisfied the moment Stage 1 launches."""
-        run_id = self._new_id()
-        paths = self._paths(run_id)
+        project_id = self._new_id()
+        paths = self._paths(project_id)
         os.makedirs(paths["base"], exist_ok=True)
-        RunDB(paths["db"]).set_phase("draft", "active")
-        state = self._load_state(run_id)
+        ProjectStore(paths["db"]).set_phase("draft", "active")
+        state = self._load_state(project_id)
         state.phase = "draft"
         state.held = True
         state.skill = "software-factory"
@@ -815,34 +815,34 @@ class Console:
         state.brief = {}
         state.interview_coverage = {}
         state.save()
-        return run_id
+        return project_id
 
-    def is_draft(self, run_id: str) -> bool:
-        return self._load_state(run_id).phase == "draft"
+    def is_draft(self, project_id: str) -> bool:
+        return self._load_state(project_id).phase == "draft"
 
-    def draft_brief(self, run_id: str) -> dict:
+    def draft_brief(self, project_id: str) -> dict:
         """The accumulated brief for a draft (read-only copy)."""
-        return dict(self._load_state(run_id).brief or {})
+        return dict(self._load_state(project_id).brief or {})
 
-    def attach_to_draft(self, run_id: str, files: list) -> list[str]:
+    def attach_to_draft(self, project_id: str, files: list) -> list[str]:
         """Persist + extract files attached during the interview into the draft's input/ (PDF/DOCX
         → Markdown[+images], wireframes survive). Records them as context artifacts; the draft stays
-        invisible to the poller (is_pipeline_run excludes drafts). Returns paths written."""
+        invisible to the poller (is_pipeline_project excludes drafts). Returns paths written."""
         if not files:
             return []
-        paths = self._paths(run_id)
+        paths = self._paths(project_id)
         os.makedirs(paths["input_dir"], exist_ok=True)
         written = persist_and_compose(paths["input_dir"], "", files, extract=self._extract)
-        db = RunDB(paths["db"])
+        db = ProjectStore(paths["db"])
         for name in written:
             if name != "context.txt":   # no description here → skip the (empty) composed prompt
                 db.record_artifact("input", "input/" + name, kind="context")
         return [w for w in written if w != "context.txt"]
 
-    def update_draft_brief(self, run_id: str, brief: dict, coverage: dict | None = None) -> dict:
+    def update_draft_brief(self, project_id: str, brief: dict, coverage: dict | None = None) -> dict:
         """Merge brief sections into a draft and persist. Returns the updated coverage so the
         concierge can see progress. Idempotent."""
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         merged = dict(state.brief or {})
         merged.update({k: v for k, v in (brief or {}).items() if v})
         state.brief = merged
@@ -852,16 +852,16 @@ class Console:
         from .brief import coverage as _cov
         return state.interview_coverage or _cov(merged)
 
-    def draft_project(self, run_id: str) -> dict:
+    def draft_project(self, project_id: str) -> dict:
         """Read-only project projection of a draft (name + goal + scope + composed description +
         brief + coverage) — the counterpart of set_draft_project, for the concierge's get_intake_state."""
         from .brief import coverage as _cov
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         brief = dict(state.brief or {})
         return {"name": state.name, "goal": brief.get("goals", ""), "scope": list(state.scope or []),
                 "description": state.description or "", "brief": brief, "coverage": _cov(brief)}
 
-    def set_draft_project(self, run_id: str, name: str | None = None,
+    def set_draft_project(self, project_id: str, name: str | None = None,
                           goal: str | None = None, scope: list | None = None) -> dict:
         """Structured project setter for the Option C onboarding (draft phase). Writes the project
         name, the goal (into brief.goals so it reaches the Stage-1 brief block), and the scope-of-work
@@ -870,7 +870,7 @@ class Console:
         recompose against each other's persisted value so independent calls stay idempotent.
         Returns {name, goal, scope, description, brief, coverage}."""
         from .brief import compose_description, coverage as _cov
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         if name is not None:
             state.name = name
         brief = dict(state.brief or {})
@@ -889,15 +889,15 @@ class Console:
         return {"name": state.name, "goal": brief.get("goals", ""), "scope": list(state.scope or []),
                 "description": state.description or "", "brief": brief, "coverage": _cov(brief)}
 
-    def promote_draft(self, run_id: str, description: str = "",
+    def promote_draft(self, project_id: str, description: str = "",
                       interview_md: str | None = None, target: str = "railway") -> str:
         """Promote a draft into a real run: launch Stage 1 against the EXISTING draft id, threading
         the accumulated brief + interview transcript into the Stage-1 input. No new id is minted."""
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         brief = dict(state.brief or {})
         # The description anchors the prompt; prefer an explicit one, else the brief's goals.
         desc = (description or state.description or brief.get("goals") or "").strip()
-        req = RunRequest(
+        req = ProjectRequest(
             description=desc,
             target=target or state.deploy_target or "railway",
             runtime=state.runtime,
@@ -909,17 +909,17 @@ class Console:
         state.phase = "provision"
         state.held = False
         state.save()
-        return self._provision_and_launch(run_id, req, brief=brief, interview_md=interview_md)
+        return self._provision_and_launch(project_id, req, brief=brief, interview_md=interview_md)
 
-    def deployments(self, run_id: str) -> dict:
+    def deployments(self, project_id: str) -> dict:
         """Per-deliverable deployments (a run ships 1..N apps; no single run-level deploy_url)."""
-        rows = RunDB(self._paths(run_id)["db"]).deployments()
+        rows = ProjectStore(self._paths(project_id)["db"]).deployments()
         return {"deployments": rows, "apps": sorted({r["app"] for r in rows if r.get("app")})}
 
-    def tickets(self, run_id: str) -> dict:
+    def tickets(self, project_id: str) -> dict:
         """Build-ticket projection for the kanban view. Empty before Stage 2 persists tickets —
         the frontend renders an empty-state, not an error (TicketStore CREATE-IF-NOT-EXISTS)."""
-        store = TicketStore(self._paths(run_id)["tickets_db"])
+        store = TicketStore(self._paths(project_id)["tickets_db"])
         items = [
             {"id": t.id, "title": t.title, "wave": t.wave, "status": t.status,
              "agent": t.agent, "provenance": t.provenance, "provenance_type": t.provenance_type,
@@ -930,33 +930,33 @@ class Console:
         waves = sorted({t["wave"] for t in items})
         return {"tickets": items, "waves": waves}
 
-    def agents(self, run_id: str) -> list[dict]:
+    def agents(self, project_id: str) -> list[dict]:
         """Agents on a run (Project View §2.5) — a flat projection of the agent registry."""
-        regs = AgentRegistry(self._paths(run_id)["agents_db"]).agents_for(run_id)
+        regs = AgentRegistry(self._paths(project_id)["agents_db"]).agents_for(project_id)
         return [{"agent_id": a.agent_id, "role": a.role, "model": a.model, "phase": a.phase,
                  "status": a.status, "outcome": a.outcome, "ticket_id": a.ticket_id,
                  "cost_usd": a.cost_usd}
                 for a in regs]
 
-    def artifacts(self, run_id: str) -> list[dict]:
+    def artifacts(self, project_id: str) -> list[dict]:
         """Factory-produced artifacts for a run (Project View Documents tab / produced docs)."""
-        return RunDB(self._paths(run_id)["db"]).artifacts()
+        return ProjectStore(self._paths(project_id)["db"]).artifacts()
 
-    def run_created(self, run_id: str) -> float | None:
-        """Best-available creation time: the earliest recorded phase timestamp (runstate carries no
+    def project_created(self, project_id: str) -> float | None:
+        """Best-available creation time: the earliest recorded phase timestamp (projectstate carries no
         created column). None if nothing has been recorded yet."""
-        ts = [p["ts"] for p in RunDB(self._paths(run_id)["db"]).phases() if p.get("ts")]
+        ts = [p["ts"] for p in ProjectStore(self._paths(project_id)["db"]).phases() if p.get("ts")]
         return min(ts) if ts else None
 
-    def release_run(self, run_id: str) -> bool:
+    def release_project(self, project_id: str) -> bool:
         """Release a gated hold: launch Stage 1. False if not held (double-release refuses)."""
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         if not state.held:
             return False
         state.held = False
         state.save()
-        RunDB(self._paths(run_id)["db"]).set_phase("provision", "active")
-        req = RunRequest(
+        ProjectStore(self._paths(project_id)["db"]).set_phase("provision", "active")
+        req = ProjectRequest(
             description=state.description or "",
             target=state.deploy_target or "railway",
             runtime=state.runtime,
@@ -964,32 +964,32 @@ class Console:
             impl_model=state.impl_model,
             name=state.name,
         )
-        prompt = make_prompt_stage1(req, run_id, self._runs_dir, runtime=state.runtime)
-        self._launch_stage(run_id, 1, prompt, {})
+        prompt = make_prompt_stage1(req, project_id, self._projects_dir, runtime=state.runtime)
+        self._launch_stage(project_id, 1, prompt, {})
         return True
 
-    def is_pipeline_run(self, run_id: str) -> bool:
-        """True only if this run was actually started by THIS pipeline (start_run records ≥1
-        artifact in run.db). A resurfaced pre-redesign dir — PRD.md on disk but an empty run.db
+    def is_pipeline_project(self, project_id: str) -> bool:
+        """True only if this run was actually started by THIS pipeline (start_project records ≥1
+        artifact in project store). A resurfaced pre-redesign dir — PRD.md on disk but an empty project store
         (created fresh on load) — is False, so the poller never auto-advances/zombie-launches it.
         A DRAFT (pre-run interview) is always False, even though attached files record artifacts,
         so the poller ignores it until promotion."""
-        if self._load_state(run_id).phase == "draft":
+        if self._load_state(project_id).phase == "draft":
             return False
-        db = RunDB(self._paths(run_id)["db"])
+        db = ProjectStore(self._paths(project_id)["db"])
         return bool(db.artifacts())
 
-    def detect_stage1_done(self, run_id: str) -> bool:
+    def detect_stage1_done(self, project_id: str) -> bool:
         """Stage 1 is done when the PRD passes the mechanical gate (the artifact IS the proof —
         no event needed; the datastore + the committed PRD are the source of truth)."""
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         if state.stage1_done:
             return True
         # SPEC §1: a stage is done only when its gate passes AND its process finished —
         # never flip (and so never let the poller launch S2) while S1 is still alive.
-        if not self.stage_finished(run_id):
+        if not self.stage_finished(project_id):
             return False
-        base = self._paths(run_id)["base"]
+        base = self._paths(project_id)["base"]
         for root, _dirs, files in os.walk(base):
             if "PRD.md" in files:
                 with open(os.path.join(root, "PRD.md")) as f:
@@ -998,36 +998,36 @@ class Console:
                 if ok:
                     state.stage1_done = True
                     state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
-                    state.spent_usd = self._cost(run_id) or state.spent_usd
+                    state.spent_usd = self._cost(project_id) or state.spent_usd
                     state.save()
                     # SPEC §5: the stage is over — close any agent rows it forgot to finish.
-                    AgentRegistry(self._paths(run_id)["agents_db"]).finalize_orphans(run_id, stage_ok=True)
+                    AgentRegistry(self._paths(project_id)["agents_db"]).finalize_orphans(project_id, stage_ok=True)
                     return True
         return False
 
-    def start_stage2(self, run_id: str) -> str | None:
-        """Launch Stage 2. Returns run_id or None if blocked (prior stage alive / MCP unhealthy)."""
-        state = self._load_state(run_id)
+    def start_stage2(self, project_id: str) -> str | None:
+        """Launch Stage 2. Returns project_id or None if blocked (prior stage alive / MCP unhealthy)."""
+        state = self._load_state(project_id)
         if self._terminal(state) or not state.stage1_done:
             return None   # terminal (done/stopped) runs are never relaunched
-        if self._stage_process_alive(run_id):
+        if self._stage_process_alive(project_id):
             return None   # SPEC §1: never two stage orchestrators for one run
-        req = RunRequest(description=state.description or "", target=state.deploy_target or "railway")
+        req = ProjectRequest(description=state.description or "", target=state.deploy_target or "railway")
         env = {k: v for k, v in os.environ.items()
                if k in (state.creds_provided or [])}
-        prompt = make_prompt_stage2(req, run_id, self._runs_dir, runtime=state.runtime)
-        result = self._launch_stage(run_id, 2, prompt, env)
-        return run_id if result is not None else None
+        prompt = make_prompt_stage2(req, project_id, self._projects_dir, runtime=state.runtime)
+        result = self._launch_stage(project_id, 2, prompt, env)
+        return project_id if result is not None else None
 
-    def detect_stage2_done(self, run_id: str) -> bool:
+    def detect_stage2_done(self, project_id: str) -> bool:
         """Stage 2 is done when PRD+architecture+svg exist AND the store holds buildable tickets
         (the artifacts + the ticket DB are the proof — no event needed)."""
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         if state.stage2_done:
             return True
-        if not self.stage_finished(run_id):
+        if not self.stage_finished(project_id):
             return False   # SPEC §1: gate + finished process, never mid-flight
-        base = self._paths(run_id)["base"]
+        base = self._paths(project_id)["base"]
         ok, _missing = artifacts.verify(base, ["PRD.md", "architecture.md", "architecture.svg"])
         if not ok:
             for root, _dirs, files in os.walk(base):
@@ -1039,12 +1039,12 @@ class Console:
             return False
         # The store must hold real, buildable tickets (acceptance + DoD) — not just
         # ticket *events* on the canvas. An empty/hollow store is NOT a done Stage 2.
-        tickets = TicketStore(self._paths(run_id)["tickets_db"])
+        tickets = TicketStore(self._paths(project_id)["tickets_db"])
         if tickets.buildable_count() < 1:
             return False
         state.stage2_done = True
         state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
-        state.spent_usd = self._cost(run_id) or state.spent_usd
+        state.spent_usd = self._cost(project_id) or state.spent_usd
         # Parse required tokens from architecture.md
         for root, _dirs, files in os.walk(base):
             if "architecture.md" in files:
@@ -1053,28 +1053,28 @@ class Console:
                 state.deps_required = [t["name"] for t in tokens]
                 break
         state.save()
-        AgentRegistry(self._paths(run_id)["agents_db"]).finalize_orphans(run_id, stage_ok=True)
+        AgentRegistry(self._paths(project_id)["agents_db"]).finalize_orphans(project_id, stage_ok=True)
         return True
 
-    def detect_stage3_done(self, run_id: str) -> bool:
+    def detect_stage3_done(self, project_id: str) -> bool:
         """Stage 3 is done ONLY when ALL hard gates pass (no hollow done):
         (a) the completed tickets trace to recorded native-Task agents — not a monolithic build,
-        (b) a PASSING Playwright happy-flow against the live URL is recorded in run.db, and
+        (b) a PASSING Playwright happy-flow against the live URL is recorded in project store, and
         (c) the QA loop closed: EVERY ticket reached `approved` (deployed → qa_testing → approved).
             A ticket that QA bounced (qa_reject → open) re-opens the run until it's rebuilt + re-passed.
         On success, record the deploy_url (from the passing verification) and mark phase=done."""
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         if state.phase == "done":
             return True
-        paths = self._paths(run_id)
-        db = RunDB(paths["db"])
+        paths = self._paths(project_id)
+        db = ProjectStore(paths["db"])
         # Gate (b): a real green browser test on the live url must be recorded.
         if not db.has_passing_verification():
             return False
         # Gate (a): tickets were built by per-ticket agents, not one monolithic session.
         tickets = TicketStore(paths["tickets_db"])
         done = tickets.done_tickets()
-        spawned = len(AgentRegistry(paths["agents_db"]).agents_for(run_id))
+        spawned = len(AgentRegistry(paths["agents_db"]).agents_for(project_id))
         if not done or spawned == 0 or any(t.agent is None for t in done):
             return False
         # Gate (c): QA approved every ticket. The QA agent drives each deployed ticket's happy flow
@@ -1086,17 +1086,17 @@ class Console:
             state.deploy_url = passing[-1]["url"]
         state.phase = "done"
         state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
-        # Persist the final spend into run.db so cost survives log loss (SPEC §4 durability),
+        # Persist the final spend into project store so cost survives log loss (SPEC §4 durability),
         # and so verify_evidence's spent_usd comparison has a real basis.
-        state.spent_usd = max(state.spent_usd or 0, self._cost(run_id))
+        state.spent_usd = max(state.spent_usd or 0, self._cost(project_id))
         state.save()
-        AgentRegistry(paths["agents_db"]).finalize_orphans(run_id, stage_ok=True)
+        AgentRegistry(paths["agents_db"]).finalize_orphans(project_id, stage_ok=True)
         return True
 
-    def run_links(self, run_id: str) -> dict:
+    def project_links(self, project_id: str) -> dict:
         """SPEC §6 delivery: the run's outward links from the artifacts table —
         {'repo': <github url>|None, 'live': <deploy url>|None}."""
-        db = RunDB(self._paths(run_id)["db"])
+        db = ProjectStore(self._paths(project_id)["db"])
         repo = live = None
         for a in db.artifacts():
             path = a.get("path") or ""
@@ -1108,25 +1108,25 @@ class Console:
                 repo = path
             elif live is None and ("live" in title or kind == "deploy"):
                 live = path
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         return {"repo": repo or state.repo_url, "live": live or state.deploy_url}
 
-    def demo_credentials(self, run_id: str) -> str | None:
+    def demo_credentials(self, project_id: str) -> str | None:
         """SPEC §6 delivery: the seeded demo login (recorded by Stage 3 as a 'demo-creds'
         artifact) — an app with a sign-in is only demo-able if this reaches the operator.
         These are throwaway demo values by contract, never operator secrets."""
-        db = RunDB(self._paths(run_id)["db"])
+        db = ProjectStore(self._paths(project_id)["db"])
         for a in db.artifacts():
             if (a.get("kind") or "").lower() == "demo-creds":
-                content = self.artifact(run_id, a.get("path") or "").get("content")
+                content = self.artifact(project_id, a.get("path") or "").get("content")
                 if content:
                     return content.strip()
         return None
 
-    def stage2_artifacts(self, run_id: str) -> dict:
+    def stage2_artifacts(self, project_id: str) -> dict:
         """Return Stage 2 artifact paths + parsed required tokens + default dispositions."""
-        state = self._load_state(run_id)
-        base = self._paths(run_id)["base"]
+        state = self._load_state(project_id)
+        base = self._paths(project_id)["base"]
         # default disposition per token (smart-classified), overlaid with any saved choices
         disposition = deps_mod.default_dispositions(state.deps_required)
         disposition.update(state.deps_disposition or {})
@@ -1139,13 +1139,13 @@ class Console:
                 break
         return result
 
-    def submit_deps(self, run_id: str, deps: dict) -> dict:
+    def submit_deps(self, project_id: str, deps: dict) -> dict:
         """Accept per-dep dispositions (+ values for `provide`). Accepts both the new shape
         `{name: {disposition, value?}}` and legacy `{name: value_string}` (treated as provide).
 
         Persists NAMES + dispositions (metadata) to state. Provided VALUES are NEVER written to
         disk — they ride into the Stage 3 env via `start_stage3(extra_creds=...)`."""
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         disposition = deps_mod.default_dispositions(state.deps_required)
         disposition.update(state.deps_disposition or {})
         provided = set(state.deps_provided)
@@ -1175,24 +1175,24 @@ class Console:
             "satisfied": state.deps_satisfied,
         }
 
-    def start_stage3(self, run_id: str, extra_creds: dict | None = None) -> str | None:
-        """Launch Stage 3. Returns run_id or None if blocked."""
-        state = self._load_state(run_id)
+    def start_stage3(self, project_id: str, extra_creds: dict | None = None) -> str | None:
+        """Launch Stage 3. Returns project_id or None if blocked."""
+        state = self._load_state(project_id)
         if self._terminal(state) or not state.stage2_done or not state.deps_satisfied:
             return None   # terminal (done/stopped) runs are never relaunched
-        if self._stage_process_alive(run_id):
+        if self._stage_process_alive(project_id):
             return None   # SPEC §1: never two stage orchestrators for one run
-        req = RunRequest(description=state.description or "", target=state.deploy_target or "railway")
+        req = ProjectRequest(description=state.description or "", target=state.deploy_target or "railway")
         env = {k: v for k, v in os.environ.items()
                if k in (state.creds_provided or [])}
         if extra_creds:
             env.update(extra_creds)
-        prompt = make_prompt_stage3(req, run_id, self._runs_dir, dispositions=state.deps_disposition,
+        prompt = make_prompt_stage3(req, project_id, self._projects_dir, dispositions=state.deps_disposition,
                                     runtime=state.runtime)
-        result = self._launch_stage(run_id, 3, prompt, env)
-        return run_id if result is not None else None
+        result = self._launch_stage(project_id, 3, prompt, env)
+        return project_id if result is not None else None
 
-    def retry_stage(self, run_id: str, stage: int, extra_creds: dict | None = None) -> str | None:
+    def retry_stage(self, project_id: str, stage: int, extra_creds: dict | None = None) -> str | None:
         """Re-run a single stage against the EXISTING workspace + prior-stage artifacts.
 
         Unlike `start_stageN`, this does not require the stage's own completion — it's for
@@ -1202,9 +1202,9 @@ class Console:
         """
         if stage not in (1, 2, 3):
             return None
-        if self._stage_process_alive(run_id):
+        if self._stage_process_alive(project_id):
             return None   # SPEC §1: never two stage orchestrators for one run
-        state = self._load_state(run_id)
+        state = self._load_state(project_id)
         if state.phase == "stopped":
             return None   # canceled runs stay canceled (budget-paused runs are NOT 'stopped')
         if stage >= 2 and not state.stage1_done:
@@ -1218,55 +1218,55 @@ class Console:
             state.stage2_done = False
         state.save()
 
-        req = RunRequest(description=state.description or "", target=state.deploy_target or "railway")
+        req = ProjectRequest(description=state.description or "", target=state.deploy_target or "railway")
         env = {k: v for k, v in os.environ.items() if k in (state.creds_provided or [])}
         if extra_creds:
             env.update(extra_creds)
         if stage == 3:
-            prompt = make_prompt_stage3(req, run_id, self._runs_dir, dispositions=state.deps_disposition,
+            prompt = make_prompt_stage3(req, project_id, self._projects_dir, dispositions=state.deps_disposition,
                                         runtime=state.runtime)
         else:
             prompt = {1: make_prompt_stage1, 2: make_prompt_stage2}[stage](
-                req, run_id, self._runs_dir, runtime=state.runtime)
-        RunDB(self._paths(run_id)["db"]).set_phase("retry-stage-%d" % stage, "started")
-        result = self._launch_stage(run_id, stage, prompt, env)
-        return run_id if result is not None else None
+                req, project_id, self._projects_dir, runtime=state.runtime)
+        ProjectStore(self._paths(project_id)["db"]).set_phase("retry-stage-%d" % stage, "started")
+        result = self._launch_stage(project_id, stage, prompt, env)
+        return project_id if result is not None else None
 
-    def _cost(self, run_id: str) -> float:
-        """streamlog.cost_usd with an (mtime,size)-keyed cache — an unchanged run.log always
+    def _cost(self, project_id: str) -> float:
+        """streamlog.cost_usd with an (mtime,size)-keyed cache — an unchanged project.log always
         yields the same cost, so the multi-MB reparse only happens when the log actually grew.
         Safe for the budget teeth: a stale hit is impossible (any append changes the key)."""
-        p = os.path.join(self._paths(run_id)["base"], "run.log")
+        p = os.path.join(self._paths(project_id)["base"], "project.log")
         try:
             st = os.stat(p)
             key = (st.st_mtime_ns, st.st_size)
         except OSError:
             return 0.0
-        hit = self._cost_cache.get(run_id)
+        hit = self._cost_cache.get(project_id)
         if hit and hit[0] == key:
             return hit[1]
-        val = streamlog.cost_usd(self._full_log(run_id))
-        self._cost_cache[run_id] = (key, val)
+        val = streamlog.cost_usd(self._full_log(project_id))
+        self._cost_cache[project_id] = (key, val)
         return val
 
-    def _full_log(self, run_id: str) -> str:
-        p = os.path.join(self._paths(run_id)["base"], "run.log")
+    def _full_log(self, project_id: str) -> str:
+        p = os.path.join(self._paths(project_id)["base"], "project.log")
         if not os.path.exists(p):
             return ""
         with open(p, "r", errors="replace") as f:
             return f.read()
 
-    def read_log(self, run_id: str, max_bytes: int | None = 20000) -> str:
+    def read_log(self, project_id: str, max_bytes: int | None = 20000) -> str:
         if max_bytes is None:
-            return self._full_log(run_id)
-        return self._read_log_tail(run_id, max_bytes)
+            return self._full_log(project_id)
+        return self._read_log_tail(project_id, max_bytes)
 
-    def read_log_envelope(self, run_id: str, max_bytes: int = 20000) -> dict:
-        """Tail of run.log with honesty about truncation — the UI must never present a
+    def read_log_envelope(self, project_id: str, max_bytes: int = 20000) -> dict:
+        """Tail of project.log with honesty about truncation — the UI must never present a
         partial log as the whole thing."""
-        p = os.path.join(self._paths(run_id)["base"], "run.log")
+        p = os.path.join(self._paths(project_id)["base"], "project.log")
         total = os.path.getsize(p) if os.path.exists(p) else 0
-        log = self._read_log_tail(run_id, max_bytes)
+        log = self._read_log_tail(project_id, max_bytes)
         return {
             "log": log,
             "capped": total > max_bytes,
@@ -1274,8 +1274,8 @@ class Console:
             "total_bytes": total,
         }
 
-    def _read_log_tail(self, run_id: str, max_bytes: int) -> str:
-        p = os.path.join(self._paths(run_id)["base"], "run.log")
+    def _read_log_tail(self, project_id: str, max_bytes: int) -> str:
+        p = os.path.join(self._paths(project_id)["base"], "project.log")
         if not os.path.exists(p):
             return ""
         with open(p, "rb") as f:
@@ -1284,31 +1284,31 @@ class Console:
             f.seek(max(0, size - max_bytes))
             return f.read().decode("utf-8", "replace")
 
-    def _workspace_state(self, run_id: str, phase: str) -> str:
-        ws = os.path.join(self._paths(run_id)["base"], "workspace")
+    def _workspace_state(self, project_id: str, phase: str) -> str:
+        ws = os.path.join(self._paths(project_id)["base"], "workspace")
         if os.path.isdir(ws):
             return "active"
         return "cleaned" if phase in ("done", "blocked", "stopped") else "pending"
 
-    def status(self, run_id: str) -> dict:
-        state = self._load_state(run_id)
-        reg = AgentRegistry(self._paths(run_id)["agents_db"])
+    def status(self, project_id: str) -> dict:
+        state = self._load_state(project_id)
+        reg = AgentRegistry(self._paths(project_id)["agents_db"])
         return {
-            "run_id": run_id,
+            "project_id": project_id,
             "skill": state.skill,
             "skill_version": state.skill_version,
             "description": state.description,
             "name": state.name,
             "deploy_target": state.deploy_target,
-            "phase": self.current_phase(run_id),
+            "phase": self.current_phase(project_id),
             "done": state.phase == "done",
             "deploy_url": state.deploy_url,
-            "spent_usd": self._cost(run_id) or state.spent_usd,
+            "spent_usd": self._cost(project_id) or state.spent_usd,
             "creds_provided": state.creds_provided,
             "byo_railway": "RAILWAY_TOKEN" in (state.creds_provided or []),
-            "workspace": self._workspace_state(run_id, state.phase),
-            "agents": reg.counts(run_id),
-            "no_op_rate": reg.no_op_rate(run_id),
+            "workspace": self._workspace_state(project_id, state.phase),
+            "agents": reg.counts(project_id),
+            "no_op_rate": reg.no_op_rate(project_id),
             "stage": state.stage,
             "stage1_done": state.stage1_done,
             "stage2_done": state.stage2_done,
@@ -1317,14 +1317,14 @@ class Console:
             "deps_satisfied": state.deps_satisfied,
             "planning_model": state.planning_model,
             "impl_model": state.impl_model,
-            "budget_ceiling": self._budget_ceiling(run_id),
+            "budget_ceiling": self._budget_ceiling(project_id),
             "held": state.held,
             "owner": state.owner,
         }
 
-    def run_owner(self, run_id: str) -> str:
+    def project_owner(self, project_id: str) -> str:
         """The email that owns this run ('' = legacy/unowned). The per-route visibility gate."""
-        return (self._load_state(run_id).owner or "").lower()
+        return (self._load_state(project_id).owner or "").lower()
 
     def assign_unowned(self, owner_email: str) -> int:
         """One-time-ish backfill: give every ownerless run an owner (the pre-multitenancy runs).
@@ -1333,15 +1333,15 @@ class Console:
         if not owner_email:
             return 0
         n = 0
-        for r in self.list_runs():            # owner=None → all runs
-            st = self._load_state(r["run_id"])
+        for r in self.list_projects():            # owner=None → all runs
+            st = self._load_state(r["project_id"])
             if not (st.owner or ""):
                 st.owner = owner_email
                 st.save()
                 n += 1
         return n
 
-    def list_runs(self, owner: str | None = None) -> list[dict]:
+    def list_projects(self, owner: str | None = None) -> list[dict]:
         """All runs (owner=None — admin/internal callers like the poller), or only those
         owned by `owner` (a member's email; '' never matches, so unowned runs stay admin-only)."""
         runs = []
@@ -1350,16 +1350,15 @@ class Console:
         # fresh container, wiped volume — and must still surface. Local wins the dedupe.
         # Only factory-shaped ids list (same rule as the pg registry guard): agents calling
         # db verbs with garbage args once littered the volume with dirs like
-        # "build-plan.md"/run.db, and discovery showed them as runs.
-        local = [n for n in os.listdir(self._runs_dir)
-                 if RUN_ID_RE.fullmatch(n)
-                 and os.path.isdir(os.path.join(self._runs_dir, n))
-                 and os.path.exists(os.path.join(self._runs_dir, n, "run.db"))]
+        # "build-plan.md"/project store, and discovery showed them as runs.
+        local = [n for n in os.listdir(self._projects_dir)
+                 if PROJECT_ID_RE.fullmatch(n)
+                 and os.path.isdir(os.path.join(self._projects_dir, n))]
         created = {}
-        for r in dbshim.registry_runs():
-            if RUN_ID_RE.fullmatch(r["run_id"]):
-                created[r["run_id"]] = r.get("created") or 0
-        names = local + [rid for rid in created if rid not in set(local)]
+        for r in dbshim.registry_projects():
+            if PROJECT_ID_RE.fullmatch(r["project_id"]):
+                created[r["project_id"]] = r.get("created") or 0
+        names = local + [pid for pid in created if pid not in set(local)]
         for name in names:
             st = self._load_state(name)
             if owner is not None and (st.owner or "").lower() != owner:
@@ -1369,7 +1368,7 @@ class Console:
             # confusion). An uncleared budget blocker = stopped, full stop.
             budget_stopped = any(
                 b.get("blocks") == "budget" and not b["cleared"]
-                for b in RunDB(self._paths(name)["db"]).blockers()
+                for b in ProjectStore(self._paths(name)["db"]).blockers()
             )
             # Distinct agent roles on the run (first-seen order) — the dashboard's per-project
             # avatar stack (PRD §2.2). Empty when nothing's been spawned yet.
@@ -1380,11 +1379,11 @@ class Console:
             # Last activity (epoch) for the dashboard's "updated" column; falls back to the
             # registry create time for a registry-only run with no local dir yet.
             try:
-                updated = os.path.getmtime(os.path.join(self._runs_dir, name))
+                updated = os.path.getmtime(os.path.join(self._projects_dir, name))
             except OSError:
                 updated = created.get(name, 0)
             runs.append({
-                "run_id": name,
+                "project_id": name,
                 "phase": self.current_phase(name),
                 "description": st.description,
                 "name": st.name,
@@ -1400,11 +1399,11 @@ class Console:
         runs.sort(key=lambda r: r["updated"], reverse=True)
         return runs
 
-    def events(self, run_id: str) -> list:
-        """Recent run activity, projected from run.db for the live activity feed. Shaped like the
+    def events(self, project_id: str) -> list:
+        """Recent run activity, projected from project store for the live activity feed. Shaped like the
         old event records ({type, payload, ts}) so the frontend renders unchanged — but the DATASTORE
         is the source of truth; there is no event log."""
-        db = RunDB(self._paths(run_id)["db"])
+        db = ProjectStore(self._paths(project_id)["db"])
         items = []
         for p in db.phases():
             items.append({"ts": p["ts"], "type": "phase",
@@ -1421,16 +1420,16 @@ class Console:
         items.sort(key=lambda e: e["ts"])
         return items
 
-    def continue_run(self, run_id: str, gate: str) -> dict:
-        gates.clear_gate(self._runs_dir, run_id, gate)
+    def continue_project(self, project_id: str, gate: str) -> dict:
+        gates.clear_gate(self._projects_dir, project_id, gate)
         return {"cleared": gate}
 
-    def artifact(self, run_id: str, path: str) -> dict:
+    def artifact(self, project_id: str, path: str) -> dict:
         # Artifact paths arrive relative to wherever the recording agent worked: the run base
         # (host: "input/..."), the workspace (orchestrator: "architecture.md"), or the cloned
         # project repo INSIDE the workspace (S1 agents: "PRD.md", "research/x.md"). Resolve
         # against all three levels — the file must still stay under the run base (no escape).
-        base = os.path.realpath(self._paths(run_id)["base"])
+        base = os.path.realpath(self._paths(project_id)["base"])
         ws = os.path.join(base, "workspace")
         roots = [base, ws]
         try:
@@ -1445,21 +1444,21 @@ class Console:
                     return {"path": path, "content": f.read()[:200000]}
         return {"error": "not found", "path": path}
 
-    def graph(self, run_id: str) -> dict:
-        """Cytoscape elements projected ENTIRELY from run.db (the single source of truth):
-        pipeline phases + stage gates + deps from runstate/phases; agents from the agents table;
+    def graph(self, project_id: str) -> dict:
+        """Cytoscape elements projected ENTIRELY from project store (the single source of truth):
+        pipeline phases + stage gates + deps from projectstate/phases; agents from the agents table;
         artifacts/blockers from their tables; the pending review gate from the gates table.
         No event log, no stream-log parsing — the canvas is a pure projection of the datastore."""
-        paths = self._paths(run_id)
-        db = RunDB(paths["db"])
-        state = self._load_state(run_id)
+        paths = self._paths(project_id)
+        db = ProjectStore(paths["db"])
+        state = self._load_state(project_id)
         orch_label = ("Kimi · software-factory" if state.runtime == "opencode"
                       else "Claude · software-factory")
         nodes = [{"data": {"id": "orchestrator", "label": orch_label,
-                           "kind": "orchestrator", "status": self.current_phase(run_id)}}]
+                           "kind": "orchestrator", "status": self.current_phase(project_id)}}]
         edges = []
 
-        derived = self.derive_phases(run_id)
+        derived = self.derive_phases(project_id)
         prev = "orchestrator"
         for name in PIPELINE:
             st = derived.get(name, "pending")
@@ -1492,7 +1491,7 @@ class Console:
         # Agents — projected from the agents table (recorded native Task sub-agents)
         reg = AgentRegistry(paths["agents_db"])
         agent_ids = set()
-        for rec in reg.agents_for(run_id):
+        for rec in reg.agents_for(project_id):
             nid = "agent:" + rec.agent_id
             agent_ids.add(nid)
             nodes.append({"data": {"id": nid, "label": rec.role, "kind": "agent",
@@ -1506,7 +1505,7 @@ class Console:
             if path.startswith("http"):
                 status = "created"
             else:
-                status = "created" if (path and "content" in self.artifact(run_id, path)) else "missing"
+                status = "created" if (path and "content" in self.artifact(project_id, path)) else "missing"
             aid = "artifact:%d" % i
             nodes.append({"data": {"id": aid, "label": a.get("title") or "artifact", "kind": "artifact",
                                    "path": path, "status": status,
@@ -1534,9 +1533,9 @@ class Console:
                     edges.append({"data": {"source": gid, "target": tgt, "etype": "flow"}})
         return {"nodes": nodes, "edges": edges}
 
-    def evidence(self, run_id: str) -> dict:
-        paths = self._paths(run_id)
-        state = self._load_state(run_id)
+    def evidence(self, project_id: str) -> dict:
+        paths = self._paths(project_id)
+        state = self._load_state(project_id)
         reg = AgentRegistry(paths["agents_db"])
         tickets = TicketStore(paths["tickets_db"])
         bundle = build_evidence(state, reg, tickets)

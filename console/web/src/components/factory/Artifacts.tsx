@@ -1,9 +1,9 @@
 // Artifacts.tsx — the produced-artifacts list (left rail) + the DocViewer modal.
 //
-// Artifacts are the artifact-kind nodes in the real graph (projected from run.db's artifacts
+// Artifacts are the artifact-kind nodes in the real graph (projected from the project store's artifacts
 // table). Each carries { label, path, status, url }. An http path is an external link (repo /
 // live app) opened in a new tab; a file path opens in the DocViewer, which fetches the content
-// from /api/runs/{id}/artifact?path=… (api.artifact) and renders by extension:
+// from /api/projects/{id}/artifact?path=… (api.artifact) and renders by extension:
 //   .md  → monospace text · .svg → inline · everything else → text.
 import { useEffect, useState } from "react";
 import { T, Icon } from "../onboarding/design";
@@ -41,8 +41,8 @@ export function ArtifactList({ artifacts, onOpen }:
 }
 
 // DocViewer — modal that fetches + renders one artifact (or arbitrary content, e.g. a ticket body).
-export function DocViewer({ runId, doc, onClose }:
-  { runId: string; doc: { label: string; path?: string; content?: string } | null; onClose: () => void }) {
+export function DocViewer({ projectId, doc, onClose }:
+  { projectId: string; doc: { label: string; path?: string; content?: string } | null; onClose: () => void }) {
   const [content, setContent] = useState<string | null>(doc?.content ?? null);
   const [loading, setLoading] = useState(false);
 
@@ -51,11 +51,11 @@ export function DocViewer({ runId, doc, onClose }:
     if (doc.content != null) { setContent(doc.content); return; }
     if (!doc.path) return;
     setLoading(true);
-    api.artifact(runId, doc.path)
+    api.artifact(projectId, doc.path)
       .then((r) => setContent(r.content ?? (r.error ? `Could not load: ${r.error}` : "")))
       .catch((e) => setContent(`Could not load: ${e}`))
       .finally(() => setLoading(false));
-  }, [doc, runId]);
+  }, [doc, projectId]);
 
   if (!doc) return null;
   const isSvg = (doc.path || "").toLowerCase().endsWith(".svg");

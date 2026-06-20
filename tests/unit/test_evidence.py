@@ -4,7 +4,7 @@ claim, but a reconciliation: skill stamped, agents recorded, every done ticket t
 merged PR with a real diff, agent cost reconciled against budget, and a deploy URL only if
 real completed work backs it.
 """
-from software_factory.runstate import RunState, JsonFileStore
+from software_factory.projectstate import ProjectState, JsonFileStore
 from software_factory.agents import AgentRegistry
 from software_factory.tickets import TicketStore
 from software_factory.budget import Usage
@@ -13,7 +13,7 @@ from software_factory.evidence import build_evidence, verify_evidence
 
 def real_run(tmp_path):
     """A run that genuinely used the skill: stamped, one agent did real work, one ticket done."""
-    state = RunState.load("run-1", JsonFileStore(str(tmp_path)))
+    state = ProjectState.load("project-1", JsonFileStore(str(tmp_path)))
     state.skill = "software-factory"
     state.skill_version = "0.0.1"
     state.description = "guestbook web app"
@@ -23,13 +23,13 @@ def real_run(tmp_path):
     state.spent_usd = 0.42
     state.save()
 
-    # Flat schema: the registry scopes by the run id in its path; this run is "run-1".
-    reg = AgentRegistry(str(tmp_path / "run-1" / "agents.db"), clock=lambda: 1)
-    reg.spawn("a1", "run-1", 1, "build", "claude-opus-4-8")
+    # Flat schema: the registry scopes by the run id in its path; this run is "project-1".
+    reg = AgentRegistry(str(tmp_path / "project-1"), clock=lambda: 1)
+    reg.spawn("a1", "project-1", 1, "build", "claude-opus-4-8")
     reg.record("a1", outcome="real_diff", usage=Usage("claude-opus-4-8", output_tokens=4000),
                cost_usd=0.42, provenance="7", diff_lines=120)
 
-    tickets = TicketStore(str(tmp_path / "tickets.db"))
+    tickets = TicketStore(str(tmp_path / "project-1"))
     tid = tickets.create_ticket("guestbook", acceptance="submit->see", dod="green", wave=1)
     tickets.mark_done(tid, provenance="7", diff_lines=120)
     return state, reg, tickets

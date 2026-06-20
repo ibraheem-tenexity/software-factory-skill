@@ -1,16 +1,16 @@
 // Dashboard.tsx — Projects dashboard (PRD §2.2), the post-login home. Faithful TSX port of the
 // design's dashboard.jsx, reusing the Tenexity primitives from onboarding/design.tsx and driven
-// by REAL run-registry data (/api/runs, owner-scoped) + /api/me + /api/org. Fields the prototype
+// by REAL run-registry data (/api/projects, owner-scoped) + /api/me + /api/org. Fields the prototype
 // mocked are derived from real data where it exists and degrade honestly where it doesn't.
 import { useEffect, useState } from "react";
-import { api, RunSummary, Org, Me } from "../api";
+import { api, ProjectSummary, Org, Me } from "../api";
 import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, Wordmark } from "./onboarding/design";
 
 type StatusKey = "deployed" | "needs-input" | "draft" | "researching" | "building";
 type Tone = "success" | "warning" | "neutral" | "brand" | "info";
 
 // Derive the project status from real run state (never fabricated).
-function statusOf(r: RunSummary): { key: StatusKey; label: string; tone: Tone } {
+function statusOf(r: ProjectSummary): { key: StatusKey; label: string; tone: Tone } {
   if (r.deploy_url || r.done || r.phase === "done") return { key: "deployed", label: "Deployed", tone: "success" };
   if (r.budget_stopped || r.held) return { key: "needs-input", label: "Needs input", tone: "warning" };
   if (r.phase === "draft") return { key: "draft", label: "Draft", tone: "neutral" };
@@ -19,7 +19,7 @@ function statusOf(r: RunSummary): { key: StatusKey; label: string; tone: Tone } 
 }
 
 // Progress reflects the staged pipeline (stage 1→2→3); deployed = 100, draft = 0.
-function pctOf(r: RunSummary, key: StatusKey): number {
+function pctOf(r: ProjectSummary, key: StatusKey): number {
   if (key === "deployed") return 100;
   if (key === "draft") return 0;
   const stage = Math.max(0, Math.min(3, r.stage || 0));
@@ -68,7 +68,7 @@ function AgentDots({ agents }: { agents: string[] }) {
   );
 }
 
-function ProjectRow({ r, onClick, first }: { r: RunSummary; onClick: () => void; first: boolean }) {
+function ProjectRow({ r, onClick, first }: { r: ProjectSummary; onClick: () => void; first: boolean }) {
   const st = statusOf(r);
   const live = st.key === "building" || st.key === "researching";
   const pct = pctOf(r, st.key);
@@ -79,7 +79,7 @@ function ProjectRow({ r, onClick, first }: { r: RunSummary; onClick: () => void;
       onMouseEnter={(e) => (e.currentTarget.style.background = T.sunken)} onMouseLeave={(e) => (e.currentTarget.style.background = T.raised)}>
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-          <span style={{ font: `600 14.5px/1.2 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name || r.run_id}</span>
+          <span style={{ font: `600 14.5px/1.2 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name || r.project_id}</span>
           <StatusPill tone={st.tone} dot={live}>{st.label}</StatusPill>
         </div>
         <p style={{ margin: "5px 0 0", font: `400 12.5px/1.4 ${T.sans}`, color: T.secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.description || "—"}</p>
@@ -99,33 +99,33 @@ function ProjectRow({ r, onClick, first }: { r: RunSummary; onClick: () => void;
   );
 }
 
-function ProjectList({ runs, onOpen, empty }: { runs: RunSummary[]; onOpen: (id: string) => void; empty: string }) {
-  if (!runs.length) return <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "22px", textAlign: "center", font: `400 13px/1.4 ${T.sans}`, color: T.tertiary }}>{empty}</div>;
+function ProjectList({ projects, onOpen, empty }: { projects: ProjectSummary[]; onOpen: (id: string) => void; empty: string }) {
+  if (!projects.length) return <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "22px", textAlign: "center", font: `400 13px/1.4 ${T.sans}`, color: T.tertiary }}>{empty}</div>;
   return (
     <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden", boxShadow: T.shadowXs }}>
-      {runs.map((r, i) => <ProjectRow key={r.run_id} r={r} first={i === 0} onClick={() => onOpen(r.run_id)} />)}
+      {projects.map((r, i) => <ProjectRow key={r.project_id} r={r} first={i === 0} onClick={() => onOpen(r.project_id)} />)}
     </div>
   );
 }
 
 export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => void; onNew: () => void; onOrg: () => void }) {
-  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [me, setMe] = useState<Me | null>(null);
   const [org, setOrg] = useState<Org | null>(null);
 
   useEffect(() => {
-    api.runs().then((d) => setRuns(d.runs || [])).catch(() => setRuns([]));
+    api.projects().then((d) => setProjects(d.projects || [])).catch(() => setProjects([]));
     api.me().then(setMe).catch(() => setMe(null));
     api.getOrg().then((d) => setOrg(d.org)).catch(() => setOrg(null));
   }, []);
 
   const isAdmin = me?.role === "admin";
-  const active = runs.filter((r) => statusOf(r).key !== "deployed");
-  const shipped = runs.filter((r) => statusOf(r).key === "deployed");
+  const active = projects.filter((r) => statusOf(r).key !== "deployed");
+  const shipped = projects.filter((r) => statusOf(r).key === "deployed");
   const building = active.filter((r) => statusOf(r).key === "building");
   const researching = active.filter((r) => statusOf(r).key === "researching");
   const withAgents = active.filter((r) => (r.agents?.length || 0) > 0).length;
-  const totalSpend = runs.reduce((s, r) => s + (r.spent_usd || 0), 0);
+  const totalSpend = projects.reduce((s, r) => s + (r.spent_usd || 0), 0);
   const orgName = org?.name || "Your organization";
 
   // Org-admin preview stats — built only from real org fields we have.
@@ -176,8 +176,8 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
             <MetricCard label="Active projects" value={String(active.length)} hint={`${withAgents} with agents working now`} accent />
             <MetricCard label="In build" value={String(building.length)} hint={`${researching.length} researching`} />
-            <MetricCard label="Deployed" value={String(shipped.length)} hint={shipped[0] ? (shipped[0].name || shipped[0].run_id) + " · live" : "none yet"} />
-            <MetricCard label="Spend" value={money(totalSpend) === "—" ? "$0.00" : money(totalSpend)} hint={`across ${runs.length} project${runs.length === 1 ? "" : "s"}`} />
+            <MetricCard label="Deployed" value={String(shipped.length)} hint={shipped[0] ? (shipped[0].name || shipped[0].project_id) + " · live" : "none yet"} />
+            <MetricCard label="Spend" value={money(totalSpend) === "—" ? "$0.00" : money(totalSpend)} hint={`across ${projects.length} project${projects.length === 1 ? "" : "s"}`} />
           </div>
 
           {/* org admin preview — ADMINS ONLY; non-admins see nothing (the list moves up). */}
@@ -209,14 +209,14 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
               <CategoryLabel>In progress · {active.length}</CategoryLabel>
               <span style={{ font: `400 11.5px/1 ${T.sans}`, color: T.tertiary }}>Sorted by last activity</span>
             </div>
-            <ProjectList runs={active} onOpen={onOpen} empty="No projects in progress. Start one with “New project”." />
+            <ProjectList projects={active} onOpen={onOpen} empty="No projects in progress. Start one with “New project”." />
           </div>
 
           {/* deployed */}
           {shipped.length > 0 && (
             <div>
               <CategoryLabel style={{ marginBottom: 10 }}>Deployed · {shipped.length}</CategoryLabel>
-              <ProjectList runs={shipped} onOpen={onOpen} empty="" />
+              <ProjectList projects={shipped} onOpen={onOpen} empty="" />
             </div>
           )}
 

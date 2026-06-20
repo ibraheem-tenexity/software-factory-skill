@@ -1,9 +1,9 @@
 """Run state must survive a crash or a /loop re-entry: load -> work -> save -> resume.
 
-The backend is pluggable (local JSON here; the per-run run.db in a real run) so the same
+The backend is pluggable (local JSON here; the per-project project.db in a real run) so the same
 resume contract is unit-testable without any live dependency.
 """
-from software_factory.runstate import RunState, JsonFileStore
+from software_factory.projectstate import ProjectState, JsonFileStore
 
 
 def store(tmp_path):
@@ -11,7 +11,7 @@ def store(tmp_path):
 
 
 def test_fresh_run_starts_at_provision_with_zero_spend(tmp_path):
-    s = RunState.load("run-1", store(tmp_path))
+    s = ProjectState.load("project-1", store(tmp_path))
     assert s.phase == "provision"
     assert s.spent_usd == 0.0
     assert s.repo_url is None
@@ -19,21 +19,21 @@ def test_fresh_run_starts_at_provision_with_zero_spend(tmp_path):
 
 
 def test_loading_an_unknown_run_is_fresh_not_an_error(tmp_path):
-    s = RunState.load("never-seen", store(tmp_path))
-    assert s.run_id == "never-seen"
+    s = ProjectState.load("never-seen", store(tmp_path))
+    assert s.project_id == "never-seen"
     assert s.phase == "provision"
 
 
 def test_save_then_load_resumes_exactly_where_it_left_off(tmp_path):
     st = store(tmp_path)
-    s = RunState.load("run-2", st)
+    s = ProjectState.load("project-2", st)
     s.phase = "build"
     s.spent_usd = 42.5
     s.repo_url = "https://github.com/acme/guestbook"
     s.save()
 
     # Simulate a crash + /loop re-entry: brand-new object, same backend.
-    resumed = RunState.load("run-2", store(tmp_path))
+    resumed = ProjectState.load("project-2", store(tmp_path))
     assert resumed.phase == "build"
     assert resumed.spent_usd == 42.5
     assert resumed.repo_url == "https://github.com/acme/guestbook"
@@ -42,7 +42,7 @@ def test_save_then_load_resumes_exactly_where_it_left_off(tmp_path):
 def test_proof_marker_is_stamped_and_persists(tmp_path):
     # At provision the orchestrator stamps WHICH skill drove the run — the run's receipt.
     st = store(tmp_path)
-    s = RunState.load("run-proof", st)
+    s = ProjectState.load("project-proof", st)
     assert s.skill is None  # not yet stamped
     s.skill = "software-factory"
     s.skill_version = "0.0.1"
@@ -50,7 +50,7 @@ def test_proof_marker_is_stamped_and_persists(tmp_path):
     s.deploy_target = "railway"
     s.save()
 
-    resumed = RunState.load("run-proof", store(tmp_path))
+    resumed = ProjectState.load("project-proof", store(tmp_path))
     assert resumed.skill == "software-factory"
     assert resumed.skill_version == "0.0.1"
     assert resumed.description == "guestbook web app"
@@ -59,29 +59,29 @@ def test_proof_marker_is_stamped_and_persists(tmp_path):
 
 def test_runs_are_isolated_by_id(tmp_path):
     st = store(tmp_path)
-    a = RunState.load("a", st)
+    a = ProjectState.load("a", st)
     a.phase = "deploy"
     a.save()
-    b = RunState.load("b", store(tmp_path))
+    b = ProjectState.load("b", store(tmp_path))
     assert b.phase == "provision"  # 'a' did not leak into 'b'
 
 
 def test_per_run_model_picks_persist_across_reload(tmp_path):
     # Operator-picked models (planning = S1/S2 orchestrators, impl = S3) are pinned at
-    # start_run and must survive crashes/retries like every other run-scoped decision.
+    # start_project and must survive crashes/retries like every other run-scoped decision.
     st = store(tmp_path)
-    s = RunState.load("run-m", st)
+    s = ProjectState.load("project-m", st)
     s.planning_model = "claude-fable-5"
     s.impl_model = "claude-opus-4-8"
     s.save()
-    resumed = RunState.load("run-m", store(tmp_path))
+    resumed = ProjectState.load("project-m", store(tmp_path))
     assert resumed.planning_model == "claude-fable-5"
     assert resumed.impl_model == "claude-opus-4-8"
 
 
 def test_project_name_persists_across_reload(tmp_path):
     st = store(tmp_path)
-    s = RunState.load("run-n", st)
+    s = ProjectState.load("project-n", st)
     s.name = "Acme CRM"
     s.save()
-    assert RunState.load("run-n", store(tmp_path)).name == "Acme CRM"
+    assert ProjectState.load("project-n", store(tmp_path)).name == "Acme CRM"

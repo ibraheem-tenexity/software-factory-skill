@@ -1,4 +1,4 @@
-"""Parse the headless `claude -p --output-format stream-json` log (run.log) into the live
+"""Parse the headless `claude -p --output-format stream-json` log (project.log) into the live
 COST and AGENT GRAPH the dashboard renders.
 
 Cost comes from claude's own authoritative `result.total_cost_usd` when the run has finished,
@@ -29,8 +29,8 @@ OPENCODE_FALLBACK_MODEL = "openrouter/moonshotai/kimi-k2.7-code"
 
 
 def cost_usd(text: str, prices: dict | None = None) -> float:
-    # run.log APPENDS every stage's session, keyed per session; the log may be claude
-    # stream-json or opencode --format json (one runtime per run — RunState.runtime pins it —
+    # project.log APPENDS every stage's session, keyed per session; the log may be claude
+    # stream-json or opencode --format json (one runtime per run — ProjectState.runtime pins it —
     # but one parser handles both vocabularies; the schemas are disjoint).
     # claude: per session, `result.total_cost_usd` is authoritative; usage after a session's
     # result is the next logical session's estimate. A session that NEVER emitted a result

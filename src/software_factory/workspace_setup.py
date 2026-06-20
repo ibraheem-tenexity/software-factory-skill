@@ -89,14 +89,14 @@ def _skill_file(stage: int, skills_dir: str | None = None) -> str:
 
 
 def prepare_workspace(
-    runs_dir: str,
-    run_id: str,
+    projects_dir: str,
+    project_id: str,
     stage: int,
     skills_dir: str | None = None,
     phase_dir: str | None = None,
     runtime: str = "claude",
 ) -> str:
-    ws = workspace.create(runs_dir, run_id)
+    ws = workspace.create(projects_dir, project_id)
 
     # .mcp.json is written for BOTH runtimes: mcp_health.check_mcp reads exactly this shape
     # and _launch_stage hard-gates on it before any launch.
@@ -135,15 +135,15 @@ def prepare_workspace(
             shutil.copytree(src, dst, dirs_exist_ok=True)
 
     if stage >= 2:
-        _copy_prior_artifacts(runs_dir, run_id, ws, ["PRD.md", "design-spec.md"])
+        _copy_prior_artifacts(projects_dir, project_id, ws, ["PRD.md", "design-spec.md"])
     if stage >= 3:
-        _copy_prior_artifacts(runs_dir, run_id, ws, ["architecture.md", "architecture.svg"])
+        _copy_prior_artifacts(projects_dir, project_id, ws, ["architecture.md", "architecture.svg"])
 
     return ws
 
 
-def _copy_prior_artifacts(runs_dir: str, run_id: str, ws: str, names: list[str]) -> None:
-    base = os.path.join(runs_dir, run_id)
+def _copy_prior_artifacts(projects_dir: str, project_id: str, ws: str, names: list[str]) -> None:
+    base = os.path.join(projects_dir, project_id)
     ctx_dir = os.path.join(ws, "context")
     ctx_real = os.path.realpath(ctx_dir)
     for name in names:

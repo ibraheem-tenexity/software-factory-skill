@@ -94,12 +94,12 @@ def make_tools(console: Console, users=None, attachments=lambda: [],
     def _email() -> str:
         return (owner() or "").strip().lower()
 
-    def _allowed(run_id: str) -> bool:
+    def _allowed(project_id: str) -> bool:
         """Ownership check for run-scoped tools. Admins bypass; members must own the run."""
         email, role = viewer()
         if role == "admin":
             return True
-        return bool(run_id) and (console.run_owner(run_id) or "").lower() == (email or "").lower()
+        return bool(project_id) and (console.project_owner(project_id) or "").lower() == (email or "").lower()
 
     # ── Company / org (first-time setup; editable when returning) ──────────────────────────────
     async def _get_company_profile() -> str:
@@ -143,16 +143,16 @@ def make_tools(console: Console, users=None, attachments=lambda: [],
 
     # ── Project (writes to the draft; description composed server-side) ────────────────────────
     async def _set_project_basics(name: str = "", goal: str = "") -> str:
-        rid = draft_id()
-        if not rid:
+        pid = draft_id()
+        if not pid:
             return json.dumps({"error": "no active draft"})
-        return json.dumps(console.set_draft_project(rid, name=(name or None), goal=(goal or None)))
+        return json.dumps(console.set_draft_project(pid, name=(name or None), goal=(goal or None)))
 
     async def _set_project_scope(scope: list) -> str:
-        rid = draft_id()
-        if not rid:
+        pid = draft_id()
+        if not pid:
             return json.dumps({"error": "no active draft"})
-        return json.dumps(console.set_draft_project(rid, scope=(scope or [])))
+        return json.dumps(console.set_draft_project(pid, scope=(scope or [])))
 
     async def _attach_project_materials() -> str:
         # Files arrive with the chat message and the server auto-persists them to the draft's input/.
@@ -166,41 +166,41 @@ def make_tools(console: Console, users=None, attachments=lambda: [],
     async def _get_intake_state() -> str:
         # READ-ONLY. The frontend OWNS the checklist + ready gate; this is for the agent's own
         # reasoning, it must NOT compute or push completion to the UI.
-        rid = draft_id()
+        pid = draft_id()
         org = users.org_for_user(_email()) if users else None
-        project = console.draft_project(rid) if rid else {}
+        project = console.draft_project(pid) if pid else {}
         return json.dumps({"company": org, "project": project})
 
     async def _validate_intake_complete() -> str:
-        rid = draft_id()
-        brief = console.draft_brief(rid) if rid else {}
+        pid = draft_id()
+        brief = console.draft_brief(pid) if pid else {}
         ready, missing = enough(brief)
         return json.dumps({"ready": ready, "missing": missing})
 
     async def _hand_off_to_factory(target: str = "railway") -> str:
-        rid = draft_id()
-        if not rid:
+        pid = draft_id()
+        if not pid:
             return json.dumps({"error": "no active draft to promote"})
         try:
-            run_id = console.promote_draft(rid, interview_md=interview(), target=target)
+            project_id = console.promote_draft(pid, interview_md=interview(), target=target)
         except ValueError as e:               # duplicate project name — tell the user
             return json.dumps({"error": str(e)})
-        return json.dumps({"run_id": run_id, "status": "started"})
+        return json.dumps({"project_id": project_id, "status": "started"})
 
-    async def _check_status(run_id: str) -> str:
-        if not _allowed(run_id):
+    async def _check_status(project_id: str) -> str:
+        if not _allowed(project_id):
             return json.dumps({"error": "forbidden"})
-        return json.dumps(console.status(run_id))
+        return json.dumps(console.status(project_id))
 
-    async def _request_dep_input(run_id: str, dep_names: list) -> str:
-        if not _allowed(run_id):
+    async def _request_dep_input(project_id: str, dep_names: list) -> str:
+        if not _allowed(project_id):
             return json.dumps({"error": "forbidden"})
-        return json.dumps({"type": "dep_request", "run_id": run_id, "dep_names": dep_names})
+        return json.dumps({"type": "dep_request", "project_id": project_id, "dep_names": dep_names})
 
-    async def _get_result(run_id: str) -> str:
-        if not _allowed(run_id):
+    async def _get_result(project_id: str) -> str:
+        if not _allowed(project_id):
             return json.dumps({"error": "forbidden"})
-        return json.dumps(console.evidence(run_id))
+        return json.dumps(console.evidence(project_id))
 
     def _tool(name, desc, props, required, fn):
         return FunctionTool(name=name, description=desc,
@@ -256,14 +256,14 @@ def make_tools(console: Console, users=None, attachments=lambda: [],
               [], _hand_off_to_factory),
         _tool("check_status",
               "Check current pipeline status — phase, stage, cost — after handoff.",
-              {"run_id": _str}, ["run_id"], _check_status),
+              {"project_id": _str}, ["project_id"], _check_status),
         _tool("request_dep_input",
               "Signal the frontend to show secure input fields for dependency tokens. Use this instead "
               "of asking the user to paste tokens in chat.",
-              {"run_id": _str, "dep_names": _strs}, ["run_id", "dep_names"], _request_dep_input),
+              {"project_id": _str, "dep_names": _strs}, ["project_id", "dep_names"], _request_dep_input),
         _tool("get_result",
               "Get final artifacts and deployment URL(s) after the pipeline completes.",
-              {"run_id": _str}, ["run_id"], _get_result),
+              {"project_id": _str}, ["project_id"], _get_result),
     ]
 
 
@@ -310,17 +310,17 @@ class ChatAgentRunner:
         )
         self._conversations: dict[str, list] = {}
 
-    async def handle_message(self, run_id: str | None, user_msg: str,
+    async def handle_message(self, project_id: str | None, user_msg: str,
                               files: list, images: list,
                               runtime: str = "", planning_model: str = "",
                               impl_model: str = "",
                               project_name: str = "",
                               gated: bool = False,
                               owner: str = "", role: str = "admin") -> tuple[str | None, list[ChatMessage]]:
-        """Process a user message through the agent. Returns (run_id, response_messages)."""
+        """Process a user message through the agent. Returns (project_id, response_messages)."""
         from agents import Runner
 
-        conv_key = run_id or "__new__"
+        conv_key = project_id or "__new__"
         history = self._conversations.get(conv_key, [])
 
         content_parts = []
@@ -351,7 +351,7 @@ class ChatAgentRunner:
         self._pending_gated = bool(gated)
         self._pending_owner = owner or ""
         self._pending_viewer = (owner or "", role or "admin")
-        self._pending_draft_id = run_id or ""
+        self._pending_draft_id = project_id or ""
         self._pending_interview_md = _render_interview(history)
         try:
             result = await Runner.run(self._agent, input=history)
@@ -386,14 +386,14 @@ class ChatAgentRunner:
                 # ChatCompletions-compat proxy (Kimi via OpenRouter) can emit malformed
                 # arguments — degrade to a plain reply rather than 500ing the chat endpoint.
                 if call.name == "hand_off_to_factory":
-                    # The draft was promoted in-place; run_id is already the canonical draft id
+                    # The draft was promoted in-place; project_id is already the canonical draft id
                     # (set by the server before the interview). No slug minting.
-                    if not run_id:
+                    if not project_id:
                         continue
                     response_msgs.append(ChatMessage(
                         role="system", content="Pipeline started.",
                         msg_type="pipeline_started", ts=now,
-                        metadata={"run_id": run_id},
+                        metadata={"project_id": project_id},
                     ))
                 elif call.name == "request_dep_input":
                     try:
@@ -404,7 +404,7 @@ class ChatAgentRunner:
                         role="assistant",
                         content="The architecture requires these credentials. Please provide them below.",
                         msg_type="dep_request", ts=now,
-                        metadata={"run_id": run_id, "dep_names": dep_names},
+                        metadata={"project_id": project_id, "dep_names": dep_names},
                     ))
 
         # One assistant bubble per turn: the reply (joined text) goes first, then any
@@ -422,13 +422,13 @@ class ChatAgentRunner:
 
         history.extend([{"role": "assistant", "content": m.content} for m in response_msgs
                         if m.role == "assistant"])
-        self._conversations[run_id or conv_key] = history
+        self._conversations[project_id or conv_key] = history
 
-        return run_id, response_msgs
+        return project_id, response_msgs
 
-    def check_and_notify(self, run_id: str, prev_stage: int = 0) -> list[ChatMessage]:
+    def check_and_notify(self, project_id: str, prev_stage: int = 0) -> list[ChatMessage]:
         """Check pipeline status and generate notification messages for transitions."""
-        status = self._console.status(run_id)
+        status = self._console.status(project_id)
         msgs: list[ChatMessage] = []
         now = time.time()
 
@@ -437,7 +437,7 @@ class ChatAgentRunner:
                 role="system",
                 content="Research complete — Design & Architecture stage starting.",
                 msg_type="status_update", ts=now,
-                metadata={"run_id": run_id, "stage": 2},
+                metadata={"project_id": project_id, "stage": 2},
             ))
 
         if status.get("stage2_done") and prev_stage < 3:
@@ -448,14 +448,14 @@ class ChatAgentRunner:
                     content="The architecture requires these credentials to proceed. "
                             "Please provide them in the secure fields below.",
                     msg_type="dep_request", ts=now,
-                    metadata={"run_id": run_id, "dep_names": deps},
+                    metadata={"project_id": project_id, "dep_names": deps},
                 ))
             else:
                 msgs.append(ChatMessage(
                     role="system",
                     content="Design complete — Build stage starting.",
                     msg_type="status_update", ts=now,
-                    metadata={"run_id": run_id, "stage": 3},
+                    metadata={"project_id": project_id, "stage": 3},
                 ))
 
         if status.get("done"):
@@ -465,7 +465,7 @@ class ChatAgentRunner:
                 role="assistant",
                 content=f"Build complete! Deployed to {url} — total cost ${spent:.2f}.",
                 msg_type="complete", ts=now,
-                metadata={"run_id": run_id, "url": url, "spent_usd": spent},
+                metadata={"project_id": project_id, "url": url, "spent_usd": spent},
             ))
 
         return msgs

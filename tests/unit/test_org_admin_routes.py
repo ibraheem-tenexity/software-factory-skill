@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 
 def _load_app(tmp_path, monkeypatch, **env):
-    monkeypatch.setenv("SF_RUNS_DIR", str(tmp_path))
+    monkeypatch.setenv("SF_PROJECTS_DIR", str(tmp_path))
     monkeypatch.setenv("SF_BLOB_DIR", str(tmp_path / "blobs"))
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
@@ -82,7 +82,7 @@ def test_upload_list_use_delete_doc(admin_mod, admin_client, monkeypatch):
     docs = admin_client.get("/api/org/docs").json()["docs"]
     assert [d["name"] for d in docs] == ["pricing.xlsx"]
 
-    r2 = admin_client.post(f"/api/org/docs/{doc['id']}/use", json={"run_id": "run-1"})
+    r2 = admin_client.post(f"/api/org/docs/{doc['id']}/use", json={"project_id": "project-1"})
     assert r2.status_code == 200 and r2.json()["used_count"] == 1
 
     assert admin_client.delete(f"/api/org/docs/{doc['id']}").status_code == 200
@@ -144,10 +144,10 @@ def test_billing_set_plan_then_usage_reads_it(admin_mod, admin_client, monkeypat
 def test_usage_rolls_up_only_member_runs(admin_mod, admin_client, monkeypatch):
     _login(admin_mod, admin_client, monkeypatch)
     _make_org(admin_client)
-    monkeypatch.setattr(admin_mod.console, "list_runs", lambda owner=None: [
-        {"run_id": "r1", "name": "AP matching", "spent_usd": 5.0, "owner": "op@tenexity.ai",
+    monkeypatch.setattr(admin_mod.console, "list_projects", lambda owner=None: [
+        {"project_id": "r1", "name": "AP matching", "spent_usd": 5.0, "owner": "op@tenexity.ai",
          "budget_stopped": False, "held": False, "deploy_url": ""},
-        {"run_id": "r2", "name": "Stranger's", "spent_usd": 9.0, "owner": "stranger@x.com",
+        {"project_id": "r2", "name": "Stranger's", "spent_usd": 9.0, "owner": "stranger@x.com",
          "budget_stopped": False, "held": False, "deploy_url": ""},
     ])
     u = admin_client.get("/api/org/usage").json()

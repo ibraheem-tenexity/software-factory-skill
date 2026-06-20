@@ -5,11 +5,11 @@ from software_factory import billing
 def test_summarize_rolls_up_org_spend_and_activity():
     org = {"plan": "Team", "monthly_budget_cap": 120.0}
     runs = [
-        {"run_id": "r1", "name": "AP matching", "spent_usd": 26.10,
+        {"project_id": "r1", "name": "AP matching", "spent_usd": 26.10,
          "budget_stopped": False, "held": False, "deploy_url": ""},
-        {"run_id": "r2", "name": "Quote-to-Epicor", "spent_usd": 4.20,
+        {"project_id": "r2", "name": "Quote-to-Epicor", "spent_usd": 4.20,
          "budget_stopped": False, "held": False, "deploy_url": "http://x"},   # shipped
-        {"run_id": "r3", "name": "Returns portal", "spent_usd": 2.05,
+        {"project_id": "r3", "name": "Returns portal", "spent_usd": 2.05,
          "budget_stopped": True, "held": False, "deploy_url": ""},            # stopped
     ]
     u = billing.summarize(org, runs)
@@ -34,5 +34,5 @@ def test_summarize_handles_no_org_and_no_runs():
 
 
 def test_summarize_name_falls_back_to_run_id():
-    u = billing.summarize({}, [{"run_id": "run-abc", "name": "", "spent_usd": 1.0}])
-    assert u["by_project"][0]["name"] == "run-abc"
+    u = billing.summarize({}, [{"project_id": "project-abc", "name": "", "spent_usd": 1.0}])
+    assert u["by_project"][0]["name"] == "project-abc"

@@ -4,8 +4,8 @@ The immediate need is durable QA screenshot URLs (a bug report bounced to a tick
 `description` links `![](<url>)` images that must outlive the workspace). The same adapter
 later carries inputs/logs/artifacts off the `/data` volume (ARCHITECTURE §6).
 
-Two scopes share one bucket: run-scoped `<run_id>/<kind>/<file>` and org-scoped
-`org/<org_id>/<kind>/<file>`. Callers pass `scope_id` (e.g. "run-abc123" or "org/org-9f")
+Two scopes share one bucket: run-scoped `<project_id>/<kind>/<file>` and org-scoped
+`org/<org_id>/<kind>/<file>`. Callers pass `scope_id` (e.g. "project-abc123" or "org/org-9f")
 and a `key` (e.g. "qa/ticket-3-1718.png"); the object path is `<scope_id>/<key>`.
 
 Env-gated, mirroring `notify`/`tracing`: with `SUPABASE_URL` + `SUPABASE_SERVICE_KEY`

@@ -2,8 +2,8 @@
 
 Postgres everywhere — there is no sqlite backend. `connect(path)` returns a `PgConn` over psycopg3
 against `DATABASE_URL` (the Supabase transaction pooler on 6543 in prod; a local Postgres in dev/test).
-The `path` only names the run directory (run.log/chat.jsonl still live on the volume) and the run id
-the stores scope by; no per-run schema or database file is created.
+The `path` only names the run directory (project.log/chat.jsonl still live on the volume) and the run id
+the stores scope by; no per-project schema or database file is created.
 
 `PgConn` presents the small `sqlite3.Connection` surface the stores were written against:
   - `?`->`%s` placeholder translation (the stores' SQL uses `?`);
@@ -12,7 +12,7 @@ the stores scope by; no per-run schema or database file is created.
   - each statement in its own transaction; 3x retry with backoff on transient pooler/network errors.
 
 Schema is owned by the SQLAlchemy models (Alembic in prod, `metadata.create_all` in tests), never by
-dbshim. Run discovery (`registry_runs`) reads the flat `runstate` table.
+dbshim. Run discovery (`registry_projects`) reads the flat `projectstate` table.
 """
 from __future__ import annotations
 
@@ -23,12 +23,12 @@ import time
 _RETRY_SLEEP = 0.5
 _TRIES = 3
 # Tables with an `id` identity column — INSERTs get RETURNING id so `.lastrowid` keeps working
-# (runstate/gates/agents key on natural/composite PKs instead).
+# (projectstate/gates/agents key on natural/composite PKs instead).
 _ID_TABLES = ("tickets", "phases", "artifacts", "blockers", "verifications", "deployments", "blobs")
 
 
 def connect(path: str):
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)  # run.log/chat.jsonl live here
+    os.makedirs(path or ".", exist_ok=True)  # project.log/chat.jsonl live here
     return PgConn(_pg_connect(os.environ["DATABASE_URL"]))
 
 
@@ -43,17 +43,17 @@ def _pg_connect(url: str):
     return conn
 
 
-def registry_runs() -> list:
-    """Runs known to the flat `public.runstate` table: [{run_id, created}]. `created` is 0
-    (runstate carries no timestamp; the console falls back to volume mtime for sorting). [] on any
+def registry_projects() -> list:
+    """Runs known to the flat `public.projectstate` table: [{project_id, created}]. `created` is 0
+    (projectstate carries no timestamp; the console falls back to volume mtime for sorting). [] on any
     pg error so the run listing keeps working even if the DB is briefly unreachable."""
     try:
         conn = _pg_connect(os.environ["DATABASE_URL"])
         try:
             with conn.transaction():
                 cur = conn.cursor()
-                cur.execute("SELECT run_id FROM public.runstate")
-                return [{"run_id": r["run_id"], "created": 0} for r in cur.fetchall()]
+                cur.execute("SELECT project_id FROM public.projectstate")
+                return [{"project_id": r["project_id"], "created": 0} for r in cur.fetchall()]
         finally:
             conn.close()
     except Exception:

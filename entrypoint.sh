@@ -7,8 +7,8 @@ set -eu
 
 cd /app
 
-RUNS="${SF_RUNS_DIR:-/app/.runs}"
-mkdir -p "$RUNS" 2>/dev/null || true
+PROJECTS="${SF_PROJECTS_DIR:-/app/.projects}"
+mkdir -p "$PROJECTS" 2>/dev/null || true
 
 # Apply DB migrations (Alembic, the single public schema) BEFORE serving, so the schema is
 # deterministic. Postgres everywhere; a no-op without DATABASE_URL. Non-fatal: the lifespan boot
@@ -18,7 +18,7 @@ python3 -m software_factory.migrate || echo "[entrypoint] WARN: migrate failed; 
 
 UVICORN="uvicorn console.app:app --host ${SF_BIND:-0.0.0.0} --port ${PORT:-8765}"
 if [ "$(id -u)" = "0" ]; then
-    chown -R 1000:1000 "$RUNS" 2>/dev/null || true
+    chown -R 1000:1000 "$PROJECTS" 2>/dev/null || true
     exec setpriv --reuid=1000 --regid=1000 --init-groups $UVICORN
 fi
 exec $UVICORN

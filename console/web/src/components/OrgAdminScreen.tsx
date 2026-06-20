@@ -344,7 +344,7 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
                   <div style={{ padding: "10px 16px", borderBottom: `1px solid ${T.borderSubtle}`, background: T.sunken }}><CategoryLabel>Spend by project</CategoryLabel></div>
                   {byProject.length === 0 && <div style={{ padding: "20px", textAlign: "center", font: `400 13px/1.4 ${T.sans}`, color: T.tertiary }}>No spend recorded yet.</div>}
                   {byProject.map((r, i) => (
-                    <div key={r.run_id || r.name + i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderTop: i ? `1px solid ${T.borderSubtle}` : "none" }}>
+                    <div key={r.project_id || r.name + i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderTop: i ? `1px solid ${T.borderSubtle}` : "none" }}>
                       <span style={{ flex: 1, font: `500 13px/1.2 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
                       <span style={{ width: 120, height: 6, borderRadius: 3, background: T.sunken, overflow: "hidden" }}><span style={{ display: "block", height: "100%", width: Math.round((r.spent_usd / maxSpend) * 100) + "%", background: T.brand }} /></span>
                       <span style={{ width: 56, textAlign: "right", font: `500 12px/1 ${T.mono}`, color: T.secondary }}>{money(r.spent_usd)}</span>

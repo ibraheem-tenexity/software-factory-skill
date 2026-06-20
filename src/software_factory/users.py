@@ -35,8 +35,7 @@ def _env_admins() -> list:
 
 
 class UserStore:
-    def __init__(self, sqlite_path: str = ""):
-        # `sqlite_path` is vestigial (Postgres everywhere); kept so existing call sites pass a path.
+    def __init__(self):
         self._cache: dict | None = None
         self._cache_ts = 0.0
         for email in _env_admins():          # bootstrap admins always present

@@ -1,11 +1,11 @@
-"""The SF_RUNTIME=opencode launch path: opencode argv, config isolation env, per-run runtime
+"""The SF_RUNTIME=opencode launch path: opencode argv, config isolation env, per-project runtime
 pinning, monolithic prompts, and the opencode workspace contract. The claude path's own tests
 (test_console.py) stay green because the default runtime is claude."""
 import json
 import os
 
 from software_factory.console import (
-    Console, RunRequest, make_prompt_stage1, make_prompt_stage3,
+    Console, ProjectRequest, make_prompt_stage1, make_prompt_stage3,
 )
 
 KIMI = "openrouter/moonshotai/kimi-k2.7-code"
@@ -26,7 +26,7 @@ class FakeLauncher:
 
 
 def console(tmp_path, launcher):
-    ids = iter(["run-oc"])
+    ids = iter(["project-oc"])
     return Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids),
                    extract=lambda path: "# extracted")
 
@@ -35,7 +35,7 @@ def test_start_run_launches_opencode_with_kimi_and_no_max_turns(tmp_path, monkey
     monkeypatch.setenv("SF_RUNTIME", "opencode")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    c.start_run(RunRequest(description="a guestbook app", target="railway"))
+    c.start_project(ProjectRequest(description="a guestbook app", target="railway"))
 
     assert launcher.argv[0] == "opencode"
     assert launcher.argv[1] == "run"
@@ -50,7 +50,7 @@ def test_opencode_launch_env_isolates_global_config_and_external_skills(tmp_path
     monkeypatch.setenv("SF_RUNTIME", "opencode")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    c.start_run(RunRequest(description="guestbook", target="railway"))
+    c.start_project(ProjectRequest(description="guestbook", target="railway"))
 
     # ~/.config/opencode (peer MCPs, global instructions) must NEVER leak into stage runs
     assert launcher.env["XDG_CONFIG_HOME"].startswith(launcher.cwd)
@@ -66,7 +66,7 @@ def test_opencode_secrets_stay_in_env_never_argv(tmp_path, monkeypatch):
     monkeypatch.setenv("SF_RUNTIME", "opencode")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    c.start_run(RunRequest(description="guestbook", target="railway",
+    c.start_project(ProjectRequest(description="guestbook", target="railway",
                            credentials={"RAILWAY_TOKEN": SECRET}))
     assert launcher.env["RAILWAY_TOKEN"] == SECRET
     assert all(SECRET not in str(a) for a in launcher.argv)
@@ -77,22 +77,22 @@ def test_runtime_is_pinned_on_the_run_not_the_env(tmp_path, monkeypatch):
     monkeypatch.setenv("SF_RUNTIME", "opencode")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook", target="railway"))
+    project_id = c.start_project(ProjectRequest(description="guestbook", target="railway"))
     monkeypatch.delenv("SF_RUNTIME")
 
-    state = c._load_state(run_id)
+    state = c._load_state(project_id)
     assert state.runtime == "opencode"
     state.stage1_done = True
     state.save()
-    c.start_stage2(run_id)
+    c.start_stage2(project_id)
     assert launcher.argv[0] == "opencode"
 
 
 def test_default_runtime_is_claude(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook", target="railway"))
-    assert c._load_state(run_id).runtime == "claude"
+    project_id = c.start_project(ProjectRequest(description="guestbook", target="railway"))
+    assert c._load_state(project_id).runtime == "claude"
     assert "claude" in launcher.argv[0]
 
 
@@ -101,7 +101,7 @@ def test_opencode_workspace_gets_opencode_json_not_claude_settings(tmp_path, mon
     monkeypatch.setenv("SF_MAX_TURNS", "150")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    c.start_run(RunRequest(description="guestbook", target="railway"))
+    c.start_project(ProjectRequest(description="guestbook", target="railway"))
 
     ws = launcher.cwd
     cfg = json.loads(open(os.path.join(ws, "opencode.json")).read())
@@ -116,22 +116,22 @@ def test_opencode_workspace_gets_opencode_json_not_claude_settings(tmp_path, mon
 
 
 def test_opencode_prompts_are_monolithic_with_logical_agents():
-    req = RunRequest(description="x")
-    p1 = make_prompt_stage1(req, "run-1", "/runs", runtime="opencode")
+    req = ProjectRequest(description="x")
+    p1 = make_prompt_stage1(req, "project-1", "/runs", runtime="opencode")
     assert "MONOLITHIC" in p1 and "ORCHESTRATOR-ONLY" not in p1
-    p3 = make_prompt_stage3(req, "run-1", "/runs", runtime="opencode")
+    p3 = make_prompt_stage3(req, "project-1", "/runs", runtime="opencode")
     assert "TicketStore.claim" in p3                          # claim with the logical-agent id
     assert "one native Task sub-agent PER ticket" not in p3
     # claude prompts unchanged
-    assert "ORCHESTRATOR-ONLY" in make_prompt_stage1(req, "run-1", "/runs")
+    assert "ORCHESTRATOR-ONLY" in make_prompt_stage1(req, "project-1", "/runs")
 
 
 def test_graph_orchestrator_label_reflects_runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("SF_RUNTIME", "opencode")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook", target="railway"))
-    g = c.graph(run_id)
+    project_id = c.start_project(ProjectRequest(description="guestbook", target="railway"))
+    g = c.graph(project_id)
     orch = next(n for n in g["nodes"] if n["data"]["id"] == "orchestrator")
     assert orch["data"]["label"].startswith("Kimi")
 
@@ -141,8 +141,8 @@ def test_request_runtime_overrides_env_default(tmp_path, monkeypatch):
     monkeypatch.setenv("SF_RUNTIME", "claude")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook", runtime="opencode"))
-    assert c._load_state(run_id).runtime == "opencode"
+    project_id = c.start_project(ProjectRequest(description="guestbook", runtime="opencode"))
+    assert c._load_state(project_id).runtime == "opencode"
     assert launcher.argv[0] == "opencode"
 
 
@@ -150,26 +150,26 @@ def test_empty_request_runtime_falls_back_to_env(tmp_path, monkeypatch):
     monkeypatch.setenv("SF_RUNTIME", "opencode")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    run_id = c.start_run(RunRequest(description="guestbook"))
-    assert c._load_state(run_id).runtime == "opencode"
+    project_id = c.start_project(ProjectRequest(description="guestbook"))
+    assert c._load_state(project_id).runtime == "opencode"
 
 
 def test_list_runs_flags_budget_stopped(tmp_path):
     # A budget-stopped run must surface as stopped, never as live/active (the
     # frozen-ghosts-shown-green UI confusion).
-    from software_factory.db import RunDB
-    from software_factory.console import run_paths
+    from software_factory.db import ProjectStore
+    from software_factory.console import project_paths
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="x"))
-    RunDB(run_paths(str(tmp_path), rid)["db"]).add_blocker(
+    rid = c.start_project(ProjectRequest(description="x"))
+    ProjectStore(project_paths(str(tmp_path), rid)["db"]).add_blocker(
         "Budget cap $0.01 reached (spent $2.66) — stage stopped.", blocks="budget")
-    runs = {r["run_id"]: r for r in c.list_runs()}
+    runs = {r["project_id"]: r for r in c.list_projects()}
     assert runs[rid]["budget_stopped"] is True
 
 
 def test_lingering_opencode_proc_with_completed_session_counts_as_finished(tmp_path, monkeypatch):
-    # run-45b8c4d5 wedge: opencode procs LINGER after session-complete; a live handle must not
+    # project-45b8c4d5 wedge: opencode procs LINGER after session-complete; a live handle must not
     # block auto-resume when the log shows step_finish reason=stop and 5+ min of silence.
     import json as _json, os as _os, time as _time
     monkeypatch.setenv("SF_RUNTIME", "opencode")
@@ -177,11 +177,11 @@ def test_lingering_opencode_proc_with_completed_session_counts_as_finished(tmp_p
     class LiveProc:
         def poll(self): return None   # zombie: never exits
 
-    ids = iter(["run-zz"])
+    ids = iter(["project-zz"])
     c = Console(str(tmp_path), launch=lambda *a, **k: LiveProc(), new_id=lambda: next(ids),
                 extract=lambda p: "# x")
-    rid = c.start_run(RunRequest(description="x"))
-    log = _os.path.join(str(tmp_path), rid, "run.log")
+    rid = c.start_project(ProjectRequest(description="x"))
+    log = _os.path.join(str(tmp_path), rid, "project.log")
     with open(log, "w") as f:
         f.write(_json.dumps({"type": "step_finish", "part": {"type": "step-finish",
                 "reason": "stop", "cost": 0.1}}) + "\n")
@@ -205,11 +205,11 @@ def test_claude_runtime_live_handle_never_false_finishes(tmp_path):
     class LiveProc:
         def poll(self): return None
 
-    ids = iter(["run-cl"])
+    ids = iter(["project-cl"])
     c = Console(str(tmp_path), launch=lambda *a, **k: LiveProc(), new_id=lambda: next(ids),
                 extract=lambda p: "# x")
-    rid = c.start_run(RunRequest(description="x"))
-    log = _os.path.join(str(tmp_path), rid, "run.log")
+    rid = c.start_project(ProjectRequest(description="x"))
+    log = _os.path.join(str(tmp_path), rid, "project.log")
     open(log, "w").write("{}\n")
     old = _time.time() - 4000
     _os.utime(log, (old, old))
@@ -217,13 +217,13 @@ def test_claude_runtime_live_handle_never_false_finishes(tmp_path):
 
 
 def test_deploy_phase_never_skipped_when_deploy_artifact_exists(tmp_path):
-    # run-45b8c4d5 canvas lie #1: the app was LIVE while 'deploy' rendered skipped —
+    # project-45b8c4d5 canvas lie #1: the app was LIVE while 'deploy' rendered skipped —
     # a deploy-kind artifact IS deploy activity AND deploy's closing signal.
-    from software_factory.db import RunDB
-    from software_factory.console import run_paths
+    from software_factory.db import ProjectStore
+    from software_factory.console import project_paths
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
-    db = RunDB(run_paths(str(tmp_path), rid)["db"])
+    rid = c.start_project(ProjectRequest(description="x"))
+    db = ProjectStore(project_paths(str(tmp_path), rid)["db"])
     db.set_phase("build", "active")
     db.record_artifact("Live URL", "https://app.example.up.railway.app", kind="deploy")
     phases = c.derive_phases(rid)
@@ -235,11 +235,11 @@ def test_fix_loop_bounces_active_back_to_build(tmp_path):
     # canvas lie #2: during a test->build fix loop the canvas must show build active again,
     # with test pending (it will re-run), not frozen on the furthest index.
     import time as _t
-    from software_factory.db import RunDB
-    from software_factory.console import run_paths
+    from software_factory.db import ProjectStore
+    from software_factory.console import project_paths
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_run(RunRequest(description="x"))
-    db = RunDB(run_paths(str(tmp_path), rid)["db"])
+    rid = c.start_project(ProjectRequest(description="x"))
+    db = ProjectStore(project_paths(str(tmp_path), rid)["db"])
     db.set_phase("build", "active"); _t.sleep(0.01)
     db.set_phase("test", "active"); _t.sleep(0.01)
     db.set_phase("build", "active")            # the loop: back to build
@@ -249,11 +249,11 @@ def test_fix_loop_bounces_active_back_to_build(tmp_path):
 
 
 def test_mark_done_accepts_commit_sha_provenance(tmp_path):
-    # run-45b8c4d5 finding: monolithic agents commit directly to main (no PRs) — a commit
+    # project-45b8c4d5 finding: monolithic agents commit directly to main (no PRs) — a commit
     # sha is first-class provenance; hollow closes still refused.
     import pytest
     from software_factory.tickets import TicketStore, HollowWorkError
-    ts = TicketStore(str(tmp_path / "t.db"))
+    ts = TicketStore(str(tmp_path / "project-1"))
     tid = ts.create_ticket("x", "acceptance", "dod", 1)
     ts.claim(tid, "ticket-1-build")
     ts.mark_done(tid, "a1b2c3d4e5f6a7b8", 42)
@@ -286,7 +286,7 @@ def test_sf_swarm_wraps_stage3_in_the_driver_but_not_stages_1_2(tmp_path, monkey
     monkeypatch.setenv("SF_SWARM", "1")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="guestbook", target="railway"))
+    rid = c.start_project(ProjectRequest(description="guestbook", target="railway"))
     assert launcher.argv[0] == "opencode"                    # stage 1: no driver wrap
 
     st = c._load_state(rid)
@@ -308,7 +308,7 @@ def test_without_sf_swarm_stage3_launches_opencode_directly(tmp_path, monkeypatc
     monkeypatch.delenv("SF_SWARM", raising=False)
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="guestbook", target="railway"))
+    rid = c.start_project(ProjectRequest(description="guestbook", target="railway"))
     st = c._load_state(rid)
     st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True
     st.save()
@@ -318,17 +318,17 @@ def test_without_sf_swarm_stage3_launches_opencode_directly(tmp_path, monkeypatc
 
 
 def test_stage_finished_respects_a_live_stage3_pidfile_over_an_idle_log(tmp_path):
-    # run-5b7aef7a live scar: server restart loses the process handle; the swarm driver
-    # sits quiet in run.log for >2min mid-Kimi-turn; log-idle fallback said "finished" and
+    # project-5b7aef7a live scar: server restart loses the process handle; the swarm driver
+    # sits quiet in project.log for >2min mid-Kimi-turn; log-idle fallback said "finished" and
     # the poller relaunched a second orchestrator. A live stage3.pid must win.
     import subprocess
     import time as _time
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = "run-pid"
+    rid = "project-pid"
     base = os.path.join(str(tmp_path), rid)
     os.makedirs(base, exist_ok=True)
-    log = os.path.join(base, "run.log")
+    log = os.path.join(base, "project.log")
     with open(log, "w") as f:
         f.write("{}\n")
     idle = _time.time() - 600
@@ -347,7 +347,7 @@ def test_stage_finished_respects_a_live_stage3_pidfile_over_an_idle_log(tmp_path
 def test_stage_pid_alive_rejects_recycled_pids(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = "run-pid2"
+    rid = "project-pid2"
     base = os.path.join(str(tmp_path), rid)
     os.makedirs(base, exist_ok=True)
     with open(os.path.join(base, "stage3.pid"), "w") as f:
@@ -361,7 +361,7 @@ def test_budget_kill_escalates_to_sigkill_when_terminate_is_ignored(tmp_path):
     # is the failure mode the brake exists for — enforce_budget must escalate to kill().
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    rid = c.start_run(RunRequest(description="x", target="railway"))
+    rid = c.start_project(ProjectRequest(description="x", target="railway"))
 
     class StubbornProc:
         def __init__(self):
@@ -380,7 +380,7 @@ def test_budget_kill_escalates_to_sigkill_when_terminate_is_ignored(tmp_path):
     st = c._load_state(rid)
     st.budget_ceiling = 0.01
     st.save()
-    with open(os.path.join(str(tmp_path), rid, "run.log"), "w") as f:
+    with open(os.path.join(str(tmp_path), rid, "project.log"), "w") as f:
         f.write(json.dumps({"type": "step_finish", "sessionID": "s",
                             "part": {"type": "step-finish", "cost": 5.0}}) + "\n")
     assert c.enforce_budget(rid) is True
@@ -388,11 +388,11 @@ def test_budget_kill_escalates_to_sigkill_when_terminate_is_ignored(tmp_path):
 
 
 def test_default_launch_child_owns_the_log_file_not_a_server_pipe(tmp_path):
-    # run-5b7aef7a live scar: stdout piped through a server pump thread dies with the
-    # server — run.log freezes and the §4 brake goes spend-blind while the orchestrator
-    # keeps working. The child must write run.log through its OWN fd.
+    # project-5b7aef7a live scar: stdout piped through a server pump thread dies with the
+    # server — project.log freezes and the §4 brake goes spend-blind while the orchestrator
+    # keeps working. The child must write project.log through its OWN fd.
     from software_factory.console import _default_launch
-    log = str(tmp_path / "run.log")
+    log = str(tmp_path / "project.log")
     p = _default_launch(["bash", "-c", "echo from-child; echo err-too >&2"], {}, log_path=log)
     p.wait(timeout=10)
     text = open(log).read()

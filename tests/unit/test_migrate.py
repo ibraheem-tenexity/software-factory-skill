@@ -1,4 +1,4 @@
-"""Migration entrypoint. With the flat schema Alembic owns every table directly (no per-run
+"""Migration entrypoint. With the flat schema Alembic owns every table directly (no per-project
 fan-out); the live `alembic upgrade head` is exercised during the cutover, not in unit tests."""
 from software_factory import migrate
 

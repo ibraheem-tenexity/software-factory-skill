@@ -4,7 +4,7 @@ A pure summary over the runs that belong to an organization — kept here (not i
 knows nothing of orgs, nor in `users`, which knows nothing of runs) so the app layer can join the
 two: gather the org's runs, hand them here with the org record, get back the dashboard payload.
 
-"Spent" is the sum of each run's lifetime spend (the per-run figure the console already computes);
+"Spent" is the sum of each run's lifetime spend (the per-project figure the console already computes);
 there is no reliable per-month boundary on run spend, so this is total-to-date, not month-windowed.
 """
 from __future__ import annotations
@@ -15,12 +15,12 @@ def summarize(org: dict | None, runs: list[dict]) -> dict:
 
     `org` is the organization record (for `plan`/`monthly_budget_cap`), or None.
     `runs` are that org's runs (already owner-filtered to org members) as returned by
-    `Console.list_runs`. A run is "active" (building now) when it is neither budget-stopped,
+    `Console.list_projects`. A run is "active" (building now) when it is neither budget-stopped,
     held, nor already shipped (has a deploy_url)."""
     org = org or {}
     by_project = [
-        {"run_id": r["run_id"],
-         "name": r.get("name") or r["run_id"],
+        {"project_id": r["project_id"],
+         "name": r.get("name") or r["project_id"],
          "spent_usd": round(r.get("spent_usd") or 0.0, 2)}
         for r in runs
     ]

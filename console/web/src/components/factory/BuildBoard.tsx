@@ -1,5 +1,5 @@
 // BuildBoard.tsx — the Kanban board (design: buildboard.jsx Kanban), bound to REAL tickets from
-// /api/runs/{id}/tickets (console.tickets → TicketStore.all_tickets).
+// /api/projects/{id}/tickets (console.tickets → TicketStore.all_tickets).
 //
 // The backend's 6 raw ticket statuses (open · in_progress · done · deployed · qa_testing ·
 // approved) project onto the design's 5 columns:

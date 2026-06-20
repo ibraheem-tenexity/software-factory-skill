@@ -1,4 +1,4 @@
-"""Parse the headless claude stream-json (captured in run.log) into the two things the
+"""Parse the headless claude stream-json (captured in project.log) into the two things the
 dashboard needs but the wandering orchestration doesn't self-report: live COST and the
 AGENT GRAPH (orchestrator + the subagents it spawned via the Task tool).
 
@@ -27,7 +27,7 @@ def test_cost_uses_result_total_when_present():
 
 
 def test_cost_sums_result_totals_across_appended_stages():
-    # run.log APPENDS each stage's claude -p session; each session emits its own authoritative
+    # project.log APPENDS each stage's claude -p session; each session emits its own authoritative
     # result line. True run cost = SUM of every session's total_cost_usd, not just the last one
     # (the old "last result wins" lost Stage 1's cost the moment Stage 2 finished).
     two_stages = stream(ASSIST_USAGE, RESULT, ASSIST_USAGE, RESULT)
@@ -42,7 +42,7 @@ def test_cost_adds_inflight_stage_after_last_result():
 
 
 def test_cost_keeps_a_killed_sessions_estimate_when_a_later_session_finishes():
-    # run-d329e57c scar: the OOM-killed S3 session never emitted a result line; when the RETRY
+    # project-d329e57c scar: the OOM-killed S3 session never emitted a result line; when the RETRY
     # session's result landed, the killed session's ~$12 estimate was discarded (tail reset) and
     # the run under-reported $28.37 as $16.31 — under-counting the budget guard. Cost must be
     # session-aware: per session, a result is authoritative; without one, the estimate COUNTS.

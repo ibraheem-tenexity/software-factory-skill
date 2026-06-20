@@ -8,10 +8,10 @@ relational shape changes. The mermaid diagram below mirrors it for diff-friendly
 and API access patterns. Service/storage topology is in [`service-architecture.svg`](service-architecture.svg);
 the current-state runtime architecture is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-> **Note on the current production model:** today the per-run tables (`runstate`, `phases`, `artifacts`,
+> **Note on the current production model:** today the per-project tables (`projectstate`, `phases`, `artifacts`,
 > `blockers`, `gates`, `verifications`, `tickets`, `agents`) live in a **separate Postgres schema per run**
-> (`sf_run_<id>`), so the `run_id` relationships below are *logical / enforced per-run*, not cross-schema
-> FKs. The ERD shows the **flat, FK'd target** the rebuild moves toward (`run_index` as the central run
+> (`sf_run_<id>`), so the `project_id` relationships below are *logical / enforced per-project*, not cross-schema
+> FKs. The ERD shows the **flat, FK'd target** the rebuild moves toward (`project_index` as the central run
 > entity, `provenance` replacing the `pr INTEGER` hazard, `chat_messages`/`run_blobs` as later passes).
 
 ```mermaid
@@ -39,7 +39,7 @@ erDiagram
     }
 
     RUN_INDEX {
-        text run_id PK "run-XXXXXXXX"
+        text project_id PK "run-XXXXXXXX"
         text name UK "unique project identity"
         text owner_email FK "-> USERS.email"
         text description
@@ -66,9 +66,9 @@ erDiagram
 
     DEPLOYMENTS {
         int id PK
-        text run_id FK "-> RUN_INDEX"
+        text project_id FK "-> RUN_INDEX"
         text app "mobile-web | web | api | ..."
-        text service_name "sf-<run_id>-<app>"
+        text service_name "sf-<project_id>-<app>"
         text url
         text status "deploying | live | failed"
         bool verified
@@ -76,13 +76,13 @@ erDiagram
     }
 
     RUNSTATE {
-        text run_id PK "FK -> RUN_INDEX"
-        text data "full RunState JSON (transitional; exploded into RUN_INDEX over time)"
+        text project_id PK "FK -> RUN_INDEX"
+        text data "full ProjectState JSON (transitional; exploded into RUN_INDEX over time)"
     }
 
     PHASES {
         int id PK
-        text run_id FK
+        text project_id FK
         text name
         text status "pending|active|done|skipped|failed"
         int stage
@@ -91,7 +91,7 @@ erDiagram
 
     ARTIFACTS {
         int id PK
-        text run_id FK
+        text project_id FK
         text title
         text path "file path or URL (bytes -> Storage later)"
         text kind "context|repo|deploy|plan|deploy-db|demo-creds"
@@ -101,7 +101,7 @@ erDiagram
 
     BLOCKERS {
         int id PK
-        text run_id FK
+        text project_id FK
         text what
         text blocks "budget|mcp|deploy-db|<phase>"
         bool cleared
@@ -109,7 +109,7 @@ erDiagram
     }
 
     GATES {
-        text run_id PK "composite PK (run_id, name)"
+        text project_id PK "composite PK (project_id, name)"
         text name PK
         text status
         float ts
@@ -117,7 +117,7 @@ erDiagram
 
     VERIFICATIONS {
         int id PK
-        text run_id FK
+        text project_id FK
         int deployment_id FK "-> DEPLOYMENTS"
         text url
         bool passed "passed=1 = the Stage-3 browser gate"
@@ -127,7 +127,7 @@ erDiagram
 
     TICKETS {
         int id PK
-        text run_id FK
+        text project_id FK
         text title
         text acceptance
         text dod
@@ -142,7 +142,7 @@ erDiagram
 
     AGENTS {
         text agent_id PK
-        text run_id FK
+        text project_id FK
         int ticket_id FK "-> TICKETS.id"
         text role
         text model
@@ -162,7 +162,7 @@ erDiagram
 
     CHAT_MESSAGES {
         int id PK
-        text run_id FK
+        text project_id FK
         text role "user|assistant|system"
         text content
         text msg_type
@@ -172,7 +172,7 @@ erDiagram
 
     RUN_BLOBS {
         int id PK
-        text run_id FK
+        text project_id FK
         text kind "input|artifact|log|chat|workspace-snapshot"
         text storage_bucket
         text storage_key
@@ -186,25 +186,25 @@ erDiagram
 
 ```
 USERS (email PK)
-  └─owns─< RUN_INDEX (run_id PK, name UK, owner_email FK)        ── the run/project entity
-              ├─1:1─ RUNSTATE (run_id PK)                          ── RunState JSON (transitional)
-              ├──< DEPLOYMENTS (run_id FK) ──< VERIFICATIONS (deployment_id FK)
+  └─owns─< RUN_INDEX (project_id PK, name UK, owner_email FK)        ── the run/project entity
+              ├─1:1─ RUNSTATE (project_id PK)                          ── ProjectState JSON (transitional)
+              ├──< DEPLOYMENTS (project_id FK) ──< VERIFICATIONS (deployment_id FK)
               ├──< PHASES
-              ├──< ARTIFACTS     (run_id FK)   path only; bytes → Storage (RUN_BLOBS) later
+              ├──< ARTIFACTS     (project_id FK)   path only; bytes → Storage (RUN_BLOBS) later
               ├──< BLOCKERS
-              ├──< GATES         (run_id+name PK)
-              ├──< VERIFICATIONS (run_id FK)   passed=1 ⇒ done gate per deployment
-              ├──< TICKETS       (run_id FK) ──< AGENTS (ticket_id FK)
-              ├──< AGENTS        (run_id FK)
-              ├──< CHAT_MESSAGES (run_id FK)   [later pass — today chat.jsonl]
-              └──< RUN_BLOBS     (run_id FK)   [later pass — Supabase Storage manifest]
+              ├──< GATES         (project_id+name PK)
+              ├──< VERIFICATIONS (project_id FK)   passed=1 ⇒ done gate per deployment
+              ├──< TICKETS       (project_id FK) ──< AGENTS (ticket_id FK)
+              ├──< AGENTS        (project_id FK)
+              ├──< CHAT_MESSAGES (project_id FK)   [later pass — today chat.jsonl]
+              └──< RUN_BLOBS     (project_id FK)   [later pass — Supabase Storage manifest]
 
 legend:  ──<  one-to-many      1:1  one-to-one      PK primary  UK unique  FK foreign key
 ```
 
 ## Notes
-- `USERS` + `RUN_INDEX` (+ registry) are **global** (`public` schema). The detail tables are per-run
-  today (schema-per-run); the rebuild keeps that routing in `dbshim` for v1 while `RUN_INDEX` becomes the
+- `USERS` + `RUN_INDEX` (+ registry) are **global** (`public` schema). The detail tables are per-project
+  today (schema-per-project); the rebuild keeps that routing in `dbshim` for v1 while `RUN_INDEX` becomes the
   flat, queryable index (owner filter + unique name as real constraints).
 - `deploy_url` is **not** a scalar on `RUN_INDEX`; deliverable URLs live in `DEPLOYMENTS` (1..N per run),
   and `VERIFICATIONS` is per-deployment.
@@ -222,19 +222,19 @@ legend:  ──<  one-to-many      1:1  one-to-one      PK primary  UK unique  F
 _Folded from the former root `schema.md` (now removed). The ERD above and `schema-erd.svg` are the
 source of truth for table shape; this section carries DDL, constraints, storage, and API detail._
 
-> **SHIPPED (2026-06, on the current schema-per-run model — the flat rewrite below is DEFERRED):**
+> **SHIPPED (2026-06, on the current schema-per-project model — the flat rewrite below is DEFERRED):**
 > new global tables **`public.organizations`** (name, industry, sub_focus, headcount/revenue as
 > band-label text, location, website, connected_systems) and **`public.blobs`** (scope `run`|`org`,
 > scope_id, kind, storage_key, content_type, size, sha256); **`public.users`** gained
-> `org_id`/`designation`/`role_description`/`tenexity`; the per-run **`tickets`** table gained a 6-state
+> `org_id`/`designation`/`role_description`/`tenexity`; the per-project **`tickets`** table gained a 6-state
 > `status` (`open → in_progress → done → deployed → qa_testing → approved`) + a markdown `description`
-> (QA bug reports). The flat `project_id` rewrite + `run→project` rename + per-run-fan-out retirement +
+> (QA bug reports). The flat `project_id` rewrite + `run→project` rename + per-project-fan-out retirement +
 > data migration in the "PROPOSED" subsections remain a deferred, operator-reviewed follow-up.
 
 ## Current Decisions
 
-- First FastAPI pass should replace the HTTP shell while keeping `dbshim`, per-run schemas, and the current store classes as repositories.
-- Add `public.run_index` in the first FastAPI/storage pass. It removes the current N-schema scan for `/api/runs` and gives project names and owners real indexed database shape.
+- First FastAPI pass should replace the HTTP shell while keeping `dbshim`, per-project schemas, and the current store classes as repositories.
+- Add `public.project_index` in the first FastAPI/storage pass. It removes the current N-schema scan for `/api/projects` and gives project names and owners real indexed database shape.
 - Fix `tickets.pr` and `agents.pr` provenance typing as a standalone high-priority storage fix before relying on opencode/Kimi runs in Postgres.
 - Keep chat JSONL, logs, uploads, and artifact bytes file-backed for the first FastAPI cut; move them to DB/Storage later.
 - Project creation chat now records the onboarding input snapshot in `chat.jsonl`: prompt, project/runtime/model metadata, input documents/images, and AI responses.
@@ -253,13 +253,13 @@ The console does not use one flat relational schema today.
 
 - Global tables live in `public`.
 - Each run gets its own schema in Postgres: `sf_run_<run_id_suffix>`.
-- In local/dev mode, the same per-run tables live in `<runs_dir>/<run_id>/run.db`.
-- Large or stream-like data is still file-backed under `<runs_dir>/<run_id>/`.
+- In local/dev mode, the same per-project tables live in `<projects_dir>/<project_id>/project.db`.
+- Large or stream-like data is still file-backed under `<projects_dir>/<project_id>/`.
 
 Current code references:
 
-- `src/software_factory/dbshim.py` - SQLite/Postgres routing and per-run schema creation.
-- `src/software_factory/db.py` - runstate, phases, artifacts, blockers, gates, verifications.
+- `src/software_factory/dbshim.py` - SQLite/Postgres routing and per-project schema creation.
+- `src/software_factory/db.py` - projectstate, phases, artifacts, blockers, gates, verifications.
 - `src/software_factory/tickets.py` - tickets.
 - `src/software_factory/agents.py` - agent telemetry.
 - `src/software_factory/users.py` - global user directory.
@@ -287,7 +287,7 @@ Created by `dbshim.PgConn._ensure()`.
 
 ```sql
 create table if not exists public.sf_runs (
-  run_id text primary key,
+  project_id text primary key,
   schema_name text not null,
   created_at timestamptz not null default now()
 );
@@ -348,14 +348,14 @@ Security note:
 
 ### `public.sf_run_schema_version`
 
-Purpose: per-run-schema version registry for the Alembic per-run fan-out (see "Migrations" below).
-One row per run; records which per-run template version each `sf_run_<id>` schema is at, so the
+Purpose: per-project-schema version registry for the Alembic per-project fan-out (see "Migrations" below).
+One row per run; records which per-project template version each `sf_run_<id>` schema is at, so the
 fan-out only applies pending revisions. Created in the Alembic baseline (`0001`); `dbshim` stamps a
 new schema's row at head on creation.
 
 ```sql
 create table if not exists public.sf_run_schema_version (
-  run_id     text primary key,
+  project_id     text primary key,
   version    text not null,
   updated_at timestamptz not null default now()
 );
@@ -374,7 +374,7 @@ For `run-1234abcd`, the schema name is:
 sf_run_1234abcd
 ```
 
-All per-run queries in Postgres mode rely on per-statement:
+All per-project queries in Postgres mode rely on per-statement:
 
 ```sql
 set local search_path to "<run_schema>", public;
@@ -382,24 +382,24 @@ set local search_path to "<run_schema>", public;
 
 This is load-bearing because the Supabase transaction pooler does not preserve session state between statements.
 
-### `runstate`
+### `projectstate`
 
 Purpose: resumable orchestration state as JSON.
 
 ```sql
-create table if not exists runstate (
-  run_id text primary key,
+create table if not exists projectstate (
+  project_id text primary key,
   data text not null
 );
 ```
 
-Current JSON keys from `RunState`:
+Current JSON keys from `ProjectState`:
 
 | Key | Type | Notes |
 |---|---|---|
-| `run_id` | string | Authoritative id. |
+| `project_id` | string | Authoritative id. |
 | `phase` | string | Terminal state uses `done` or `stopped`; active phase is derived elsewhere. |
-| `spent_usd` | number | Persisted fallback; run.log-derived spend usually leads. |
+| `spent_usd` | number | Persisted fallback; project.log-derived spend usually leads. |
 | `repo_url` | string/null | Legacy or fallback repo URL. |
 | `deploy_url` | string/null | Final passing verification URL. |
 | `skill` | string/null | Expected `software-factory`. |
@@ -424,15 +424,15 @@ Current JSON keys from `RunState`:
 
 Target recommendation:
 
-- Keep `runstate.data` during the FastAPI conversion to avoid breaking stage agents and CLI writes.
-- Add typed projection columns in `public.run_index` in the first FastAPI/storage pass.
+- Keep `projectstate.data` during the FastAPI conversion to avoid breaking stage agents and CLI writes.
+- Add typed projection columns in `public.project_index` in the first FastAPI/storage pass.
 - Do not split every JSON key into columns in the first FastAPI pass. That would couple the migration to orchestration semantics and make rollback harder.
 
 Minimal typed projection for the first pass:
 
 ```sql
-create table if not exists public.run_index (
-  run_id text primary key references public.sf_runs(run_id) on delete cascade,
+create table if not exists public.project_index (
+  project_id text primary key references public.sf_runs(project_id) on delete cascade,
   schema_name text not null unique,
   name text not null default '',
   owner text not null default '',
@@ -456,32 +456,32 @@ create table if not exists public.run_index (
 );
 
 create index if not exists run_index_owner_updated_idx
-  on public.run_index (owner, updated_at desc);
+  on public.project_index (owner, updated_at desc);
 
 create index if not exists run_index_updated_idx
-  on public.run_index (updated_at desc);
+  on public.project_index (updated_at desc);
 
 create unique index if not exists run_index_name_unique_idx
-  on public.run_index (lower(name))
+  on public.project_index (lower(name))
   where name <> '';
 ```
 
 Write-through rule:
 
-- `RunState.save()` or its repository wrapper should update `public.run_index` whenever indexed fields change.
+- `ProjectState.save()` or its repository wrapper should update `public.project_index` whenever indexed fields change.
 - `public.sf_runs` remains the registry and schema-name source of truth.
-- `public.run_index` becomes the list/filter/ownership projection for FastAPI.
+- `public.project_index` becomes the list/filter/ownership projection for FastAPI.
 - Empty legacy names must remain allowed; uniqueness applies only to non-empty names.
 - **A run is not tied to a single `deploy_url`.** Deliverable URLs live in `public.deployments` (1..N per run);
-  `run_index` keeps only the high-level `deploy_target` platform.
+  `project_index` keeps only the high-level `deploy_target` platform.
 - `runtime` is the pipeline type (`claude` | `opencode`). Store the resolved `model` as well so a run records exactly what built it.
 
 Reason:
 
-- Current `list_runs()` opens every run schema and JSON-decodes `runstate` to render `/api/runs`.
+- Current `list_projects()` opens every run schema and JSON-decodes `projectstate` to render `/api/projects`.
 - Current project-name uniqueness is a racy Python scan.
-- Current ownership filtering also requires loading per-run JSON.
-- A projection table turns these into indexed reads while preserving the existing per-run state contract.
+- Current ownership filtering also requires loading per-project JSON.
+- A projection table turns these into indexed reads while preserving the existing per-project state contract.
 
 ### `phases`
 
@@ -660,9 +660,9 @@ create index if not exists verifications_passed_ts_idx
 
 Notes:
 
-- A successful Stage 3 verification is per-deliverable, not per-run.
+- A successful Stage 3 verification is per-deliverable, not per-project.
 - `deployments.id` identifies the app/service being verified; `url` is the target under test (which may differ from the final public URL when staging domains are used).
-- `state.deploy_url` (or `run_index.deploy_url`) should be retired in favor of `deployments.url` and `deployments.verified`.
+- `state.deploy_url` (or `project_index.deploy_url`) should be retired in favor of `deployments.url` and `deployments.verified`.
 
 ### `deployments`
 
@@ -671,9 +671,9 @@ Purpose: a run ships one or more deliverables (web app, mobile-web app, API, etc
 ```sql
 create table if not exists deployments (
   id integer primary key generated by default as identity,
-  run_id text not null references public.run_index(run_id) on delete cascade,
+  project_id text not null references public.project_index(project_id) on delete cascade,
   app text not null,               -- e.g. mobile-web | web | api
-  service_name text,                -- Railway service name, e.g. sf-<run_id>-<app>
+  service_name text,                -- Railway service name, e.g. sf-<project_id>-<app>
   url text,
   status text not null default 'deploying'
     check (status in ('deploying', 'live', 'failed')),
@@ -682,15 +682,15 @@ create table if not exists deployments (
 );
 
 create index if not exists deployments_run_idx
-  on deployments (run_id);
+  on deployments (project_id);
 
 create unique index if not exists deployments_run_app_idx
-  on deployments (run_id, app);
+  on deployments (project_id, app);
 ```
 
 Design notes:
 
-- `deploy_target` on `run_index` stays as the deployment platform (`railway`, `vercel`, etc.).
+- `deploy_target` on `project_index` stays as the deployment platform (`railway`, `vercel`, etc.).
 - Per-app URLs and verified status move here.
 - `verifications.deployment_id` links a Stage 3 happy-flow check to the specific deliverable.
 - The harness screenshot gate runs per deployment/app.
@@ -764,7 +764,7 @@ Purpose: agent lifecycle and cost telemetry.
 ```sql
 create table if not exists agents (
   agent_id text primary key,
-  run_id text not null,
+  project_id text not null,
   ticket_id integer,
   role text not null,
   model text not null,
@@ -796,7 +796,7 @@ Recommended target form:
 ```sql
 create table if not exists agents (
   agent_id text primary key,
-  run_id text not null,
+  project_id text not null,
   ticket_id integer,
   role text not null,
   model text not null,
@@ -821,7 +821,7 @@ create table if not exists agents (
 Recommended indexes:
 
 ```sql
-create index if not exists agents_run_started_idx on agents (run_id, started_at, agent_id);
+create index if not exists agents_run_started_idx on agents (project_id, started_at, agent_id);
 create index if not exists agents_ticket_idx on agents (ticket_id);
 create index if not exists agents_status_idx on agents (status);
 ```
@@ -836,10 +836,10 @@ Migration note:
 These are required by the console but are not currently relational.
 
 ```text
-<runs_dir>/<run_id>/input/
-<runs_dir>/<run_id>/run.log
-<runs_dir>/<run_id>/chat.jsonl
-<runs_dir>/<run_id>/workspace/
+<projects_dir>/<project_id>/input/
+<projects_dir>/<project_id>/project.log
+<projects_dir>/<project_id>/chat.jsonl
+<projects_dir>/<project_id>/workspace/
 ```
 
 ## Run Blob Storage Decision
@@ -848,9 +848,9 @@ Run blobs should have two layers:
 
 - **Source of truth, target state:** Supabase Storage in the Tenexity `software-factory-as-a-skill`
   project.
-- **Relational manifest:** `public.run_blobs` in the same Supabase/Postgres project, keyed by `run_id`
+- **Relational manifest:** `public.run_blobs` in the same Supabase/Postgres project, keyed by `project_id`
   and pointing at `(storage_bucket, storage_key)`.
-- **Local cache/scratch:** the Railway `/data` volume under `<runs_dir>/<run_id>/` remains a write-through
+- **Local cache/scratch:** the Railway `/data` volume under `<projects_dir>/<project_id>/` remains a write-through
   cache and workspace scratch area, not the durable source of truth.
 
 Recommended bucket layout:
@@ -858,11 +858,11 @@ Recommended bucket layout:
 ```text
 bucket: factory-run-blobs
 
-runs/<run_id>/input/<filename>
-runs/<run_id>/artifacts/<artifact_id>/<filename>
-runs/<run_id>/logs/run.log
-runs/<run_id>/chat/chat.jsonl
-runs/<run_id>/workspace-snapshots/<timestamp>.tar.zst
+runs/<project_id>/input/<filename>
+runs/<project_id>/artifacts/<artifact_id>/<filename>
+runs/<project_id>/logs/project.log
+runs/<project_id>/chat/chat.jsonl
+runs/<project_id>/workspace-snapshots/<timestamp>.tar.zst
 ```
 
 Rules:
@@ -924,8 +924,8 @@ create index if not exists chat_messages_ts_idx on chat_messages (ts, id);
 
 Decision point:
 
-- Put `chat_messages` in each per-run schema to keep all run-scoped data together.
-- Or put it in `public.chat_messages(run_id, ...)` to make SSE/history easier without search-path switching.
+- Put `chat_messages` in each per-project schema to keep all run-scoped data together.
+- Or put it in `public.chat_messages(project_id, ...)` to make SSE/history easier without search-path switching.
 
 Recommendation for FastAPI:
 
@@ -942,7 +942,7 @@ Recommendation for FastAPI:
 Current limitation:
 
 - A no-run preflight conversation that never calls `start_pipeline` is still only in the in-memory concierge session.
-- Once a run exists, its project chat is durable at `<runs_dir>/<run_id>/chat.jsonl`.
+- Once a run exists, its project chat is durable at `<projects_dir>/<project_id>/chat.jsonl`.
 - If the product needs durable pre-run clarification turns, introduce an explicit draft-project id rather than hiding drafts in the run namespace.
 
 Suggested public form:
@@ -950,7 +950,7 @@ Suggested public form:
 ```sql
 create table if not exists public.chat_messages (
   id bigint generated always as identity primary key,
-  run_id text not null references public.sf_runs(run_id) on delete cascade,
+  project_id text not null references public.sf_runs(project_id) on delete cascade,
   role text not null check (role in ('user', 'assistant', 'system')),
   content text not null,
   msg_type text not null default 'text',
@@ -960,12 +960,12 @@ create table if not exists public.chat_messages (
 );
 
 create index if not exists chat_messages_run_ts_idx
-  on public.chat_messages (run_id, ts, id);
+  on public.chat_messages (project_id, ts, id);
 ```
 
 ### Logs
 
-Current logs are `run.log`.
+Current logs are `project.log`.
 
 Uses:
 
@@ -984,7 +984,7 @@ Suggested manifest:
 ```sql
 create table if not exists public.run_blobs (
   id bigint generated always as identity primary key,
-  run_id text not null references public.sf_runs(run_id) on delete cascade,
+  project_id text not null references public.sf_runs(project_id) on delete cascade,
   kind text not null check (kind in ('input', 'artifact', 'log', 'chat', 'workspace-snapshot')),
   title text,
   storage_bucket text,
@@ -997,7 +997,7 @@ create table if not exists public.run_blobs (
 );
 
 create index if not exists run_blobs_run_kind_idx
-  on public.run_blobs (run_id, kind, created_at desc);
+  on public.run_blobs (project_id, kind, created_at desc);
 ```
 
 ## API Access Patterns To Preserve
@@ -1021,26 +1021,26 @@ DB needs:
 
 ### Runs
 
-- `GET /api/runs`
-- `POST /api/runs`
-- `GET /api/runs/{run_id}`
-- `POST /api/runs/{run_id}/release`
-- `POST /api/runs/{run_id}/retry`
-- `POST /api/runs/{run_id}/budget`
+- `GET /api/projects`
+- `POST /api/projects`
+- `GET /api/projects/{project_id}`
+- `POST /api/projects/{project_id}/release`
+- `POST /api/projects/{project_id}/retry`
+- `POST /api/projects/{project_id}/budget`
 
 DB needs:
 
 - list run registry with owner filter
 - enforce unique project name
-- read/write `RunState`
+- read/write `ProjectState`
 - find active blockers
 - derive spend
 - derive stage/phase
 
 ### Run Canvas
 
-- `GET /api/runs/{run_id}/graph`
-- `GET /api/runs/{run_id}/events`
+- `GET /api/projects/{project_id}/graph`
+- `GET /api/projects/{project_id}/events`
 
 DB needs:
 
@@ -1051,27 +1051,27 @@ DB needs:
 - verifications
 - tickets
 - agents
-- runstate flags
+- projectstate flags
 
 ### Artifacts and Logs
 
-- `GET /api/runs/{run_id}/artifact?path=...`
-- `GET /api/runs/{run_id}/log`
-- `GET /api/runs/{run_id}/evidence`
+- `GET /api/projects/{project_id}/artifact?path=...`
+- `GET /api/projects/{project_id}/log`
+- `GET /api/projects/{project_id}/evidence`
 
 DB needs:
 
 - artifact metadata
 - file/blob resolver
 - full log or tail
-- evidence bundle from runstate, agents, tickets
+- evidence bundle from projectstate, agents, tickets
 
 ### Chat and SSE
 
 - `POST /api/chat`
-- `GET /api/chat/{run_id}/history`
-- `GET /api/chat/{run_id}/stream`
-- `POST /api/chat/{run_id}/deps`
+- `GET /api/chat/{project_id}/history`
+- `GET /api/chat/{project_id}/stream`
+- `POST /api/chat/{project_id}/deps`
 
 DB needs:
 
@@ -1084,12 +1084,12 @@ DB needs:
 
 Recommended first pass:
 
-1. Keep `dbshim` and per-run schemas.
+1. Keep `dbshim` and per-project schemas.
 2. Keep current store classes as repositories behind FastAPI dependencies.
 3. Add typed Pydantic response models at the API boundary.
-4. Add `public.run_index` and write-through from runstate saves.
-5. Add Alembic only for global tables and additive per-run table changes.
-6. Keep `runstate.data` as JSON text initially.
+4. Add `public.project_index` and write-through from projectstate saves.
+5. Add Alembic only for global tables and additive per-project table changes.
+6. Keep `projectstate.data` as JSON text initially.
 7. Move chat from JSONL to DB only after FastAPI route parity is proven.
 
 Why:
@@ -1097,7 +1097,7 @@ Why:
 - Stage agents already call `python3 -m software_factory.db ...`.
 - The CLI and store classes are the contract for agent writes.
 - A full ORM rewrite risks breaking gate semantics and run recovery.
-- The per-run schema plus transaction-pooler `SET LOCAL search_path` is the hard production behavior.
+- The per-project schema plus transaction-pooler `SET LOCAL search_path` is the hard production behavior.
 
 Recommended standalone storage fix before or alongside the first pass:
 
@@ -1116,14 +1116,14 @@ Recommended later pass:
 Current ownership is enforced at the HTTP boundary:
 
 - Admins see all runs.
-- Members see only runs where `RunState.owner == viewer.email`.
+- Members see only runs where `ProjectState.owner == viewer.email`.
 - Service token is admin-equivalent.
 - Console methods do not enforce ownership internally.
 
 FastAPI must preserve this rule in dependencies:
 
 - A dependency should resolve the viewer.
-- A second dependency should authorize `run_id` for every run-scoped route.
+- A second dependency should authorize `project_id` for every run-scoped route.
 - New routes must not call `Console` directly before this dependency runs.
 
 Database-level RLS:
@@ -1134,14 +1134,14 @@ Database-level RLS:
 
 Potential RLS direction if browser direct reads ever happen:
 
-- Keep `public.users`, `public.sf_runs`, `public.run_index`, `public.chat_messages`, and `public.run_blobs` protected.
+- Keep `public.users`, `public.sf_runs`, `public.project_index`, `public.chat_messages`, and `public.run_blobs` protected.
 - Prefer server-only access for now.
-- Avoid making per-run schemas part of the public Data API surface.
+- Avoid making per-project schemas part of the public Data API surface.
 
 ## Migration Risks
 
 - `tickets.pr` and `agents.pr` are typed as integer but opencode can use commit SHA provenance.
-- `runstate.data` is JSON stored as text, so SQL filtering on owner/name/stage requires loading each run unless a projection table is added.
+- `projectstate.data` is JSON stored as text, so SQL filtering on owner/name/stage requires loading each run unless a projection table is added.
 - Per-run schemas need careful connection handling with the Supabase transaction pooler
   (`prepare_threshold=None` — server-side prepared statements break on the 6543 pooler).
 - Files/logs/chat are not durable if the `/data` volume is lost.
@@ -1151,29 +1151,29 @@ Potential RLS direction if browser direct reads ever happen:
 The schema is now **Alembic-managed** (no more relying on scattered `create table if not exists`):
 - **Global `public` tables** — standard Alembic revisions in `migrations/` (baseline `0001` =
   `sf_runs`, `users`, `sf_run_schema_version`). `alembic upgrade head` via `software_factory.migrate`.
-- **Per-run `sf_run_<id>` schemas** — Alembic can't iterate dynamic schemas, so per-run schema changes
+- **Per-run `sf_run_<id>` schemas** — Alembic can't iterate dynamic schemas, so per-project schema changes
   are versioned in `software_factory.schema_ddl.PER_RUN_REVISIONS` and applied by a **fan-out**
   (`migrate.fanout_per_run`) across every schema in `public.sf_runs`, with each schema's version
   recorded in `public.sf_run_schema_version`. `dbshim` stamps new schemas at head on creation.
 - **Run automatically** at deploy (`entrypoint.sh` → `python3 -m software_factory.migrate`, before
   uvicorn) and defensively in the console boot lifespan. Postgres-only; sqlite/dev is a no-op.
-- Adding a per-run column later = append a revision to `PER_RUN_REVISIONS` (idempotent, unqualified
+- Adding a per-project column later = append a revision to `PER_RUN_REVISIONS` (idempotent, unqualified
   DDL); the next deploy fans it out across all run schemas.
 
 ## Open Questions
 
 - Should chat move to `public.chat_messages` during the FastAPI conversion, or remain JSONL for the first cut?
 - Should artifact bytes move to Supabase Storage before or after FastAPI route parity?
-- Should per-run schemas remain long-term, or should new runs eventually use flat public tables keyed by `run_id`?
-- Should `runstate.data` become `jsonb` while preserving the same payload?
+- Should per-project schemas remain long-term, or should new runs eventually use flat public tables keyed by `project_id`?
+- Should `projectstate.data` become `jsonb` while preserving the same payload?
 
 ## Initial Recommendation
 
 For the first FastAPI implementation:
 
-- Keep current per-run schemas and `dbshim`.
-- Keep `RunDB`, `TicketStore`, `AgentRegistry`, and `UserStore` as the data access layer.
-- Add `public.run_index` and make runstate persistence write through to it.
+- Keep current per-project schemas and `dbshim`.
+- Keep `ProjectDB`, `TicketStore`, `AgentRegistry`, and `UserStore` as the data access layer.
+- Add `public.project_index` and make projectstate persistence write through to it.
 - Add route-level FastAPI dependencies for viewer and run ownership.
 - Fix ticket/agent provenance typing as a standalone high-priority storage change.
 - Add migrations only after API parity tests exist, except for the provenance bug if it blocks live Postgres runs.
@@ -1186,15 +1186,15 @@ This is the lowest-risk route because it replaces the HTTP shell without changin
 # PROPOSED (next change) — flat project schema + 6-state kanban + orgs
 
 > **Status: PROPOSED, not yet built.** This is the target of the next change; the sections above
-> describe the currently-deployed (schema-per-run) model. When this lands, it replaces them.
+> describe the currently-deployed (schema-per-project) model. When this lands, it replaces them.
 
 **Headline changes:**
 - **Rename `run` → `project`** everywhere: table `run_index → projects`, key `run_id → project_id`,
   and in code `RunState → ProjectState` / `RunDB → ProjectDB`, the `db` CLI arg, the stage SKILLs, and
   the volume dir `runs/<id>/ → projects/<id>/`.
-- **Drop schema-per-run** → one `public` schema, every table keyed by `project_id`. `dbshim` loses the
-  per-run `CREATE SCHEMA` + `SET LOCAL search_path` machinery; Alembic manages one schema directly, so
-  the per-run fan-out + `sf_run_schema_version` (the current model) are retired.
+- **Drop schema-per-project** → one `public` schema, every table keyed by `project_id`. `dbshim` loses the
+  per-project `CREATE SCHEMA` + `SET LOCAL search_path` machinery; Alembic manages one schema directly, so
+  the per-project fan-out + `sf_run_schema_version` (the current model) are retired.
 - **Organizations** as the top-level tenant; richer **users**; **6-state** tickets with a QA loop;
   **Supabase Storage** for run/org files (project- and org-scoped); a unified **blobs** manifest.
 
@@ -1228,7 +1228,7 @@ This is the lowest-risk route because it replaces the HTTP shell without changin
 | tenexity | bool — factory admin-panel access |
 | created_at · created_by | timestamptz · text |
 
-### `projects` (renamed from `run_index`; the hub)
+### `projects` (renamed from `project_index`; the hub)
 `project_id PK`, `name` UNIQUE, `owner` FK→users.email, `phase`, `stage`, `runtime`,
 `planning_model`, `impl_model`, `model`, `brief` jsonb, `interview_coverage` jsonb, `budget_ceiling`,
 `spent_usd`, `held`, `repo_url`, `deploy_target`, `data` jsonb (ProjectState blob, transitional),

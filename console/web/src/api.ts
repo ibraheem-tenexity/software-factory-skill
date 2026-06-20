@@ -1,7 +1,7 @@
 // Thin typed client over the existing console JSON API. Cookie auth → credentials: "include".
 
-export type RunSummary = {
-  run_id: string;
+export type ProjectSummary = {
+  project_id: string;
   name?: string;
   phase?: string;
   stage?: number;
@@ -43,11 +43,11 @@ export type BriefResponse = { brief: Brief; coverage: Record<string, boolean> };
 
 export type Me = { email: string; role: string; auth: boolean };
 
-// GET /api/runs/{id}/deployments → console.deployments(). Per-deliverable: a run ships 1..N apps.
+// GET /api/projects/{id}/deployments → console.deployments(). Per-deliverable: a run ships 1..N apps.
 export type Deployment = { app?: string; url?: string; repo?: string; [k: string]: any };
 export type DeploymentsResponse = { deployments: Deployment[]; apps: string[] };
 
-// GET /api/runs/{id}/deps → console.stage2_artifacts(). `tokens` are the architecture-derived
+// GET /api/projects/{id}/deps → console.stage2_artifacts(). `tokens` are the architecture-derived
 // required tokens; `disposition[name]` is the per-token plan (mcp | mock | provide).
 export type DepToken = { name: string; [k: string]: any };
 export type DepsResponse = {
@@ -57,7 +57,7 @@ export type DepsResponse = {
   disposition: Record<string, string>;
   tokens: DepToken[];
 };
-// POST /api/runs/{id}/deps body — {deps: {name: {disposition, value?}}}. value rides into the
+// POST /api/projects/{id}/deps body — {deps: {name: {disposition, value?}}}. value rides into the
 // Stage-3 env only; it is never persisted to disk (see console.submit_deps).
 export type DepSubmit = Record<string, { disposition: string; value?: string }>;
 export type DepsSubmitResponse = {
@@ -65,7 +65,7 @@ export type DepsSubmitResponse = {
   missing: string[]; satisfied: boolean;
 };
 
-export type RunEvent = { ts: number; type: string; payload: Record<string, any> };
+export type ProjectEvent = { ts: number; type: string; payload: Record<string, any> };
 export type Artifact = { path: string; content?: string; error?: string };
 
 // Project view (§2.5) — Overview rollup + Documents, per tjyb5gmy's LOCKED shapes (PR #13).
@@ -91,7 +91,7 @@ export type OrgDoc = { id: string; name: string; kind?: string; tag?: string; si
 export type OrgUsage = {
   plan?: string; monthly_budget_cap?: number; spent?: number;
   active_projects?: number; total_projects?: number;
-  by_project: { run_id: string; name: string; spent_usd: number }[];
+  by_project: { project_id: string; name: string; spent_usd: number }[];
 };
 
 // Public boot config the SPA reads to decide whether to gate on login (auth on) or open
@@ -139,25 +139,25 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 export const api = {
   authConfig: () => get<AuthConfig>("/api/auth/config"),
   me: () => get<Me>("/api/me"),
-  runs: () => get<{ runs: RunSummary[] }>("/api/runs"),
-  status: (id: string) => get<RunSummary & Record<string, any>>(`/api/runs/${id}`),
-  graph: (id: string) => get<Graph>(`/api/runs/${id}/graph`),
-  tickets: (id: string) => get<TicketsResponse>(`/api/runs/${id}/tickets`),
-  brief: (id: string) => get<BriefResponse>(`/api/runs/${id}/brief`),
-  putBrief: (id: string, brief: Brief) => send<BriefResponse>(`/api/runs/${id}/brief`, "PUT", brief),
+  projects: () => get<{ projects: ProjectSummary[] }>("/api/projects"),
+  status: (id: string) => get<ProjectSummary & Record<string, any>>(`/api/projects/${id}`),
+  graph: (id: string) => get<Graph>(`/api/projects/${id}/graph`),
+  tickets: (id: string) => get<TicketsResponse>(`/api/projects/${id}/tickets`),
+  brief: (id: string) => get<BriefResponse>(`/api/projects/${id}/brief`),
+  putBrief: (id: string, brief: Brief) => send<BriefResponse>(`/api/projects/${id}/brief`, "PUT", brief),
   chat: (body: Record<string, unknown>) =>
-    send<{ run_id: string; messages: any[] }>("/api/chat", "POST", body),
+    send<{ project_id: string; messages: any[] }>("/api/chat", "POST", body),
   chatHistory: (id: string) => get<{ messages: any[] }>(`/api/chat/${id}/history`),
-  deployments: (id: string) => get<DeploymentsResponse>(`/api/runs/${id}/deployments`),
-  deps: (id: string) => get<DepsResponse>(`/api/runs/${id}/deps`),
+  deployments: (id: string) => get<DeploymentsResponse>(`/api/projects/${id}/deployments`),
+  deps: (id: string) => get<DepsResponse>(`/api/projects/${id}/deps`),
   submitDeps: (id: string, deps: DepSubmit) =>
-    send<DepsSubmitResponse>(`/api/runs/${id}/deps`, "POST", { deps }),
-  events: (id: string) => get<{ events: RunEvent[] }>(`/api/runs/${id}/events`),
+    send<DepsSubmitResponse>(`/api/projects/${id}/deps`, "POST", { deps }),
+  events: (id: string) => get<{ events: ProjectEvent[] }>(`/api/projects/${id}/events`),
   artifact: (id: string, path: string) =>
-    get<Artifact>(`/api/runs/${id}/artifact?path=${encodeURIComponent(path)}`),
+    get<Artifact>(`/api/projects/${id}/artifact?path=${encodeURIComponent(path)}`),
   // Project view (§2.5) — Overview rollup + Documents. Backend landing via #13; degrade to empty.
-  overview: (id: string) => get<ProjectOverview>(`/api/runs/${id}/overview`),
-  documents: (id: string) => get<ProjectDocuments>(`/api/runs/${id}/documents`),
+  overview: (id: string) => get<ProjectOverview>(`/api/projects/${id}/overview`),
+  documents: (id: string) => get<ProjectDocuments>(`/api/projects/${id}/documents`),
   getOrg: () => get<{ org: Org | null }>("/api/org"),
   createOrg: (body: OrgInput) => send<{ org: Org }>("/api/org", "POST", body),
   patchOrg: (body: Partial<Org>) => send<{ org: Org }>("/api/org", "PATCH", body),
@@ -170,17 +170,17 @@ export const api = {
   orgDocs: () => get<{ docs: OrgDoc[] }>("/api/org/docs"),
   orgUsage: () => get<OrgUsage>("/api/org/usage"),
   patchBilling: (body: { plan?: string; monthly_budget_cap?: number }) => send<OrgUsage>("/api/org/billing", "PATCH", body),
-  createRun: (body: { description: string; project_name: string }) =>
-    send<{ run_id: string }>("/api/runs", "POST", body),
+  createProject: (body: { description: string; project_name: string }) =>
+    send<{ project_id: string }>("/api/projects", "POST", body),
   // ── Onboarding draft model (docs/plans/concierge-onboarding-api.md) ──
   createDraft: (body?: { project_name?: string }) =>
-    send<{ run_id: string }>("/api/drafts", "POST", body || {}),
+    send<{ project_id: string }>("/api/drafts", "POST", body || {}),
   patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[] }) =>
-    send<{ name: string; goal: string; scope: string[]; description: string; brief: Record<string, string>; coverage: Record<string, boolean> }>(`/api/runs/${id}/draft`, "PATCH", body),
+    send<{ name: string; goal: string; scope: string[]; description: string; brief: Record<string, string>; coverage: Record<string, boolean> }>(`/api/projects/${id}/draft`, "PATCH", body),
   attach: (id: string, files: { name: string; content_b64: string }[]) =>
-    send<{ attached: string[] }>(`/api/runs/${id}/attach`, "POST", { files }),
+    send<{ attached: string[] }>(`/api/projects/${id}/attach`, "POST", { files }),
   promote: (id: string, body?: { description?: string; target?: string }) =>
-    send<{ run_id: string; status: string }>(`/api/runs/${id}/promote`, "POST", body || {}),
+    send<{ project_id: string; status: string }>(`/api/projects/${id}/promote`, "POST", body || {}),
 };
 
 export const BRIEF_SECTIONS: { key: string; label: string }[] = [

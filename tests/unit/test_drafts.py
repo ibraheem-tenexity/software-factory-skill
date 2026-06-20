@@ -1,6 +1,6 @@
 """Durable drafts: an interview that persists BEFORE a run exists, then promotes into a real
 Stage-1 launch carrying the accumulated brief. Plus the kanban tickets projection."""
-from software_factory.console import Console, RunRequest
+from software_factory.console import Console, ProjectRequest
 
 
 class FakeLauncher:
@@ -13,7 +13,7 @@ class FakeLauncher:
 
 
 def _console(tmp_path, launcher):
-    ids = iter([f"run-{i:08x}" for i in range(1, 50)])
+    ids = iter([f"project-{i:08x}" for i in range(1, 50)])
     return Console(str(tmp_path), launch=launcher,
                    new_id=lambda: next(ids), extract=lambda p: "# x")
 
@@ -21,10 +21,10 @@ def _console(tmp_path, launcher):
 def test_create_draft_mints_canonical_id_and_is_not_a_pipeline_run(tmp_path):
     c = _console(tmp_path, FakeLauncher())
     rid = c.create_draft(owner="op@tenexity.ai", name="Cargo", runtime="claude")
-    assert rid.startswith("run-") and len(rid) == 12       # run-<8hex>, registry-safe
+    assert rid.startswith("project-") and len(rid) == 16       # project-<8hex>, registry-safe
     assert c.is_draft(rid) is True
     # NO artifact recorded → the poller / ghost-resume guard ignore the draft
-    assert c.is_pipeline_run(rid) is False
+    assert c.is_pipeline_project(rid) is False
     st = c.status(rid)
     assert st["phase"] == "draft"
 
@@ -52,7 +52,7 @@ def test_promote_draft_launches_stage1_with_brief_threaded(tmp_path):
     out = c.promote_draft(rid, interview_md="USER: build cargo screening\nAI: on it")
     assert out == rid                                  # same id, no re-mint
     assert c.is_draft(rid) is False
-    assert c.is_pipeline_run(rid) is True              # now provisioned (artifacts recorded)
+    assert c.is_pipeline_project(rid) is True              # now provisioned (artifacts recorded)
     # the brief reached the Stage-1 prompt the orchestrator was launched with
     prompt = " ".join(str(a) for a in launcher.argv)
     assert "PROJECT BRIEF" in prompt
@@ -131,10 +131,10 @@ def test_tickets_carry_app_for_multi_deliverable_runs(tmp_path):
 
 
 def test_deployments_are_per_deliverable(tmp_path):
-    from software_factory.db import RunDB
+    from software_factory.db import ProjectStore
     c = _console(tmp_path, FakeLauncher())
     rid = c.create_draft(owner="op@tenexity.ai")
-    db = RunDB(c._paths(rid)["db"])
+    db = ProjectStore(c._paths(rid)["db"])
     db.record_deployment("mobile-web", "https://sf-x-mobile.up.railway.app", verified=True)
     db.record_deployment("web", "https://sf-x-web.up.railway.app", status="live")
     out = c.deployments(rid)

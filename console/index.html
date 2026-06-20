@@ -787,7 +787,7 @@
       renderCostPill(s);
       // A finished run never changes again — stop burning a 4-fetch tick every 2s on it.
       if (s.done && timer) { clearInterval(timer); timer = null; }
-      // Surface the live demo + source-repo links (repo comes from the run.db "GitHub Repo" artifact)
+      // Surface the live demo + source-repo links (repo comes from the the project store "GitHub Repo" artifact)
       let linksHtml = "";
       if (s.deploy_url) linksHtml += `<a href="${s.deploy_url}" target="_blank" rel="noopener">demo ↗</a>`;
       const repo = (g.nodes || []).map(n => n.data || n).find(d => d.kind === "artifact" && /repo/i.test(d.label || "") && (d.url || "").startsWith("http"));

@@ -2,7 +2,7 @@
 
 Brings the legacy software-factory's richer context model into the new system: instead of a
 single lazy prompt, onboarding accumulates a structured brief (the 7 sections below) through a
-conversational interview. The brief is durable run state (see RunState.brief) and is injected
+conversational interview. The brief is durable run state (see ProjectState.brief) and is injected
 into the Stage-1 PRD prompt via `brief_to_prompt_block` (the `briefToPromptBlock` analogue).
 
 Determinism note: this module is pure vocabulary + string helpers — no model, no I/O — so it is

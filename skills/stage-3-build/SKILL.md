@@ -22,11 +22,11 @@ recorded, GREEN Playwright happy-flow on the live URL is done.
 ## Record state in the datastore (there are NO events)
 
 ```bash
-python3 -m software_factory.db <verb> <runs_dir> <run_id> ...
+python3 -m software_factory.db <verb> <projects_dir> <project_id> ...
 ```
-`<runs_dir> <run_id>` ALWAYS come first, before the verb's own args:
-`set-phase <runs_dir> <run_id> <name>`; `spawn-agent <runs_dir> <run_id> <id> <role> <model> <phase>` / `finish-agent <runs_dir> <run_id> <id> <outcome> [cost] [pr] [diff_lines]`
-per Task sub-agent; `record-artifact <runs_dir> <run_id> <title> <path> <kind> [agent]`; `record-verification <runs_dir> <run_id> <url> <0|1> <result-json>`
+`<projects_dir> <project_id>` ALWAYS come first, before the verb's own args:
+`set-phase <projects_dir> <project_id> <name>`; `spawn-agent <projects_dir> <project_id> <id> <role> <model> <phase>` / `finish-agent <projects_dir> <project_id> <id> <outcome> [cost] [pr] [diff_lines]`
+per Task sub-agent; `record-artifact <projects_dir> <project_id> <title> <path> <kind> [agent]`; `record-verification <projects_dir> <project_id> <url> <0|1> <result-json>`
 for the Playwright gate; `add-blocker`/`clear-blocker`. No events — the datastore is the source of truth.
 
 ## Phase 0: plan FIRST  (`set-phase plan`)
@@ -57,7 +57,7 @@ A no-op sub-agent turn (empty diff) is a retry/escalate signal, never a completi
   for ERP/HR data, emails to a table/log) — never a dead stub, never block on the real third-party.
 - **DEPLOY-DB** (any database token) → the FACTORY has already provisioned this run's database and
   written its connection details to **`context/deploy-db.json`** (a JSON object with `DATABASE_URL`).
-  READ that file, point the app at that `DATABASE_URL`, and set it on the `sf-<run_id>` service at
+  READ that file, point the app at that `DATABASE_URL`, and set it on the `sf-<project_id>` service at
   deploy. You do **NOT** provision a database, and you have **NO Supabase access** — there is no
   Supabase MCP and no Supabase token in your environment. Never call Supabase, never create a project.
 - **MCP** (e.g. `NEXTAUTH_SECRET`) → generate it yourself / via the Railway MCP.
@@ -67,12 +67,12 @@ A no-op sub-agent turn (empty diff) is a retry/escalate signal, never a completi
 
 **Multi-deliverable:** a run may ship MORE THAN ONE deliverable (the PRD screen catalog + tickets are
 tagged with an `app`: `mobile-web | web | api | …`). Deploy **each app to its own service**
-`sf-<run_id>-<app>` (a single-app project is just `sf-<run_id>`). For EACH deliverable run the deploy
+`sf-<project_id>-<app>` (a single-app project is just `sf-<project_id>`). For EACH deliverable run the deploy
 sequence below, then record it: `record-deployment <app> <url> live <service_name> 0` (set the last
 arg to `1` once its happy-flow passes in Phase 3). There is NO single run-level deploy URL — each
 deliverable is tracked independently and the kanban/console group by app.
 
-Deploy ONLY to this run's own dedicated service(s) `sf-<run_id>[-<app>]` — **NEVER** a bare/un-named
+Deploy ONLY to this run's own dedicated service(s) `sf-<project_id>[-<app>]` — **NEVER** a bare/un-named
 deploy (it would overwrite the factory console).
 
 **Project isolation:** built apps deploy into the **software-factory-projects** Railway project and
@@ -96,13 +96,13 @@ It is the local stdio MCP server (`railway mcp`) and authenticates with the cont
 
 ### Successful deploy path (the proven sequence — follow it in order)
 1. **Preflight the build FIRST** (see below) — skipping this is why deploys fail at "scheduling build".
-2. `create_service` named `sf-<run_id>` (idempotent: if `list_services` shows it, reuse it).
-3. `set_variables` on `sf-<run_id>`: every runtime var the app needs — the `DATABASE_URL` from
+2. `create_service` named `sf-<project_id>` (idempotent: if `list_services` shows it, reuse it).
+3. `set_variables` on `sf-<project_id>`: every runtime var the app needs — the `DATABASE_URL` from
    `context/deploy-db.json`, plus `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `OPENROUTER_API_KEY`,
    `OPENROUTER_BASE_URL` as the app requires. (No Supabase vars — the app uses the provided Postgres.)
 4. `deploy` the service. Railway builds it **remotely** — do NOT run `npm run build` locally (it
    OOM-restarts the shared container and kills you mid-run).
-5. `generate_domain` for `sf-<run_id>` (target the app's listen port). **The app has NO public URL
+5. `generate_domain` for `sf-<project_id>` (target the app's listen port). **The app has NO public URL
    until you do this** — derive your health URL from the domain `generate_domain` returns. (Skipping
    this and polling a guessed URL is how a prior run hung forever.)
 6. **Finite** health-wait — a bounded number of checks (≈20 over a few minutes), NEVER an infinite
@@ -138,7 +138,7 @@ embedded `ghp_` token — use a credential helper / `GH_TOKEN`, never bake the t
 ## Phase 3: test — the GATE (mandatory; the only path to done)  (`set-phase test`)
 
 Drive the LIVE deployed URL through the primary journey with the **Playwright MCP**, **for EACH
-deliverable** (each `sf-<run_id>-<app>`). Build a structured result and pass it to
+deliverable** (each `sf-<project_id>-<app>`). Build a structured result and pass it to
 `gate.happy_flow_passed(result)`. RECORD it: `record-verification <url> <0|1> <result-json>`
 (include per-flow pass/fail + screenshot/console-error refs), and mark that app's deployment verified:
 `record-deployment <app> <url> live <service_name> 1`. ALL deliverables must pass before done.
@@ -158,20 +158,20 @@ individually and reach `approved`** before the run is done. The ticket lifecycle
 back to `open` carrying a bug report. Drive it with the db CLI (or `TicketStore`):
 
 For each ticket that built + deployed:
-1. `python3 -m software_factory.db mark-deployed <runs_dir> <run_id> <ticket_id>` — once its app is live.
-2. `python3 -m software_factory.db start-qa <runs_dir> <run_id> <ticket_id>` — begin QA.
+1. `python3 -m software_factory.db mark-deployed <projects_dir> <project_id> <ticket_id>` — once its app is live.
+2. `python3 -m software_factory.db start-qa <projects_dir> <project_id> <ticket_id>` — begin QA.
 3. A **QA Task sub-agent** drives THAT ticket's specific acceptance flow on the live URL with the
    **Playwright MCP**.
-   - **Pass** → `python3 -m software_factory.db qa-approve <runs_dir> <run_id> <ticket_id>`.
+   - **Pass** → `python3 -m software_factory.db qa-approve <projects_dir> <project_id> <ticket_id>`.
    - **Bug** → take screenshots, store them durably, and bounce the ticket back with a markdown bug report:
      ```python
      from software_factory import storage
      from software_factory.blobs import BlobStore
-     url = storage.put("<run_id>", f"qa/ticket-<ticket_id>-<ts>.png", "<screenshot_path>")
-     BlobStore("<runs_dir>/<run_id>/run.db").record("run", "<run_id>", url.split("/object/")[-1],
+     url = storage.put("<project_id>", f"qa/ticket-<ticket_id>-<ts>.png", "<screenshot_path>")
+     BlobStore("<projects_dir>/<project_id>/project.db").record("project", "<project_id>", url.split("/object/")[-1],
                 kind="qa-screenshot", content_type="image/png")
      ```
-     then `python3 -m software_factory.db qa-reject <runs_dir> <run_id> <ticket_id> "<bug_markdown>"`.
+     then `python3 -m software_factory.db qa-reject <projects_dir> <project_id> <ticket_id> "<bug_markdown>"`.
      The bug report (what failed + repro + `![](<screenshot-url>)` links) is appended to the ticket's
      `description` and the ticket returns to `open` — a build Task sub-agent then re-claims it, reads the
      report + screenshots, fixes, `mark_done` → redeploy → QA again.
@@ -182,20 +182,20 @@ with any unapproved (or QA-bounced) ticket is NOT done.
 
 ## Phase 4: teardown  (`set-phase teardown`)
 
-On any terminal state, after the live URL + verification are recorded: `workspace.destroy(workspace, runs_dir)`.
-Proof (run.db + run.log) at the base survives.
+On any terminal state, after the live URL + verification are recorded: `workspace.destroy(workspace, projects_dir)`.
+Proof (project.db + project.log) at the base survives.
 
 ## Python layer
 
 | Need | Call |
 |------|------|
-| Record canvas state | `python3 -m software_factory.db <verb> <runs_dir> <run_id> ...` |
+| Record canvas state | `python3 -m software_factory.db <verb> <projects_dir> <project_id> ...` |
 | Tickets | `tickets.TicketStore` — `claim`, `mark_done`, `mark_deployed`, `start_qa`, `qa_approve`, `qa_reject`, `all_approved` |
 | Blob storage | `storage.put/get/url`, `blobs.BlobStore.record` — durable QA screenshots (Supabase Storage; local fallback) |
 | Repo / PR / merge | `repo.GitHub` — `open_pr`, `merge_if_green` |
 | Deploy + health | `deploy.deploy(target, dir)`, `deploy.healthy(url)` |
 | Done verdict | `gate.happy_flow_passed(result)`, `gate.bugs_from(result)` |
-| Workspace teardown | `workspace.destroy(path, runs_dir)` |
+| Workspace teardown | `workspace.destroy(path, projects_dir)` |
 
 ## Guardrails
 
@@ -203,7 +203,7 @@ Proof (run.db + run.log) at the base survives.
 - **No hollow done:** empty turn = retry/escalate; `merge_if_green` + `mark_done` enforce real diffs/PRs;
   done REQUIRES a recorded passing Playwright verification AND every ticket `approved` via the QA loop.
 - **Orchestrator-only:** never edit app code in the main session — one native Task sub-agent per ticket.
-- **Deploy isolation:** always deploy to `sf-<run_id>`, never the console service.
+- **Deploy isolation:** always deploy to `sf-<project_id>`, never the console service.
 - **Fully autonomous** — no human approval gates.
 
 ## LLM access — use OpenRouter (standard for every app we build)

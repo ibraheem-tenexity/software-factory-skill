@@ -2,7 +2,7 @@
 
 The orchestrator is a `/loop` session: each re-entry loads state, does a slice of work,
 and saves. A crash or loop tick therefore resumes instead of restarting. The store is a
-small pluggable interface — JSON on disk for tests, the per-run run.db (RunDB) in real runs.
+small pluggable interface — JSON on disk for tests, the per-project project store (ProjectStore) in real runs.
 """
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from typing import Optional, Protocol
 
 
 class Store(Protocol):
-    def read(self, run_id: str) -> Optional[dict]: ...
-    def write(self, run_id: str, data: dict) -> None: ...
+    def read(self, project_id: str) -> Optional[dict]: ...
+    def write(self, project_id: str, data: dict) -> None: ...
 
 
 class JsonFileStore:
@@ -24,23 +24,23 @@ class JsonFileStore:
         self._dir = dir
         os.makedirs(dir, exist_ok=True)
 
-    def _path(self, run_id: str) -> str:
-        return os.path.join(self._dir, f"{run_id}.json")
+    def _path(self, project_id: str) -> str:
+        return os.path.join(self._dir, f"{project_id}.json")
 
-    def read(self, run_id: str) -> Optional[dict]:
+    def read(self, project_id: str) -> Optional[dict]:
         try:
-            with open(self._path(run_id)) as f:
+            with open(self._path(project_id)) as f:
                 return json.load(f)
         except FileNotFoundError:
             return None
 
-    def write(self, run_id: str, data: dict) -> None:
-        with open(self._path(run_id), "w") as f:
+    def write(self, project_id: str, data: dict) -> None:
+        with open(self._path(project_id), "w") as f:
             json.dump(data, f, indent=2)
 
 
 _PERSISTED = {
-    "run_id", "phase", "spent_usd", "repo_url", "deploy_url",
+    "project_id", "phase", "spent_usd", "repo_url", "deploy_url",
     "skill", "skill_version", "description", "name", "deploy_target", "creds_provided",
     "stage", "stage1_done", "stage2_done", "runtime",
     "planning_model", "impl_model",
@@ -51,8 +51,8 @@ _PERSISTED = {
 
 
 @dataclass
-class RunState:
-    run_id: str
+class ProjectState:
+    project_id: str
     phase: str = "provision"
     spent_usd: float = 0.0
     repo_url: Optional[str] = None
@@ -61,14 +61,14 @@ class RunState:
     skill: Optional[str] = None
     skill_version: Optional[str] = None
     description: Optional[str] = None
-    name: str = ""  # operator-chosen project name (display label; run_id stays the key)
+    name: str = ""  # operator-chosen project name (display label; project_id stays the key)
     deploy_target: Optional[str] = None
     creds_provided: list = field(default_factory=list)  # cred NAMES only, never values
     stage: int = 1
     stage1_done: bool = False
     stage2_done: bool = False
-    runtime: str = "claude"  # agent runtime for this run: claude | opencode; pinned at start_run
-    # Operator-picked models, pinned at start_run (claude runtime; empty = stage defaults):
+    runtime: str = "claude"  # agent runtime for this run: claude | opencode; pinned at start_project
+    # Operator-picked models, pinned at start_project (claude runtime; empty = stage defaults):
     # planning drives the S1/S2 orchestrators, impl drives S3.
     planning_model: str = ""
     impl_model: str = ""
@@ -76,7 +76,7 @@ class RunState:
     deps_provided: list = field(default_factory=list)  # dep NAMES only, never values
     deps_satisfied: bool = False
     deps_disposition: dict = field(default_factory=dict)  # name -> provide|mock|mcp|env (metadata, safe on disk)
-    budget_ceiling: Optional[float] = None  # per-run override of SF_COST_CEILING (SPEC §4, recoverable kill)
+    budget_ceiling: Optional[float] = None  # per-project override of SF_COST_CEILING (SPEC §4, recoverable kill)
     held: bool = False  # gated hold: created but NOT launched until released (survives restarts)
     owner: str = ""  # email of the creating user; members see only their own runs (admins see all)
     # Structured onboarding brief (see brief.BRIEF_SECTIONS) + per-section covered flags. Accumulated
@@ -90,14 +90,14 @@ class RunState:
     _store: Optional[Store] = field(default=None, repr=False, compare=False)
 
     @classmethod
-    def load(cls, run_id: str, store: Store) -> "RunState":
-        data = store.read(run_id) or {}
+    def load(cls, project_id: str, store: Store) -> "ProjectState":
+        data = store.read(project_id) or {}
         known = {k: v for k, v in data.items() if k in _PERSISTED}
-        known["run_id"] = run_id  # the id is authoritative from the caller, not the file
+        known["project_id"] = project_id  # the id is authoritative from the caller, not the file
         return cls(_store=store, **known)
 
     def save(self) -> None:
         if self._store is None:
-            raise RuntimeError("RunState has no store to save to")
+            raise RuntimeError("ProjectState has no store to save to")
         payload = {f.name: getattr(self, f.name) for f in fields(self) if f.name in _PERSISTED}
-        self._store.write(self.run_id, payload)
+        self._store.write(self.project_id, payload)

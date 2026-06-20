@@ -15,7 +15,7 @@ pytestmark = pytest.mark.skipif(
     not os.environ.get("SF_TEST_DATABASE_URL"),
     reason="SF_TEST_DATABASE_URL not set (live pg integration)")
 
-_FLAT_TABLES = ("runstate", "phases", "artifacts", "blockers", "gates",
+_FLAT_TABLES = ("projectstate", "phases", "artifacts", "blockers", "gates",
                 "verifications", "deployments", "tickets", "agents")
 
 
@@ -24,34 +24,34 @@ def pg_env(monkeypatch, tmp_path):
     monkeypatch.setenv("SF_ENVIRONMENT", "test")
     monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", os.environ["SF_TEST_DATABASE_URL"])
-    rid = "run-it" + uuid.uuid4().hex[:8]
+    rid = "project-it" + uuid.uuid4().hex[:8]
     yield str(tmp_path), rid
-    # flat schema: delete only this run's rows (no per-run schema to drop).
+    # flat schema: delete only this run's rows (no per-project schema to drop).
     from software_factory import dbshim
     conn = dbshim._pg_connect(os.environ["SF_TEST_DATABASE_URL"])
     with conn.transaction():
         cur = conn.cursor()
         for t in _FLAT_TABLES:
-            cur.execute(f"DELETE FROM public.{t} WHERE run_id = %s", (rid,))
+            cur.execute(f"DELETE FROM public.{t} WHERE project_id = %s", (rid,))
     conn.close()
 
 
 def test_full_store_round_trip_on_live_pg(pg_env):
-    runs_dir, rid = pg_env
-    db_path = os.path.join(runs_dir, rid, "run.db")
+    projects_dir, rid = pg_env
+    db_path = os.path.join(projects_dir, rid)
     from software_factory.agents import AgentRegistry
     from software_factory.budget import Usage
-    from software_factory.db import RunDB
-    from software_factory.runstate import RunState
+    from software_factory.db import ProjectStore
+    from software_factory.projectstate import ProjectState
     from software_factory.tickets import TicketStore
     from software_factory import dbshim
 
-    db = RunDB(db_path)
-    st = RunState.load(rid, db)
+    db = ProjectStore(db_path)
+    st = ProjectState.load(rid, db)
     st.phase = "build"
     st.spent_usd = 3.5
     st.save()
-    assert RunState.load(rid, RunDB(db_path)).spent_usd == 3.5
+    assert ProjectState.load(rid, ProjectStore(db_path)).spent_usd == 3.5
 
     db.set_phase("build", "active", stage=3)
     db.record_artifact("PRD", "PRD.md", kind="doc")
@@ -72,4 +72,4 @@ def test_full_store_round_trip_on_live_pg(pg_env):
                provenance=1, diff_lines=5)
     assert reg.counts(rid)["done"] == 1
 
-    assert rid in {r["run_id"] for r in dbshim.registry_runs()}
+    assert rid in {r["project_id"] for r in dbshim.registry_projects()}
