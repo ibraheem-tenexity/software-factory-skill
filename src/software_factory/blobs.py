@@ -43,10 +43,23 @@ class BlobStore:
             with conn.transaction():
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT scope, scope_id, kind, name, tag, storage_key, content_type, "
+                    "SELECT id, scope, scope_id, kind, name, tag, storage_key, content_type, "
                     "size_bytes, sha256 FROM public.blobs WHERE scope=%s AND scope_id=%s "
                     "ORDER BY id", (scope, scope_id))
                 return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+
+    def set_scope(self, blob_id: int, scope: str, scope_id: str) -> None:
+        """Move a blob between scopes (project ⇄ org) — PRD §2.4 material scope toggle."""
+        if scope not in ("project", "org"):
+            raise ValueError(f"blob scope must be 'project' or 'org', got {scope!r}")
+        conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
+        try:
+            with conn.transaction():
+                conn.cursor().execute(
+                    "UPDATE public.blobs SET scope=%s, scope_id=%s WHERE id=%s",
+                    (scope, scope_id, blob_id))
         finally:
             conn.close()
 

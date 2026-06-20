@@ -106,7 +106,7 @@ def test_project_rename_and_archive(mod, client, monkeypatch):
     _login(mod, client, monkeypatch)
     monkeypatch.setattr(mod.console, "project_owner", lambda rid: "op@tenexity.ai")
     monkeypatch.setattr(mod.console, "rename_project",
-                        lambda rid, name=None, description=None: {"project_id": rid, "name": name})
+                        lambda rid, name=None, description=None, scope=None: {"project_id": rid, "name": name})
     monkeypatch.setattr(mod.console, "set_archived", lambda rid, a: a)
     assert client.patch("/api/projects/project-x", json={"name": "Renamed"}).json()["name"] == "Renamed"
     assert client.delete("/api/projects/project-x").json() == {"project_id": "project-x", "archived": True}
@@ -121,3 +121,27 @@ def test_run_material_upload(mod, client, monkeypatch):
     assert r.status_code == 200
     up = r.json()["uploaded"]
     assert any(m["name"] == "spec.pdf" and m["kind"] == "pdf" for m in up)
+    assert all(m.get("id") for m in up)        # stable id for the scope-toggle
+
+
+def test_project_scope_edit_wires_through(mod, client, monkeypatch):
+    _login(mod, client, monkeypatch)
+    monkeypatch.setattr(mod.console, "project_owner", lambda pid: "op@tenexity.ai")
+    monkeypatch.setattr(mod.console, "rename_project",
+                        lambda pid, name=None, description=None, scope=None: {
+                            "project_id": pid, "scope": scope or []})
+    r = client.patch("/api/projects/project-x", json={"scope": ["Quoting", "Pricing"]})
+    assert r.status_code == 200 and r.json()["scope"] == ["Quoting", "Pricing"]
+
+
+def test_material_scope_toggle_moves_to_org_kb(mod, client, monkeypatch):
+    _login(mod, client, monkeypatch)
+    client.post("/api/org", json={"name": "Acme"})        # op gets an org
+    monkeypatch.setattr(mod.console, "project_owner", lambda pid: "op@tenexity.ai")
+    monkeypatch.setattr(mod.console, "artifacts", lambda pid: [])
+    up = client.post("/api/projects/project-z/materials", json={
+        "name": "spec.pdf", "data_b64": base64.b64encode(b"x").decode()}).json()["uploaded"]
+    mid = up[0]["id"]
+    docs = client.patch(f"/api/projects/project-z/materials/{mid}", json={"scope": "org"}).json()
+    assert all(m["id"] != mid for m in docs["uploaded"])          # gone from the project
+    assert any(d["id"] == mid for d in client.get("/api/org/docs").json()["docs"])  # now in org KB

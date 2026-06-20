@@ -1418,15 +1418,22 @@ class Console:
         return state.archived
 
     def rename_project(self, project_id: str, name: str | None = None,
-                       description: str | None = None) -> dict:
-        """Update a project's display name / description in place (post-promotion edit)."""
+                       description: str | None = None, scope: list | None = None) -> dict:
+        """Update a project's name / scope / description in place (post-promotion edit). When `scope`
+        is given the description is recomposed (goal + scope line), exactly like the draft setter."""
+        from .brief import compose_description
         state = self._load_state(project_id)
         if name is not None:
             state.name = name
-        if description is not None:
+        if scope is not None:
+            state.scope = list(scope)
+            goal = (state.brief or {}).get("goals", "") or ""
+            state.description = compose_description(goal, state.scope)
+        elif description is not None:
             state.description = description
         state.save()
-        return {"project_id": project_id, "name": state.name, "description": state.description}
+        return {"project_id": project_id, "name": state.name, "scope": list(state.scope or []),
+                "description": state.description}
 
     def events(self, project_id: str) -> list:
         """Recent run activity, projected from project store for the live activity feed. Shaped like the

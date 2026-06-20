@@ -75,9 +75,9 @@ def documents(blobs: list, artifacts: list) -> dict:
     for b in blobs or []:
         key = b.get("storage_key") or ""
         name = os.path.basename(key) or key
-        uploaded.append({"name": name, "kind": _kind_for(name), "size_bytes": b.get("size_bytes"),
-                         "content_type": b.get("content_type"), "storage_key": key,
-                         "created_at": b.get("created_at")})
+        uploaded.append({"id": b.get("id"), "name": name, "kind": _kind_for(name),
+                         "size_bytes": b.get("size_bytes"), "content_type": b.get("content_type"),
+                         "storage_key": key, "created_at": b.get("created_at")})
     produced = [{"title": a.get("title", ""), "path": a.get("path", ""), "kind": a.get("kind", ""),
                  "agent": a.get("agent", ""), "ts": a.get("ts")} for a in (artifacts or [])]
     return {"uploaded": uploaded, "produced": produced}

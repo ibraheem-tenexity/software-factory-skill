@@ -501,6 +501,11 @@ class ContinueIn(BaseModel):
 class ProjectPatchIn(BaseModel):
     name: str | None = None
     description: str | None = None
+    scope: list | None = None
+
+
+class MaterialScopeIn(BaseModel):
+    scope: str = "project"     # "project" | "org"
 
 
 class Stage3In(BaseModel):
@@ -1298,14 +1303,35 @@ def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authori
 
 @app.patch("/api/projects/{pid}")
 def project_update(pid: str, body: ProjectPatchIn, v: tuple = Depends(authorize_project)):
-    """Rename / re-describe a promoted project in place (drafts use PATCH /api/projects/{pid}/draft)."""
-    return console.rename_project(pid, name=body.name, description=body.description)
+    """Rename / re-scope / re-describe a promoted project (drafts use PATCH /api/projects/{pid}/draft).
+    Sending `scope` recomposes the description (goal + scope line) server-side."""
+    return console.rename_project(pid, name=body.name, description=body.description, scope=body.scope)
 
 
 @app.delete("/api/projects/{pid}")
 def project_delete(pid: str, v: tuple = Depends(authorize_project)):
     """Soft-delete (archive) a project — hidden from every listing; discards a draft."""
     return {"project_id": pid, "archived": console.set_archived(pid, True)}
+
+
+@app.patch("/api/projects/{pid}/materials/{material_id}")
+def project_material_scope(pid: str, material_id: int, body: MaterialScopeIn,
+                           v: tuple = Depends(authorize_project)):
+    """Move an uploaded material between project-scope and org-wide (PRD §2.4). →org puts it in the
+    org knowledge base (appears in /api/org/docs); →project moves it back to this project."""
+    b = blobs.get_blob(material_id)
+    if not b:
+        raise HTTPException(status_code=404, detail="material not found")
+    if body.scope == "org":
+        org = users.org_for_user(console.project_owner(pid))
+        if not org:
+            raise HTTPException(status_code=409, detail="project owner has no org on file")
+        blobs.set_scope(material_id, "org", org["id"])
+    elif body.scope == "project":
+        blobs.set_scope(material_id, "project", pid)
+    else:
+        raise HTTPException(status_code=400, detail="scope must be 'project' or 'org'")
+    return project_view.documents(blobs.list_for("project", pid), console.artifacts(pid))
 
 
 # ── Run-scoped actions ──────────────────────────────────────────────────────────────────────

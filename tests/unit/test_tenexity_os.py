@@ -129,3 +129,14 @@ def test_console_rename(tmp_path):
     out = c.rename_project(rid, name="New Name", description="desc")
     assert out["name"] == "New Name"
     assert c.status(rid)["name"] == "New Name"
+
+
+def test_console_rename_scope_recomposes_description(tmp_path):
+    rid = "project-eeee5555"
+    c = _seed(tmp_path, rid)
+    st = c._load_state(rid)
+    st.brief = {"goals": "automate quoting"}
+    st.save()
+    out = c.rename_project(rid, scope=["Quoting / RFQ", "Pricing"])
+    assert out["scope"] == ["Quoting / RFQ", "Pricing"]
+    assert "automate quoting" in out["description"] and "Quoting / RFQ" in out["description"]
