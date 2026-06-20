@@ -575,6 +575,12 @@ if os.path.isdir(os.path.join(_REACT_DIST, "assets")):
     from fastapi.staticfiles import StaticFiles
     app.mount("/assets", StaticFiles(directory=os.path.join(_REACT_DIST, "assets")), name="assets")
 
+# Self-hosted brand fonts (Vite copies console/web/public/fonts → dist/fonts; admin.css @font-face
+# references them at absolute /fonts/*.ttf). Served like /assets, else the portal falls back to system fonts.
+if os.path.isdir(os.path.join(_REACT_DIST, "fonts")):
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/fonts", StaticFiles(directory=os.path.join(_REACT_DIST, "fonts")), name="fonts")
+
 
 def _index_html() -> bytes:
     path = os.path.join(_REACT_DIST, "index.html") if _react_enabled() else os.path.join(HERE, "index.html")
