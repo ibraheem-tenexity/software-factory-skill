@@ -79,6 +79,7 @@ type Project = {
   f: string;
   auto: number;
   last: string;
+  mode: "real" | "demo";
 };
 
 type AllowedUser = {
@@ -115,18 +116,18 @@ const PHASE_TONE: Record<Project["phase"], "info" | "warning" | "brand" | "neutr
 };
 
 const ADMIN_PROJECTS: Project[] = [
-  { name: "Beacon Industrial — SAP S/4 Bridge", client: "Beacon Industrial Supply", factory: "wms-erp", phase: "REVIEW", tasks: "5/6", f: "1.6", auto: 68, last: "8 seconds ago" },
-  { name: "Halcyon — Insights Dashboard", client: "Halcyon Bicycles", factory: "data", phase: "PLANNING", tasks: "5/5", f: "2.0", auto: 62, last: "12 seconds ago" },
-  { name: "Distributor Intelligence Platform", client: "Acme Corp", factory: "software-factory", phase: "BUILDING", tasks: "0/0", f: "2.1", auto: 60, last: "44 seconds ago" },
-  { name: "test", client: "test", factory: "operations", phase: "TRIAGE", tasks: "36/70", f: "2.4", auto: 55, last: "57 seconds ago" },
-  { name: "Lattice — Member Portal", client: "Lattice Climbing Co.", factory: "software", phase: "REVIEW", tasks: "8/8", f: "1.4", auto: 78, last: "1 minute ago" },
-  { name: "Brassica — Wholesale Order Intake", client: "Brassica Markets", factory: "operations", phase: "REVIEW", tasks: "5/6", f: "2.4", auto: 71, last: "1 minute ago" },
-  { name: "Cardinal 3PL — Carrier Rate Sync", client: "Cardinal Logistics", factory: "integration", phase: "BUILDING", tasks: "4/4", f: "2.5", auto: 70, last: "1 minute ago" },
-  { name: "order entry", client: "Nick.", factory: "edi-trading-partner", phase: "BUILDING", tasks: "22/27", f: "1.5", auto: 55, last: "2 minutes ago" },
-  { name: "Pinnacle Foods — EDI Backlog", client: "Pinnacle Foodservice Distributors", factory: "edi-trading-partner", phase: "BUILDING", tasks: "7/8", f: "2.3", auto: 74, last: "2 minutes ago" },
-  { name: "Northwind Portal", client: "Acme Corp", factory: "software", phase: "INTAKE", tasks: "1/763", f: "2.1", auto: 55, last: "1 month ago" },
-  { name: "oe", client: "vamac", factory: "software", phase: "INTAKE", tasks: "3/842", f: "1.9", auto: 55, last: "1 month ago" },
-  { name: "RAG model", client: "Acme Corp", factory: "software", phase: "INTAKE", tasks: "4/842", f: "2.0", auto: 55, last: "1 month ago" },
+  { name: "Beacon Industrial — SAP S/4 Bridge", client: "Beacon Industrial Supply", factory: "wms-erp", phase: "REVIEW", tasks: "5/6", f: "1.6", auto: 68, last: "8 seconds ago", mode: "real" },
+  { name: "Halcyon — Insights Dashboard", client: "Halcyon Bicycles", factory: "data", phase: "PLANNING", tasks: "5/5", f: "2.0", auto: 62, last: "12 seconds ago", mode: "real" },
+  { name: "Distributor Intelligence Platform", client: "Acme Corp", factory: "software-factory", phase: "BUILDING", tasks: "0/0", f: "2.1", auto: 60, last: "44 seconds ago", mode: "real" },
+  { name: "test", client: "test", factory: "operations", phase: "TRIAGE", tasks: "36/70", f: "2.4", auto: 55, last: "57 seconds ago", mode: "demo" },
+  { name: "Lattice — Member Portal", client: "Lattice Climbing Co.", factory: "software", phase: "REVIEW", tasks: "8/8", f: "1.4", auto: 78, last: "1 minute ago", mode: "real" },
+  { name: "Brassica — Wholesale Order Intake", client: "Brassica Markets", factory: "operations", phase: "REVIEW", tasks: "5/6", f: "2.4", auto: 71, last: "1 minute ago", mode: "real" },
+  { name: "Cardinal 3PL — Carrier Rate Sync", client: "Cardinal Logistics", factory: "integration", phase: "BUILDING", tasks: "4/4", f: "2.5", auto: 70, last: "1 minute ago", mode: "real" },
+  { name: "order entry", client: "Nick.", factory: "edi-trading-partner", phase: "BUILDING", tasks: "22/27", f: "1.5", auto: 55, last: "2 minutes ago", mode: "real" },
+  { name: "Pinnacle Foods — EDI Backlog", client: "Pinnacle Foodservice Distributors", factory: "edi-trading-partner", phase: "BUILDING", tasks: "7/8", f: "2.3", auto: 74, last: "2 minutes ago", mode: "real" },
+  { name: "Northwind Portal", client: "Acme Corp", factory: "software", phase: "INTAKE", tasks: "1/763", f: "2.1", auto: 55, last: "1 month ago", mode: "real" },
+  { name: "oe", client: "vamac", factory: "software", phase: "INTAKE", tasks: "3/842", f: "1.9", auto: 55, last: "1 month ago", mode: "demo" },
+  { name: "RAG model", client: "Acme Corp", factory: "software", phase: "INTAKE", tasks: "4/842", f: "2.0", auto: 55, last: "1 month ago", mode: "demo" },
 ];
 
 const ROSTER: Agent[] = [
@@ -416,7 +417,17 @@ function MiniBar({ pct }: { pct: number }) {
 }
 
 /* ---- views ---- */
-function AdminClients() {
+function AdminClients({ query }: { query: string }) {
+  const filtered = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return ADMIN_CLIENTS;
+    return ADMIN_CLIENTS.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.in.toLowerCase().includes(q) ||
+        c.last.toLowerCase().includes(q)
+    );
+  }, [query]);
   return (
     <>
       <PageTitle
@@ -486,7 +497,7 @@ function AdminClients() {
           <ColHead>Total spend</ColHead>
           <ColHead style={{ textAlign: "right" }}>Last activity</ColHead>
         </div>
-        {ADMIN_CLIENTS.map((c, i) => (
+        {filtered.map((c, i) => (
           <button
             key={c.name}
             style={{
@@ -555,8 +566,22 @@ function AdminFilter({ children, w = 150 }: { children: React.ReactNode; w?: num
   );
 }
 
-function AdminProjectsView() {
+function AdminProjectsView({ query }: { query: string }) {
   const [type, setType] = React.useState<"ALL PROJECTS" | "REAL" | "DEMO/FAKE">("REAL");
+  const filtered = React.useMemo(() => {
+    const mode = type === "ALL PROJECTS" ? null : type === "REAL" ? "real" : "demo";
+    const q = query.trim().toLowerCase();
+    return ADMIN_PROJECTS.filter((p) => {
+      if (mode && p.mode !== mode) return false;
+      if (!q) return true;
+      return (
+        p.name.toLowerCase().includes(q) ||
+        p.client.toLowerCase().includes(q) ||
+        p.factory.toLowerCase().includes(q) ||
+        p.phase.toLowerCase().includes(q)
+      );
+    });
+  }, [type, query]);
   return (
     <>
       <PageTitle
@@ -619,7 +644,9 @@ function AdminProjectsView() {
             ))}
           </div>
         </div>
-        <Mono>{ADMIN_PROJECTS.length} of {ADMIN_PROJECTS.length}</Mono>
+        <Mono>
+          {filtered.length} of {ADMIN_PROJECTS.length}
+        </Mono>
       </div>
       <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden", background: T.raised }}>
         <div
@@ -641,7 +668,7 @@ function AdminProjectsView() {
           <ColHead>Auto</ColHead>
           <ColHead style={{ textAlign: "right" }}>Last activity</ColHead>
         </div>
-        {ADMIN_PROJECTS.map((p, i) => (
+        {filtered.map((p, i) => (
           <button
             key={p.name + i}
             style={{
@@ -774,7 +801,19 @@ function AgentCard({ a, onOpen }: { a: Agent; onOpen: (a: Agent) => void }) {
   );
 }
 
-function AdminAgents({ onOpen }: { onOpen: (a: Agent) => void }) {
+function AdminAgents({ onOpen, query }: { onOpen: (a: Agent) => void; query: string }) {
+  const filtered = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return ROSTER;
+    return ROSTER.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        a.callsign.toLowerCase().includes(q) ||
+        a.sign.toLowerCase().includes(q) ||
+        a.desc.toLowerCase().includes(q) ||
+        a.model.toLowerCase().includes(q)
+    );
+  }, [query]);
   return (
     <>
       <PageTitle
@@ -817,7 +856,7 @@ function AdminAgents({ onOpen }: { onOpen: (a: Agent) => void }) {
         <Mono style={{ fontSize: 11 }}>ok 0 · missing 1 · modified 0 · outdated 0</Mono>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
-        {ROSTER.map((a) => (
+        {filtered.map((a) => (
           <AgentCard key={a.callsign} a={a} onOpen={onOpen} />
         ))}
       </div>
@@ -1081,13 +1120,25 @@ function AgentPromptPanel({ agent, onClose }: { agent: Agent; onClose: () => voi
   );
 }
 
-function AdminTools() {
+function AdminTools({ query }: { query: string }) {
   const TYPE_C: Record<string, [string, string]> = {
     MCP: [T.brandSoft, T.brandDeep],
     API: [T.cHighSoft, T.cHigh],
     native: [T.successSoft, T.success],
     HTTP: ["#f3e9fb", "#7a3ea8"],
   };
+  const filtered = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return MCP_TOOLS;
+    return MCP_TOOLS.filter(
+      (t) =>
+        t.name.toLowerCase().includes(q) ||
+        t.type.toLowerCase().includes(q) ||
+        t.provider.toLowerCase().includes(q) ||
+        t.scope.toLowerCase().includes(q) ||
+        t.auth.toLowerCase().includes(q)
+    );
+  }, [query]);
   return (
     <>
       <PageTitle
@@ -1125,7 +1176,7 @@ function AdminTools() {
           <ColHead>Used by</ColHead>
           <ColHead style={{ textAlign: "right" }}>Status</ColHead>
         </div>
-        {MCP_TOOLS.map((t, i) => {
+        {filtered.map((t, i) => {
           const tc = TYPE_C[t.type] || TYPE_C.native;
           const connected = t.status === "connected";
           return (
@@ -1221,7 +1272,30 @@ function AdminTools() {
   );
 }
 
-function AdminOverview({ onNav }: { onNav: (id: string) => void }) {
+function AdminOverview({ onNav, query }: { onNav: (id: string) => void; query: string }) {
+  const filteredProjects = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return ADMIN_PROJECTS;
+    return ADMIN_PROJECTS.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.client.toLowerCase().includes(q) ||
+        p.factory.toLowerCase().includes(q) ||
+        p.phase.toLowerCase().includes(q)
+    );
+  }, [query]);
+  const filteredAgents = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return ROSTER;
+    return ROSTER.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        a.callsign.toLowerCase().includes(q) ||
+        a.sign.toLowerCase().includes(q) ||
+        a.desc.toLowerCase().includes(q) ||
+        a.model.toLowerCase().includes(q)
+    );
+  }, [query]);
   return (
     <>
       <PageTitle
@@ -1261,7 +1335,7 @@ function AdminOverview({ onNav }: { onNav: (id: string) => void }) {
               ALL →
             </button>
           </div>
-          {ADMIN_PROJECTS.slice(0, 6).map((p, i) => (
+          {filteredProjects.slice(0, 6).map((p, i) => (
             <div
               key={p.name + i}
               style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderTop: i ? `1px solid ${T.borderSubtle}` : "none" }}
@@ -1308,7 +1382,7 @@ function AdminOverview({ onNav }: { onNav: (id: string) => void }) {
               ROSTER →
             </button>
           </div>
-          {ROSTER.slice(0, 6).map((a, i) => (
+          {filteredAgents.slice(0, 6).map((a, i) => (
             <div
               key={a.callsign}
               style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderTop: i ? `1px solid ${T.borderSubtle}` : "none" }}
@@ -1572,6 +1646,18 @@ export function AdminPortal() {
   const [view, setView] = React.useState<string>("clients");
   const [agent, setAgent] = React.useState<Agent | null>(null);
   const [invite, setInvite] = React.useState(false);
+  const [query, setQuery] = React.useState("");
+  const searchRef = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const NAV = [
     { id: "overview", label: "Overview", icon: "overview" },
     { id: "clients", label: "Clients", icon: "clients" },
@@ -1723,7 +1809,20 @@ export function AdminPortal() {
               }}
             >
               <Icon name="search" size={14} color={T.tertiary} />
-              <span style={{ flex: 1, font: `400 12.5px/1 ${T.sans}`, color: T.tertiary }}>Search…</span>
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search…"
+                style={{
+                  flex: 1,
+                  border: "none",
+                  background: "transparent",
+                  outline: "none",
+                  font: `400 12.5px/1 ${T.sans}`,
+                  color: T.fg,
+                }}
+              />
               <span
                 style={{
                   font: `500 10px/1 ${T.mono}`,
@@ -1742,11 +1841,11 @@ export function AdminPortal() {
           </div>
           {/* content */}
           <div style={{ flex: 1, overflow: "auto", padding: "20px 26px 36px" }}>
-            {view === "overview" && <AdminOverview onNav={setView} />}
-            {view === "clients" && <AdminClients />}
-            {(view === "projects" || view === "newproject") && <AdminProjectsView />}
-            {view === "agents" && <AdminAgents onOpen={setAgent} />}
-            {view === "tools" && <AdminTools />}
+            {view === "overview" && <AdminOverview onNav={setView} query={query} />}
+            {view === "clients" && <AdminClients query={query} />}
+            {(view === "projects" || view === "newproject") && <AdminProjectsView query={query} />}
+            {view === "agents" && <AdminAgents onOpen={setAgent} query={query} />}
+            {view === "tools" && <AdminTools query={query} />}
             {(view === "factories" || view === "settings") && (
               <div style={{ display: "grid", placeItems: "center", height: 320 }}>
                 <div style={{ textAlign: "center" }}>
