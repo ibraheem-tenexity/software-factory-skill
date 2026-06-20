@@ -22,9 +22,11 @@ _CACHE_TTL = 20.0
 # organizations columns that hold JSON-encoded lists (decoded on read).
 _ORG_JSON_COLS = ("sub_focus", "connected_systems")
 _ORG_COLS = ("id", "name", "industry", "sub_focus", "headcount", "revenue",
-             "location", "website", "connected_systems", "created_at", "created_by")
+             "location", "website", "connected_systems", "plan", "monthly_budget_cap",
+             "created_at", "created_by")
 _ORG_SELECT = ("SELECT id, name, industry, sub_focus, headcount, revenue, location, website, "
-               "connected_systems, extract(epoch from created_at) AS created_at, created_by "
+               "connected_systems, plan, monthly_budget_cap, "
+               "extract(epoch from created_at) AS created_at, created_by "
                "FROM public.organizations")
 
 
@@ -169,6 +171,22 @@ class UserStore:
     def org_for_user(self, email: str) -> dict | None:
         u = self.get_user(email)
         return self.get_org(u["org_id"]) if u and u.get("org_id") else None
+
+    def list_org_members(self, org_id: str) -> list:
+        """Users linked to this org (Team & access), ordered by email."""
+        if not org_id:
+            return []
+        return sorted((u for u in self._all().values() if u.get("org_id") == org_id),
+                      key=lambda u: u["email"])
+
+    def invite_member(self, email: str, org_id: str, *, role: str = "member",
+                      designation: str | None = None, by: str = "") -> None:
+        """Add (or re-link) a user to an org with a role — the Team & access invite."""
+        email = (email or "").strip().lower()
+        if not email or not org_id:
+            return
+        self.upsert(email, role if role in ("admin", "member") else "member", by)
+        self.set_profile(email, org_id=org_id, designation=designation)
 
     @staticmethod
     def _decode_org(row: dict) -> dict:

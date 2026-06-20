@@ -100,3 +100,41 @@ def test_set_profile_preserves_admin_role(store):
 def test_tenexity_flag(store):
     store.set_profile("staff@t.ai", tenexity=True)
     assert store.get_user("staff@t.ai")["tenexity"] in (1, True)
+
+
+# -- org membership (Team & access, PRD §2.3) -------------------------------------------
+def test_list_org_members_scoped_and_ordered(store):
+    oid = store.create_org("Acme")
+    other = store.create_org("Beta")
+    store.set_profile("zoe@t.ai", org_id=oid, designation="Sales")
+    store.set_profile("amy@t.ai", org_id=oid, designation="Ops")
+    store.set_profile("ben@t.ai", org_id=other, designation="Ops")   # different org
+    members = store.list_org_members(oid)
+    assert [m["email"] for m in members] == ["amy@t.ai", "zoe@t.ai"]   # ordered, org-scoped
+    assert members[0]["designation"] == "Ops"
+    assert members[1]["role"] == "member"
+
+
+def test_invite_member_creates_user_linked_to_org(store):
+    oid = store.create_org("Acme")
+    store.invite_member("new@t.ai", oid, role="member", designation="Procurement", by="boss@t.ai")
+    u = store.get_user("new@t.ai")
+    assert u["org_id"] == oid
+    assert u["role"] == "member"
+    assert u["designation"] == "Procurement"
+    assert [m["email"] for m in store.list_org_members(oid)] == ["new@t.ai"]
+
+
+def test_invite_member_can_grant_admin(store):
+    oid = store.create_org("Acme")
+    store.invite_member("lead@t.ai", oid, role="admin", by="boss@t.ai")
+    assert store.get_role("lead@t.ai") == "admin"
+
+
+def test_org_plan_and_budget_cap_round_trip(store):
+    oid = store.create_org("Acme")
+    assert store.get_org(oid)["plan"] is None            # unset by default
+    store.update_org(oid, plan="Team", monthly_budget_cap=120.0)
+    org = store.get_org(oid)
+    assert org["plan"] == "Team"
+    assert org["monthly_budget_cap"] == 120.0

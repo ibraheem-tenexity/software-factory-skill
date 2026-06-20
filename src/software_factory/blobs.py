@@ -17,18 +17,24 @@ class BlobStore:
         pass
 
     def record(self, scope: str, scope_id: str, storage_key: str, *, kind: str | None = None,
+               name: str | None = None, tag: str | None = None,
                content_type: str | None = None, size_bytes: int | None = None,
-               sha256: str | None = None) -> None:
-        """Record one stored blob. `scope` is 'run' or 'org'."""
+               sha256: str | None = None) -> int:
+        """Record one stored blob and return its id. `scope` is 'run' or 'org'; `name`/`tag` are
+        the display filename + category shown in the org knowledge base."""
         if scope not in ("run", "org"):
             raise ValueError(f"blob scope must be 'run' or 'org', got {scope!r}")
         conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
         try:
             with conn.transaction():
-                conn.cursor().execute(
-                    "INSERT INTO public.blobs (scope, scope_id, kind, storage_key, content_type, "
-                    "size_bytes, sha256) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                    (scope, scope_id, kind, storage_key, content_type, size_bytes, sha256))
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO public.blobs (scope, scope_id, kind, name, tag, storage_key, "
+                    "content_type, size_bytes, sha256) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                    "RETURNING id",
+                    (scope, scope_id, kind, name, tag, storage_key, content_type, size_bytes,
+                     sha256))
+                return cur.fetchone()["id"]
         finally:
             conn.close()
 
@@ -38,8 +44,69 @@ class BlobStore:
             with conn.transaction():
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT scope, scope_id, kind, storage_key, content_type, size_bytes, sha256 "
-                    "FROM public.blobs WHERE scope=%s AND scope_id=%s ORDER BY id", (scope, scope_id))
+                    "SELECT scope, scope_id, kind, name, tag, storage_key, content_type, "
+                    "size_bytes, sha256 FROM public.blobs WHERE scope=%s AND scope_id=%s "
+                    "ORDER BY id", (scope, scope_id))
                 return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+
+    # -- org knowledge base (org-scoped docs + reuse count) -----------------------------
+    def list_org_docs(self, org_id: str) -> list[dict]:
+        """The org's knowledge-base docs, each with `used_count` = distinct projects that have
+        imported it and `updated` (epoch seconds). Newest first."""
+        conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
+        try:
+            with conn.transaction():
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT b.id, b.name, b.tag, b.kind, b.content_type, b.size_bytes, "
+                    "extract(epoch from b.created_at) AS updated, "
+                    "count(DISTINCT u.run_id) AS used_count "
+                    "FROM public.blobs b "
+                    "LEFT JOIN public.blob_uses u ON u.blob_id = b.id "
+                    "WHERE b.scope='org' AND b.scope_id=%s "
+                    "GROUP BY b.id ORDER BY b.id DESC", (org_id,))
+                return [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
+
+    def get_blob(self, blob_id: int) -> dict | None:
+        conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
+        try:
+            with conn.transaction():
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT id, scope, scope_id, kind, name, tag, storage_key, content_type, "
+                    "size_bytes, sha256 FROM public.blobs WHERE id=%s", (blob_id,))
+                row = cur.fetchone()
+                return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def record_use(self, blob_id: int, run_id: str) -> int:
+        """Note that a project (`run_id`) imported this org doc; return the new distinct-project
+        count. Re-recording the same project is a no-op for the count."""
+        conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
+        try:
+            with conn.transaction():
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO public.blob_uses (blob_id, run_id) VALUES (%s,%s)",
+                    (blob_id, run_id))
+                cur.execute(
+                    "SELECT count(DISTINCT run_id) AS n FROM public.blob_uses WHERE blob_id=%s",
+                    (blob_id,))
+                return cur.fetchone()["n"]
+        finally:
+            conn.close()
+
+    def delete(self, blob_id: int) -> None:
+        conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
+        try:
+            with conn.transaction():
+                cur = conn.cursor()
+                cur.execute("DELETE FROM public.blob_uses WHERE blob_id=%s", (blob_id,))
+                cur.execute("DELETE FROM public.blobs WHERE id=%s", (blob_id,))
         finally:
             conn.close()
