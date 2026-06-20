@@ -28,8 +28,10 @@ _AUTH = dict(SF_GOOGLE_CLIENT_ID="cid-123.apps.googleusercontent.com",
 
 @pytest.fixture()
 def mod(tmp_path, monkeypatch):
-    # op is staff (SF_ADMIN_EMAILS) AND can act as an org-admin for the org it creates.
-    return _load_app(tmp_path, monkeypatch, SF_ADMIN_EMAILS="op@tenexity.ai", **_AUTH)
+    # op is platform staff (role==admin via SF_ADMIN_EMAILS AND tenexity) + org-admin of its own org.
+    mod = _load_app(tmp_path, monkeypatch, SF_ADMIN_EMAILS="op@tenexity.ai", **_AUTH)
+    mod.users.set_profile("op@tenexity.ai", tenexity=True)
+    return mod
 
 
 @pytest.fixture()

@@ -25,7 +25,9 @@ _AUTH = dict(SF_GOOGLE_CLIENT_ID="cid-123.apps.googleusercontent.com",
 
 @pytest.fixture()
 def staff_mod(tmp_path, monkeypatch):
-    return _load_app(tmp_path, monkeypatch, SF_ADMIN_EMAILS="op@tenexity.ai", **_AUTH)
+    mod = _load_app(tmp_path, monkeypatch, SF_ADMIN_EMAILS="op@tenexity.ai", **_AUTH)
+    mod.users.set_profile("op@tenexity.ai", tenexity=True)   # platform staff = role==admin AND tenexity
+    return mod
 
 
 @pytest.fixture()
@@ -43,11 +45,60 @@ def member_client(member_mod):
     return TestClient(member_mod.app)
 
 
+@pytest.fixture()
+def adminonly_mod(tmp_path, monkeypatch):
+    # role==admin (via SF_ADMIN_EMAILS) but tenexity NOT set → must NOT reach Tenexity OS.
+    return _load_app(tmp_path, monkeypatch, SF_ADMIN_EMAILS="op@tenexity.ai", **_AUTH)
+
+
+@pytest.fixture()
+def adminonly_client(adminonly_mod):
+    return TestClient(adminonly_mod.app)
+
+
 def _login(mod, client, monkeypatch, email="op@tenexity.ai"):
     from software_factory import auth as a
     monkeypatch.setattr(a, "_fetch_claims", lambda tok: {
         "aud": "cid-123.apps.googleusercontent.com", "email": email, "email_verified": "true"})
     return client.post("/api/auth/google", json={"credential": "t"})
+
+
+def _enable_react(mod, monkeypatch):
+    monkeypatch.setattr(mod, "_react_enabled", lambda: True)
+    monkeypatch.setattr(mod, "_admin_html", lambda: b"<admin-spa>")
+
+
+# ── /admin PAGE route is hard-gated (the live-exposure fix) ─────────────────────────────────────
+def test_admin_page_redirects_unauthenticated(staff_mod, staff_client, monkeypatch):
+    _enable_react(staff_mod, monkeypatch)
+    r = staff_client.get("/admin", follow_redirects=False)      # no session
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    assert b"admin-spa" not in r.content                         # portal HTML NOT served
+
+
+def test_admin_page_forbidden_for_member(member_mod, member_client, monkeypatch):
+    _enable_react(member_mod, monkeypatch)
+    _login(member_mod, member_client, monkeypatch)               # op = plain member here
+    assert member_client.get("/admin").status_code == 403
+
+
+def test_admin_page_forbidden_for_admin_without_tenexity(adminonly_mod, adminonly_client, monkeypatch):
+    _enable_react(adminonly_mod, monkeypatch)
+    _login(adminonly_mod, adminonly_client, monkeypatch)         # role admin, NO tenexity flag
+    assert adminonly_client.get("/admin").status_code == 403
+
+
+def test_admin_page_served_to_staff(staff_mod, staff_client, monkeypatch):
+    _enable_react(staff_mod, monkeypatch)
+    _login(staff_mod, staff_client, monkeypatch)                 # role admin AND tenexity
+    r = staff_client.get("/admin")
+    assert r.status_code == 200 and b"admin-spa" in r.content
+
+
+def test_admin_api_forbidden_for_admin_without_tenexity(adminonly_mod, adminonly_client, monkeypatch):
+    # require_staff strict bar: env-admin alone (no tenexity) must NOT reach cross-tenant data.
+    _login(adminonly_mod, adminonly_client, monkeypatch)
+    assert adminonly_client.get("/api/admin/overview").status_code == 403
 
 
 # ── staff gate ────────────────────────────────────────────────────────────────────────────────

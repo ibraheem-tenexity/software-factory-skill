@@ -26,7 +26,8 @@ import threading
 import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import (HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse,
+                               StreamingResponse)
 from pydantic import BaseModel
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -395,21 +396,24 @@ def require_admin(v: tuple = Depends(require_authed)) -> tuple:
     return v
 
 
-def require_staff(v: tuple = Depends(require_authed)) -> tuple:
-    """Tenexity OS gate (§3): platform staff ONLY — cross-tenant data. A customer org-admin does
-    NOT qualify. Admits: service token / auth-disabled (viewer email=None, role=admin), an
-    SF_ADMIN_EMAILS operator, or a user with the `tenexity` flag set."""
-    email, role, _ = v
+def _staff_session(v: tuple) -> bool:
+    """May this session reach Tenexity OS (cross-tenant data + the operator portal)? Service token /
+    auth-disabled (viewer email=None, role=admin) → yes (bots/CI). A HUMAN session must be BOTH
+    role==admin AND tenexity==true — a customer org-admin or any non-staff member never qualifies."""
+    email, role, ok = v
+    if not ok:
+        return False
     if email is None and role == "admin":          # service token or auth disabled = platform access
-        return v
-    em = (email or "").lower()
-    env_admins = {e.strip().lower() for e in os.environ.get("SF_ADMIN_EMAILS", "").split(",") if e.strip()}
-    if em and em in env_admins:
-        return v
-    u = users.get_user(em)
-    if u and u.get("tenexity") in (1, True):
-        return v
-    raise HTTPException(status_code=403, detail="staff only")
+        return True
+    u = users.get_user((email or "").lower())
+    return bool(role == "admin" and u and u.get("tenexity") in (1, True))
+
+
+def require_staff(v: tuple = Depends(require_authed)) -> tuple:
+    """Tenexity OS API gate (§3): platform staff ONLY — cross-tenant data. See `_staff_session`."""
+    if not _staff_session(v):
+        raise HTTPException(status_code=403, detail="staff only")
+    return v
 
 
 # ── Pydantic request bodies (extra keys ignored — mirror the dicts the old server read) ───────
@@ -616,12 +620,16 @@ def root(v: tuple = Depends(viewer)):
 @app.get("/admin", response_class=HTMLResponse)
 @app.get("/admin.html", response_class=HTMLResponse)
 def admin_portal(v: tuple = Depends(viewer)):
-    # The Tenexity OS operator portal is a separate SPA entry (console/web/admin.html →
-    # src/admin/main.tsx), built alongside index.html. Only available in React mode (the
-    # legacy single-file console has no admin entry). Like root(), the SPA gates its own
-    # access; the service token / session resolve the full-admin identity it needs.
+    # The Tenexity OS operator portal (separate SPA entry, React mode only) exposes CROSS-TENANT
+    # data, so the PAGE is hard-gated server-side (not just the /api/admin/* data): an unauthenticated
+    # caller is sent to sign in; a signed-in non-staff user (incl. a customer org-admin) gets 403.
+    # Only platform staff (service token, or a human session role==admin AND tenexity==true) get it.
     if not _react_enabled():
         raise HTTPException(status_code=404, detail="not found")
+    if not v[2]:                                   # no session → bounce to sign-in
+        return RedirectResponse("/", status_code=303)
+    if not _staff_session(v):                      # signed in but not platform staff
+        raise HTTPException(status_code=403, detail="forbidden")
     return HTMLResponse(_admin_html())
 
 
