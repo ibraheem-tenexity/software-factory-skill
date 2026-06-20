@@ -152,6 +152,15 @@ export const api = {
   patchBilling: (body: { plan?: string; monthly_budget_cap?: number }) => send<OrgUsage>("/api/org/billing", "PATCH", body),
   createRun: (body: { description: string; project_name: string }) =>
     send<{ run_id: string }>("/api/runs", "POST", body),
+  // ── Onboarding draft model (docs/plans/concierge-onboarding-api.md) ──
+  createDraft: (body?: { project_name?: string }) =>
+    send<{ run_id: string }>("/api/drafts", "POST", body || {}),
+  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[] }) =>
+    send<{ name: string; goal: string; scope: string[]; description: string; brief: Record<string, string>; coverage: Record<string, boolean> }>(`/api/runs/${id}/draft`, "PATCH", body),
+  attach: (id: string, files: { name: string; content_b64: string }[]) =>
+    send<{ attached: string[] }>(`/api/runs/${id}/attach`, "POST", { files }),
+  promote: (id: string, body?: { description?: string; target?: string }) =>
+    send<{ run_id: string; status: string }>(`/api/runs/${id}/promote`, "POST", body || {}),
 };
 
 export const BRIEF_SECTIONS: { key: string; label: string }[] = [
