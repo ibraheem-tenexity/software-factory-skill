@@ -1361,6 +1361,8 @@ class Console:
         names = local + [pid for pid in created if pid not in set(local)]
         for name in names:
             st = self._load_state(name)
+            if getattr(st, "archived", False):
+                continue   # soft-deleted — hidden from every listing
             if owner is not None and (st.owner or "").lower() != owner:
                 continue   # member view: skip runs they don't own (unowned '' never matches)
             # A budget-stopped run is NOT active: surfacing it with a live/green status misled
@@ -1395,9 +1397,36 @@ class Console:
                 "owner": st.owner,
                 "agents": roles[:5],
                 "updated": updated,
+                "runtime": st.runtime,
+                "is_demo": bool(getattr(st, "is_demo", False)),
             })
         runs.sort(key=lambda r: r["updated"], reverse=True)
         return runs
+
+    def set_demo(self, project_id: str, is_demo: bool) -> bool:
+        """Tenexity OS REAL/DEMO toggle (§3.3). Returns the new flag."""
+        state = self._load_state(project_id)
+        state.is_demo = bool(is_demo)
+        state.save()
+        return state.is_demo
+
+    def set_archived(self, project_id: str, archived: bool) -> bool:
+        """Soft-delete / restore a project (DELETE /api/projects/{id}). Archived projects vanish from lists."""
+        state = self._load_state(project_id)
+        state.archived = bool(archived)
+        state.save()
+        return state.archived
+
+    def rename_project(self, project_id: str, name: str | None = None,
+                       description: str | None = None) -> dict:
+        """Update a project's display name / description in place (post-promotion edit)."""
+        state = self._load_state(project_id)
+        if name is not None:
+            state.name = name
+        if description is not None:
+            state.description = description
+        state.save()
+        return {"project_id": project_id, "name": state.name, "description": state.description}
 
     def events(self, project_id: str) -> list:
         """Recent run activity, projected from project store for the live activity feed. Shaped like the

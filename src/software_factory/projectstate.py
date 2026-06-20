@@ -46,7 +46,7 @@ _PERSISTED = {
     "planning_model", "impl_model",
     "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
     "budget_ceiling", "held", "owner",
-    "brief", "interview_coverage", "scope",
+    "brief", "interview_coverage", "scope", "is_demo", "archived",
 }
 
 
@@ -87,6 +87,12 @@ class ProjectState:
     # the structured backing for the project description: description = compose(brief.goals, scope),
     # recomposed idempotently whenever goal or scope changes via Console.set_draft_project.
     scope: list = field(default_factory=list)
+
+    # Tenexity OS REAL/DEMO toggle (§3.3). False = real customer project; True = demo/internal.
+    is_demo: bool = False
+
+    # Soft-delete: archived projects are hidden from every listing (DELETE /api/runs/{id}).
+    archived: bool = False
     _store: Optional[Store] = field(default=None, repr=False, compare=False)
 
     @classmethod

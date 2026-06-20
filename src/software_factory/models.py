@@ -147,6 +147,7 @@ users = Table(
     Column("designation", Text),
     Column("role_description", Text),
     Column("tenexity", Integer),
+    Column("status", Text, nullable=False, server_default="active"),  # 'active' | 'invited' (§3.6)
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
     Column("created_by", Text),
 )
@@ -176,8 +177,46 @@ blob_uses = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
 )
 
+# Editable agent system prompts (Tenexity OS §3.4). One row per agent callsign; the live pipeline
+# does NOT yet read these (operator-editable + versioned here; wiring into agents is a follow-up).
+agent_prompts = Table(
+    "agent_prompts", metadata,
+    Column("callsign", Text, primary_key=True),     # e.g. "ATLAS"
+    Column("prompt", Text, nullable=False),
+    Column("version", Integer, nullable=False, server_default="1"),
+    Column("updated_by", Text),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
+)
+
+# Tools / MCP registry (Tenexity OS §3.5) — real datastore (seeded with the factory's tools), no
+# hardcoded response. `used` is derived (not stored).
+mcp_tools = Table(
+    "mcp_tools", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("name", Text, nullable=False),
+    Column("type", Text),                       # MCP | API | native | HTTP
+    Column("provider", Text),
+    Column("scope", Text),
+    Column("status", Text, nullable=False, server_default="available"),  # connected | available
+    Column("auth", Text),
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+)
+
+# Agent registry (Tenexity OS §3.4 identity) — seeded from the canonical roster; live cost/success
+# are merged from `public.agents` at read time. Editable here so it's real datastore, not a constant.
+agent_registry = Table(
+    "agent_registry", metadata,
+    Column("callsign", Text, primary_key=True),
+    Column("name", Text, nullable=False),
+    Column("role", Text),
+    Column("model", Text),
+    Column("cost_tier", Integer, nullable=False, server_default="1"),
+    Column("descr", Text),
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+)
+
 # Groupings: the flat per-project tables, the global directory tables, and everything (Alembic + tests).
 PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
 FLAT_TABLES = PROJECTDB + (tickets, agents)
-GLOBAL_TABLES = (organizations, users, blobs, blob_uses)
+GLOBAL_TABLES = (organizations, users, blobs, blob_uses, agent_prompts, mcp_tools, agent_registry)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES

@@ -69,7 +69,8 @@ class UserStore:
             rows = {
                 r["email"].lower(): r for r in self._query(
                     "SELECT email, role, created_by, org_id, designation, role_description, "
-                    "tenexity, extract(epoch from created_at) AS created_at FROM public.users")
+                    "tenexity, status, extract(epoch from created_at) AS created_at "
+                    "FROM public.users")
             }
         except Exception:
             # directory briefly unreachable — serve the last snapshot (env admins still work
@@ -103,6 +104,21 @@ class UserStore:
             return
         self._exec("DELETE FROM public.users WHERE email = ?", (email,))
         self._cache = None
+
+    def set_status(self, email: str, status: str) -> None:
+        """Sign-in allow-list status (Tenexity OS §3.6): 'invited' on invite, 'active' on first login."""
+        email = (email or "").strip().lower()
+        if not email or status not in ("active", "invited"):
+            return
+        self._exec("UPDATE public.users SET status = ? WHERE email = ?", (status, email))
+        self._cache = None
+
+    def mark_active(self, email: str) -> None:
+        """Flip an invited user to active — called on first successful sign-in."""
+        email = (email or "").strip().lower()
+        row = self._all().get(email)
+        if row and row.get("status") == "invited":
+            self.set_status(email, "active")
 
     # -- user profile (org link + self-described role) ----------------------------------
     def get_user(self, email: str) -> dict | None:
@@ -166,6 +182,14 @@ class UserStore:
             return
         vals.append(org_id)
         self._exec(f"UPDATE public.organizations SET {', '.join(sets)} WHERE id=?", tuple(vals))
+
+    def delete_org(self, org_id: str) -> None:
+        """Delete an org and unlink its members (their rows survive, org_id cleared)."""
+        if not org_id:
+            return
+        self._exec("UPDATE public.users SET org_id = NULL WHERE org_id = ?", (org_id,))
+        self._exec("DELETE FROM public.organizations WHERE id = ?", (org_id,))
+        self._cache = None
 
     def org_for_user(self, email: str) -> dict | None:
         u = self.get_user(email)

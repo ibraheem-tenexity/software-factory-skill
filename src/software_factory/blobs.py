@@ -100,6 +100,24 @@ class BlobStore:
         finally:
             conn.close()
 
+    def update(self, blob_id: int, *, name: str | None = None, tag: str | None = None) -> None:
+        """Rename / retag a doc (only the provided fields)."""
+        sets, vals = [], []
+        for col, val in (("name", name), ("tag", tag)):
+            if val is not None:
+                sets.append(f"{col}=%s")
+                vals.append(val)
+        if not sets:
+            return
+        vals.append(blob_id)
+        conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
+        try:
+            with conn.transaction():
+                conn.cursor().execute(
+                    f"UPDATE public.blobs SET {', '.join(sets)} WHERE id=%s", tuple(vals))
+        finally:
+            conn.close()
+
     def delete(self, blob_id: int) -> None:
         conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
         try:

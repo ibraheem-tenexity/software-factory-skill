@@ -18,6 +18,7 @@ Run:  uvicorn console.app:app --host 0.0.0.0 --port 8765   (or python3 console/a
 import asyncio
 import base64
 import contextlib
+import datetime
 import json
 import os
 import sys
@@ -40,8 +41,11 @@ from software_factory import tracing  # noqa: E402
 from software_factory import storage  # noqa: E402
 from software_factory import billing  # noqa: E402
 from software_factory import project_view  # noqa: E402
+from software_factory import tenexity_os  # noqa: E402
 from software_factory.users import UserStore  # noqa: E402
 from software_factory.blobs import BlobStore  # noqa: E402
+from software_factory.agent_prompts import PromptStore  # noqa: E402
+from software_factory.registries import ToolStore, AgentRegistryStore  # noqa: E402
 
 PROJECTS_DIR = os.environ.get("SF_PROJECTS_DIR", os.path.join(os.path.dirname(__file__), "..", ".projects"))
 HERE = os.path.dirname(__file__)
@@ -54,6 +58,13 @@ auth.register_user_store(users.is_member, users.get_role)
 
 # Blob manifest — org knowledge-base docs + run-scoped uploaded materials (bytes live in storage).
 blobs = BlobStore()
+
+# Editable agent system prompts (Tenexity OS §3.4) — stored/served, not yet applied to live agents.
+prompts = PromptStore()
+
+# Tools/MCP registry + agent identity registry (§3.4/§3.5) — real datastore (seeded), CRUD-able.
+tool_store = ToolStore()
+agent_store = AgentRegistryStore()
 
 # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
 _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
@@ -384,6 +395,23 @@ def require_admin(v: tuple = Depends(require_authed)) -> tuple:
     return v
 
 
+def require_staff(v: tuple = Depends(require_authed)) -> tuple:
+    """Tenexity OS gate (§3): platform staff ONLY — cross-tenant data. A customer org-admin does
+    NOT qualify. Admits: service token / auth-disabled (viewer email=None, role=admin), an
+    SF_ADMIN_EMAILS operator, or a user with the `tenexity` flag set."""
+    email, role, _ = v
+    if email is None and role == "admin":          # service token or auth disabled = platform access
+        return v
+    em = (email or "").lower()
+    env_admins = {e.strip().lower() for e in os.environ.get("SF_ADMIN_EMAILS", "").split(",") if e.strip()}
+    if em and em in env_admins:
+        return v
+    u = users.get_user(em)
+    if u and u.get("tenexity") in (1, True):
+        return v
+    raise HTTPException(status_code=403, detail="staff only")
+
+
 # ── Pydantic request bodies (extra keys ignored — mirror the dicts the old server read) ───────
 class GoogleLoginIn(BaseModel):
     credential: str = ""
@@ -425,6 +453,11 @@ class OrgDocIn(BaseModel):
     data_b64: str = ""
 
 
+class OrgDocPatchIn(BaseModel):
+    name: str | None = None
+    tag: str | None = None
+
+
 class OrgDocUseIn(BaseModel):
     project_id: str = ""
 
@@ -463,6 +496,11 @@ class DepsIn(BaseModel):
 
 class ContinueIn(BaseModel):
     gate: str = ""
+
+
+class ProjectPatchIn(BaseModel):
+    name: str | None = None
+    description: str | None = None
 
 
 class Stage3In(BaseModel):
@@ -706,6 +744,15 @@ def org_doc_use(doc_id: int, body: OrgDocUseIn, v: tuple = Depends(require_authe
     return {"used_count": blobs.record_use(doc_id, body.project_id)}
 
 
+@app.patch("/api/org/docs/{doc_id}")
+def org_doc_update(doc_id: int, body: OrgDocPatchIn, v: tuple = Depends(require_admin)):
+    org = _caller_org(v)
+    _org_doc_or_404(doc_id, org["id"])
+    blobs.update(doc_id, name=body.name, tag=body.tag)
+    doc = next((d for d in blobs.list_org_docs(org["id"]) if d["id"] == doc_id), None)
+    return {"doc": doc}
+
+
 @app.delete("/api/org/docs/{doc_id}")
 def org_doc_delete(doc_id: int, v: tuple = Depends(require_admin)):
     org = _caller_org(v)
@@ -788,10 +835,293 @@ def google_login(body: GoogleLoginIn):
     token = auth.login(body.credential or "")
     if not token:
         raise HTTPException(status_code=403, detail="not authorized")
+    em = auth.session_email(token)               # flip an invited allow-list user → active (§3.6)
+    if em:
+        users.mark_active(em)
     resp = JSONResponse({"ok": True})
     resp.set_cookie(auth.COOKIE, token, max_age=auth.SESSION_TTL, path="/",
                     httponly=True, samesite="lax")
     return resp
+
+
+# ── Tenexity OS admin (PRD §3) — CROSS-TENANT, staff-gated ──────────────────────────────────────
+class DemoIn(BaseModel):
+    is_demo: bool = False
+
+
+class PromptIn(BaseModel):
+    prompt: str = ""
+
+
+class InviteIn(BaseModel):
+    email: str = ""
+    access_type: str = "org"     # "org" | "tenexity"
+    org_name: str | None = None
+
+
+class AccessPatchIn(BaseModel):
+    role: str | None = None
+    status: str | None = None
+
+
+class AgentIn(BaseModel):
+    callsign: str = ""
+    name: str = ""
+    role: str | None = None
+    model: str | None = None
+    cost_tier: int = 1
+    descr: str | None = None
+
+
+class AgentPatchIn(BaseModel):
+    name: str | None = None
+    role: str | None = None
+    model: str | None = None
+    cost_tier: int | None = None
+    descr: str | None = None
+
+
+class ToolIn(BaseModel):
+    name: str = ""
+    type: str | None = None
+    provider: str | None = None
+    scope: str | None = None
+    auth: str | None = None
+    status: str = "available"
+
+
+class ToolPatchIn(BaseModel):
+    name: str | None = None
+    type: str | None = None
+    provider: str | None = None
+    scope: str | None = None
+    auth: str | None = None
+    status: str | None = None
+
+
+class ClientIn(BaseModel):
+    name: str = ""
+    industry: str | None = None
+    website: str | None = None
+
+
+class ClientPatchIn(BaseModel):
+    name: str | None = None
+    industry: str | None = None
+    headcount: str | None = None
+    revenue: str | None = None
+    location: str | None = None
+    website: str | None = None
+    plan: str | None = None
+    monthly_budget_cap: float | None = None
+
+
+def _midnight_epoch() -> float:
+    now = datetime.datetime.now()
+    return now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+
+def _admin_context():
+    """Shared cross-tenant reads: all projects, all orgs, members-by-org, owner→org-name map."""
+    runs = console.list_projects(owner=None)
+    orgs = users.list_orgs()
+    members_by_org = {o["id"]: users.list_org_members(o["id"]) for o in orgs}
+    o2o = tenexity_os.owner_to_org(orgs, members_by_org)
+    return runs, orgs, members_by_org, o2o
+
+
+@app.get("/api/admin/overview")
+def admin_overview(v: tuple = Depends(require_staff)):
+    runs, orgs, _members, o2o = _admin_context()
+    rollups = tenexity_os.agent_rollups()
+    roster = tenexity_os.agent_roster(agent_store.all(), rollups, prompts.all())
+    return tenexity_os.overview(orgs, runs, rollups, tenexity_os.agents_active_count(),
+                                tenexity_os.today_burn(_midnight_epoch()), roster, o2o)
+
+
+@app.get("/api/admin/clients")
+def admin_clients(v: tuple = Depends(require_staff)):
+    runs, orgs, members_by_org, _o2o = _admin_context()
+    return {"clients": tenexity_os.client_rows(orgs, runs, members_by_org,
+                                               tenexity_os.open_tickets_by_project())}
+
+
+@app.get("/api/admin/projects")
+def admin_projects(mode: str = "all", v: tuple = Depends(require_staff)):
+    runs, _orgs, _members, o2o = _admin_context()
+    return {"projects": tenexity_os.project_rows(runs, o2o, tenexity_os.ticket_counts_by_project(),
+                                                 mode=mode)}
+
+
+@app.patch("/api/admin/projects/{pid}")
+def admin_set_demo(pid: str, body: DemoIn, v: tuple = Depends(require_staff)):
+    return {"project_id": pid, "is_demo": console.set_demo(pid, body.is_demo)}
+
+
+# Agents (identity from agent_registry table; cost/success merged live; prompt editable) ----------
+@app.get("/api/admin/agents")
+def admin_agents(v: tuple = Depends(require_staff)):
+    return {"agents": tenexity_os.agent_roster(agent_store.all(), tenexity_os.agent_rollups(),
+                                               prompts.all())}
+
+
+@app.get("/api/admin/agents/{callsign}")
+def admin_agent(callsign: str, v: tuple = Depends(require_staff)):
+    cs = callsign.upper()
+    card = next((a for a in tenexity_os.agent_roster(agent_store.all(), tenexity_os.agent_rollups(),
+                                                     prompts.all()) if a["callsign"] == cs), None)
+    if not card:
+        raise HTTPException(status_code=404, detail="unknown agent")
+    p = prompts.get(cs)
+    return {**card, "prompt": p["prompt"] if p else "",
+            "prompt_applied": False,   # saved here but NOT yet wired into the live pipeline
+            "tools": [t for t in tool_store.all() if t["status"] == "connected"],
+            "activity": []}
+
+
+@app.post("/api/admin/agents")
+def admin_agent_create(body: AgentIn, v: tuple = Depends(require_staff)):
+    cs = (body.callsign or "").strip().upper()
+    if not cs or not (body.name or "").strip():
+        raise HTTPException(status_code=400, detail="callsign + name required")
+    if agent_store.get(cs):
+        raise HTTPException(status_code=409, detail="callsign exists")
+    return {"agent": agent_store.create(cs, body.name, role=body.role, model=body.model,
+                                        cost_tier=body.cost_tier, descr=body.descr)}
+
+
+@app.patch("/api/admin/agents/{callsign}")
+def admin_agent_update(callsign: str, body: AgentPatchIn, v: tuple = Depends(require_staff)):
+    cs = callsign.upper()
+    if not agent_store.get(cs):
+        raise HTTPException(status_code=404, detail="unknown agent")
+    fields = {k: val for k, val in body.model_dump().items() if val is not None}
+    return {"agent": agent_store.update(cs, fields)}
+
+
+@app.delete("/api/admin/agents/{callsign}")
+def admin_agent_delete(callsign: str, v: tuple = Depends(require_staff)):
+    cs = callsign.upper()
+    if not agent_store.get(cs):
+        raise HTTPException(status_code=404, detail="unknown agent")
+    agent_store.delete(cs)
+    return {"ok": True}
+
+
+@app.patch("/api/admin/agents/{callsign}/prompt")
+def admin_set_prompt(callsign: str, body: PromptIn, v: tuple = Depends(require_staff)):
+    row = prompts.set(callsign.upper(), body.prompt or "", by=v[0] or "")
+    return {"callsign": row["callsign"], "prompt": row["prompt"], "version": row["version"],
+            "updated_by": row["updated_by"], "updated_at": row["updated_at"],
+            "applied": False}   # honest: stored, not yet applied to live agents
+
+
+# Tools / MCP registry (real datastore) -----------------------------------------------------------
+@app.get("/api/admin/tools")
+def admin_tools(v: tuple = Depends(require_staff)):
+    return {"tools": [{**t, "used": None} for t in tool_store.all()]}
+
+
+@app.post("/api/admin/tools")
+def admin_tool_create(body: ToolIn, v: tuple = Depends(require_staff)):
+    if not (body.name or "").strip():
+        raise HTTPException(status_code=400, detail="name required")
+    return {"tool": tool_store.create(body.name, type=body.type, provider=body.provider,
+                                      scope=body.scope, auth=body.auth, status=body.status)}
+
+
+@app.patch("/api/admin/tools/{tool_id}")
+def admin_tool_update(tool_id: int, body: ToolPatchIn, v: tuple = Depends(require_staff)):
+    fields = {k: val for k, val in body.model_dump().items() if val is not None}
+    tool = tool_store.update(tool_id, fields)
+    if not tool:
+        raise HTTPException(status_code=404, detail="unknown tool")
+    return {"tool": tool}
+
+
+@app.delete("/api/admin/tools/{tool_id}")
+def admin_tool_delete(tool_id: int, v: tuple = Depends(require_staff)):
+    tool_store.delete(tool_id)
+    return {"ok": True}
+
+
+# Clients / tenants (admin-scoped org CRUD) -------------------------------------------------------
+@app.post("/api/admin/clients")
+def admin_client_create(body: ClientIn, v: tuple = Depends(require_staff)):
+    if not (body.name or "").strip():
+        raise HTTPException(status_code=400, detail="name required")
+    oid = users.create_org(body.name, industry=body.industry, website=body.website, by=v[0] or "")
+    return {"client": users.get_org(oid)}
+
+
+@app.patch("/api/admin/clients/{org_id}")
+def admin_client_update(org_id: str, body: ClientPatchIn, v: tuple = Depends(require_staff)):
+    if not users.get_org(org_id):
+        raise HTTPException(status_code=404, detail="unknown org")
+    fields = {k: val for k, val in body.model_dump().items() if val is not None}
+    users.update_org(org_id, **fields)
+    return {"client": users.get_org(org_id)}
+
+
+@app.delete("/api/admin/clients/{org_id}")
+def admin_client_delete(org_id: str, v: tuple = Depends(require_staff)):
+    if not users.get_org(org_id):
+        raise HTTPException(status_code=404, detail="unknown org")
+    users.delete_org(org_id)
+    return {"ok": True}
+
+
+# Invites / allow-list ----------------------------------------------------------------------------
+def _access_rows():
+    out = []
+    for u in users.list_users():
+        staff = u.get("tenexity") in (1, True)
+        org = users.get_org(u["org_id"]) if u.get("org_id") else None
+        out.append({"email": u["email"], "type": "Tenexity" if staff else "New org",
+                    "org": "Tenexity" if staff else (org["name"] if org else None),
+                    "role": u["role"], "status": u.get("status") or "active"})
+    return {"users": out}
+
+
+@app.get("/api/admin/access")
+def admin_access(v: tuple = Depends(require_staff)):
+    return _access_rows()
+
+
+@app.post("/api/admin/access")
+def admin_invite(body: InviteIn, v: tuple = Depends(require_staff)):
+    email = (body.email or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="email required")
+    by = v[0] or ""
+    if body.access_type == "tenexity":
+        users.upsert(email, "member", by=by)
+        users.set_profile(email, tenexity=True)
+    else:
+        if not (body.org_name or "").strip():
+            raise HTTPException(status_code=400, detail="org_name required for a new org")
+        oid = users.create_org(body.org_name, by=by)
+        users.invite_member(email, oid, role="admin", by=by)
+    users.set_status(email, "invited")
+    return _access_rows()
+
+
+@app.patch("/api/admin/access/{email}")
+def admin_access_update(email: str, body: AccessPatchIn, v: tuple = Depends(require_staff)):
+    em = (email or "").strip().lower()
+    if not users.get_user(em):
+        raise HTTPException(status_code=404, detail="unknown user")
+    if body.role in ("admin", "member"):
+        users.upsert(em, body.role, by=v[0] or "")
+    if body.status in ("active", "invited"):
+        users.set_status(em, body.status)
+    return _access_rows()
+
+
+@app.delete("/api/admin/access/{email}")
+def admin_access_revoke(email: str, v: tuple = Depends(require_staff)):
+    users.remove((email or "").strip().lower())
+    return _access_rows()
 
 
 # ── Runs: list + create ───────────────────────────────────────────────────────────────────────
@@ -946,6 +1276,36 @@ def project_overview(pid: str, v: tuple = Depends(authorize_project)):
 @app.get("/api/projects/{pid}/documents")
 def project_documents(pid: str, v: tuple = Depends(authorize_project)):
     return project_view.documents(blobs.list_for("project", pid), console.artifacts(pid))
+
+
+@app.post("/api/projects/{pid}/materials")
+def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authorize_project)):
+    """Upload a project-scoped material at ANY phase (attach is draft-only). Shows up in
+    GET /api/projects/{pid}/documents.uploaded."""
+    if not (body.name or "").strip():
+        raise HTTPException(status_code=400, detail="name required")
+    try:
+        raw = base64.b64decode(body.data_b64 or "", validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="data_b64 must be valid base64")
+    key = f"materials/{body.name}"
+    storage.put(pid, key, raw)
+    blobs.record("project", pid, f"{pid}/{key}", name=body.name, tag=body.tag,
+                 kind=_doc_kind(body.name), content_type=body.content_type,
+                 size_bytes=len(raw), sha256=storage.sha256(raw))
+    return project_view.documents(blobs.list_for("project", pid), console.artifacts(pid))
+
+
+@app.patch("/api/projects/{pid}")
+def project_update(pid: str, body: ProjectPatchIn, v: tuple = Depends(authorize_project)):
+    """Rename / re-describe a promoted project in place (drafts use PATCH /api/projects/{pid}/draft)."""
+    return console.rename_project(pid, name=body.name, description=body.description)
+
+
+@app.delete("/api/projects/{pid}")
+def project_delete(pid: str, v: tuple = Depends(authorize_project)):
+    """Soft-delete (archive) a project — hidden from every listing; discards a draft."""
+    return {"project_id": pid, "archived": console.set_archived(pid, True)}
 
 
 # ── Run-scoped actions ──────────────────────────────────────────────────────────────────────
