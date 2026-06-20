@@ -68,6 +68,15 @@ export type DepsSubmitResponse = {
 export type RunEvent = { ts: number; type: string; payload: Record<string, any> };
 export type Artifact = { path: string; content?: string; error?: string };
 
+// Org-admin (§2.3) — org-scoped, per the locked contract in docs/plans/org-admin-api.md.
+export type Member = { email: string; role: string; designation?: string; you?: boolean };
+export type OrgDoc = { id: string; name: string; kind?: string; tag?: string; size_bytes?: number; content_type?: string; used_count?: number; updated?: number };
+export type OrgUsage = {
+  plan?: string; monthly_budget_cap?: number; spent?: number;
+  active_projects?: number; total_projects?: number;
+  by_project: { run_id: string; name: string; spent_usd: number }[];
+};
+
 // Public boot config the SPA reads to decide whether to gate on login (auth on) or open
 // straight to the console (auth off, dev/test). client_id feeds the Google sign-in button.
 export type AuthConfig = { enabled: boolean; client_id: string };
@@ -132,6 +141,15 @@ export const api = {
   getOrg: () => get<{ org: Org | null }>("/api/org"),
   createOrg: (body: OrgInput) => send<{ org: Org }>("/api/org", "POST", body),
   patchOrg: (body: Partial<Org>) => send<{ org: Org }>("/api/org", "PATCH", body),
+  // Org-admin §2.3 — org-scoped (resolve org from session). Backend in progress (tjyb5gmy);
+  // callers degrade to empty/null until live. NOT /api/users (that's the global cross-org dir).
+  orgMembers: () => get<{ members: Member[] }>("/api/org/members"),
+  inviteMember: (body: { email: string; role: string; designation?: string }) => send<{ members?: Member[] }>("/api/org/members", "POST", body),
+  updateMember: (email: string, body: { role?: string; designation?: string }) => send<{ members?: Member[] }>(`/api/org/members/${encodeURIComponent(email)}`, "PATCH", body),
+  removeMember: (email: string) => send<{ ok?: boolean }>(`/api/org/members/${encodeURIComponent(email)}`, "DELETE"),
+  orgDocs: () => get<{ docs: OrgDoc[] }>("/api/org/docs"),
+  orgUsage: () => get<OrgUsage>("/api/org/usage"),
+  patchBilling: (body: { plan?: string; monthly_budget_cap?: number }) => send<OrgUsage>("/api/org/billing", "PATCH", body),
   createRun: (body: { description: string; project_name: string }) =>
     send<{ run_id: string }>("/api/runs", "POST", body),
 };
