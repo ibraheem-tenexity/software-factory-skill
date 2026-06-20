@@ -65,6 +65,12 @@ const fileToB64 = (file: File): Promise<string> => new Promise((resolve) => {
   r.onerror = () => resolve("");
   r.readAsDataURL(file);
 });
+function fmtBytes(n: number): string {
+  if (!n) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export function OnboardingScreen({ onComplete }: { onComplete: (projectId: string) => void }) {
   const [mode, setMode] = useState<"loading" | "fresh" | "returning">("loading");
@@ -87,6 +93,8 @@ export function OnboardingScreen({ onComplete }: { onComplete: (projectId: strin
   // project answers (shared)
   const [p, setP] = useState<{ name: string; goal: string; scope: string[]; video: boolean; docs: boolean }>(
     { name: "", goal: "", scope: [], video: false, docs: false });
+  // Real uploaded filenames per material slot (drives the Dropzone list — no dummy data).
+  const [mats, setMats] = useState<{ video: { name: string; size?: string }[]; docs: { name: string; size?: string }[] }>({ video: [], docs: [] });
   const setProj = (k: string, v: any) => setP((x) => ({ ...x, [k]: v }));
 
   // concierge rail chat (shares draftId)
@@ -168,10 +176,14 @@ export function OnboardingScreen({ onComplete }: { onComplete: (projectId: strin
 
   const attachFiles = async (list: FileList | null, kind: "video" | "docs") => {
     if (!draftId || !list || !list.length) return;
+    const picked = Array.from(list);
     try {
-      const files = await Promise.all(Array.from(list).map(async (file) => ({ name: file.name, content_b64: await fileToB64(file) })));
+      const files = await Promise.all(picked.map(async (file) => ({ name: file.name, content_b64: await fileToB64(file) })));
       await api.attach(draftId, files);
       setProj(kind, true);
+      // record the REAL filenames so the Dropzone lists what was actually uploaded (video = replace)
+      const added = picked.map((f) => ({ name: f.name, size: fmtBytes(f.size) }));
+      setMats((m) => ({ ...m, [kind]: kind === "video" ? added.slice(-1) : [...m[kind], ...added] }));
     } catch (e: any) { setError(`Couldn’t attach files: ${String(e?.message || e)}`); }
   };
 
@@ -287,8 +299,8 @@ export function OnboardingScreen({ onComplete }: { onComplete: (projectId: strin
                   </Card>
                   <Card cat="Your first project" title="Project materials" desc="A walkthrough recording is the highest-signal input you can give.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                      <Field label="Walkthrough video" optional><Dropzone kind="video" filled={p.video} onToggle={() => videoInputRef.current?.click()} /></Field>
-                      <Field label="Supporting documents" optional><Dropzone kind="docs" compact filled={p.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
+                      <Field label="Walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} /></Field>
+                      <Field label="Supporting documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
                     </div>
                   </Card>
                 </>
@@ -358,8 +370,8 @@ export function OnboardingScreen({ onComplete }: { onComplete: (projectId: strin
                   </Card>
                   <Card cat="This project" title="Project materials" desc="We already have your line card & pricing on file — only add what's specific to this project.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                      <Field label="Project walkthrough video" optional><Dropzone kind="video" filled={p.video} onToggle={() => videoInputRef.current?.click()} /></Field>
-                      <Field label="Extra documents" optional><Dropzone kind="docs" compact filled={p.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
+                      <Field label="Project walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} /></Field>
+                      <Field label="Extra documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
                     </div>
                   </Card>
                 </>

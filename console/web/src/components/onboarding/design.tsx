@@ -214,37 +214,37 @@ export function IndustryTile({ item, selected, onClick, compact }:
   );
 }
 
-export function Dropzone({ kind, filled, onToggle, compact }:
-  { kind: "video" | "docs"; filled?: boolean; onToggle?: () => void; compact?: boolean }) {
+export function Dropzone({ kind, filled, onToggle, compact, files = [] }:
+  { kind: "video" | "docs"; filled?: boolean; onToggle?: () => void; compact?: boolean;
+    files?: { name: string; size?: string }[] }) {
   const isVideo = kind === "video";
-  const rows: [string, string, string][] = isVideo
-    ? [["process-walkthrough.mp4", "86.4 MB", "video"]]
-    : [["standard-pricing.xlsx", "142 KB", "csv"], ["rfq-sop.pdf", "320 KB", "pdf"], ["line-card.pdf", "1.1 MB", "pdf"]];
+  // The list reflects what the user ACTUALLY uploaded (passed in by the caller) — no dummy data.
+  const has = files.length > 0 || !!filled;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <button onClick={onToggle} style={{ width: "100%", boxSizing: "border-box", cursor: "pointer",
         display: "flex", alignItems: "center", justifyContent: "center", gap: 12, textAlign: "center",
-        border: `2px dashed ${filled ? T.brand : T.borderDefault}`, borderRadius: T.rLg,
-        background: filled ? T.brandSoft : T.sunken, padding: compact ? "10px 14px" : "22px 16px", transition: "all .14s" }}>
-        <Icon name={isVideo ? "video" : "upload"} size={20} color={filled ? T.brand : T.tertiary} />
+        border: `2px dashed ${has ? T.brand : T.borderDefault}`, borderRadius: T.rLg,
+        background: has ? T.brandSoft : T.sunken, padding: compact ? "10px 14px" : "22px 16px", transition: "all .14s" }}>
+        <Icon name={isVideo ? "video" : "upload"} size={20} color={has ? T.brand : T.tertiary} />
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
           <span style={{ font: `500 14px/1.3 ${T.sans}`, color: T.fg }}>
-            {filled ? (isVideo ? "process-walkthrough.mp4" : "Add more files") : (isVideo ? "Record or drop a process walkthrough" : "Drag files here or click to browse")}
+            {has ? (isVideo ? "Replace recording" : "Add more files") : (isVideo ? "Record or drop a process walkthrough" : "Drag files here or click to browse")}
           </span>
           <span style={{ marginTop: 2, font: `400 12px/1.3 ${T.sans}`, color: T.tertiary }}>
             {isVideo ? "screen recording · mp4, mov — up to 500 MB" : "SOPs, price lists, specs — pdf, xlsx, docx up to 25 MB"}
           </span>
         </div>
       </button>
-      {filled && (
+      {files.length > 0 && (
         <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised, overflow: "hidden" }}>
-          {rows.map((f, i, arr) => (
-            <div key={f[0]} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 12px", borderBottom: i < arr.length - 1 ? `1px solid ${T.borderSubtle}` : "none" }}>
+          {files.map((f, i, arr) => (
+            <div key={f.name + i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 12px", borderBottom: i < arr.length - 1 ? `1px solid ${T.borderSubtle}` : "none" }}>
               <span style={{ display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: 6, border: `1px solid ${T.borderSubtle}`, background: T.sunken }}>
-                <Icon name={f[2] === "video" ? "video" : "file"} size={14} color={T.tertiary} />
+                <Icon name={isVideo ? "video" : "file"} size={14} color={T.tertiary} />
               </span>
-              <span style={{ flex: 1, font: `500 13px/1.2 ${T.sans}`, color: T.fg }}>{f[0]}</span>
-              <span style={{ font: `400 12px/1 ${T.mono}`, color: T.tertiary }}>{f[1]}</span>
+              <span style={{ flex: 1, minWidth: 0, font: `500 13px/1.2 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</span>
+              {f.size && <span style={{ font: `400 12px/1 ${T.mono}`, color: T.tertiary }}>{f.size}</span>}
               <span style={{ display: "inline-flex", alignItems: "center", gap: 4, font: `400 12px/1 ${T.sans}`, color: T.success }}>
                 <Icon name="check" size={13} color={T.success} /> Uploaded
               </span>
@@ -331,7 +331,7 @@ export function Message({ who, persona, text, anim, badge }:
       {isAgent ? (
         <span style={{ marginTop: 1, width: 28, height: 28, flexShrink: 0, borderRadius: "50%", display: "grid", placeItems: "center",
           background: T.brandSoft, color: T.brand, boxShadow: `inset 0 0 0 1px ${T.brand}33` }}><Sparkle size={13} color={T.brand} /></span>
-      ) : <Avatar name="Ibraheem K" size={28} />}
+      ) : <Avatar name="You" size={28} />}
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6,
         border: `1px solid ${isAgent ? T.brand + "33" : T.borderSubtle}`, background: isAgent ? T.brandSoft + "4d" : T.raised,
         borderRadius: T.rLg, padding: "10px 13px" }}>

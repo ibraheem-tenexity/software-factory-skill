@@ -4,7 +4,7 @@
 // /api/org (GET/PATCH); Team via org-scoped /api/org/members; Knowledge base via /api/org/docs;
 // Usage & billing via /api/org/usage (+ PATCH /api/org/billing). Every section degrades to an empty
 // state until its backend lands, so the screen ships independently.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, Org, Member, OrgDoc, OrgUsage, Me } from "../api";
 import { T, Icon, Sparkle, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, Field, TextInput } from "./onboarding/design";
 
@@ -68,13 +68,32 @@ function MetricCard({ label, value, hint, accent }: { label: string; value: stri
   );
 }
 
-function FileTile({ d }: { d: OrgDoc }) {
+function FileTile({ d, onDelete, onSave }: { d: OrgDoc; onDelete?: () => void; onSave?: (name: string, tag: string) => void }) {
   const k = FILE_KIND[d.kind || "doc"] || FILE_KIND.doc;
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(d.name);
+  const [tag, setTag] = useState(d.tag || "");
+  if (editing) {
+    return (
+      <div style={{ background: T.raised, border: `1px solid ${T.brand}55`, borderRadius: T.rLg, padding: "13px 14px", display: "flex", flexDirection: "column", gap: 8, boxShadow: T.shadowXs }}>
+        <Field label="Name"><TextInput value={name} onChange={setName} size="sm" /></Field>
+        <Field label="Tag"><TextInput value={tag} onChange={setTag} size="sm" placeholder="e.g. Price book" /></Field>
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+          <Btn variant="ghost" size="sm" onClick={() => { setEditing(false); setName(d.name); setTag(d.tag || ""); }}>Cancel</Btn>
+          <Btn variant="primary" size="sm" onClick={() => { onSave?.(name.trim() || d.name, tag.trim()); setEditing(false); }}>Save</Btn>
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{ background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, padding: "13px 14px", display: "flex", flexDirection: "column", gap: 10, boxShadow: T.shadowXs }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{ font: `700 9px/1 ${T.mono}`, letterSpacing: "0.05em", color: k[2], background: k[1], padding: "4px 6px", borderRadius: 4 }}>{k[0]}</span>
-        {d.tag && <CategoryLabel style={{ fontSize: 9.5 }}>{d.tag}</CategoryLabel>}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {d.tag && <CategoryLabel style={{ fontSize: 9.5 }}>{d.tag}</CategoryLabel>}
+          {onSave && <button onClick={() => { setName(d.name); setTag(d.tag || ""); setEditing(true); }} title="Rename / retag" style={{ font: `500 11px/1 ${T.sans}`, color: T.brandDeep, border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>Edit</button>}
+          {onDelete && <button onClick={onDelete} title="Delete document" style={{ display: "grid", placeItems: "center", width: 22, height: 22, borderRadius: 5, border: "none", background: "transparent", cursor: "pointer", color: T.tertiary }}><Icon name="x" size={13} color={T.tertiary} /></button>}
+        </div>
       </div>
       <span style={{ font: `600 13px/1.3 ${T.sans}`, color: T.fg, wordBreak: "break-word" }}>{d.name}</span>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", font: `400 11px/1 ${T.mono}`, color: T.tertiary }}>
@@ -104,14 +123,54 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("member");
 
+  // billing edit ("Manage plan")
+  const [editPlan, setEditPlan] = useState(false);
+  const [planDraft, setPlanDraft] = useState<{ plan: string; cap: string }>({ plan: "", cap: "" });
+
+  const docsInputRef = useRef<HTMLInputElement | null>(null);
+
   const loadMembers = () => api.orgMembers().then((d) => setMembers(d.members || [])).catch(() => setMembers([]));
   const loadUsage = () => api.orgUsage().then(setUsage).catch(() => setUsage(null));
+  const loadDocs = () => api.orgDocs().then((d) => setDocs(d.docs || [])).catch(() => setDocs([]));
+
+  // KB: real upload (FileReader→base64→POST /api/org/docs) + delete.
+  const uploadDocs = async (list: FileList | null) => {
+    if (!list || !list.length) return;
+    setNotice("");
+    try {
+      for (const file of Array.from(list)) {
+        const data_b64 = await new Promise<string>((resolve) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result || "").split(",")[1] || "");
+          r.onerror = () => resolve("");
+          r.readAsDataURL(file);
+        });
+        await api.orgDocUpload({ name: file.name, content_type: file.type || undefined, data_b64 });
+      }
+      await loadDocs();
+    } catch { setNotice("Upload failed (admin only)."); }
+  };
+  const deleteDoc = async (docId: string) => {
+    try { await api.orgDocDelete(docId); await loadDocs(); }
+    catch { setNotice("Couldn’t delete document."); }
+  };
+  const renameDoc = async (docId: string, name: string, tag: string) => {
+    try { await api.orgDocPatch(docId, { name, tag }); await loadDocs(); }
+    catch { setNotice("Couldn’t update document."); }
+  };
+  const savePlan = async () => {
+    try {
+      const cap = parseFloat(planDraft.cap);
+      await api.patchBilling({ plan: planDraft.plan || undefined, monthly_budget_cap: isNaN(cap) ? undefined : cap });
+      setEditPlan(false); await loadUsage();
+    } catch { setNotice("Couldn’t update plan."); }
+  };
 
   useEffect(() => {
     api.getOrg().then((d) => setOrg(d.org)).catch(() => setOrg(null));
     api.me().then(setMe).catch(() => setMe(null));
     loadMembers();
-    api.orgDocs().then((d) => setDocs(d.docs || [])).catch(() => setDocs([])); // backend pending → empty
+    loadDocs();
     loadUsage();
   }, []);
 
@@ -247,11 +306,12 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
             {/* ── Knowledge base ── */}
             {sec === "knowledge" && (
               <>
+                <input ref={docsInputRef} type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.md,image/*" style={{ display: "none" }} onChange={(e) => { uploadDocs(e.target.files); e.target.value = ""; }} />
                 <SecHead title="Knowledge base" desc="Org-scoped documents the factory can draw on for any project."
-                  action={<Btn variant="primary" size="sm" onClick={() => setNotice("Document upload is coming soon.")}><Icon name="upload" size={14} color="#fff" /> Upload</Btn>} />
+                  action={<Btn variant="primary" size="sm" onClick={() => docsInputRef.current?.click()}><Icon name="upload" size={14} color="#fff" /> Upload</Btn>} />
                 {docs.length ? (
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-                    {docs.map((d) => <FileTile key={d.id} d={d} />)}
+                    {docs.map((d) => <FileTile key={d.id} d={d} onDelete={() => deleteDoc(d.id)} onSave={(name, tag) => renameDoc(d.id, name, tag)} />)}
                   </div>
                 ) : (
                   <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "30px", textAlign: "center", font: `400 13px/1.5 ${T.sans}`, color: T.tertiary }}>
@@ -334,7 +394,16 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
             {/* ── Usage & billing ── */}
             {sec === "billing" && (
               <>
-                <SecHead title="Usage & billing" desc="Spend across every project in this organization." />
+                <SecHead title="Usage & billing" desc="Spend across every project in this organization."
+                  action={editPlan
+                    ? <div style={{ display: "flex", gap: 8 }}><Btn variant="ghost" size="sm" onClick={() => setEditPlan(false)}>Cancel</Btn><Btn variant="primary" size="sm" onClick={savePlan}>Save</Btn></div>
+                    : <Btn variant="secondary" size="sm" onClick={() => { setPlanDraft({ plan: usage?.plan || "", cap: usage?.monthly_budget_cap != null ? String(usage.monthly_budget_cap) : "" }); setEditPlan(true); }}>Manage plan</Btn>} />
+                {editPlan && (
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 16, padding: "14px 16px", border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised }}>
+                    <Field label="Plan" style={{ flex: 1 }}><TextInput value={planDraft.plan} onChange={(v) => setPlanDraft({ ...planDraft, plan: v })} placeholder="e.g. Team" /></Field>
+                    <Field label="Monthly budget cap ($)" style={{ flex: 1 }}><TextInput value={planDraft.cap} onChange={(v) => setPlanDraft({ ...planDraft, cap: v })} placeholder="120" /></Field>
+                  </div>
+                )}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
                   <MetricCard label="Plan" value={usage?.plan || "—"} hint={usage?.monthly_budget_cap != null ? `${money(usage.monthly_budget_cap)} / mo cap` : "billing not yet configured"} accent />
                   <MetricCard label="Spent this month" value={usage?.spent != null ? money(usage.spent) : "—"} hint={usage?.monthly_budget_cap ? `${Math.round(((usage.spent || 0) / usage.monthly_budget_cap) * 100)}% of cap` : ""} />

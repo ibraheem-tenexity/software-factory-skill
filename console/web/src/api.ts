@@ -70,7 +70,7 @@ export type Artifact = { path: string; content?: string; error?: string };
 
 // Project view (§2.5) — Overview rollup + Documents, per tjyb5gmy's LOCKED shapes (PR #13).
 // Callers degrade to empty until live.
-export type ProjectMaterial = { name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number };
+export type ProjectMaterial = { id?: string; name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number; scope?: "project" | "org" };
 export type ProjectArtifact = { title: string; path?: string; kind?: string; agent?: string; ts?: number };
 export type ProjectOverview = {
   brief?: { name?: string; description?: string; goal?: string; scope?: string[]; owner?: string; phase?: string; stage?: number; created?: number | string };
@@ -181,6 +181,20 @@ export const api = {
     send<{ attached: string[] }>(`/api/projects/${id}/attach`, "POST", { files }),
   promote: (id: string, body?: { description?: string; target?: string }) =>
     send<{ project_id: string; status: string }>(`/api/projects/${id}/promote`, "POST", body || {}),
+  // ── CRUD (no-dummy/full-CRUD pass, docs/plans/crud-contract.md). NEW endpoints (patchProject/
+  // deleteProject/uploadMaterial) graceful-degrade until tjyb5gmy ships them; KB doc ops are LIVE. ──
+  patchProject: (id: string, body: { name?: string; description?: string; scope?: string[] }) =>
+    send<ProjectSummary & Record<string, any>>(`/api/projects/${id}`, "PATCH", body),
+  setMaterialScope: (id: string, materialId: string, scope: "project" | "org") =>
+    send<ProjectDocuments>(`/api/projects/${id}/materials/${materialId}`, "PATCH", { scope }),
+  deleteProject: (id: string) => send<{ ok?: boolean }>(`/api/projects/${id}`, "DELETE"),
+  uploadMaterial: (id: string, file: { name: string; tag?: string; content_type?: string; data_b64: string }) =>
+    send<{ ok?: boolean }>(`/api/projects/${id}/materials`, "POST", file),
+  orgDocUpload: (body: { name: string; tag?: string; content_type?: string; data_b64: string }) =>
+    send<{ doc?: OrgDoc }>("/api/org/docs", "POST", body),
+  orgDocDelete: (docId: string) => send<{ ok?: boolean }>(`/api/org/docs/${docId}`, "DELETE"),
+  orgDocPatch: (docId: string, body: { name?: string; tag?: string }) =>
+    send<{ doc?: OrgDoc }>(`/api/org/docs/${docId}`, "PATCH", body),
 };
 
 export const BRIEF_SECTIONS: { key: string; label: string }[] = [

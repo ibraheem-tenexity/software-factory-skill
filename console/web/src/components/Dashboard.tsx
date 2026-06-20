@@ -2,9 +2,9 @@
 // design's dashboard.jsx, reusing the Tenexity primitives from onboarding/design.tsx and driven
 // by REAL run-registry data (/api/projects, owner-scoped) + /api/me + /api/org. Fields the prototype
 // mocked are derived from real data where it exists and degrade honestly where it doesn't.
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api, ProjectSummary, Org, Me } from "../api";
-import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, Wordmark } from "./onboarding/design";
+import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, TextInput } from "./onboarding/design";
 
 type StatusKey = "deployed" | "needs-input" | "draft" | "researching" | "building";
 type Tone = "success" | "warning" | "neutral" | "brand" | "info";
@@ -68,21 +68,40 @@ function AgentDots({ agents }: { agents: string[] }) {
   );
 }
 
-function ProjectRow({ r, onClick, first }: { r: ProjectSummary; onClick: () => void; first: boolean }) {
+const rowMenuItem: React.CSSProperties = { display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "none", border: "none", cursor: "pointer", font: `500 12.5px/1 ${"'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif"}`, color: T.fg };
+
+function ProjectRow({ r, onClick, first, onRename, onArchive }:
+  { r: ProjectSummary; onClick: () => void; first: boolean; onRename: (id: string, name: string) => void; onArchive: (id: string) => void }) {
   const st = statusOf(r);
   const live = st.key === "building" || st.key === "researching";
   const pct = pctOf(r, st.key);
+  const [menu, setMenu] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(r.name || "");
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
   return (
-    <button onClick={onClick} style={{ width: "100%", textAlign: "left", cursor: "pointer", background: T.raised, border: "none",
-      borderTop: first ? "none" : `1px solid ${T.borderSubtle}`, padding: "16px 18px", display: "grid",
-      gridTemplateColumns: "minmax(0,1fr) 132px 150px 96px 24px", alignItems: "center", gap: 16, transition: "background .12s" }}
+    <div role="button" tabIndex={0} onClick={renaming ? undefined : onClick}
+      onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !renaming) onClick(); }}
+      style={{ width: "100%", textAlign: "left", cursor: renaming ? "default" : "pointer", background: T.raised,
+        borderTop: first ? "none" : `1px solid ${T.borderSubtle}`, padding: "16px 18px", display: "grid",
+        gridTemplateColumns: "minmax(0,1fr) 132px 150px 96px 28px", alignItems: "center", gap: 16, transition: "background .12s" }}
       onMouseEnter={(e) => (e.currentTarget.style.background = T.sunken)} onMouseLeave={(e) => (e.currentTarget.style.background = T.raised)}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-          <span style={{ font: `600 14.5px/1.2 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name || r.project_id}</span>
-          <StatusPill tone={st.tone} dot={live}>{st.label}</StatusPill>
-        </div>
-        <p style={{ margin: "5px 0 0", font: `400 12.5px/1.4 ${T.sans}`, color: T.secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.description || "—"}</p>
+        {renaming ? (
+          <div onClick={stop} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <TextInput value={name} onChange={setName} size="sm" />
+            <Btn size="sm" variant="primary" onClick={() => { onRename(r.project_id, name.trim()); setRenaming(false); }}>Save</Btn>
+            <Btn size="sm" variant="ghost" onClick={() => { setRenaming(false); setName(r.name || ""); }}>Cancel</Btn>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+              <span style={{ font: `600 14.5px/1.2 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name || r.project_id}</span>
+              <StatusPill tone={st.tone} dot={live}>{st.label}</StatusPill>
+            </div>
+            <p style={{ margin: "5px 0 0", font: `400 12.5px/1.4 ${T.sans}`, color: T.secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.description || "—"}</p>
+          </>
+        )}
       </div>
       <div>
         <div style={{ font: `500 11.5px/1 ${T.mono}`, color: T.secondary, marginBottom: 6 }}>{r.phase || "—"}</div>
@@ -94,16 +113,28 @@ function ProjectRow({ r, onClick, first }: { r: ProjectSummary; onClick: () => v
       </div>
       <div><AgentDots agents={r.agents || []} /></div>
       <div style={{ font: `400 11.5px/1.3 ${T.sans}`, color: T.tertiary }}>{relTime(r.updated)}<div style={{ font: `400 11px/1 ${T.mono}`, color: T.tertiary, marginTop: 3 }}>{money(r.spent_usd)}</div></div>
-      <Icon name="chevronRight" size={16} color={T.tertiary} />
-    </button>
+      <div style={{ position: "relative" }} onClick={stop}>
+        <button onClick={() => setMenu((v) => !v)} title="Project actions" style={{ display: "grid", placeItems: "center", width: 28, height: 28, borderRadius: 6, border: "none", background: "transparent", cursor: "pointer", color: T.tertiary }}><Icon name="dots" size={16} color={T.tertiary} /></button>
+        {menu && (
+          <>
+            <div onClick={() => setMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 9 }} />
+            <div style={{ position: "absolute", right: 0, top: 30, zIndex: 10, background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rMd, boxShadow: T.shadowMd, overflow: "hidden", minWidth: 150 }}>
+              <button onClick={() => { setMenu(false); setName(r.name || ""); setRenaming(true); }} style={rowMenuItem}>Rename</button>
+              <button onClick={() => { setMenu(false); if (confirm(`Archive “${r.name || r.project_id}”? It’ll be hidden from your projects.`)) onArchive(r.project_id); }} style={{ ...rowMenuItem, color: T.danger }}>Archive</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
-function ProjectList({ projects, onOpen, empty }: { projects: ProjectSummary[]; onOpen: (id: string) => void; empty: string }) {
+function ProjectList({ projects, onOpen, onRename, onArchive, empty }:
+  { projects: ProjectSummary[]; onOpen: (id: string) => void; onRename: (id: string, name: string) => void; onArchive: (id: string) => void; empty: string }) {
   if (!projects.length) return <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "22px", textAlign: "center", font: `400 13px/1.4 ${T.sans}`, color: T.tertiary }}>{empty}</div>;
   return (
     <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden", boxShadow: T.shadowXs }}>
-      {projects.map((r, i) => <ProjectRow key={r.project_id} r={r} first={i === 0} onClick={() => onOpen(r.project_id)} />)}
+      {projects.map((r, i) => <ProjectRow key={r.project_id} r={r} first={i === 0} onClick={() => onOpen(r.project_id)} onRename={onRename} onArchive={onArchive} />)}
     </div>
   );
 }
@@ -113,11 +144,23 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
   const [me, setMe] = useState<Me | null>(null);
   const [org, setOrg] = useState<Org | null>(null);
 
+  const [loading, setLoading] = useState(true);
+  const loadProjects = () => api.projects().then((d) => setProjects(d.projects || [])).catch(() => setProjects([]));
   useEffect(() => {
-    api.projects().then((d) => setProjects(d.projects || [])).catch(() => setProjects([]));
+    setLoading(true);
+    loadProjects().finally(() => setLoading(false));
     api.me().then(setMe).catch(() => setMe(null));
     api.getOrg().then((d) => setOrg(d.org)).catch(() => setOrg(null));
   }, []);
+
+  // Project CRUD (NEW endpoints — graceful until tjyb5gmy ships; refetch on success).
+  const renameProject = async (id: string, name: string) => {
+    if (!name) return;
+    try { await api.patchProject(id, { name }); await loadProjects(); } catch { /* endpoint not live yet */ }
+  };
+  const archiveProject = async (id: string) => {
+    try { await api.deleteProject(id); await loadProjects(); } catch { /* endpoint not live yet */ }
+  };
 
   const isAdmin = me?.role === "admin";
   const active = projects.filter((r) => statusOf(r).key !== "deployed");
@@ -172,7 +215,7 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
             <Btn variant="primary" size="lg" onClick={onNew}><Icon name="plus" size={15} color="#fff" /> New project</Btn>
           </div>
 
-          {/* pulse strip — computed from real runs */}
+          {/* pulse strip — computed from real projects */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
             <MetricCard label="Active projects" value={String(active.length)} hint={`${withAgents} with agents working now`} accent />
             <MetricCard label="In build" value={String(building.length)} hint={`${researching.length} researching`} />
@@ -209,14 +252,14 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
               <CategoryLabel>In progress · {active.length}</CategoryLabel>
               <span style={{ font: `400 11.5px/1 ${T.sans}`, color: T.tertiary }}>Sorted by last activity</span>
             </div>
-            <ProjectList projects={active} onOpen={onOpen} empty="No projects in progress. Start one with “New project”." />
+            <ProjectList projects={active} onOpen={onOpen} onRename={renameProject} onArchive={archiveProject} empty={loading ? "Loading projects…" : "No projects in progress. Start one with “New project”."} />
           </div>
 
           {/* deployed */}
           {shipped.length > 0 && (
             <div>
               <CategoryLabel style={{ marginBottom: 10 }}>Deployed · {shipped.length}</CategoryLabel>
-              <ProjectList projects={shipped} onOpen={onOpen} empty="" />
+              <ProjectList projects={shipped} onOpen={onOpen} onRename={renameProject} onArchive={archiveProject} empty="" />
             </div>
           )}
 

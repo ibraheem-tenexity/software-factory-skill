@@ -4,7 +4,7 @@
 // rendered inline, so this stays fully decoupled from the factory components.
 import { useEffect, useState } from "react";
 import { api, ProjectSummary } from "../../api";
-import { T, Icon, Btn, StatusPill, Avatar, Wordmark } from "../onboarding/design";
+import { T, Icon, Btn, StatusPill, Avatar, Wordmark, TextInput } from "../onboarding/design";
 import { OverviewTab } from "./OverviewTab";
 import { DocumentsTab } from "./DocumentsTab";
 
@@ -29,6 +29,9 @@ export function ProjectView({ projectId, onBack, onOpenFactory }: { projectId: s
   const [tab, setTab] = useState<Tab>("overview");
   const [status, setStatus] = useState<(ProjectSummary & Record<string, any>) | null>(null);
   const [email, setEmail] = useState("");
+  const [menu, setMenu] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
 
   useEffect(() => { setTab("overview"); }, [projectId]);
   useEffect(() => {
@@ -39,6 +42,18 @@ export function ProjectView({ projectId, onBack, onOpenFactory }: { projectId: s
   const name = status?.name || projectId;
   const st = status ? statusOf(status) : null;
 
+  // Project CRUD (NEW endpoints — graceful until tjyb5gmy ships).
+  const doRename = async () => {
+    const n = nameDraft.trim();
+    if (!n) { setRenaming(false); return; }
+    try { await api.patchProject(projectId, { name: n }); setStatus((s) => (s ? { ...s, name: n } : s)); } catch { /* not live yet */ }
+    setRenaming(false);
+  };
+  const doArchive = async () => {
+    if (!confirm(`Archive “${name}”? It’ll be hidden from your projects.`)) return;
+    try { await api.deleteProject(projectId); onBack(); } catch { /* not live yet */ }
+  };
+
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: T.bg, fontFamily: T.sans }}>
       {/* top bar + peer-tab strip */}
@@ -48,10 +63,34 @@ export function ProjectView({ projectId, onBack, onOpenFactory }: { projectId: s
             <Btn variant="ghost" size="sm" onClick={onBack}><Icon name="arrowLeft" size={14} /> Projects</Btn>
             <Wordmark size={17} />
             <span style={{ font: `400 13px/1 ${T.mono}`, color: T.tertiary }}>/</span>
-            <span style={{ font: `600 13px/1 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
-            {st && <StatusPill tone={st.tone} dot={st.tone === "info" || st.tone === "brand"}>{st.label}</StatusPill>}
+            {renaming ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <TextInput value={nameDraft} onChange={setNameDraft} size="sm" />
+                <Btn size="sm" variant="primary" onClick={doRename}>Save</Btn>
+                <Btn size="sm" variant="ghost" onClick={() => setRenaming(false)}>Cancel</Btn>
+              </div>
+            ) : (
+              <>
+                <span style={{ font: `600 13px/1 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</span>
+                {st && <StatusPill tone={st.tone} dot={st.tone === "info" || st.tone === "brand"}>{st.label}</StatusPill>}
+              </>
+            )}
           </div>
-          <Avatar name={email || "You"} size={28} tone="brand" />
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ position: "relative" }}>
+              <button onClick={() => setMenu((v) => !v)} title="Project actions" style={{ display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: "50%", border: `1px solid ${T.borderSubtle}`, background: T.raised, cursor: "pointer", color: T.secondary }}><Icon name="dots" size={16} color={T.secondary} /></button>
+              {menu && (
+                <>
+                  <div onClick={() => setMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 9 }} />
+                  <div style={{ position: "absolute", right: 0, top: 36, zIndex: 10, background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rMd, boxShadow: T.shadowMd, overflow: "hidden", minWidth: 150 }}>
+                    <button onClick={() => { setMenu(false); setNameDraft(name); setRenaming(true); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "none", border: "none", cursor: "pointer", font: `500 12.5px/1 ${T.sans}`, color: T.fg }}>Rename project</button>
+                    <button onClick={() => { setMenu(false); doArchive(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "none", border: "none", cursor: "pointer", font: `500 12.5px/1 ${T.sans}`, color: T.danger }}>Archive project</button>
+                  </div>
+                </>
+              )}
+            </div>
+            <Avatar name={email || "You"} size={28} tone="brand" />
+          </div>
         </div>
         <div style={{ display: "flex", gap: 2, padding: "0 24px" }}>
           {TABS.map((t) => {

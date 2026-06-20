@@ -5,7 +5,7 @@
 // empty/“—” state until the data is live.
 import { useEffect, useState } from "react";
 import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact } from "../../api";
-import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar } from "../onboarding/design";
+import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, TextInput, TextArea } from "../onboarding/design";
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 
@@ -67,10 +67,18 @@ function Empty({ children }: { children: React.ReactNode }) {
 export function OverviewTab({ projectId, onOpenFactory }: { projectId: string; onOpenFactory: () => void }) {
   const [ov, setOv] = useState<ProjectOverview | null>(null);
   const [docs, setDocs] = useState<ProjectDocuments | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [goalDraft, setGoalDraft] = useState("");
+  const [scopeDraft, setScopeDraft] = useState("");
 
+  const loadOverview = () => api.overview(projectId).then(setOv).catch(() => setOv(null));
   useEffect(() => {
-    api.overview(projectId).then(setOv).catch(() => setOv(null));      // backend pending → graceful empty
-    api.documents(projectId).then(setDocs).catch(() => setDocs(null)); // materials + produced lists
+    setLoading(true);
+    Promise.allSettled([
+      api.overview(projectId).then(setOv).catch(() => setOv(null)),       // backend pending → graceful empty
+      api.documents(projectId).then(setDocs).catch(() => setDocs(null)),  // materials + produced lists
+    ]).finally(() => setLoading(false));
   }, [projectId]);
 
   const brief = ov?.brief || {};
@@ -82,6 +90,24 @@ export function OverviewTab({ projectId, onOpenFactory }: { projectId: string; o
   const produced: ProjectArtifact[] = docs?.produced || [];
   const pct = build.pct ?? 0;
 
+  // Edit the project brief post-promote: goal via PUT /api/projects/{id}/brief (live); scope via
+  // PATCH /api/projects/{id} {scope} (graceful until tjyb5gmy ships it).
+  const startEdit = () => { setGoalDraft(brief.goal || brief.description || ""); setScopeDraft((brief.scope || []).join(", ")); setEditing(true); };
+  const saveBrief = async () => {
+    const goal = goalDraft.trim();
+    const scope = scopeDraft.split(",").map((s) => s.trim()).filter(Boolean);
+    try { if (goal) await api.putBrief(projectId, { goals: goal }); } catch { /* ignore */ }
+    try { await api.patchProject(projectId, { scope }); } catch { /* scope endpoint not live yet */ }
+    await loadOverview();
+    setEditing(false);
+  };
+
+  if (loading) {
+    return <div style={{ flex: 1, display: "grid", placeItems: "center", background: T.bg }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, font: `500 13px/1 ${T.sans}`, color: T.tertiary }}><Icon name="layers" size={14} color={T.tertiary} /> Loading project…</span>
+    </div>;
+  }
+
   return (
     <div style={{ flex: 1, overflow: "auto", backgroundImage: `radial-gradient(circle, ${T.borderSubtle} 1px, transparent 1px)`, backgroundSize: "22px 22px" }}>
       <div style={{ padding: "22px 24px 36px" }}>
@@ -90,17 +116,37 @@ export function OverviewTab({ projectId, onOpenFactory }: { projectId: string; o
           {/* project brief */}
           <Panel title="Project brief" span={2} accent>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div>
-                <CategoryLabel style={{ marginBottom: 6 }}>Goal</CategoryLabel>
-                <p style={{ margin: 0, font: `400 14px/1.55 ${T.sans}`, color: T.fg }}>{brief.goal || brief.description || <Empty>No goal captured yet.</Empty>}</p>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: -8 }}>
+                {editing
+                  ? <div style={{ display: "flex", gap: 8 }}><Btn variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Btn><Btn variant="primary" size="sm" onClick={saveBrief}>Save</Btn></div>
+                  : <Btn variant="secondary" size="sm" onClick={startEdit}>Edit brief</Btn>}
               </div>
-              {!!(brief.scope && brief.scope.length) && (
-                <div>
-                  <CategoryLabel style={{ marginBottom: 7 }}>Scope</CategoryLabel>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-                    {brief.scope.map((s) => <span key={s} style={{ font: `500 12px/1 ${T.sans}`, color: T.brandDeep, background: T.brandSoft, padding: "6px 11px", borderRadius: 9999 }}>{s}</span>)}
+              {editing ? (
+                <>
+                  <div>
+                    <CategoryLabel style={{ marginBottom: 6 }}>Goal</CategoryLabel>
+                    <TextArea rows={3} value={goalDraft} onChange={setGoalDraft} placeholder="What should this project do?" />
                   </div>
-                </div>
+                  <div>
+                    <CategoryLabel style={{ marginBottom: 6 }}>Scope (comma-separated)</CategoryLabel>
+                    <TextInput value={scopeDraft} onChange={setScopeDraft} placeholder="Quoting / RFQ, Pricing & approvals" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <CategoryLabel style={{ marginBottom: 6 }}>Goal</CategoryLabel>
+                    <p style={{ margin: 0, font: `400 14px/1.55 ${T.sans}`, color: T.fg }}>{brief.goal || brief.description || <Empty>No goal captured yet.</Empty>}</p>
+                  </div>
+                  {!!(brief.scope && brief.scope.length) && (
+                    <div>
+                      <CategoryLabel style={{ marginBottom: 7 }}>Scope</CategoryLabel>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                        {brief.scope.map((s) => <span key={s} style={{ font: `500 12px/1 ${T.sans}`, color: T.brandDeep, background: T.brandSoft, padding: "6px 11px", borderRadius: 9999 }}>{s}</span>)}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, paddingTop: 4 }}>
                 {([["Owner", brief.owner], ["Created", fmtDate(brief.created)], ["Phase", brief.phase]] as [string, string | undefined][]).map(([k, v]) => (
