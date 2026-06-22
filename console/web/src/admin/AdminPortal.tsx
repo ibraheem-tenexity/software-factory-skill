@@ -3,7 +3,7 @@ import { T } from "./tokens";
 import { Icon } from "./primitives";
 import { api } from "../api";
 import type { AdminAgent, AdminClient, AdminTool } from "../api";
-import { AdminClients, AdminProjectsView, AdminAgents, AdminTools, AdminOverview } from "./views";
+import { AdminClients, AdminProjectsView, AdminAgents, AdminTools, AdminOverview, AdminFactories, AdminSettings } from "./views";
 import { InviteModal, AgentPromptPanel, ClientModal, AgentModal, ToolModal, ConfirmDelete } from "./modals";
 
 const NAV_PATHS: Record<string, string> = {
@@ -303,16 +303,8 @@ export function AdminPortal() {
             {view === "tools" && (
               <AdminTools key={toolVersion} query={query} onNew={() => setToolModal("new")} onEdit={(t) => setToolModal(t)} onDelete={(t) => setDeleteTarget({ kind: "tool", item: t })} />
             )}
-            {(view === "factories" || view === "settings") && (
-              <div style={{ display: "grid", placeItems: "center", height: 320 }}>
-                <div style={{ textAlign: "center" }}>
-                  <span style={{ font: `500 12px/1 ${T.mono}`, letterSpacing: "0.08em", textTransform: "uppercase", color: T.tertiary, display: "block", marginBottom: 6 }}>
-                    {view}
-                  </span>
-                  <span style={{ font: `400 14px/1.5 ${T.sans}`, color: T.tertiary }}>Module surface — out of scope for this prototype.</span>
-                </div>
-              </div>
-            )}
+            {view === "factories" && <AdminFactories />}
+            {view === "settings" && <AdminSettings />}
           </div>
         </div>
         {agent && <AgentPromptPanel agent={agent} onClose={() => setAgent(null)} onSaved={() => setAgentVersion((v) => v + 1)} />}
