@@ -992,3 +992,33 @@ export function AdminOverview({ onNav, query }: { onNav: (id: string) => void; q
     </>
   );
 }
+
+function Placeholder({ label }: { label: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+      <div
+        style={{
+          textAlign: "center",
+          maxWidth: 420,
+          padding: "32px 36px",
+          borderRadius: T.rLg,
+          border: `1px dashed ${T.borderDefault}`,
+          background: T.raised,
+        }}
+      >
+        <Mono style={{ fontSize: 11, display: "block", marginBottom: 10, letterSpacing: "0.12em" }}>{label.toUpperCase()}</Mono>
+        <p style={{ margin: 0, font: `400 14px/1.5 ${T.sans}`, color: T.tertiary }}>
+          Module surface — out of scope for this prototype.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function AdminFactories() {
+  return <Placeholder label="Factories" />;
+}
+
+export function AdminSettings() {
+  return <Placeholder label="Settings" />;
+}
