@@ -121,7 +121,7 @@ def test_chat_threads_viewer_role_to_concierge(auth_mod, auth_client, monkeypatc
             captured.update(kw)
             return ("project-abcdef12", [])
 
-    monkeypatch.setattr(auth_mod, "_chat_runner", _FakeRunner())
+    monkeypatch.setattr(auth_mod.state, "_chat_runner", _FakeRunner())
     r = auth_client.post("/api/chat", json={"message": "build me an app"})
     assert r.status_code == 200
     assert captured.get("role") == "member"
@@ -212,8 +212,8 @@ def test_me_open_when_auth_disabled(client):
 def test_react_mode_serves_spa_to_unauthed(auth_mod, auth_client, monkeypatch):
     # Option B gate-rework: in React mode the SPA gates login itself (via /api/auth/config +
     # /api/me), so root() serves the bundle to UNAUTHED users too — not the server login page.
-    monkeypatch.setattr(auth_mod, "_react_enabled", lambda: True)
-    monkeypatch.setattr(auth_mod, "_index_html", lambda: b"<div id='root'></div><!--SPA-->")
+    monkeypatch.setattr(auth_mod.state, "_react_enabled", lambda: True)
+    monkeypatch.setattr(auth_mod.state, "_index_html", lambda: b"<div id='root'></div><!--SPA-->")
     r = auth_client.get("/")
     assert r.status_code == 200
     assert "SPA" in r.text                       # the React bundle

@@ -68,8 +68,8 @@ def _login(mod, client, monkeypatch, email="op@tenexity.ai"):
 
 
 def _enable_react(mod, monkeypatch):
-    monkeypatch.setattr(mod, "_react_enabled", lambda: True)
-    monkeypatch.setattr(mod, "_admin_html", lambda: b"<admin-spa>")
+    monkeypatch.setattr(mod.state, "_react_enabled", lambda: True)
+    monkeypatch.setattr(mod.state, "_admin_html", lambda: b"<admin-spa>")
 
 
 # ── /admin PAGE route is hard-gated (the live-exposure fix) ─────────────────────────────────────

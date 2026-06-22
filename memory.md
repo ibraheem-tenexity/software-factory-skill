@@ -56,3 +56,11 @@ phase complete.
 2. .gitignore + opencode.json untracked (#19); console/web/src/admin/{AdminPortal,views,modals}.tsx (#20 Factories/Settings placeholders, #21 Tools status toggle + colored badges).
 3. FE/config-only, no schema/auth impact; rebased each onto current main, merged #19→#20→#21 (clean auto-merge, no conflicts); placeholders are honest "out of scope" cards — NO fake data (per the no-dummy-data rule).
 4. Summary: SPA built clean (tsc -b + vite); railway up green (migrate 0003 no-op re-run); new admin bundle served; Tools PATCH verified against live data. PR #23 (§3.6 provide-access/invite polish) remains OPEN/unintegrated — a future window.
+
+# backend (software-factory-skill) Update at Time: 22:06:2026:22:45:00.000
+1. Modularized the 1551-line console/app.py monolith into a package (behavior-preserving pure move, zero logic/route changes) on branch worktree-app-modularize off main 36e1d76.
+2. NEW: console/{state.py,deps.py,schemas.py,poller.py} + console/routers/{open_routes,auth,org,admin_os,projects,chat}.py + routers/__init__.py; app.py reduced to FastAPI()+middleware+lifespan+static-mounts+router-includes; docs/ARCHITECTURE.md updated; 5 test monkeypatch targets repointed to state.* + 2 fixtures unchanged.
+3. Singletons moved to state.py behind reset() (called by app.py on every import) so importlib.reload(console.app) still re-instantiates stores per test — critical: re-seeds the bootstrap admin AFTER conftest's per-test TRUNCATE (else login 403). Consumers late-bind state.X so they see post-reset instances; no shadow rebinds (one canonical home per symbol).
+4. Summary: full unit suite 526 passed/1 skipped (the only reds were a missing google-auth dep in the local venv, now installed — not a code issue). Every route path/method/auth-dep/response shape byte-identical. Atomic PR; merge held by coordinator behind the OS-PR train. No data wiring changed; flagged agent_registry/mcp_tools as seeded-real-table (not fake) and activity[]/avg_friction as honest empties.
+
+KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued user-mgmt work) has NO brute-force throttle — add a minimal per-email/IP attempt limit or backoff before/after it ships. Generic 401 (never leak bad-pw vs no-pw vs disabled) is intentional.
