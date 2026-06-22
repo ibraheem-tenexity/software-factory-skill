@@ -1,6 +1,7 @@
 import React from "react";
 import { T } from "./tokens";
 import { Icon, Sparkle, StatusPill, Field, TextInput, Btn } from "./primitives";
+import { AdminBtn, ColHead } from "./views";
 import { api } from "../api";
 import type { AdminAgent, AdminTool, AdminClient, AdminAccessUser } from "../api";
 import { useAdminFetch, fmtRel } from "./hooks";
@@ -728,9 +729,9 @@ export function InviteModal({ onClose }: { onClose: () => void }) {
             <Mono style={{ fontSize: 11 }}>
               {type === "org" ? "Becomes ORG ADMIN · email added to allow-list" : "Added to allow-list as OPERATOR"}
             </Mono>
-            <Btn variant="primary" onClick={send} disabled={!valid}>
+            <AdminBtn primary onClick={send} disabled={!valid}>
               Send invite
-            </Btn>
+            </AdminBtn>
           </div>
         </div>
         <div style={{ borderTop: `1px solid ${T.borderSubtle}`, overflow: "auto" }}>
@@ -744,7 +745,7 @@ export function InviteModal({ onClose }: { onClose: () => void }) {
               borderBottom: `1px solid ${T.borderSubtle}`,
             }}
           >
-            <Mono style={{ fontSize: 10.5, color: T.tertiary }}>ALLOWED SIGN-INS</Mono>
+            <ColHead>Allowed sign-ins</ColHead>
             <Mono style={{ fontSize: 10.5 }}>{list.length}</Mono>
           </div>
           {list.map((u, i) => (
@@ -792,7 +793,7 @@ export function InviteModal({ onClose }: { onClose: () => void }) {
                   justifySelf: "start",
                 }}
               >
-                {u.role}
+                {u.type === "Tenexity" ? "Operator" : "Org admin"}
               </span>
               <span style={{ justifySelf: "end" }}>
                 <StatusPill tone={u.status === "active" ? "success" : "warning"} dot={u.status === "active"}>
