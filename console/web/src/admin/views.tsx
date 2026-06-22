@@ -14,7 +14,7 @@ const PHASE_TONE: Record<string, "info" | "warning" | "brand" | "neutral" | "suc
   LIVE: "success",
 };
 
-function Mono({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+export function Mono({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
     <span style={{ font: `500 11px/1 ${T.mono}`, letterSpacing: "0.04em", color: T.tertiary, ...style }}>
       {children}
@@ -22,7 +22,7 @@ function Mono({ children, style }: { children: React.ReactNode; style?: React.CS
   );
 }
 
-function ColHead({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+export function ColHead({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
     <span
       style={{
@@ -86,17 +86,18 @@ function PhasePill({ phase }: { phase: string }) {
   );
 }
 
-function AdminBtn({ children, primary, onClick }: { children: React.ReactNode; primary?: boolean; onClick?: () => void }) {
+export function AdminBtn({ children, primary, onClick, disabled }: { children: React.ReactNode; primary?: boolean; onClick?: () => void; disabled?: boolean }) {
   return (
     <button
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       style={{
         display: "inline-flex",
         alignItems: "center",
         gap: 7,
         height: 36,
         padding: "0 14px",
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
         font: `600 11.5px/1 ${T.mono}`,
         letterSpacing: "0.05em",
         textTransform: "uppercase",
@@ -104,6 +105,7 @@ function AdminBtn({ children, primary, onClick }: { children: React.ReactNode; p
         border: `1px solid ${primary ? "transparent" : T.borderDefault}`,
         background: primary ? T.brand : T.raised,
         color: primary ? "#fff" : T.fg,
+        opacity: disabled ? 0.5 : 1,
       }}
     >
       {children}
@@ -111,7 +113,7 @@ function AdminBtn({ children, primary, onClick }: { children: React.ReactNode; p
   );
 }
 
-function PageTitle({ title, sub, actions }: { title: string; sub: string; actions?: React.ReactNode }) {
+export function PageTitle({ title, sub, actions }: { title: string; sub: string; actions?: React.ReactNode }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 22 }}>
       <div>
@@ -141,7 +143,7 @@ function MiniBar({ pct }: { pct: number }) {
   );
 }
 
-function AdminFilter({ children, w = 150 }: { children: React.ReactNode; w?: number }) {
+export function AdminFilter({ children, w = 150 }: { children: React.ReactNode; w?: number }) {
   return (
     <div
       style={{
@@ -1037,4 +1039,26 @@ export function AdminFactories() {
 
 export function AdminSettings() {
   return <Placeholder label="Settings" />;
+}
+
+export function AdminSymphony() {
+  return (
+    <div style={{ maxWidth: 520 }}>
+      <PageTitle title="Symphony" sub="Multi-agent orchestration and swarm coordination." />
+      <div
+        style={{
+          padding: "20px 22px",
+          borderRadius: T.rLg,
+          border: `1px dashed ${T.borderDefault}`,
+          background: T.raised,
+        }}
+      >
+        <Mono style={{ fontSize: 11, display: "block", marginBottom: 10, letterSpacing: "0.12em" }}>COMING SOON</Mono>
+        <p style={{ margin: 0, font: `400 14px/1.5 ${T.sans}`, color: T.tertiary }}>
+          Symphony is not deployed yet. This screen will remain empty until the backend ships the
+          supporting tables and API.
+        </p>
+      </div>
+    </div>
+  );
 }
