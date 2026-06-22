@@ -14,3 +14,4 @@ client_secret_*.json
 # Design prototype reference for Task 4 (do not commit) — see .design-source/NOTES.md
 .design-source/
 console/web/node_modules
+opencode.json
