@@ -217,6 +217,15 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 export const api = {
   authConfig: () => get<AuthConfig>("/api/auth/config"),
   me: () => get<Me>("/api/me"),
+  // Email+password sign-in (backend POST /api/auth/password). On 200 the server sets the sf_session
+  // cookie (same as Google). Returns {ok,status} (not get/send) so the caller can branch on 401.
+  passwordLogin: async (body: { email: string; password: string }): Promise<{ ok: boolean; status: number }> => {
+    const r = await fetch("/api/auth/password", {
+      method: "POST", credentials: "include",
+      headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    return { ok: r.ok, status: r.status };
+  },
   projects: () => get<{ projects: ProjectSummary[] }>("/api/projects"),
   status: (id: string) => get<ProjectSummary & Record<string, any>>(`/api/projects/${id}`),
   graph: (id: string) => get<Graph>(`/api/projects/${id}/graph`),
