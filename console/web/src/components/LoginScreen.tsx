@@ -1,12 +1,12 @@
 // LoginScreen.tsx — Software Factory sign-in. Faithful TSX port of the design's login.jsx
 // (two-pane: dark brand panel + auth form; Tenexity system via design.tsx primitives).
 //
-// Operator directive overrides the prototype's "all auth → dashboard": GOOGLE is the only
-// FUNCTIONAL path — it reuses the existing console flow (GIS ID token → POST /api/auth/google,
-// the same exchange console/login.html uses). Microsoft / email+password / org-SSO are rendered
-// faithfully but MOCKED (a subtle "coming soon" notice). The SSO mode toggle + show/hide are
-// pure UI and stay live.
+// FUNCTIONAL sign-in paths: GOOGLE (GIS ID token → POST /api/auth/google) and EMAIL+PASSWORD
+// (POST /api/auth/password — both set the same sf_session cookie → the App.tsx Gate re-resolves
+// /api/me → dashboard). Microsoft + org-SSO remain rendered-but-mocked ("coming soon"). The SSO
+// mode toggle + show/hide password are pure UI.
 import React, { useEffect, useRef, useState } from "react";
+import { api } from "../api";
 import { T, Icon, CategoryLabel, Field, TextInput, Btn } from "./onboarding/design";
 
 const GIS_SRC = "https://accounts.google.com/gsi/client";
@@ -116,6 +116,25 @@ export function LoginScreen({ clientId, onAuthed }: { clientId: string; onAuthed
     return () => { cancelled = true; };
   }, [clientId, mode]);
 
+  const [signingIn, setSigningIn] = useState(false);
+  // Real email+password sign-in. 200 sets the session cookie ⇒ onAuthed (gate → dashboard);
+  // bad creds ⇒ inline error in the interface's voice (no apology).
+  const handlePassword = async () => {
+    const e = email.trim();
+    if (!e || !pw || signingIn) return;
+    setError(""); setNotice(""); setSigningIn(true);
+    try {
+      // 401 {detail:"invalid credentials"} is generic for all failure cases (per contract) →
+      // one message, no branching on 403/429.
+      const { ok } = await api.passwordLogin({ email: e, password: pw });
+      if (ok) onAuthed();
+      else setError("Wrong email or password.");
+    } catch {
+      setError("Sign-in failed. Please try again.");
+    }
+    setSigningIn(false);
+  };
+
   const mock = () => { setError(""); setNotice(MOCK_NOTICE); };
 
   return (
@@ -173,17 +192,17 @@ export function LoginScreen({ clientId, onAuthed }: { clientId: string; onAuthed
 
               <Divider>or</Divider>
 
-              <Field label="Work email"><TextInput type="email" value={email} onChange={setEmail} placeholder="you@company.com" style={{ height: 44 }} /></Field>
+              <Field label="Work email"><TextInput type="email" value={email} onChange={setEmail} placeholder="you@company.com" style={{ height: 44 }} onKeyDown={(e) => { if (e.key === "Enter") handlePassword(); }} /></Field>
               <Field label="Password">
                 <div style={{ position: "relative" }}>
-                  <TextInput type={showPw ? "text" : "password"} value={pw} onChange={setPw} placeholder="••••••••" style={{ height: 44, paddingRight: 56 }} />
+                  <TextInput type={showPw ? "text" : "password"} value={pw} onChange={setPw} placeholder="••••••••" style={{ height: 44, paddingRight: 56 }} onKeyDown={(e) => { if (e.key === "Enter") handlePassword(); }} />
                   <button onClick={() => setShowPw((v) => !v)} style={{ position: "absolute", right: 10, top: 0, bottom: 0, font: `500 12px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>{showPw ? "Hide" : "Show"}</button>
                 </div>
               </Field>
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -4 }}>
                 <button onClick={mock} style={{ font: `500 12.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>Forgot password?</button>
               </div>
-              <Btn variant="primary" size="lg" full onClick={mock} style={{ height: 46, marginTop: 2 }}>Sign in <Icon name="arrowRight" size={15} color="#fff" /></Btn>
+              <Btn variant="primary" size="lg" full onClick={handlePassword} disabled={signingIn || !email.trim() || !pw} style={{ height: 46, marginTop: 2 }}>{signingIn ? "Signing in…" : "Sign in"} <Icon name="arrowRight" size={15} color="#fff" /></Btn>
 
               <button onClick={() => { setNotice(""); setError(""); setMode("sso"); }} style={{ width: "100%", height: 44, display: "flex", alignItems: "center", justifyContent: "center", gap: 9, cursor: "pointer",
                 border: `1px solid ${T.borderDefault}`, borderRadius: T.rMd, background: "transparent", color: T.fg, font: `500 13.5px/1 ${T.sans}` }}>
