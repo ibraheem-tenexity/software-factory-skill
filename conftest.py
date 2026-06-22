@@ -105,7 +105,11 @@ def _clean_db(_db_schema):
     import psycopg
     from software_factory import models
 
-    names = ", ".join(f'public."{t}"' for t in models.metadata.tables)
+    # roles/role_permissions are migration-seeded REFERENCE data (the RBAC buckets), not per-test
+    # state — like a lookup table they persist for the session (and users.role_id FKs them). Truncating
+    # them would wipe the seed and break every user insert, so they're excluded here.
+    _seed = {"roles", "role_permissions"}
+    names = ", ".join(f'public."{t}"' for t in models.metadata.tables if t not in _seed)
     conn = psycopg.connect(_db_schema, autocommit=True)
     try:
         conn.execute(f"TRUNCATE {names} RESTART IDENTITY CASCADE")

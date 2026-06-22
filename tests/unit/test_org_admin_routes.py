@@ -1,8 +1,8 @@
 """Org Admin backend routes (PRD §2.3): knowledge base, team & access, usage & billing.
 
 Auth-enabled TestClient (org endpoints resolve the org from the session, so they need a real
-logged-in user). The default user here is an ADMIN (SF_ADMIN_EMAILS) so write routes are exercised;
-a member-only fixture guards the admin gate.
+logged-in user). The default user here is an ADMIN (seeded with role 'admin') so write routes are
+exercised; a member-only fixture guards the admin gate.
 """
 import base64
 import importlib
@@ -27,33 +27,37 @@ def _load_app(tmp_path, monkeypatch, **env):
 
 
 _AUTH = dict(SF_GOOGLE_CLIENT_ID="cid-123.apps.googleusercontent.com",
-             SF_AUTH_EMAILS="op@tenexity.ai", SF_AUTH_SECRET="test-secret")
+             SF_SESSION_SECRET="test-secret")
 
 
 @pytest.fixture()
 def admin_mod(tmp_path, monkeypatch):
-    return _load_app(tmp_path, monkeypatch, SF_ADMIN_EMAILS="op@tenexity.ai", **_AUTH)
+    mod = _load_app(tmp_path, monkeypatch, **_AUTH)
+    mod.users.upsert("op@tenexity.ai", "admin")   # org-admin → write routes exercised
+    return mod
 
 
 @pytest.fixture()
 def admin_client(admin_mod):
-    return TestClient(admin_mod.app)
+    return TestClient(admin_mod.app, base_url="https://testserver")
 
 
 @pytest.fixture()
 def member_mod(tmp_path, monkeypatch):
-    return _load_app(tmp_path, monkeypatch, **_AUTH)   # no SF_ADMIN_EMAILS → op is a member
+    mod = _load_app(tmp_path, monkeypatch, **_AUTH)
+    mod.users.upsert("op@tenexity.ai", "member")   # op is a member
+    return mod
 
 
 @pytest.fixture()
 def member_client(member_mod):
-    return TestClient(member_mod.app)
+    return TestClient(member_mod.app, base_url="https://testserver")
 
 
 def _login(mod, client, monkeypatch, email="op@tenexity.ai"):
     from software_factory import auth as a
-    monkeypatch.setattr(a, "_fetch_claims", lambda tok: {
-        "aud": "cid-123.apps.googleusercontent.com", "email": email, "email_verified": "true"})
+    monkeypatch.setattr(a, "verify_google_id_token",
+                        lambda tok: {"sub": "sub-" + email, "email": email, "email_verified": True})
     return client.post("/api/auth/google", json={"credential": "t"})
 
 

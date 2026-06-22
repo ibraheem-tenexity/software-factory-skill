@@ -25,20 +25,22 @@ def _load_app(tmp_path, monkeypatch, **env):
 
 @pytest.fixture()
 def auth_mod(tmp_path, monkeypatch):
-    return _load_app(tmp_path, monkeypatch,
-                     SF_GOOGLE_CLIENT_ID="cid-123.apps.googleusercontent.com",
-                     SF_AUTH_EMAILS="op@tenexity.ai", SF_AUTH_SECRET="test-secret")
+    mod = _load_app(tmp_path, monkeypatch,
+                    SF_GOOGLE_CLIENT_ID="cid-123.apps.googleusercontent.com",
+                    SF_SESSION_SECRET="test-secret")
+    mod.users.upsert("op@tenexity.ai", "member")
+    return mod
 
 
 @pytest.fixture()
 def auth_client(auth_mod):
-    return TestClient(auth_mod.app)
+    return TestClient(auth_mod.app, base_url="https://testserver")
 
 
 def _login(mod, client, monkeypatch, email="op@tenexity.ai"):
     from software_factory import auth as a
-    monkeypatch.setattr(a, "_fetch_claims", lambda tok: {
-        "aud": "cid-123.apps.googleusercontent.com", "email": email, "email_verified": "true"})
+    monkeypatch.setattr(a, "verify_google_id_token",
+                        lambda tok: {"sub": "sub-" + email, "email": email, "email_verified": True})
     return client.post("/api/auth/google", json={"credential": "t"})
 
 

@@ -23,26 +23,25 @@ def _load_app(tmp_path, monkeypatch, **env):
 
 
 _AUTH = dict(SF_GOOGLE_CLIENT_ID="cid-123.apps.googleusercontent.com",
-             SF_AUTH_EMAILS="op@tenexity.ai", SF_AUTH_SECRET="test-secret")
+             SF_SESSION_SECRET="test-secret")
 
 
 @pytest.fixture()
 def mod(tmp_path, monkeypatch):
-    # op is platform staff (role==admin via SF_ADMIN_EMAILS AND tenexity) + org-admin of its own org.
-    mod = _load_app(tmp_path, monkeypatch, SF_ADMIN_EMAILS="op@tenexity.ai", **_AUTH)
-    mod.users.set_profile("op@tenexity.ai", tenexity=True)
-    return mod
+    # op is platform staff (role==admin AND is_internal via bootstrap) + org-admin of its own org.
+    return _load_app(tmp_path, monkeypatch,
+                     SF_BOOTSTRAP_ADMIN_EMAIL="op@tenexity.ai", **_AUTH)
 
 
 @pytest.fixture()
 def client(mod):
-    return TestClient(mod.app)
+    return TestClient(mod.app, base_url="https://testserver")
 
 
 def _login(mod, client, monkeypatch, email="op@tenexity.ai"):
     from software_factory import auth as a
-    monkeypatch.setattr(a, "_fetch_claims", lambda tok: {
-        "aud": "cid-123.apps.googleusercontent.com", "email": email, "email_verified": "true"})
+    monkeypatch.setattr(a, "verify_google_id_token",
+                        lambda tok: {"sub": "sub-" + email, "email": email, "email_verified": True})
     return client.post("/api/auth/google", json={"credential": "t"})
 
 
@@ -89,8 +88,10 @@ def test_access_update_and_revoke(mod, client, monkeypatch):
                                            "org_name": "X Co"})
     rows = client.patch("/api/admin/access/u@x.com", json={"status": "active"}).json()["users"]
     assert next(u for u in rows if u["email"] == "u@x.com")["status"] == "active"
+    # revoke = disable (status→disabled + token_version bump): the row stays as an audit record,
+    # the user can no longer sign in and any live cookie is invalidated on its next request.
     rows = client.delete("/api/admin/access/u@x.com").json()["users"]
-    assert not any(u["email"] == "u@x.com" for u in rows)
+    assert next(u for u in rows if u["email"] == "u@x.com")["status"] == "disabled"
 
 
 # ── KB doc PATCH (rename/retag) ──────────────────────────────────────────────────────────────

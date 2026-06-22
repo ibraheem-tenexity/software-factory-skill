@@ -11,9 +11,13 @@ Flat schema: one set of tables, every per-project table keyed by `project_id`. `
 """
 from __future__ import annotations
 
-from sqlalchemy import (Column, DateTime, Float, Integer, MetaData, Table, Text, func)
+from sqlalchemy import (Boolean, CheckConstraint, Column, DateTime, Float, ForeignKey,
+                        Integer, MetaData, Table, Text, func, text)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 metadata = MetaData()
+
+_UUID = UUID(as_uuid=False)  # uuid columns surface as plain strings at the dbshim boundary
 
 projectstate = Table(
     "projectstate", metadata,
@@ -139,17 +143,55 @@ organizations = Table(
     Column("created_by", Text),
 )
 
+# ---- RBAC: roles + permissions (the access model) ----------------------------------------
+# A role is a named bucket; one row per role. `role_permissions` maps roles to permission
+# strings (the future privileges feature, as a proper relation rather than a parsed column).
+roles = Table(
+    "roles", metadata,
+    Column("id", _UUID, primary_key=True, server_default=text("gen_random_uuid()")),
+    Column("name", Text, nullable=False, unique=True),       # 'admin' | 'member'
+    Column("description", Text),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+role_permissions = Table(
+    "role_permissions", metadata,
+    Column("role_id", _UUID, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
+    Column("permission", Text, primary_key=True),            # e.g. 'projects.delete'
+)
+
+# Canonical identity AND the allowlist — the single source of truth for "who can access".
+#   - id          internal stable key; FK target for everything (never join on email)
+#   - google_sub  Google's permanent user id; NULL until first sign-in, then the match key
+#   - email       set at invite time; the allowlist match before google_sub is known
+#   - role_id     single FK (invite assigns exactly one role); → user_roles join if multi ever needed
+#   - is_internal internal staff vs external collaborator (was the `tenexity` flag)
+#   - status      invited (on allowlist, not signed in) | active (signed in) | disabled (revoked)
+#   - token_version  bump to revoke this user's existing signed cookies before they expire
+#   - metadata    jsonb extensibility; NEVER anything security-relevant or filtered/joined on
+#   - invited_by  audit trail (nullable self-FK)
+#   - onboarded_at  one-time fact of first sign-in (current-login is session state, never stored)
+# org_id/designation/role_description are kept (Org Admin + onboarding join/filter on them, so
+# they are real columns per the metadata rule — they are NOT auth-relevant).
 users = Table(
     "users", metadata,
-    Column("email", Text, primary_key=True),
-    Column("role", Text, nullable=False, server_default="member"),
+    Column("id", _UUID, primary_key=True, server_default=text("gen_random_uuid()")),
+    Column("google_sub", Text, unique=True),
+    Column("email", Text, nullable=False, unique=True),
+    Column("role_id", _UUID, ForeignKey("roles.id"), nullable=False),
+    Column("is_internal", Boolean, nullable=False, server_default=text("false")),
+    Column("status", Text, nullable=False, server_default="invited"),
+    Column("token_version", Integer, nullable=False, server_default="0"),
+    Column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("invited_by", _UUID, ForeignKey("users.id")),
+    Column("onboarded_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    # kept for Org Admin / onboarding (join/filter attrs → real columns, not metadata)
     Column("org_id", Text),
     Column("designation", Text),
     Column("role_description", Text),
-    Column("tenexity", Integer),
-    Column("status", Text, nullable=False, server_default="active"),  # 'active' | 'invited' (§3.6)
-    Column("created_at", DateTime(timezone=True), server_default=func.now()),
-    Column("created_by", Text),
+    CheckConstraint("status in ('invited', 'active', 'disabled')", name="users_status_check"),
 )
 
 blobs = Table(
@@ -218,5 +260,6 @@ agent_registry = Table(
 # Groupings: the flat per-project tables, the global directory tables, and everything (Alembic + tests).
 PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
 FLAT_TABLES = PROJECTDB + (tickets, agents)
-GLOBAL_TABLES = (organizations, users, blobs, blob_uses, agent_prompts, mcp_tools, agent_registry)
+GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
+                 agent_prompts, mcp_tools, agent_registry)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES

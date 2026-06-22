@@ -1,4 +1,9 @@
-"""User directory + roles + organizations (Postgres via dbshim)."""
+"""User directory + RBAC roles + organizations (Postgres via dbshim).
+
+The users table is the single source of truth for access: status invited→active→disabled, role via
+role_id→roles, google_sub set on first sign-in. No env allowlist; cold-start admin from
+SF_BOOTSTRAP_ADMIN_EMAIL.
+"""
 import pytest
 
 from software_factory import users
@@ -6,41 +11,79 @@ from software_factory import users
 
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
-    monkeypatch.setenv("SF_ADMIN_EMAILS", "boss@t.ai")
+    monkeypatch.setenv("SF_BOOTSTRAP_ADMIN_EMAIL", "boss@t.ai")
     return users.UserStore()
 
 
-def test_env_admins_seeded(store):
-    assert store.get_role("boss@t.ai") == "admin"
-    assert store.is_member("boss@t.ai")
+# -- bootstrap + roles ------------------------------------------------------------------
+def test_bootstrap_admin_seeded_as_internal_admin(store):
+    u = store.get_user("boss@t.ai")
+    assert u and u["role"] == "admin"
+    assert u["is_internal"] in (1, True)            # internal staff → can reach /admin after sign-in
+    assert u["status"] == "invited"                 # net-new row; flips to active on first sign-in
 
 
 def test_upsert_and_role(store):
     store.upsert("m@t.ai", "member", "boss@t.ai")
-    assert store.get_role("m@t.ai") == "member"
-    assert store.is_member("m@t.ai")
-    store.upsert("m@t.ai", "admin", "boss@t.ai")           # promote
-    assert store.get_role("m@t.ai") == "admin"
+    assert store.get_user("m@t.ai")["role"] == "member"
+    store.upsert("m@t.ai", "admin", "boss@t.ai")    # promote (status preserved)
+    assert store.get_user("m@t.ai")["role"] == "admin"
 
 
 def test_case_insensitive(store):
     store.upsert("Mixed@T.ai", "member")
-    assert store.get_role("mixed@t.ai") == "member"
-    assert store.is_member("MIXED@T.AI")
+    assert store.get_user("mixed@t.ai")["role"] == "member"
+    assert store.get_user("MIXED@T.AI") is not None
 
 
-def test_remove_member_but_not_env_admin(store):
+def test_remove_member_but_not_bootstrap_admin(store):
     store.upsert("m@t.ai", "member")
     store.remove("m@t.ai")
-    assert not store.is_member("m@t.ai")
-    store.remove("boss@t.ai")                              # env-bootstrap admin: protected
-    assert store.get_role("boss@t.ai") == "admin"
+    assert store.get_user("m@t.ai") is None
+    store.remove("boss@t.ai")                        # bootstrap admin is protected
+    assert store.get_user("boss@t.ai")["role"] == "admin"
 
 
 def test_unknown_email(store):
-    assert store.get_role("nobody@t.ai") is None
-    assert not store.is_member("nobody@t.ai")
-    assert store.get_role("") is None
+    assert store.get_user("nobody@t.ai") is None
+    assert store.get_user("") is None
+
+
+# -- sign-in lifecycle ------------------------------------------------------------------
+def test_authenticate_first_signin_activates_and_records_identity(store):
+    store.upsert("m@t.ai", "member")                # invited
+    assert store.get_user("m@t.ai")["status"] == "invited"
+    u = store.authenticate("google-sub-xyz", "m@t.ai")   # first sign-in matches on email
+    assert u and u["status"] == "active" and u["onboarded_at"]
+    # subsequent sign-in matches on the stable google_sub (even if email is passed differently)
+    u2 = store.authenticate("google-sub-xyz", "ANYTHING@t.ai")
+    assert u2 and u2["email"] == "m@t.ai" and u2["status"] == "active"
+
+
+def test_authenticate_rejects_unknown_email(store):
+    assert store.authenticate("sub-1", "stranger@t.ai") is None    # not on the allowlist (no row)
+
+
+def test_authenticate_rejects_disabled(store):
+    store.upsert("m@t.ai", "member")
+    store.disable("m@t.ai")
+    assert store.authenticate("sub-1", "m@t.ai") is None
+
+
+def test_disable_sets_status_and_bumps_token_version(store):
+    store.upsert("m@t.ai", "member")
+    assert int(store.get_user("m@t.ai")["token_version"]) == 0
+    store.disable("m@t.ai")
+    u = store.get_user("m@t.ai")
+    assert u["status"] == "disabled" and int(u["token_version"]) == 1
+
+
+def test_get_by_id_round_trips(store):
+    store.upsert("m@t.ai", "member")
+    uid = store.get_user("m@t.ai")["id"]
+    assert store.get_by_id(uid)["email"] == "m@t.ai"
+    assert store.get_by_id("00000000-0000-0000-0000-000000000000") is None
+    assert store.get_by_id("") is None
 
 
 # -- org / profile model ----------------------------------------------------------------
@@ -81,25 +124,25 @@ def test_list_orgs(store):
 def test_set_profile_links_org_and_role(store):
     oid = store.create_org("Acme")
     store.set_profile("m@t.ai", org_id=oid, designation="Ops Manager",
-                      role_description="runs quoting", tenexity=False)
+                      role_description="runs quoting", is_internal=False)
     u = store.get_user("m@t.ai")
     assert u["org_id"] == oid
     assert u["designation"] == "Ops Manager"
     assert u["role_description"] == "runs quoting"
-    assert u["tenexity"] in (0, False)
-    assert store.is_member("m@t.ai")               # auto-created as member
+    assert u["is_internal"] in (0, False)
+    assert u["role"] == "member"                   # auto-created as member
     assert store.org_for_user("m@t.ai")["id"] == oid
 
 
-def test_set_profile_preserves_admin_role(store):
-    store.set_profile("boss@t.ai", designation="Founder")  # env-admin
-    assert store.get_role("boss@t.ai") == "admin"          # role untouched by profile write
+def test_set_profile_preserves_role(store):
+    store.set_profile("boss@t.ai", designation="Founder")  # bootstrap admin
+    assert store.get_user("boss@t.ai")["role"] == "admin"  # role untouched by profile write
     assert store.get_user("boss@t.ai")["designation"] == "Founder"
 
 
-def test_tenexity_flag(store):
-    store.set_profile("staff@t.ai", tenexity=True)
-    assert store.get_user("staff@t.ai")["tenexity"] in (1, True)
+def test_is_internal_flag(store):
+    store.set_profile("staff@t.ai", is_internal=True)
+    assert store.get_user("staff@t.ai")["is_internal"] in (1, True)
 
 
 # -- org membership (Team & access, PRD §2.3) -------------------------------------------
@@ -128,7 +171,7 @@ def test_invite_member_creates_user_linked_to_org(store):
 def test_invite_member_can_grant_admin(store):
     oid = store.create_org("Acme")
     store.invite_member("lead@t.ai", oid, role="admin", by="boss@t.ai")
-    assert store.get_role("lead@t.ai") == "admin"
+    assert store.get_user("lead@t.ai")["role"] == "admin"
 
 
 def test_org_plan_and_budget_cap_round_trip(store):

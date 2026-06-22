@@ -105,14 +105,36 @@ digraph SchemaERD {
       <tr><td align="left">created_at, created_by</td></tr>
     </table>>];
 
+  roles [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#fde68a" port="t"><b>roles</b></td></tr>
+      <tr><td align="left"><b>PK</b> id (uuid)</td></tr>
+      <tr><td align="left">name : admin | member (unique)</td></tr>
+      <tr><td align="left">description, created_at</td></tr>
+    </table>>];
+
+  role_permissions [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#fde68a" port="t"><b>role_permissions</b></td></tr>
+      <tr><td align="left"><b>PK</b> (role_id, permission)</td></tr>
+      <tr><td align="left"><b>FK</b> role_id → roles (cascade)</td></tr>
+      <tr><td align="left"><font color="#64748b" point-size="10">e.g. 'projects.delete'</font></td></tr>
+    </table>>];
+
   users [label=<
     <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
       <tr><td bgcolor="#fef9c3" port="t"><b>users</b></td></tr>
-      <tr><td align="left"><b>PK</b> email</td></tr>
-      <tr><td align="left">role : admin | member</td></tr>
-      <tr><td align="left"><b>FK</b> org_id</td></tr>
-      <tr><td align="left">designation, role_description</td></tr>
-      <tr><td align="left">tenexity, created_at, created_by</td></tr>
+      <tr><td align="left"><b>PK</b> id (uuid)</td></tr>
+      <tr><td align="left">google_sub (unique, null until 1st sign-in)</td></tr>
+      <tr><td align="left">email (unique) — allowlist match key</td></tr>
+      <tr><td align="left"><b>FK</b> role_id → roles</td></tr>
+      <tr><td align="left">is_internal (Tenexity staff flag)</td></tr>
+      <tr><td align="left">status : invited | active | disabled</td></tr>
+      <tr><td align="left">token_version (session revoke lever)</td></tr>
+      <tr><td align="left">metadata jsonb (non-auth extensibility)</td></tr>
+      <tr><td align="left"><b>FK</b> invited_by → users; onboarded_at</td></tr>
+      <tr><td align="left">created_at, updated_at (trigger)</td></tr>
+      <tr><td align="left"><b>FK</b> org_id; designation, role_description</td></tr>
     </table>>];
 
   blobs [label=<
@@ -147,6 +169,9 @@ digraph SchemaERD {
   projectstate:t -> agents:t;
   tickets:t -> agents:t [style=dashed, color="#64748b", label=<<font point-size="9">ticket_id</font>>];
 
+  users:t -> roles:t [label=<<font point-size="9">role_id</font>>];
+  role_permissions:t -> roles:t [label=<<font point-size="9">role_id</font>>];
+  users:t -> users:t [style=dashed, color="#64748b", label=<<font point-size="9">invited_by</font>>];
   users:t -> organizations:t [label=<<font point-size="9">org_id</font>>];
   blob_uses:t -> blobs:t;
   blob_uses:t -> projectstate:t [style=dashed, color="#64748b"];

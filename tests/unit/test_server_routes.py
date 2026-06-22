@@ -34,7 +34,7 @@ def app_mod(tmp_path, monkeypatch):
 @pytest.fixture()
 def client(app_mod):
     # No `with` → lifespan (and the background poller) does not run, matching the old tests.
-    return TestClient(app_mod.app)
+    return TestClient(app_mod.app, base_url="https://testserver")
 
 
 def test_root_serves_console_html(client):
@@ -51,17 +51,18 @@ def test_run_restore_link_serves_console_html_not_404(client):
 
 @pytest.fixture()
 def auth_mod(tmp_path, monkeypatch):
-    return _load_app(
+    mod = _load_app(
         tmp_path, monkeypatch,
         SF_GOOGLE_CLIENT_ID="cid-123.apps.googleusercontent.com",
-        SF_AUTH_EMAILS="op@tenexity.ai",
-        SF_AUTH_SECRET="test-secret",
+        SF_SESSION_SECRET="test-secret",
     )
+    mod.users.upsert("op@tenexity.ai", "member")   # op is a member (no platform-admin role)
+    return mod
 
 
 @pytest.fixture()
 def auth_client(auth_mod):
-    return TestClient(auth_mod.app)
+    return TestClient(auth_mod.app, base_url="https://testserver")
 
 
 def test_auth_enabled_root_serves_login_not_console(auth_client):
@@ -79,9 +80,8 @@ def test_auth_enabled_api_requires_session(auth_client):
 
 def _login(auth_mod, client, monkeypatch, email="op@tenexity.ai"):
     from software_factory import auth as auth_mod_
-    monkeypatch.setattr(auth_mod_, "_fetch_claims", lambda tok: {
-        "aud": "cid-123.apps.googleusercontent.com", "email": email,
-        "email_verified": "true"})
+    monkeypatch.setattr(auth_mod_, "verify_google_id_token",
+                        lambda tok: {"sub": "sub-" + email, "email": email, "email_verified": True})
     return client.post("/api/auth/google", json={"credential": "goog-token"})
 
 
@@ -103,7 +103,7 @@ def test_google_login_rejected_for_unallowed_email(auth_mod, auth_client, monkey
 
 
 def test_run_scoped_route_forbidden_for_non_owner(auth_mod, auth_client, monkeypatch):
-    # op@tenexity.ai is a *member* here (no SF_ADMIN_EMAILS) → may only see runs it owns.
+    # op@tenexity.ai is a *member* here (seeded with role 'member') → may only see runs it owns.
     _login(auth_mod, auth_client, monkeypatch)
     monkeypatch.setattr(auth_mod.console, "project_owner", lambda rid: "someone-else@tenexity.ai")
     r = auth_client.get("/api/projects/project-deadbeef")
@@ -113,7 +113,7 @@ def test_run_scoped_route_forbidden_for_non_owner(auth_mod, auth_client, monkeyp
 def test_chat_threads_viewer_role_to_concierge(auth_mod, auth_client, monkeypatch):
     # A member's chat must carry role='member' (not the default 'admin') so the concierge's
     # run-scoped tools enforce ownership. Regression for the FastAPI port dropping role=.
-    _login(auth_mod, auth_client, monkeypatch)          # op@tenexity.ai = member (no SF_ADMIN_EMAILS)
+    _login(auth_mod, auth_client, monkeypatch)          # op@tenexity.ai = member (seeded role 'member')
     captured = {}
 
     class _FakeRunner:

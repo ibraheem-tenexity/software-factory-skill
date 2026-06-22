@@ -52,10 +52,10 @@ PROJECTS_DIR = os.environ.get("SF_PROJECTS_DIR", os.path.join(os.path.dirname(__
 HERE = os.path.dirname(__file__)
 console = Console(PROJECTS_DIR)
 
-# User directory (roles + login membership). Seeds env SF_ADMIN_EMAILS as admins and backs
-# auth's role/membership decisions; without it auth falls back to the env lists.
+# User directory + RBAC + orgs — the SINGLE source of truth for who can access (status invited/active/
+# disabled). No env allowlist: the cold-start admin is seeded from SF_BOOTSTRAP_ADMIN_EMAIL inside
+# UserStore.__init__, and all access thereafter is managed via the Team & access screen (no redeploy).
 users = UserStore()
-auth.register_user_store(users.is_member, users.get_role)
 
 # Blob manifest — org knowledge-base docs + run-scoped uploaded materials (bytes live in storage).
 blobs = BlobStore()
@@ -309,13 +309,13 @@ def _boot():
             _migrate.run()
         except Exception as e:
             print(f"[migrate] boot FAILED: {e}", flush=True)
-    # Backfill ownership on pre-multitenancy runs → the first bootstrap admin (idempotent).
-    _admins = [e.strip() for e in os.environ.get("SF_ADMIN_EMAILS", "").split(",") if e.strip()]
-    if _admins:
+    # Backfill ownership on pre-multitenancy runs → the bootstrap admin (idempotent).
+    _boot_admin = os.environ.get("SF_BOOTSTRAP_ADMIN_EMAIL", "").strip().lower()
+    if _boot_admin:
         try:
-            n = console.assign_unowned(_admins[0])
+            n = console.assign_unowned(_boot_admin)
             if n:
-                print(f"[owners] assigned {n} unowned run(s) to {_admins[0]}", flush=True)
+                print(f"[owners] assigned {n} unowned run(s) to {_boot_admin}", flush=True)
         except Exception as e:
             print(f"[owners] backfill FAILED: {e}", flush=True)
 
@@ -352,17 +352,19 @@ async def _access_log(request: Request, call_next):
 
 # ── Auth dependencies (wrap software_factory.auth; do not change auth resolution) ─────────────
 def viewer(request: Request) -> tuple:
-    """(email, role, ok). ok = authorized to use the API at all. Auth disabled (local/dev)
-    or a valid service token = full admin access; a session cookie = that user's role."""
+    """(email, role, ok). ok = authorized to use the API at all. Auth disabled (local/dev) or a valid
+    service token = full admin access. A session cookie is verified (HMAC signature + expiry), then the
+    user is loaded from the DB and the role resolved PER REQUEST — rejecting a disabled user or a stale
+    token_version. Role is NOT carried in the cookie, so a demotion/revoke takes effect on the next request."""
     if not auth.enabled():
         return (None, "admin", True)
     if auth.service_token_ok(request.headers.get(auth.SERVICE_HEADER)):
         return (None, "admin", True)
-    token = request.cookies.get(auth.COOKIE)
-    if token:
-        email = auth.session_email(token)
-        if email:
-            return (email, auth.role_for(email) or "member", True)
+    payload = auth.verify_session(request.cookies.get(auth.COOKIE))
+    if payload:
+        u = users.get_by_id(payload.get("uid"))
+        if u and u["status"] == "active" and int(u["token_version"]) == int(payload.get("tv", -1)):
+            return (u["email"], u["role"], True)
     return (None, None, False)
 
 
@@ -399,14 +401,14 @@ def require_admin(v: tuple = Depends(require_authed)) -> tuple:
 def _staff_session(v: tuple) -> bool:
     """May this session reach Tenexity OS (cross-tenant data + the operator portal)? Service token /
     auth-disabled (viewer email=None, role=admin) → yes (bots/CI). A HUMAN session must be BOTH
-    role==admin AND tenexity==true — a customer org-admin or any non-staff member never qualifies."""
+    role==admin AND is_internal==true — a customer org-admin or any non-staff member never qualifies."""
     email, role, ok = v
     if not ok:
         return False
     if email is None and role == "admin":          # service token or auth disabled = platform access
         return True
     u = users.get_user((email or "").lower())
-    return bool(role == "admin" and u and u.get("tenexity") in (1, True))
+    return bool(role == "admin" and u and u.get("is_internal") in (1, True))
 
 
 def require_staff(v: tuple = Depends(require_authed)) -> tuple:
@@ -851,15 +853,19 @@ def auth_config():
 @app.post("/api/auth/google")
 def google_login(body: GoogleLoginIn):
     # The login exchange is the ONLY route reachable without a session.
-    token = auth.login(body.credential or "")
-    if not token:
+    # Verify the Google ID token (signature/JWKS, exp, aud, iss), resolve it to an allowed user
+    # (invited→active on first sign-in), then mint a uid+token_version cookie. Role is NOT in the cookie.
+    try:
+        claims = auth.verify_google_id_token(body.credential or "")
+    except auth.AuthError:
         raise HTTPException(status_code=403, detail="not authorized")
-    em = auth.session_email(token)               # flip an invited allow-list user → active (§3.6)
-    if em:
-        users.mark_active(em)
+    u = users.authenticate(claims.get("sub"), claims.get("email", ""))
+    if not u:
+        raise HTTPException(status_code=403, detail="not authorized")
+    token = auth.sign_session(u["id"], int(u["token_version"]))
     resp = JSONResponse({"ok": True})
     resp.set_cookie(auth.COOKIE, token, max_age=auth.SESSION_TTL, path="/",
-                    httponly=True, samesite="lax")
+                    httponly=True, secure=True, samesite="lax")
     return resp
 
 
@@ -1094,7 +1100,7 @@ def admin_client_delete(org_id: str, v: tuple = Depends(require_staff)):
 def _access_rows():
     out = []
     for u in users.list_users():
-        staff = u.get("tenexity") in (1, True)
+        staff = u.get("is_internal") in (1, True)
         org = users.get_org(u["org_id"]) if u.get("org_id") else None
         out.append({"email": u["email"], "type": "Tenexity" if staff else "New org",
                     "org": "Tenexity" if staff else (org["name"] if org else None),
@@ -1115,7 +1121,7 @@ def admin_invite(body: InviteIn, v: tuple = Depends(require_staff)):
     by = v[0] or ""
     if body.access_type == "tenexity":
         users.upsert(email, "member", by=by)
-        users.set_profile(email, tenexity=True)
+        users.set_profile(email, is_internal=True)
     else:
         if not (body.org_name or "").strip():
             raise HTTPException(status_code=400, detail="org_name required for a new org")
@@ -1132,14 +1138,18 @@ def admin_access_update(email: str, body: AccessPatchIn, v: tuple = Depends(requ
         raise HTTPException(status_code=404, detail="unknown user")
     if body.role in ("admin", "member"):
         users.upsert(em, body.role, by=v[0] or "")
-    if body.status in ("active", "invited"):
+    if body.status == "disabled":
+        users.disable(em)                            # status→disabled + token_version bump (revokes cookie)
+    elif body.status in ("active", "invited"):
         users.set_status(em, body.status)
     return _access_rows()
 
 
 @app.delete("/api/admin/access/{email}")
 def admin_access_revoke(email: str, v: tuple = Depends(require_staff)):
-    users.remove((email or "").strip().lower())
+    # Revoke = disable + bump token_version (spec lifecycle): blocks new sign-ins AND invalidates the
+    # user's current cookie on its next request. The bootstrap admin is guarded inside disable().
+    users.disable((email or "").strip().lower())
     return _access_rows()
 
 

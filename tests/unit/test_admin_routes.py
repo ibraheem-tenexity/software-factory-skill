@@ -20,46 +20,50 @@ def _load_app(tmp_path, monkeypatch, **env):
 
 
 _AUTH = dict(SF_GOOGLE_CLIENT_ID="cid-123.apps.googleusercontent.com",
-             SF_AUTH_EMAILS="op@tenexity.ai", SF_AUTH_SECRET="test-secret")
+             SF_SESSION_SECRET="test-secret")
 
 
 @pytest.fixture()
 def staff_mod(tmp_path, monkeypatch):
-    mod = _load_app(tmp_path, monkeypatch, SF_ADMIN_EMAILS="op@tenexity.ai", **_AUTH)
-    mod.users.set_profile("op@tenexity.ai", tenexity=True)   # platform staff = role==admin AND tenexity
-    return mod
+    # platform staff = role==admin AND is_internal; bootstrap seeds op as an internal admin.
+    return _load_app(tmp_path, monkeypatch,
+                     SF_BOOTSTRAP_ADMIN_EMAIL="op@tenexity.ai", **_AUTH)
 
 
 @pytest.fixture()
 def staff_client(staff_mod):
-    return TestClient(staff_mod.app)
+    return TestClient(staff_mod.app, base_url="https://testserver")
 
 
 @pytest.fixture()
 def member_mod(tmp_path, monkeypatch):
-    return _load_app(tmp_path, monkeypatch, **_AUTH)   # no SF_ADMIN_EMAILS → op is a non-staff member
+    mod = _load_app(tmp_path, monkeypatch, **_AUTH)
+    mod.users.upsert("op@tenexity.ai", "member")   # op is a non-staff member
+    return mod
 
 
 @pytest.fixture()
 def member_client(member_mod):
-    return TestClient(member_mod.app)
+    return TestClient(member_mod.app, base_url="https://testserver")
 
 
 @pytest.fixture()
 def adminonly_mod(tmp_path, monkeypatch):
-    # role==admin (via SF_ADMIN_EMAILS) but tenexity NOT set → must NOT reach Tenexity OS.
-    return _load_app(tmp_path, monkeypatch, SF_ADMIN_EMAILS="op@tenexity.ai", **_AUTH)
+    # role==admin but is_internal NOT set → must NOT reach Tenexity OS.
+    mod = _load_app(tmp_path, monkeypatch, **_AUTH)
+    mod.users.upsert("op@tenexity.ai", "admin")
+    return mod
 
 
 @pytest.fixture()
 def adminonly_client(adminonly_mod):
-    return TestClient(adminonly_mod.app)
+    return TestClient(adminonly_mod.app, base_url="https://testserver")
 
 
 def _login(mod, client, monkeypatch, email="op@tenexity.ai"):
     from software_factory import auth as a
-    monkeypatch.setattr(a, "_fetch_claims", lambda tok: {
-        "aud": "cid-123.apps.googleusercontent.com", "email": email, "email_verified": "true"})
+    monkeypatch.setattr(a, "verify_google_id_token",
+                        lambda tok: {"sub": "sub-" + email, "email": email, "email_verified": True})
     return client.post("/api/auth/google", json={"credential": "t"})
 
 
@@ -84,19 +88,19 @@ def test_admin_page_forbidden_for_member(member_mod, member_client, monkeypatch)
 
 def test_admin_page_forbidden_for_admin_without_tenexity(adminonly_mod, adminonly_client, monkeypatch):
     _enable_react(adminonly_mod, monkeypatch)
-    _login(adminonly_mod, adminonly_client, monkeypatch)         # role admin, NO tenexity flag
+    _login(adminonly_mod, adminonly_client, monkeypatch)         # role admin, NO is_internal flag
     assert adminonly_client.get("/admin").status_code == 403
 
 
 def test_admin_page_served_to_staff(staff_mod, staff_client, monkeypatch):
     _enable_react(staff_mod, monkeypatch)
-    _login(staff_mod, staff_client, monkeypatch)                 # role admin AND tenexity
+    _login(staff_mod, staff_client, monkeypatch)                 # role admin AND is_internal
     r = staff_client.get("/admin")
     assert r.status_code == 200 and b"admin-spa" in r.content
 
 
 def test_admin_api_forbidden_for_admin_without_tenexity(adminonly_mod, adminonly_client, monkeypatch):
-    # require_staff strict bar: env-admin alone (no tenexity) must NOT reach cross-tenant data.
+    # require_staff strict bar: a plain admin (no is_internal) must NOT reach cross-tenant data.
     _login(adminonly_mod, adminonly_client, monkeypatch)
     assert adminonly_client.get("/api/admin/overview").status_code == 403
 

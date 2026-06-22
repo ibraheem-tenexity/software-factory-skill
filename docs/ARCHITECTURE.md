@@ -105,7 +105,7 @@ Stage 3 BUILD      tickets → built app(s) → deploy → verify  gate: done ti
 | `tickets.py`, `agents.py` | `TicketStore` (work units, per-wave, each tagged with its target `app` for multi-deliverable builds) and `AgentRegistry` (per-agent telemetry/cost). |
 | `dbshim.py` | The storage seam: `connect(path)` returns a sqlite3-`Connection`-shaped wrapper over **psycopg3** against the one flat `public` schema (Supabase 6543 transaction pooler, `prepare_threshold=None`); `?`→`%s` + DDL/`RETURNING` translation. All per-project stores go through it; `registry_projects()` lists `public.projectstate`. |
 | `env.py` | dev/prod tiering (`SF_ENVIRONMENT`): `db_backend()` (Postgres everywhere — kept as a single seam, no sqlite backend), `stage_env_baseline()` (scrubs console secrets from stage child processes), Railway project allowlist. |
-| `auth.py` + `users.py` | Google-OAuth login + HMAC session cookie + service token; `UserStore` directory (roles: admin/member) backing membership + per-project ownership. |
+| `auth.py` + `users.py` | Google-OAuth login (`google-auth` token verify) + HMAC `uid`/`token_version` session cookie + service token; `UserStore` = the allowlist+RBAC directory (`roles`/`role_permissions`, status invited/active/disabled, per-request role resolution) backing membership + per-project ownership. |
 | `chat_agent.py` | The "Factory Concierge" — an OpenAI-Agents-SDK agent that turns a chat conversation into a `start_project` (and answers status/deps questions). |
 | `input_pipeline.py`, `pdf_extract.py`, `docx_extract.py` | Ingest: attachments → Markdown, compose the Stage-1 input (`context.txt` + `brief.md` + `interview.md`). `docx_extract.extract_with_images` (mammoth + markdownify) keeps **wireframe images inside Word tables** → `input/images/`. |
 | `workspace_setup.py`, `workspace.py` | Per-stage ephemeral workspace: SKILL contract, `.mcp.json`, prior-stage artifacts, vendored design skills. |
@@ -155,8 +155,15 @@ prod and `metadata.create_all` builds it in tests, so the two cannot drift.
 - `agents` (composite PK `(agent_id, project_id)`) — per-agent telemetry/cost.
 
 *Global directory tables (one row-set, not per-project):*
-- `users` — the user directory (roles) + onboarding profile columns **`org_id`, `designation`,
-  `role_description`, `tenexity`** (Tenexity-staff flag).
+- `roles` / `role_permissions` — RBAC: one row per named role (`admin`/`member`, uuid PK, seeded);
+  `role_permissions` maps a role to many permission strings (e.g. `projects.delete`).
+- `users` — canonical identity **and** the allowlist (single source of truth for who can access).
+  uuid PK; **`google_sub`** (Google's stable id, set on first sign-in — the match key thereafter),
+  unique **`email`** (invite/allowlist key), **`role_id`**→`roles`, **`is_internal`** (Tenexity-staff
+  flag, was `tenexity`), **`status`** ∈ `invited|active|disabled`, **`token_version`** (per-user session
+  revoke), **`metadata`** jsonb (non-auth extensibility only), `invited_by`, `onboarded_at`,
+  `created_at`/`updated_at` (trigger). Onboarding profile columns **`org_id`, `designation`,
+  `role_description`** are kept (Org Admin/onboarding join on them).
 - `organizations` (top-level tenant: `name`, `industry`, `sub_focus`, `headcount`/`revenue` as
   **band-label text** e.g. `"51–200"` / `"$10M–$50M"`, `location`, `website`, `connected_systems`,
   plus **`plan`/`monthly_budget_cap`** for Org Admin Usage & billing) — the org-on-file model behind
@@ -217,11 +224,25 @@ key (a one-time `SUPABASE_AT` setup step), and the full write-through of inputs/
 
 ## 7. Auth, roles & multi-tenancy (current, combined tip)
 
-- **Login:** Google OAuth → server validates the ID token → issues an HMAC-signed session cookie.
-  Allowlist = `SF_AUTH_EMAILS` ∪ the `public.users` directory. Machine callers use the
-  `X-SF-Service-Token` header. `/api/health` is open; everything else gated.
-- **Roles:** `admin` | `member`. `SF_ADMIN_EMAILS` are bootstrap admins (can't be locked out) and
-  seed the directory. Admins manage the team in-console (`/api/users`, the Team panel).
+- **Login:** Google OAuth → server verifies the ID token via **`google-auth`** (`verify_oauth2_token`:
+  signature against Google's JWKS w/ key rotation, `exp`, `aud`, `iss`) + `email_verified`. It then
+  resolves the token to an allowed user (`users.authenticate`: match `google_sub`, else `email`;
+  invited/active OK, disabled rejected; first sign-in sets `google_sub`+`status=active`+`onboarded_at`)
+  and mints an **HMAC-signed cookie carrying only `uid`+`token_version`+`exp`** (`HttpOnly; Secure;
+  SameSite=Lax; Path=/; Max-Age`). The **role is NOT in the cookie**.
+- **Allowlist = the `public.users` table only** (no env allowlist — `SF_AUTH_EMAILS`/`SF_ADMIN_EMAILS`
+  are gone). `status ∈ invited|active|disabled` is the whole "who can access" question. Machine callers
+  use the constant-time-checked `X-SF-Service-Token` header. `/api/health` is open; everything else gated.
+- **Per-request authorization:** `viewer` verifies the cookie (sig+expiry, no DB), loads the user by
+  `uid`, and **rejects a disabled user or a stale `token_version`** — so a demotion/revoke takes effect
+  on the *next* request. Role is resolved per-request from `role_id`→`roles.name`. **Revoke** = set
+  `status=disabled` + bump `token_version` (invalidates the live cookie); secret rotation
+  (`SF_SESSION_SECRET`) is the global-logout lever.
+- **Roles:** `admin` | `member`. Cold-start is seeded from **`SF_BOOTSTRAP_ADMIN_EMAIL`** (the only
+  email allowed in env, seeded once as an `is_internal` admin, never removable); thereafter all access
+  is managed in-console (`/api/users`/`/api/admin/access`, the Team & access screen) — no redeploy.
+- **Tenexity OS `/admin` gate (`_staff_session`):** a human session reaches the operator portal only if
+  `role==admin` **AND** `is_internal==true`.
 - **Ownership:** every project has an `owner` (creating user's email). **Admins see all projects;
   members see only their own** — enforced on *every* project-scoped route, not just the list.
 - **Project identity:** the user-chosen **name** is unique (enforced at creation) and is what the
