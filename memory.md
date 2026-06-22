@@ -38,3 +38,21 @@ phase complete.
 2. src/software_factory/{brief.py,console.py,chat_agent.py,runstate.py,tickets.py,db.py,docx_extract.py,input_pipeline.py}, console/app.py, console/web/** (Vite+React+TS SPA), skills/stage-1/2/3 SKILL(.opencode).md; plan at ~/.claude/plans/this-is-the-feedback-purring-donut.md
 3. Operator goal "implement this plan without my input"; built phases 1,2,D,A,B,H-step1. SF_CONSOLE=react serves the SPA (legacy index.html still default → nothing breaks). Drafts mint canonical run-<8hex> up front (poller-invisible).
 4. Summary: full unit suite 412 passed/1 skipped; live E2E smoke green (draft/brief/tickets/deployments/React all serve). REMAINING (operator-gated): F = live babysit (needs real API/Railway/GitHub keys + spend — not run autonomously); H steps 3-5 (Build IR, screenshot-diff verify) deferred per plan. 6 commits c3c6e0e..d2f2303.
+
+# Tenexity OS agent Update at Time: 22:06:2026:15:24:17.285
+1. Opened PR #20 (Factories/Settings placeholder views), PR #21 (tools status toggle + colored prompt-panel badges), and PR #23 (§3.6 Provide access/invite polish for auth-rbac schema).
+2. console/web/src/admin/AdminPortal.tsx, src/admin/views.tsx, src/admin/modals.tsx; design source at ~/Downloads/Software Factory/admin.jsx + shared.jsx.
+3. Operator/integrator: work does not touch auth schema; following sequencing after auth-rbac PR.
+4. §3.6 uses existing /api/admin/* endpoints that now write users/roles; list shows friendly Operator/Org admin labels and supports revoke.
+
+# main integrator (software-factory-skill) Update at Time: 22:06:2026:22:37:00.000
+1. Shipped + DEPLOYED the auth data-model + hardening refactor to prod (main 36e1d76, PR #22): DB-backed allowlist/RBAC, google-auth token verify, uid+token_version HMAC session cookie.
+2. src/software_factory/{models,users,auth}.py, console/app.py, migrations/versions/0003_auth_rbac.py, Dockerfile (google-auth in pip list), conftest.py, tests/unit/*, docs/ARCHITECTURE.md + schema-erd.{dot,svg}.
+3. Operator directive "big & breaking, don't care about the live app": killed SF_AUTH_EMAILS/SF_ADMIN_EMAILS env allowlists → public.users (status invited|active|disabled) is the SOLE access source of truth; tenexity→is_internal; role resolved per-request from role_id→roles (instant demote/revoke); /admin gate = role==admin AND is_internal.
+4. Summary: 526 unit tests green; 0002→0003 prod-upgrade rehearsed incl. acceptance gate; deploy needed SF_BOOTSTRAP_ADMIN_EMAIL=ibraheem@tenexity.ai (lockout-critical — 0003 wipes users, bootstrap reseeds) + fresh SF_SESSION_SECRET; headless smoke + ibraheem's live Google /admin sign-in both verified. 0003 is the LAST drop+rebuild (additive-only after, per crew policy).
+
+# main integrator (software-factory-skill) Update at Time: 22:06:2026:22:38:00.000
+1. Integrated + DEPLOYED OS-portal PRs #19/#20/#21 in one coordinator-serialized window (main f01175f).
+2. .gitignore + opencode.json untracked (#19); console/web/src/admin/{AdminPortal,views,modals}.tsx (#20 Factories/Settings placeholders, #21 Tools status toggle + colored badges).
+3. FE/config-only, no schema/auth impact; rebased each onto current main, merged #19→#20→#21 (clean auto-merge, no conflicts); placeholders are honest "out of scope" cards — NO fake data (per the no-dummy-data rule).
+4. Summary: SPA built clean (tsc -b + vite); railway up green (migrate 0003 no-op re-run); new admin bundle served; Tools PATCH verified against live data. PR #23 (§3.6 provide-access/invite polish) remains OPEN/unintegrated — a future window.
