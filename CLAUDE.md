@@ -73,9 +73,25 @@ diagrams in `docs/` (`docs/schema-erd.svg` is the source-of-truth ERD, with `doc
 schema detail; `docs/service-architecture.svg` is the service/storage topology). If your change makes
 the doc or a diagram wrong, fixing them is part of the change, not a follow-up.
 
-## Blast Redius
+## Blast Radius
 
 If the operator has explicitly instructed you to do something, do not autonomously resject it or defer it based on the blast radius. This project is in its early stages and high blast radius changes are acceptable 
+
+# memory.md
+
+Format that should be followed: 
+```
+# $AGENT_NAME Update at Time: $DD:MM:YYYY:HH:MM:SS.SSS 
+1. Decision taken or work performed in a single line
+2. Related file or artifact location
+3. Reasoning
+4. Summary in 3 lines
+```
+
+The file has to serve as a long term store of information sharing betweeen agents and should be used as a central reference not a detailed account of everything. 
+The file should allow the agent to know enough to access more detailed information. 
+An entry should be made in the file whenever a significant change has been made by an agent. 
+
 
 ---
 
