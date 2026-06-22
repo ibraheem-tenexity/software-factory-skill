@@ -186,7 +186,15 @@ export type AdminAccessUser = {
   type: "New org" | "Tenexity";
   org: string;
   role: string;
-  status: "active" | "invited";
+  status: "active" | "invited" | "disabled";
+  is_internal?: boolean;
+  name?: string;
+  designation?: string;
+  method?: string;
+  sign_in_method?: string;
+  last_active?: number | string | null;
+  invited_by?: string | null;
+  created_at?: string | number;
 };
 
 export type AdminOverview = {
@@ -269,8 +277,18 @@ export const api = {
   adminUpdateTool: (id: string, body: Partial<AdminTool>) => send<{ tool: AdminTool }>(`/api/admin/tools/${encodeURIComponent(id)}`, "PATCH", body),
   adminDeleteTool: (id: string) => send<{ ok?: boolean }>(`/api/admin/tools/${encodeURIComponent(id)}`, "DELETE"),
   adminAccess: () => get<{ users: AdminAccessUser[] }>("/api/admin/access"),
-  adminInvite: (body: { email: string; access_type: "org" | "tenexity"; org_name?: string }) => send<{ users: AdminAccessUser[] }>("/api/admin/access", "POST", body),
-  adminUpdateAccess: (email: string, body: { role?: string; status?: "active" | "invited" }) => send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "PATCH", body),
+  adminInvite: (body: {
+    email: string;
+    access_type: "org" | "tenexity";
+    org_name?: string;
+    name?: string;
+    designation?: string;
+    method?: "google" | "microsoft" | "password" | "sso";
+    password?: string;
+    role?: "admin" | "member";
+  }) => send<{ users: AdminAccessUser[] }>("/api/admin/access", "POST", body),
+  adminUpdateAccess: (email: string, body: { role?: string; status?: "active" | "invited" | "disabled" }) =>
+    send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "PATCH", body),
   adminDeleteAccess: (email: string) => send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "DELETE"),
   // ── Onboarding draft model (docs/plans/concierge-onboarding-api.md) ──
   createDraft: (body?: { project_name?: string }) =>

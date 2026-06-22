@@ -3,13 +3,16 @@ import { T } from "./tokens";
 import { Icon } from "./primitives";
 import { api } from "../api";
 import type { AdminAgent, AdminClient, AdminTool } from "../api";
-import { AdminClients, AdminProjectsView, AdminAgents, AdminTools, AdminOverview, AdminFactories, AdminSettings } from "./views";
-import { InviteModal, AgentPromptPanel, ClientModal, AgentModal, ToolModal, ConfirmDelete } from "./modals";
+import { UsersManagement } from "./users";
+import { AdminClients, AdminProjectsView, AdminAgents, AdminTools, AdminOverview, AdminFactories, AdminSettings, AdminSymphony } from "./views";
+import { AgentPromptPanel, ClientModal, AgentModal, ToolModal, ConfirmDelete } from "./modals";
 
 const NAV_PATHS: Record<string, string> = {
   overview: "M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z",
   clients:
     "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75",
+  users:
+    "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
   projects: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z",
   newproject: "M12 5v14 M5 12h14",
   agents:
@@ -42,13 +45,12 @@ function NavIcon({ name, size = 17, color = "currentColor" }: { name: keyof type
 }
 
 export function AdminPortal() {
-  const [view, setView] = React.useState<string>("clients");
+  const [view, setView] = React.useState<string>("organizations");
   const [agent, setAgent] = React.useState<AdminAgent | null>(null);
   const [agentModal, setAgentModal] = React.useState<AdminAgent | null | "new">(null);
   const [clientModal, setClientModal] = React.useState<AdminClient | null | "new">(null);
   const [toolModal, setToolModal] = React.useState<AdminTool | null | "new">(null);
   const [deleteTarget, setDeleteTarget] = React.useState<{ kind: "client" | "agent" | "tool"; item: AdminClient | AdminAgent | AdminTool } | null>(null);
-  const [invite, setInvite] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [agentVersion, setAgentVersion] = React.useState(0);
   const [clientVersion, setClientVersion] = React.useState(0);
@@ -68,12 +70,14 @@ export function AdminPortal() {
 
   const NAV = [
     { id: "overview", label: "Overview", icon: "overview" },
-    { id: "clients", label: "Clients", icon: "clients" },
+    { id: "organizations", label: "Organizations", icon: "clients" },
+    { id: "users", label: "Users", icon: "users" },
     { id: "projects", label: "Projects", icon: "projects" },
     { id: "newproject", label: "New Project", icon: "newproject" },
     { id: "agents", label: "Agents", icon: "agents" },
     { id: "tools", label: "Tools", icon: "tools" },
     { id: "factories", label: "Factories", icon: "factories" },
+    { id: "symphony", label: "Symphony", icon: "symphony" },
     { id: "settings", label: "Settings", icon: "settings" },
   ] as const;
 
@@ -262,33 +266,14 @@ export function AdminPortal() {
                 ⌘K
               </span>
             </div>
-            <button
-              onClick={() => setInvite(true)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 7,
-                height: 36,
-                padding: "0 14px",
-                cursor: "pointer",
-                font: `600 11.5px/1 ${T.mono}`,
-                letterSpacing: "0.05em",
-                textTransform: "uppercase",
-                borderRadius: T.rMd,
-                border: "1px solid transparent",
-                background: T.brand,
-                color: "#fff",
-              }}
-            >
-              <Icon name="plus" size={14} color="#fff" /> Provide access
-            </button>
           </div>
           {/* content */}
           <div style={{ flex: 1, overflow: "auto", padding: "20px 26px 36px" }}>
             {view === "overview" && <AdminOverview onNav={setView} query={query} />}
-            {view === "clients" && (
+            {view === "organizations" && (
               <AdminClients query={query} onNew={() => setClientModal("new")} onEdit={(c) => setClientModal(c)} onDelete={(c) => setDeleteTarget({ kind: "client", item: c })} />
             )}
+            {view === "users" && <UsersManagement />}
             {(view === "projects" || view === "newproject") && <AdminProjectsView query={query} />}
             {view === "agents" && (
               <AdminAgents
@@ -311,11 +296,11 @@ export function AdminPortal() {
               />
             )}
             {view === "factories" && <AdminFactories />}
+            {view === "symphony" && <AdminSymphony />}
             {view === "settings" && <AdminSettings />}
           </div>
         </div>
         {agent && <AgentPromptPanel agent={agent} onClose={() => setAgent(null)} onSaved={() => setAgentVersion((v) => v + 1)} />}
-        {invite && <InviteModal onClose={() => setInvite(false)} />}
         {agentModal && (
           <AgentModal
             agent={agentModal === "new" ? undefined : agentModal}
