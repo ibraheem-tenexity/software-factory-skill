@@ -301,7 +301,14 @@ export function AdminPortal() {
               />
             )}
             {view === "tools" && (
-              <AdminTools key={toolVersion} query={query} onNew={() => setToolModal("new")} onEdit={(t) => setToolModal(t)} onDelete={(t) => setDeleteTarget({ kind: "tool", item: t })} />
+              <AdminTools
+                key={toolVersion}
+                query={query}
+                onNew={() => setToolModal("new")}
+                onEdit={(t) => setToolModal(t)}
+                onDelete={(t) => setDeleteTarget({ kind: "tool", item: t })}
+                onRefresh={() => setToolVersion((v) => v + 1)}
+              />
             )}
             {(view === "factories" || view === "settings") && (
               <div style={{ display: "grid", placeItems: "center", height: 320 }}>

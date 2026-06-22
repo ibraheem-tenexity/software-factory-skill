@@ -680,11 +680,13 @@ export function AdminTools({
   onNew,
   onEdit,
   onDelete,
+  onRefresh,
 }: {
   query: string;
   onNew: () => void;
   onEdit: (t: AdminTool) => void;
   onDelete: (t: AdminTool) => void;
+  onRefresh?: () => void;
 }) {
   const { data } = useAdminFetch(() => api.adminTools());
   const TYPE_C: Record<string, [string, string]> = {
@@ -707,6 +709,9 @@ export function AdminTools({
     );
   }, [data, query]);
   const all = data?.tools ?? [];
+  const setStatus = (t: AdminTool, status: AdminTool["status"]) => {
+    api.adminUpdateTool(t.name, { status }).then(onRefresh).catch(() => {});
+  };
   return (
     <>
       <PageTitle
@@ -821,10 +826,21 @@ export function AdminTools({
               <Mono style={{ fontSize: 12, color: t.used ? T.fg : T.tertiary }}>{t.used ? `${t.used} agents` : "—"}</Mono>
               <span style={{ justifySelf: "end" }}>
                 {connected ? (
-                  <StatusPill tone="success">live</StatusPill>
+                  <button
+                    onClick={() => setStatus(t, "available")}
+                    style={{
+                      font: `600 10.5px/1 ${T.mono}`,
+                      color: T.success,
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    live →
+                  </button>
                 ) : (
                   <button
-                    onClick={() => onEdit({ ...t, status: "connected" })}
+                    onClick={() => setStatus(t, "connected")}
                     style={{
                       font: `600 10.5px/1 ${T.mono}`,
                       color: T.brandDeep,

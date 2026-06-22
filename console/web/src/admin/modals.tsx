@@ -5,6 +5,13 @@ import { api } from "../api";
 import type { AdminAgent, AdminTool, AdminClient, AdminAccessUser } from "../api";
 import { useAdminFetch, fmtRel } from "./hooks";
 
+const TYPE_C: Record<string, [string, string]> = {
+  MCP: [T.brandSoft, T.brandDeep],
+  API: [T.cHighSoft, T.cHigh],
+  native: [T.successSoft, T.success],
+  HTTP: ["#f3e9fb", "#7a3ea8"],
+};
+
 const overlay: React.CSSProperties = {
   position: "absolute",
   inset: 0,
@@ -250,34 +257,37 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
           {tab === "tools" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <Mono style={{ marginBottom: 2, display: "block" }}>Tools available to {active.sign}</Mono>
-              {(detail?.tools ?? []).map((t) => (
-                <div
-                  key={t.name}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "10px 12px",
-                    borderRadius: T.rMd,
-                    border: `1px solid ${T.borderSubtle}`,
-                    background: T.bg,
-                  }}
-                >
-                  <span
+              {(detail?.tools ?? []).map((t) => {
+                const tc = TYPE_C[t.type || "MCP"] || TYPE_C.MCP;
+                return (
+                  <div
+                    key={t.name}
                     style={{
-                      font: `600 9px/1 ${T.mono}`,
-                      color: T.brandDeep,
-                      background: T.brandSoft,
-                      padding: "3px 5px",
-                      borderRadius: 3,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "10px 12px",
+                      borderRadius: T.rMd,
+                      border: `1px solid ${T.borderSubtle}`,
+                      background: T.bg,
                     }}
                   >
-                    {t.type || "MCP"}
-                  </span>
-                  <span style={{ flex: 1, font: `500 13px/1.2 ${T.sans}`, color: T.fg }}>{t.name}</span>
-                  <Mono style={{ fontSize: 10.5 }}>{t.scope}</Mono>
-                </div>
-              ))}
+                    <span
+                      style={{
+                        font: `600 9px/1 ${T.mono}`,
+                        color: tc[1],
+                        background: tc[0],
+                        padding: "3px 5px",
+                        borderRadius: 3,
+                      }}
+                    >
+                      {t.type || "MCP"}
+                    </span>
+                    <span style={{ flex: 1, font: `500 13px/1.2 ${T.sans}`, color: T.fg }}>{t.name}</span>
+                    <Mono style={{ fontSize: 10.5 }}>{t.scope}</Mono>
+                  </div>
+                );
+              })}
               {(detail?.tools ?? []).length === 0 && <Mono>No tools listed.</Mono>}
             </div>
           )}
