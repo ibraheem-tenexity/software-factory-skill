@@ -125,3 +125,30 @@ def service_token_ok(value) -> bool:
     if not expected or not value:
         return False
     return hmac.compare_digest(str(value), expected)
+
+
+# --- Password hashing (email+password sign-in) -------------------------------------------
+# Stdlib scrypt — a memory-hard slow hash (no extra dependency; bcrypt/argon2/scrypt all acceptable).
+# Stored as `scrypt$<n>$<r>$<p>$<salt>$<hash>`; verified in constant time. NEVER store plaintext.
+_SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 16384, 8, 1
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    dk = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R,
+                        p=_SCRYPT_P, dklen=32)
+    return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${_b64u_encode(salt)}${_b64u_encode(dk)}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Constant-time verify of `password` against a stored scrypt hash. False on any malformed input."""
+    try:
+        scheme, n, r, p, salt_b64, hash_b64 = (stored or "").split("$")
+        if scheme != "scrypt":
+            return False
+        expected = _b64u_decode(hash_b64)
+        dk = hashlib.scrypt(password.encode("utf-8"), salt=_b64u_decode(salt_b64),
+                            n=int(n), r=int(r), p=int(p), dklen=len(expected))
+        return hmac.compare_digest(dk, expected)
+    except Exception:
+        return False

@@ -4,6 +4,7 @@ import datetime
 from fastapi import APIRouter, Depends, HTTPException
 
 from software_factory import tenexity_os
+from software_factory.users import TENEXITY_ORG_ID
 
 import console.state as state
 from console.deps import require_staff
@@ -176,7 +177,10 @@ def _access_rows():
         org = state.users.get_org(u["org_id"]) if u.get("org_id") else None
         out.append({"email": u["email"], "type": "Tenexity" if staff else "New org",
                     "org": "Tenexity" if staff else (org["name"] if org else None),
-                    "role": u["role"], "status": u.get("status") or "active"})
+                    "role": u["role"], "status": u.get("status") or "active",
+                    "name": u.get("name"), "designation": u.get("designation"),
+                    "sign_in_method": u.get("sign_in_method"), "last_active": u.get("last_active"),
+                    "invited_by": u.get("invited_by")})
     return {"users": out}
 
 
@@ -190,16 +194,29 @@ def admin_invite(body: InviteIn, v: tuple = Depends(require_staff)):
     email = (body.email or "").strip().lower()
     if not email:
         raise HTTPException(status_code=400, detail="email required")
+    method = body.method or "google"
+    if method == "password" and not (body.password or ""):
+        raise HTTPException(status_code=400, detail="password required when method is 'password'")
+    role = body.role if body.role in ("admin", "member") else None
     by = v[0] or ""
     if body.access_type == "tenexity":
-        state.users.upsert(email, "member", by=by)
-        state.users.set_profile(email, is_internal=True)
+        state.users.upsert(email, role or "member", by=by)   # staff default member unless role given
+        state.users.set_profile(email, is_internal=True, org_id=TENEXITY_ORG_ID,
+                                name=body.name, designation=body.designation, sign_in_method=method)
     else:
         if not (body.org_name or "").strip():
             raise HTTPException(status_code=400, detail="org_name required for a new org")
         oid = state.users.create_org(body.org_name, by=by)
-        state.users.invite_member(email, oid, role="admin", by=by)
-    state.users.set_status(email, "invited")
+        state.users.invite_member(email, oid, role=role or "admin", by=by)  # org default admin
+        state.users.set_profile(email, name=body.name, designation=body.designation,
+                                sign_in_method=method)
+    # method=password → provision an active credentialed user; otherwise the user is invited (pending
+    # first sign-in via their method). set_password also flips sign_in_method to 'password'.
+    if method == "password":
+        state.users.set_password(email, body.password)
+        state.users.set_status(email, "active")
+    else:
+        state.users.set_status(email, "invited")
     return _access_rows()
 
 

@@ -158,10 +158,20 @@ class PromptIn(BaseModel):
     prompt: str = ""
 
 
+class PasswordLoginIn(BaseModel):
+    email: str = ""
+    password: str = ""
+
+
 class InviteIn(BaseModel):
     email: str = ""
     access_type: str = "org"     # "org" | "tenexity"
     org_name: str | None = None
+    name: str | None = None
+    designation: str | None = None
+    method: str = "google"       # google|microsoft|password|sso
+    password: str | None = None  # required when method == "password"
+    role: str | None = None      # admin|member — honored for org users (was derived)
 
 
 class AccessPatchIn(BaseModel):

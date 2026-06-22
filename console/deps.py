@@ -1,9 +1,13 @@
 """Auth dependencies — the DI gates every router shares. Behavior unchanged from the monolith."""
+import time
+
 from fastapi import Depends, HTTPException, Request
 
 from software_factory import auth
 
 import console.state as state
+
+_LAST_ACTIVE_THROTTLE = 60   # seconds — don't write last_active more than once a minute per user
 
 
 def viewer(request: Request) -> tuple:
@@ -19,6 +23,12 @@ def viewer(request: Request) -> tuple:
     if payload:
         u = state.users.get_by_id(payload.get("uid"))
         if u and u["status"] == "active" and int(u["token_version"]) == int(payload.get("tv", -1)):
+            la = u.get("last_active")              # epoch seconds (Decimal from PG) or None
+            if la is None or (time.time() - float(la)) > _LAST_ACTIVE_THROTTLE:
+                try:
+                    state.users.touch_last_active(u["id"])
+                except Exception:
+                    pass   # activity stamp is best-effort; never fail a request on it
             return (u["email"], u["role"], True)
     return (None, None, False)
 

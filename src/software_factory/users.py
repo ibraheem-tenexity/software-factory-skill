@@ -23,17 +23,26 @@ import time
 import uuid
 
 from . import dbshim
+from . import auth
 
 _CACHE_TTL = 20.0
+# Canonical internal organization — every Tenexity staff member links to it (so "Your organization"
+# resolves + the admin-dashboard card, gated on isAdmin && org, shows). Seeded at boot, idempotently.
+TENEXITY_ORG_ID = "org-tenexity"
 
 # The full user row the console reads — role resolved to its NAME via the roles join; uuid columns
 # surfaced as plain strings (clean for JSON responses and the session cookie).
+# NOTE: password_hash is deliberately NOT selected here — this row feeds /api/users etc., so the hash
+# must never ride along. It's read only by authenticate_password's dedicated query.
 _USER_SELECT = (
     "SELECT u.id::text AS id, u.google_sub, u.email, r.name AS role, "
     "u.is_internal, u.status, u.token_version, u.org_id, u.designation, u.role_description, "
+    "u.name AS name, u.sign_in_method, inv.email AS invited_by, "
     "extract(epoch from u.created_at) AS created_at, "
-    "extract(epoch from u.onboarded_at) AS onboarded_at "
-    "FROM public.users u JOIN public.roles r ON r.id = u.role_id")
+    "extract(epoch from u.onboarded_at) AS onboarded_at, "
+    "extract(epoch from u.last_active) AS last_active "
+    "FROM public.users u JOIN public.roles r ON r.id = u.role_id "
+    "LEFT JOIN public.users inv ON inv.id = u.invited_by")
 
 # organizations columns that hold JSON-encoded lists (decoded on read).
 _ORG_JSON_COLS = ("sub_focus", "connected_systems")
@@ -57,6 +66,7 @@ class UserStore:
         self._roles: dict | None = None        # {role name -> id} cache
         try:
             self._ensure_roles()                # seed admin/member (covers create_all test DBs)
+            self.ensure_tenexity_org()          # canonical internal org (before bootstrap admin links to it)
             self.ensure_bootstrap_admin()       # cold-start: the one env-seeded admin
         except Exception:
             # DB briefly unreachable at boot — the migration already seeded roles in prod, and the
@@ -235,12 +245,22 @@ class UserStore:
             "updated_at = now()",
             (str(uuid.uuid4()), email, rid))
         self._cache = None
+        # Link the bootstrap admin to the canonical Tenexity org (org_id only — preserves role/is_internal)
+        # so "Your organization" resolves and the admin-dashboard card (isAdmin && org) shows.
+        self.set_profile(email, org_id=TENEXITY_ORG_ID)
+
+    def ensure_tenexity_org(self) -> None:
+        """Cold-start seed of the canonical internal org. Guarded by an existence check because
+        create_org's INSERT has no ON CONFLICT — an unconditional call would dup-PK on the 2nd boot."""
+        if self.get_org(TENEXITY_ORG_ID) is None:
+            self.create_org("Tenexity", org_id=TENEXITY_ORG_ID, by="system")
 
     # -- user profile (org link + self-described role) ----------------------------------
     def set_profile(self, email: str, *, org_id: str | None = None, designation: str | None = None,
-                    role_description: str | None = None, is_internal: bool | None = None) -> None:
-        """Update onboarding profile fields on an existing user (creates a member row if unknown).
-        Only the non-None fields are written. `is_internal` flags Tenexity staff vs external collaborator."""
+                    role_description: str | None = None, is_internal: bool | None = None,
+                    name: str | None = None, sign_in_method: str | None = None) -> None:
+        """Update onboarding/user-mgmt profile fields on an existing user (creates a member row if
+        unknown). Only the non-None fields are written. `is_internal` flags Tenexity staff."""
         email = (email or "").strip().lower()
         if not email:
             return
@@ -248,7 +268,8 @@ class UserStore:
             self.upsert(email, "member")
         sets, vals = [], []
         for col, val in (("org_id", org_id), ("designation", designation),
-                         ("role_description", role_description)):
+                         ("role_description", role_description), ("name", name),
+                         ("sign_in_method", sign_in_method)):
             if val is not None:
                 sets.append(f"{col}=?"); vals.append(val)
         if is_internal is not None:
@@ -259,6 +280,41 @@ class UserStore:
         self._exec(f"UPDATE public.users SET {', '.join(sets)}, updated_at = now() WHERE email=?",
                    tuple(vals))
         self._cache = None
+
+    # -- email+password sign-in ---------------------------------------------------------
+    def set_password(self, email: str, raw_password: str) -> None:
+        """Provision/replace a user's password: store the scrypt hash + flip sign_in_method to
+        'password'. Does NOT change status — the caller (invite) decides active vs invited."""
+        email = (email or "").strip().lower()
+        if not email or not raw_password:
+            return
+        self._exec("UPDATE public.users SET password_hash = ?, sign_in_method = 'password', "
+                   "updated_at = now() WHERE email = ?", (auth.hash_password(raw_password), email))
+        self._cache = None
+
+    def authenticate_password(self, email: str, raw_password: str) -> dict | None:
+        """Resolve an email+password sign-in, applying the SAME allowlist/lifecycle as Google: the
+        user must exist, be 'active', and have a password set; the hash is verified constant-time.
+        Returns the user row (no hash) on success, else None. Touches last_active on success."""
+        email = (email or "").strip().lower()
+        if not email or not raw_password:
+            return None
+        rows = self._query(
+            "SELECT id::text AS id, status, password_hash FROM public.users WHERE email = ?", (email,))
+        u = rows[0] if rows else None
+        if not u or u["status"] != "active" or not u.get("password_hash"):
+            return None
+        if not auth.verify_password(raw_password, u["password_hash"]):
+            return None
+        self.touch_last_active(u["id"])
+        return self.get_by_id(u["id"])
+
+    def touch_last_active(self, uid: str) -> None:
+        """Stamp last_active = now() (display-only activity; cheap, no cache invalidation)."""
+        uid = str(uid or "")
+        if not uid:
+            return
+        self._exec("UPDATE public.users SET last_active = now() WHERE id = ?::uuid", (uid,))
 
     # -- organizations ------------------------------------------------------------------
     def create_org(self, name: str, *, industry: str | None = None, sub_focus=None,

@@ -118,7 +118,8 @@ def test_list_orgs(store):
     store.create_org("Zeta")
     store.create_org("Acme")
     names = [o["name"] for o in store.list_orgs()]
-    assert names == ["Acme", "Zeta"]               # ordered by name
+    # "Tenexity" is the canonical internal org, seeded at UserStore init (ensure_tenexity_org).
+    assert names == ["Acme", "Tenexity", "Zeta"]   # ordered by name
 
 
 def test_set_profile_links_org_and_role(store):
