@@ -351,6 +351,7 @@ export function Composer({ placeholder = "Reply…", onSend, value, onChange }:
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 8, border: `1px solid ${T.borderDefault}`, borderRadius: T.rLg, background: T.raised, padding: 8 }}>
       <textarea value={value || ""} onChange={(e) => onChange && onChange(e.target.value)} placeholder={placeholder} rows={1}
+        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend && onSend(); } }}
         style={{ flex: 1, minWidth: 0, resize: "none", border: "none", outline: "none", background: "transparent", padding: "6px", font: `400 13px/1.4 ${T.sans}`, color: T.fg }} />
       <button title="Dictate" style={{ width: 30, height: 30, display: "grid", placeItems: "center", borderRadius: T.rMd, border: "none", background: "transparent", color: T.tertiary, cursor: "pointer" }}><Icon name="mic" size={15} /></button>
       <Btn variant="primary" size="sm" onClick={onSend} style={{ height: 30 }}><Icon name="send" size={13} color="#fff" /> Send</Btn>
