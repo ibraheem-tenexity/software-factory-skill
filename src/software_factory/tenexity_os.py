@@ -22,6 +22,139 @@ _ROLE_ALIASES = {
 }
 
 
+# ── stage skills (PRD §3.4, Part 1) ───────────────────────────────────────────────────────────────
+# The 3 stage-orchestrator prompts ARE the on-disk SKILL.md files the live pipeline reads per stage
+# (one per runtime: SKILL.md = claude, SKILL.opencode.md = opencode). We surface them as READ-ONLY
+# agent cards (kind:'stage_skill', prompt_applied:true) so the Agents dashboard shows the REAL live
+# orchestrator prompts — distinct from the editable-but-disconnected PromptStore. The skills/ dir ships
+# to the container at /app/skills (Dockerfile `COPY . /app`); resolved here relative to this module.
+# Edits→pipeline + managed subagent prompts are Part 2 (deferred).
+_SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "skills")
+
+STAGE_SKILLS = [
+    {"callsign": "STAGE-1", "stage": 1, "slug": "stage-1-research",
+     "name": "Stage 1 · Research", "model": "claude-opus-4-8"},
+    {"callsign": "STAGE-2", "stage": 2, "slug": "stage-2-design",
+     "name": "Stage 2 · Design", "model": "claude-opus-4-8"},
+    {"callsign": "STAGE-3", "stage": 3, "slug": "stage-3-build",
+     "name": "Stage 3 · Build", "model": "claude-sonnet-4-6"},
+]
+_STAGE_BY_CALLSIGN = {s["callsign"]: s for s in STAGE_SKILLS}
+
+
+def _skill_filename(runtime: str) -> str:
+    return "SKILL.opencode.md" if runtime == "opencode" else "SKILL.md"
+
+
+def _skill_variants(slug: str) -> dict:
+    return {"claude": f"skills/{slug}/SKILL.md", "opencode": f"skills/{slug}/SKILL.opencode.md"}
+
+
+def _frontmatter_description(text: str) -> str | None:
+    """Pull `description:` from the SKILL.md YAML frontmatter (name/description block), else None."""
+    if not text.startswith("---"):
+        return None
+    end = text.find("\n---", 3)
+    if end == -1:
+        return None
+    for line in text[3:end].splitlines():
+        if line.strip().lower().startswith("description:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def _read_skill(slug: str, runtime: str) -> tuple[str, str | None]:
+    """(markdown_body, frontmatter_description). GRACEFUL: a missing file degrades to a clear
+    placeholder body + None description rather than raising — the dashboard shows "not found",
+    never a 500 (e.g. if the container ever ships without skills/)."""
+    path = os.path.join(_SKILLS_DIR, slug, _skill_filename(runtime))
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return (f"(skill file not found: skills/{slug}/{_skill_filename(runtime)})", None)
+    return (text, _frontmatter_description(text))
+
+
+def stage_skill_cards() -> list:
+    """The 3 stage-orchestrator cards for the Agents list — file-backed, kind:'stage_skill'."""
+    cards = []
+    for s in STAGE_SKILLS:
+        _, desc = _read_skill(s["slug"], "claude")
+        cards.append({
+            "callsign": s["callsign"], "sign": s["callsign"], "name": s["name"],
+            "role": "stage-orchestrator", "kind": "stage_skill", "stage": s["stage"],
+            "desc": desc, "model": s["model"], "cost_tier": 3,
+            "success": None, "runs": 0, "on": False, "runtimes": ["claude", "opencode"],
+        })
+    return cards
+
+
+def stage_skill_detail(callsign: str, runtime: str = "claude") -> dict | None:
+    """Full card + the REAL SKILL.md markdown for one stage orchestrator; None if not a stage skill."""
+    s = _STAGE_BY_CALLSIGN.get((callsign or "").upper())
+    if not s:
+        return None
+    runtime = "opencode" if runtime == "opencode" else "claude"
+    body, desc = _read_skill(s["slug"], runtime)
+    card = next(c for c in stage_skill_cards() if c["callsign"] == s["callsign"])
+    return {
+        **card, "desc": desc if desc is not None else card["desc"],
+        "prompt": body, "prompt_source": "skill_file", "prompt_applied": True, "editable": False,
+        "skill": s["slug"], "skill_path": f"skills/{s['slug']}/{_skill_filename(runtime)}",
+        "runtime": runtime, "variants": _skill_variants(s["slug"]),
+    }
+
+
+# ── concierge (§3.4): a 4th live card, CODE-backed (not a SKILL.md) ───────────────────────────────
+# The Factory Concierge's live instructions ARE the CONCIERGE_INSTRUCTIONS module constant used as the
+# Agent's prompt (chat_agent.py). Surfaced read-only like the stage skills (prompt_applied:true) but
+# kind:'concierge' + prompt_source:'code'. Lazy-imported so the OS module never pulls the agents/openai
+# SDK unless this card is requested, and degrades gracefully if it can't load.
+CONCIERGE_CALLSIGN = "CONCIERGE"
+
+
+def _concierge() -> tuple[str, str]:
+    """(live instructions, model label). Graceful: a placeholder + default model if chat_agent can't
+    import (keeps the dashboard from 500ing)."""
+    try:
+        from .chat_agent import CONCIERGE_INSTRUCTIONS, chat_model_label
+        return CONCIERGE_INSTRUCTIONS, chat_model_label()
+    except Exception:
+        return "(concierge instructions unavailable)", "gpt-5.4"
+
+
+def concierge_card() -> dict:
+    _, model = _concierge()
+    return {
+        "callsign": CONCIERGE_CALLSIGN, "sign": CONCIERGE_CALLSIGN, "name": "Factory Concierge",
+        "role": "concierge", "kind": "concierge", "stage": 0,
+        "desc": "Onboarding concierge — gathers requirements and drives the pipeline.",
+        "model": model, "cost_tier": 2, "success": None, "runs": 0, "on": False, "runtimes": [],
+    }
+
+
+def concierge_detail(callsign: str) -> dict | None:
+    if (callsign or "").upper() != CONCIERGE_CALLSIGN:
+        return None
+    prompt, model = _concierge()
+    return {
+        **concierge_card(), "model": model, "prompt": prompt, "prompt_source": "code",
+        "prompt_applied": True, "editable": False,
+        "source_ref": "src/software_factory/chat_agent.py:CONCIERGE_INSTRUCTIONS",
+    }
+
+
+def live_agent_cards() -> list:
+    """The non-store, real-prompt cards: 3 stage skills (file-backed) + the concierge (code-backed)."""
+    return stage_skill_cards() + [concierge_card()]
+
+
+def live_agent_detail(callsign: str, runtime: str = "claude") -> dict | None:
+    """Detail for a stage skill or the concierge; None if `callsign` is neither."""
+    return stage_skill_detail(callsign, runtime) or concierge_detail(callsign)
+
+
 # ── cross-run SQL (flat Postgres tables; no per-run accessor exposes these) ───────────────────────
 def _query(sql: str, params: tuple = ()) -> list:
     conn = dbshim._pg_connect(os.environ["DATABASE_URL"])

@@ -59,12 +59,23 @@ def admin_set_demo(pid: str, body: DemoIn, v: tuple = Depends(require_staff)):
 # Agents (identity from agent_registry table; cost/success merged live; prompt editable) ----------
 @router.get("/api/admin/agents")
 def admin_agents(v: tuple = Depends(require_staff)):
-    return {"agents": tenexity_os.agent_roster(state.agent_store.all(), tenexity_os.agent_rollups(),
-                                               state.prompts.all())}
+    # Role agents (agent_registry + store-backed prompts) + the LIVE real-prompt cards: 3 stage
+    # orchestrators (file-backed SKILL.md, kind:'stage_skill') + the Factory Concierge (code-backed
+    # CONCIERGE_INSTRUCTIONS, kind:'concierge'). See tenexity_os.live_agent_cards.
+    roster = tenexity_os.agent_roster(state.agent_store.all(), tenexity_os.agent_rollups(),
+                                      state.prompts.all())
+    return {"agents": roster + tenexity_os.live_agent_cards()}
 
 
 @router.get("/api/admin/agents/{callsign}")
-def admin_agent(callsign: str, v: tuple = Depends(require_staff)):
+def admin_agent(callsign: str, runtime: str = "claude", v: tuple = Depends(require_staff)):
+    # Stage orchestrators serve the REAL SKILL.md and the concierge serves its live CONCIERGE_INSTRUCTIONS
+    # (prompt_applied=true; ?runtime=opencode for a stage's opencode variant). Role agents serve their
+    # editable PromptStore prompt (applied=false).
+    live = tenexity_os.live_agent_detail(callsign, runtime)
+    if live:
+        return {**live, "tools": [t for t in state.tool_store.all() if t["status"] == "connected"],
+                "activity": []}
     cs = callsign.upper()
     card = next((a for a in tenexity_os.agent_roster(state.agent_store.all(), tenexity_os.agent_rollups(),
                                                      state.prompts.all()) if a["callsign"] == cs), None)

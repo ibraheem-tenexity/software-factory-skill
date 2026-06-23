@@ -116,7 +116,7 @@ Stage 3 BUILD      tickets → built app(s) → deploy → verify  gate: done ti
 | `tracing.py` | Langfuse exporter (project.log → traces); env-gated no-op. |
 | `notify.py` | Resend email on the four operator events; env-gated no-op. |
 | `swarm_adapter.py`, `swarm_stage3.py` | `SF_SWARM=1` parallel-ticket stage-3 driver (opencode swarm). |
-| `skills/stage-{1,2,3}-*` | The stage contracts (SKILL.md + .opencode.md variants) the agents follow; `skills/tenexity-design/` is the vendored brand canon. |
+| `skills/stage-{1,2,3}-*` | The stage contracts (SKILL.md + .opencode.md variants) the agents follow; `skills/tenexity-design/` is the vendored brand canon. The 3 SKILL.md files are also surfaced **read-only** in the Tenexity OS §3.4 Agents API as `kind:"stage_skill"` orchestrator cards (`GET /api/admin/agents/{STAGE-1,STAGE-2,STAGE-3}` returns the real on-disk prompt, `prompt_applied:true`, `?runtime=claude\|opencode`); a 4th `kind:"concierge"` card (`CONCIERGE`) surfaces the live `CONCIERGE_INSTRUCTIONS` constant (`prompt_source:"code"`, model = `chat_agent.select_chat_model` default **gpt-5.4**). All 4 are distinct from the editable-but-disconnected `agent_prompts` store. Dashboard edits driving the pipeline is a deferred Part 2. |
 
 ---
 

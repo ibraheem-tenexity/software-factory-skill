@@ -6,13 +6,21 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 from openai.types.responses import ResponseFunctionToolCall
 
-from software_factory.chat_agent import ChatAgentRunner, select_chat_model
+from software_factory.chat_agent import ChatAgentRunner, select_chat_model, chat_model_label
 
 
-def test_default_is_gpt4o_when_openai_key_present(monkeypatch):
+def test_default_is_gpt5_4_when_openai_key_present(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
     monkeypatch.delenv("SF_CHAT_MODEL", raising=False)
-    assert select_chat_model() == "gpt-4o"
+    assert select_chat_model() == "gpt-5.4"          # default bumped from gpt-4o
+    assert chat_model_label() == "gpt-5.4"
+
+
+def test_sf_chat_model_passes_through_an_explicit_openai_id(monkeypatch):
+    # The no-redeploy rollback lever: any non-kimi SF_CHAT_MODEL is used verbatim as the OpenAI id.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
+    monkeypatch.setenv("SF_CHAT_MODEL", "gpt-4o")
+    assert select_chat_model() == "gpt-4o" and chat_model_label() == "gpt-4o"
 
 
 def test_kimi_when_only_openrouter_key(monkeypatch):
