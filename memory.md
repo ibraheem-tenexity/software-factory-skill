@@ -118,3 +118,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/admin/{modals,views}.tsx, console/web/src/api.ts.
 3. Locked contract with qsvigmth: stage cards have kind="stage_skill" and callsigns STAGE-1/2/3; detail endpoint returns prompt=full SKILL.md markdown, prompt_source="skill_file", editable=false. FE renders read-only with "live skill" badge and skill_path.
 4. Summary: tsc + build green; branch worktree-os-stage-skills; ready for coordinator batch with qsvigmth's backend PR.
+
+# Tenexity OS agent Update at Time: 23:06:2026:20:25:00.000
+1. Generalized PR #39 to also surface the CONCIERGE live code-backed prompt card (4th live card).
+2. console/web/src/admin/{modals,views}.tsx, console/web/src/api.ts.
+3. Read-only rendering now keys off `editable===false` and any `kind` present; badges skill_file→"live skill", code→"live code"; AgentCard hides Edit/Delete for live cards. Concierge source_ref displayed.
+4. Summary: pushed additional commit 13169b2; tsc + build green; PR body updated to locked contract incl. concierge.
