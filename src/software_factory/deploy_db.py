@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Callable
+from dataclasses import dataclass
+from typing import Callable, Iterable
 
 from . import env
 from .deploy import RunResult, _real_runner
@@ -120,3 +121,142 @@ def write_file(context_dir: str, info: dict) -> str:
     with open(path, "w") as f:
         json.dump(info, f, indent=2)
     return path
+
+
+# ===========================================================================================
+# TEARDOWN + REAPER — the second half of the orphan-leak fix.
+#
+# provision() captures the per-run Postgres serviceId (the durable handle). This deletes it when
+# the run reaches a terminal/archive state so dead runs don't leak Postgres services. We delete the
+# EXACT captured id — never a name guess, never the console — so a mistake can't take out
+# factory-console (env.railway_project_allowed also rejects the console project as a second net).
+#
+# Live-verified incantation (operator l2a7ngax, CLI 5.12.1):
+#   railway service delete -s <serviceId> -p <projectId> -e <ENV> -y
+#   • `service delete` (NOT `railway delete`, which removes the whole PROJECT).
+#   • -e MUST be the service's real environment or the CLI silently "not found"s — so we read it
+#     from RAILWAY_ENVIRONMENT (factory DBs live in the console's own env), never hardcode it.
+#   • Deleting the service CASCADES its volume — no separate volume delete needed.
+#   • A re-attempt of an already-gone service returns "not found" → we treat that as success.
+#
+# POLICY GATE (single env SF_DEPLOY_DB_TEARDOWN): unset/off (default) = DISARMED — teardown and the
+# reaper run as a DRY-RUN that logs what they WOULD delete but delete nothing (the "held" state until
+# the operator makes the A/B lifecycle call). "persistent" (B, recommended) reaps discarded
+# (archived) + stopped-without-a-live-deploy and KEEPS done runs / any run with a live URL (the
+# demo). "ephemeral" (A) reaps on any terminal state.
+# ===========================================================================================
+
+_TEARDOWN_ENV = "SF_DEPLOY_DB_TEARDOWN"
+
+
+def teardown_mode() -> str:
+    """'off' (default, disarmed/dry-run), 'persistent' (B), or 'ephemeral' (A) from SF_DEPLOY_DB_TEARDOWN."""
+    v = (os.environ.get(_TEARDOWN_ENV) or "").strip().lower()
+    if v in ("ephemeral", "a"):
+        return "ephemeral"
+    if v in ("persistent", "b"):
+        return "persistent"
+    return "off"
+
+
+def _railway_environment() -> str:
+    """The -e value for a service delete. MUST match the service's project environment, else the CLI
+    silently reports 'not found'. Factory-provisioned DBs live in the console's own Railway env."""
+    return (os.environ.get("RAILWAY_ENVIRONMENT")
+            or os.environ.get("RAILWAY_ENVIRONMENT_ID")
+            or "production")
+
+
+def teardown(service_id: str, run: Callable[[list[str]], RunResult] = _real_runner) -> dict:
+    """Delete the EXACT captured Railway Postgres service (its volume cascades). Idempotent: a
+    'not found' result means the service is already gone → success. Refuses a missing service_id so
+    we never guess a name or fall back to the linked (console) service. Returns
+    {service_id, deleted, already_gone, ok, detail} — never raises on a CLI failure (the caller logs)."""
+    sid = (service_id or "").strip()
+    if not sid:
+        raise ValueError("teardown requires a captured service_id (never a name guess)")
+    args = ["railway", "service", "delete", "-s", sid]
+    # Prefer SF_RUNAPP_RAILWAY_PROJECT_IDS (the authoritative run-app target) over
+    # RAILWAY_PROJECT_ID (Railway-reserved, forced to the console's own project on prod).
+    project = env.runapp_railway_project_id() or os.environ.get("RAILWAY_PROJECT_ID")
+    if project:
+        args += ["-p", project]
+    args += ["-e", _railway_environment(), "-y"]
+    res = run(args)
+    out = res.stdout or ""
+    combined = (out + "\n" + (getattr(res, "stderr", "") or ""))   # railway may put 'not found' on stderr
+    if "not found" in combined.lower():
+        return {"service_id": sid, "deleted": False, "already_gone": True, "ok": True,
+                "detail": "not found (already gone)"}
+    if res.returncode == 0:
+        return {"service_id": sid, "deleted": True, "already_gone": False, "ok": True,
+                "detail": out[:200]}
+    return {"service_id": sid, "deleted": False, "already_gone": False, "ok": False,
+            "detail": (combined.strip()[:200]) or f"exit {res.returncode}"}
+
+
+@dataclass
+class ReapRecord:
+    """One run's deploy-DB teardown candidate. The console builds these from ProjectState
+    (service_id = deploy_db_service_id, has_verified_deploy = bool(deploy_url))."""
+    project_id: str
+    service_id: str
+    archived: bool = False
+    phase: str = ""
+    has_verified_deploy: bool = False
+
+
+def _reap_reason(rec: ReapRecord, policy: str) -> str | None:
+    """Why rec's deploy-DB is eligible for teardown under `policy`, or None to KEEP it.
+    persistent (B): reap discarded (archived) or stopped-without-a-live-deploy; keep done + live demos.
+    ephemeral (A): reap on any terminal state (done/stopped/archived)."""
+    if rec.archived:
+        return "archived"                                  # explicit discard reaps under both policies
+    if policy == "ephemeral":
+        return rec.phase if rec.phase in ("done", "stopped") else None
+    # persistent (B)
+    if rec.phase == "stopped" and not rec.has_verified_deploy:
+        return "stopped-without-deploy"
+    return None                                            # done / live demo / still-active → keep
+
+
+def reap(records: Iterable[ReapRecord],
+         run: Callable[[list[str]], RunResult] = _real_runner,
+         log: Callable[[str], None] | None = None,
+         dry_run: bool = False) -> dict:
+    """Sweep: tear down the deploy-DB of every reap-eligible run under the configured policy.
+    DISARMED (SF_DEPLOY_DB_TEARDOWN unset/off) or dry_run=True → log what WOULD be reaped, delete
+    nothing. Records with no service_id (never provisioned a DB) are skipped. Returns a structured
+    report {mode, armed, policy, reaped, would_reap, kept, failed} — every persisted DB is accounted
+    for in exactly one bucket (no silent drops)."""
+    log = log or (lambda m: None)
+    mode = teardown_mode()
+    armed = mode != "off" and not dry_run
+    policy = "ephemeral" if mode == "ephemeral" else "persistent"   # disarmed previews the recommended B
+    report: dict = {"mode": mode, "armed": armed, "policy": policy,
+                    "reaped": [], "would_reap": [], "kept": [], "failed": []}
+    for rec in records:
+        if not (rec.service_id or "").strip():
+            continue                                       # never provisioned a DB — nothing to reap
+        reason = _reap_reason(rec, policy)
+        base = {"project_id": rec.project_id, "service_id": rec.service_id}
+        if not reason:
+            report["kept"].append({**base, "phase": rec.phase,
+                                   "has_verified_deploy": rec.has_verified_deploy})
+            continue
+        if not armed:
+            report["would_reap"].append({**base, "reason": reason})
+            log(f"[deploy-db reaper] DRY-RUN would tear down {rec.service_id} "
+                f"(project {rec.project_id}, reason={reason}) — set {_TEARDOWN_ENV}=persistent|ephemeral to arm")
+            continue
+        res = teardown(rec.service_id, run=run)
+        if res["ok"]:
+            report["reaped"].append({**base, "reason": reason,
+                                     "deleted": res["deleted"], "already_gone": res["already_gone"]})
+            log(f"[deploy-db reaper] tore down {rec.service_id} (project {rec.project_id}, "
+                f"reason={reason}, {'deleted' if res['deleted'] else 'already gone'})")
+        else:
+            report["failed"].append({**base, "reason": reason, "detail": res["detail"]})
+            log(f"[deploy-db reaper] FAILED to tear down {rec.service_id} "
+                f"(project {rec.project_id}): {res['detail']}")
+    return report

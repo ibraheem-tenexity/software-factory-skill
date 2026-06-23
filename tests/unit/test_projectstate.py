@@ -39,6 +39,26 @@ def test_save_then_load_resumes_exactly_where_it_left_off(tmp_path):
     assert resumed.repo_url == "https://github.com/acme/guestbook"
 
 
+def test_deploy_db_attempts_persist_so_the_retry_cap_actually_parks(tmp_path):
+    # The provision retry cap lives across /loop re-entries: each tick re-loads state, so the attempt
+    # counter MUST survive a reload or the cap never trips and the poller loops forever (it was a
+    # dataclass field but missing from _PERSISTED — this guards that regression).
+    s = ProjectState.load("project-cap", store(tmp_path))
+    s.deploy_db_attempts = 2
+    s.save()
+    assert ProjectState.load("project-cap", store(tmp_path)).deploy_db_attempts == 2
+
+
+def test_deploy_db_service_id_persists_for_durable_teardown(tmp_path):
+    # The captured Railway serviceId is the durable teardown handle: it must survive a reload so the
+    # reaper can delete the run's Postgres even after the context dir (which also holds it) is gone.
+    s = ProjectState.load("project-td", store(tmp_path))
+    assert s.deploy_db_service_id == ""            # default for runs that never provisioned a DB
+    s.deploy_db_service_id = "svc-RNK8"
+    s.save()
+    assert ProjectState.load("project-td", store(tmp_path)).deploy_db_service_id == "svc-RNK8"
+
+
 def test_proof_marker_is_stamped_and_persists(tmp_path):
     # At provision the orchestrator stamps WHICH skill drove the run — the run's receipt.
     st = store(tmp_path)
