@@ -81,6 +81,21 @@ def test_set_draft_project_writes_name_goal_and_composes_description(tmp_path):
     assert st.description == out["description"]
 
 
+def test_set_draft_project_updates_runtime_so_promote_uses_the_picked_engine(tmp_path):
+    # The Build-engine card: an eager create mints the draft with the default runtime (claude), then
+    # the user switches to OpenCode. set_draft_project(runtime=...) must persist the change so promote
+    # launches opencode (not the stale create-time default) — otherwise the pick is silently dropped.
+    launcher = FakeLauncher()
+    c = _console(tmp_path, launcher)
+    rid = c.create_draft(owner="op@tenexity.ai", runtime="claude")
+    assert c._load_state(rid).runtime == "claude"
+    c.set_draft_project(rid, runtime="opencode")
+    assert c._load_state(rid).runtime == "opencode"
+    c.promote_draft(rid)
+    # promote threads state.runtime into the ProjectRequest the launcher sees
+    assert "opencode" in launcher.argv or any("opencode" in str(a) for a in launcher.argv)
+
+
 def test_set_draft_project_recomposes_idempotently_across_independent_calls(tmp_path):
     # set_project_basics (goal) then set_project_scope (scope) arrive as separate tool calls —
     # the second must recompose against the persisted goal, not wipe it.

@@ -300,11 +300,12 @@ def get_draft(pid: str, v: tuple = Depends(authorize_project)):
 
 @router.patch("/api/projects/{pid}/draft")
 def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_project)):
-    """Structured project write-through: {name?, goal?, scope?}. Server composes the canonical
-    description (goal + scope-of-work line). Call debounced/on-blur, NOT per keystroke."""
+    """Structured project write-through: {name?, goal?, scope?, runtime?}. Server composes the canonical
+    description (goal + scope-of-work line). runtime updates the draft's build engine (claude|opencode)
+    after the eager create. Call debounced/on-blur, NOT per keystroke."""
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
-    return state.console.set_draft_project(pid, name=body.name, goal=body.goal, scope=body.scope)
+    return state.console.set_draft_project(pid, name=body.name, goal=body.goal, scope=body.scope, runtime=body.runtime)
 
 
 @router.post("/api/projects/{pid}/attach")
