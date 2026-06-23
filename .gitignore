@@ -14,15 +14,9 @@ client_secret_*.json
 # Design prototype reference for Task 4 (do not commit) — see .design-source/NOTES.md
 .design-source/
 console/web/node_modules
-opencode.json
 
 # Playwright MCP session dumps (browser console logs + page snapshots) — generated, never commit
 .playwright-mcp/
 
-# claude-flow GENERATED runtime state — never commit (config.yaml / CAPABILITIES.md ARE tracked)
-.claude-flow/agents/
-.claude-flow/embeddings.json
-.claude-flow/metrics/
-.claude-flow/security/
-.claude-flow/swarm/
-.claude-flow/terminals/
+# claude-flow — not used; never commit any of it
+.claude-flow/
