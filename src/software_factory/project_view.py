@@ -94,4 +94,5 @@ def brief_block(project: dict, status: dict, created) -> dict:
         "phase": status.get("phase") or "",
         "stage": status.get("stage") or 0,
         "created": created,
+        "runtime": project.get("runtime") or "claude",
     }
