@@ -27,6 +27,24 @@ from fastapi import FastAPI, Request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+
+def _load_local_env(path: str | None = None) -> None:
+    """Load the repo-root .env for LOCAL runs so secrets ibraheem keeps there (e.g. LANGFUSE_*) are
+    picked up. override=False → real process/Railway env ALWAYS wins; .env only fills gaps. Prod ships
+    no .env (gitignored) → no-op there. SKIPPED under the test suite (SF_ENVIRONMENT=test) so a dev's
+    local .env can't leak keys into tests, and a missing python-dotenv never blocks startup."""
+    if os.environ.get("SF_ENVIRONMENT") == "test":
+        return
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(path or os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"), override=False)
+
+
+# Must run BEFORE `import console.state` — state.reset() reads os.environ at import time.
+_load_local_env()
+
 import console.state as state  # noqa: E402  (also: app_mod.state is the patch home for view-helpers)
 
 # Re-instantiate the singletons from the CURRENT environment on every (re)import. The tests reload
