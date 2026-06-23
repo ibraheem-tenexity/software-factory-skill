@@ -316,7 +316,7 @@ export const api = {
     password?: string;
     role?: "admin" | "member";
   }) => send<{ users: AdminAccessUser[] }>("/api/admin/access", "POST", body),
-  adminUpdateAccess: (email: string, body: { role?: string; status?: "active" | "invited" | "disabled" }) =>
+  adminUpdateAccess: (email: string, body: { role?: string; status?: "active" | "invited" | "disabled"; is_internal?: boolean }) =>
     send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "PATCH", body),
   adminDeleteAccess: (email: string) => send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "DELETE"),
   // ── Onboarding draft model (docs/plans/concierge-onboarding-api.md) ──

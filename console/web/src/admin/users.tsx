@@ -431,14 +431,17 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
 function UserDrawer({ user, onClose, onChanged }: { user: AdminAccessUser; onClose: () => void; onChanged: () => void }) {
   const [role, setRole] = React.useState(displayRole(user));
+  const [internal, setInternal] = React.useState(isInternal(user));
   const [saving, setSaving] = React.useState(false);
-  const internal = isInternal(user);
 
   const patchRole = async () => {
-    const apiRole = role.toLowerCase();
     setSaving(true);
     try {
-      await api.adminUpdateAccess(user.email, { role: apiRole });
+      if (role === "Operator") {
+        await api.adminUpdateAccess(user.email, { role: "admin", is_internal: true });
+      } else {
+        await api.adminUpdateAccess(user.email, { role: role.toLowerCase(), is_internal: internal });
+      }
       onChanged();
       onClose();
     } catch {
@@ -535,6 +538,30 @@ function UserDrawer({ user, onClose, onChanged }: { user: AdminAccessUser; onClo
           <div>
             <label style={{ font: `500 13px/1.2 ${T.sans}`, color: T.fg, display: "block", marginBottom: 6 }}>Role</label>
             <SelectField value={role} onChange={setRole} options={internal ? ["Operator"] : ["Admin", "Member"]} />
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginTop: 10,
+                font: `500 12.5px/1 ${T.sans}`,
+                color: T.fg,
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={internal}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setInternal(next);
+                  if (next) setRole("Operator");
+                  else setRole("Member");
+                }}
+                style={{ cursor: "pointer" }}
+              />
+              Tenexity internal staff
+            </label>
           </div>
 
           <div>
@@ -614,7 +641,7 @@ function UserDrawer({ user, onClose, onChanged }: { user: AdminAccessUser; onClo
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 9, padding: "13px 20px", borderTop: `1px solid ${T.borderSubtle}` }}>
           <AdminBtn onClick={onClose}>Cancel</AdminBtn>
-          <AdminBtn primary onClick={patchRole} disabled={saving || role === displayRole(user)}>
+          <AdminBtn primary onClick={patchRole} disabled={saving || (role === displayRole(user) && internal === isInternal(user))}>
             {saving ? "Saving…" : "Save changes"}
           </AdminBtn>
         </div>
@@ -638,6 +665,7 @@ function RowMenu({ user, onAct }: { user: AdminAccessUser; onAct: (id: string, u
     user.status === "invited" && ["resend", "Resend invite", T.fg],
     user.status === "active" && ["disable", "Disable sign-in", T.warning],
     user.status === "disabled" && ["enable", "Re-enable", T.success],
+    !isInternal(user) && ["make-tenexity-admin", "Make Tenexity admin", T.brandDeep],
     ["edit", "Edit user", T.fg],
     ["remove", "Remove user", T.danger],
   ].filter(Boolean) as [string, string, string][];
@@ -762,6 +790,13 @@ export function UsersManagement() {
       }
     } else if (id === "edit") {
       setDrawer(user);
+    } else if (id === "make-tenexity-admin") {
+      try {
+        await api.adminUpdateAccess(user.email, { role: "admin", is_internal: true });
+        refresh();
+      } catch {
+        alert("Failed to promote user.");
+      }
     }
     // resend is a no-op until backend ships a resend endpoint
   };
