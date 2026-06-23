@@ -160,3 +160,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/admin/users.tsx, console/web/src/api.ts.
 3. PATCH /api/admin/access/{email} now sends role + is_internal together; UI adds a Tenexity internal toggle in the user drawer + a row-menu quick action. Backend queued after provision-capture fix.
 4. Summary: tsc + build green; branch worktree-users-staff-toggle; hold merge until qsvigmth deploys the backend endpoint.
+
+# Tenexity OS agent Update at Time: 23:06:2026:21:35:00.000
+1. Applied operator feedback to PR #49: dropped "Operator" label, gated "Make Tenexity admin" row action on session staff (me.role==='admin' && me.is_internal===true), added self-demote guard and 409 error surfacing.
+2. console/web/src/admin/users.tsx.
+3. Per operator: staff = /api/me role admin + is_internal; UI hides action for non-staff; role is "Admin" with a separate Tenexity/staff badge; drawer toggle handles both grant and revoke; backend enforces last-staff/self-demote 409.
+4. Summary: pushed fix commit; tsc + build green; still holding merge for qsvigmth backend deploy.
