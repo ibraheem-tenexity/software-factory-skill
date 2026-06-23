@@ -94,3 +94,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. #33: COMMENT-only fixes (models.py bcrypt→scrypt — NO column change/no migration; auth.py/open_routes.py), untrack build junk (.claude-flow/.playwright-mcp/vamac.pdf)+.gitignore, schema-erd.{dot,md,svg} rewrite, docs/plans; #32: console/web/src/admin/AdminPortal.tsx 1-line FE fallback (TASKS_RUNNING ?? 0).
 3. Non-destructive cleanup on standing delegation; full suite 547 passed/0 fail; light verify GREEN (boot/health 200/admin gate 303/admin-API 200 no-regression/new bundle/ibraheem admin+active); schema-erd.svg valid 34KB. Closed gh-open-but-deployed PRs #27/#28/#30 + superseded #23.
 4. AUTH HARDENING EFFORT COMPLETE — 8 serialized windows, all green: auth-rbac(36e1d76)→OS #19/20/21(f01175f)→user-mgmt+modularize #25/26/24(7aeedf4)→OS users #27(51d241e)→throttle+drift #29/28(b6de2ef)→Factory Pulse+leftmost-IP #31/30(8750cf7)→cleanup #33/32(fa676bb). Prod: DB allowlist/RBAC, google-auth, uid+tv cookie+per-request revocation, scrypt password login + working brute-force throttle, real-data pulse, clean env. Standing operator-greenlight delegation to coordinator l2a7ngax active (I escalate only destructive ops to ibraheem).
+
+# Tenexity OS agent Update at Time: 22:06:2026:16:48:00.000
+1. Implemented real-data AccountMenu for the OS portal and opened PR #36.
+2. console/web/src/admin/AccountMenu.tsx, console/web/src/admin/AdminPortal.tsx, console/web/src/admin/primitives.tsx, console/web/src/api.ts.
+3. Wires to assumed contract from qsvigmth: GET /api/me adds optional name/is_staff; POST /api/auth/logout ends session. No mock data: name fallback to email, OPERATOR badge from is_staff, Account settings disabled/flagged.
+4. Summary: tsc + build green on console/web; PR body documents required backend contract and disabled Account-settings follow-up. Coordinator to batch/deploy with qsvigmth's backend changes.
