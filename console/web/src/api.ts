@@ -41,7 +41,7 @@ export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
 export type Brief = Record<string, string>;
 export type BriefResponse = { brief: Brief; coverage: Record<string, boolean> };
 
-export type Me = { email: string; role: string; auth: boolean };
+export type Me = { email: string; role: string; auth: boolean; name?: string; is_internal?: boolean };
 
 // GET /api/projects/{id}/deployments → console.deployments(). Per-deliverable: a run ships 1..N apps.
 export type Deployment = { app?: string; url?: string; repo?: string; [k: string]: any };
@@ -226,6 +226,9 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 export const api = {
   authConfig: () => get<AuthConfig>("/api/auth/config"),
   me: () => get<Me>("/api/me"),
+  // Sign out (backend POST /api/auth/logout clears the sf_session cookie). Resolves regardless so
+  // the caller can always redirect to "/" (SPA re-checks /api/me → login).
+  logout: async (): Promise<void> => { try { await fetch("/api/auth/logout", { method: "POST", credentials: "include" }); } catch { /* redirect anyway */ } },
   // Email+password sign-in (backend POST /api/auth/password). On 200 the server sets the sf_session
   // cookie (same as Google). Returns {ok,status} (not get/send) so the caller can branch on 401.
   passwordLogin: async (body: { email: string; password: string }): Promise<{ ok: boolean; status: number }> => {

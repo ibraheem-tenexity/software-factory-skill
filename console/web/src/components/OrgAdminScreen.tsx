@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, Org, Member, OrgDoc, OrgUsage, Me } from "../api";
 import { T, Icon, Sparkle, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, Field, TextInput } from "./onboarding/design";
+import { AccountMenu } from "./AccountMenu";
 
 type Section = "profile" | "knowledge" | "systems" | "team" | "billing";
 
@@ -236,7 +237,7 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
           <span style={{ font: `400 13px/1 ${T.mono}`, color: T.tertiary }}>/</span>
           <span style={{ font: `600 13px/1 ${T.sans}`, color: T.fg }}>Organization</span>
         </div>
-        <Avatar name={me?.email || "You"} size={30} tone="brand" />
+        <AccountMenu size={30} />
       </div>
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>

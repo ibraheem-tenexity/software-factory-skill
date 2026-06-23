@@ -4,7 +4,8 @@
 // rendered inline, so this stays fully decoupled from the factory components.
 import { useEffect, useState } from "react";
 import { api, ProjectSummary } from "../../api";
-import { T, Icon, Btn, StatusPill, Avatar, Wordmark, TextInput } from "../onboarding/design";
+import { T, Icon, Btn, StatusPill, Wordmark, TextInput } from "../onboarding/design";
+import { AccountMenu } from "../AccountMenu";
 import { OverviewTab } from "./OverviewTab";
 import { DocumentsTab } from "./DocumentsTab";
 
@@ -28,7 +29,6 @@ const TABS: { id: Tab | "factory"; label: string }[] = [
 export function ProjectView({ projectId, onBack, onOpenFactory }: { projectId: string; onBack: () => void; onOpenFactory: () => void }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [status, setStatus] = useState<(ProjectSummary & Record<string, any>) | null>(null);
-  const [email, setEmail] = useState("");
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -36,7 +36,6 @@ export function ProjectView({ projectId, onBack, onOpenFactory }: { projectId: s
   useEffect(() => { setTab("overview"); }, [projectId]);
   useEffect(() => {
     api.status(projectId).then(setStatus).catch(() => setStatus(null));
-    api.me().then((m) => setEmail(m.email || "")).catch(() => {});
   }, [projectId]);
 
   const name = status?.name || projectId;
@@ -89,7 +88,7 @@ export function ProjectView({ projectId, onBack, onOpenFactory }: { projectId: s
                 </>
               )}
             </div>
-            <Avatar name={email || "You"} size={28} tone="brand" />
+            <AccountMenu size={28} />
           </div>
         </div>
         <div style={{ display: "flex", gap: 2, padding: "0 24px" }}>
