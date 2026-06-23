@@ -26,7 +26,7 @@ const TABS: { id: Tab | "factory"; label: string }[] = [
   { id: "documents", label: "Documents" },
 ];
 
-export function ProjectView({ projectId, onBack, onOpenFactory }: { projectId: string; onBack: () => void; onOpenFactory: () => void }) {
+export function ProjectView({ projectId, onBack, onOpenFactory, onResume }: { projectId: string; onBack: () => void; onOpenFactory: () => void; onResume?: () => void }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [status, setStatus] = useState<(ProjectSummary & Record<string, any>) | null>(null);
   const [menu, setMenu] = useState(false);
@@ -107,7 +107,7 @@ export function ProjectView({ projectId, onBack, onOpenFactory }: { projectId: s
 
       {/* tab content (peer views; Factory console navigates out via onOpenFactory) */}
       {tab === "overview"
-        ? <OverviewTab projectId={projectId} onOpenFactory={onOpenFactory} />
+        ? <OverviewTab projectId={projectId} onOpenFactory={onOpenFactory} onOpenDocuments={() => setTab("documents")} onResume={onResume} />
         : <DocumentsTab projectId={projectId} />}
     </div>
   );

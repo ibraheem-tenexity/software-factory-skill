@@ -3,9 +3,16 @@
 // endpoints (PR #13): GET /api/projects/{id}/overview (brief/build/services/agents/org + counts) and
 // GET /api/projects/{id}/documents (the materials + produced LISTS). Every panel degrades to an
 // empty/“—” state until the data is live.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact } from "../../api";
 import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, TextInput, TextArea } from "../onboarding/design";
+
+const fileToB64 = (file: File): Promise<string> => new Promise((resolve) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result || "").split(",")[1] || "");
+  r.onerror = () => resolve("");
+  r.readAsDataURL(file);
+});
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 
@@ -36,13 +43,16 @@ function statusTone(s?: string): Tone {
   return "info";
 }
 
-function Panel({ title, count, children, span = 1, accent }:
-  { title: string; count?: number; children: React.ReactNode; span?: number; accent?: boolean }) {
+function Panel({ title, count, children, span = 1, accent, action }:
+  { title: string; count?: number; children: React.ReactNode; span?: number; accent?: boolean; action?: React.ReactNode }) {
   return (
     <section style={{ gridColumn: `span ${span}`, background: T.raised, border: `1px solid ${accent ? T.brand + "44" : T.borderSubtle}`, borderRadius: T.rXl, boxShadow: T.shadowXs, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderBottom: `1px solid ${T.borderSubtle}` }}>
-        <CategoryLabel tone={accent ? "brand" : "tertiary"}>{title}</CategoryLabel>
-        {count != null && <span style={{ font: `500 10px/1 ${T.mono}`, color: T.tertiary, background: T.sunken, borderRadius: 9, padding: "2px 6px" }}>{count}</span>}
+      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: `1px solid ${T.borderSubtle}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <CategoryLabel tone={accent ? "brand" : "tertiary"}>{title}</CategoryLabel>
+          {count != null && <span style={{ font: `500 10px/1 ${T.mono}`, color: T.tertiary, background: T.sunken, borderRadius: 9, padding: "2px 6px" }}>{count}</span>}
+        </div>
+        {action}
       </header>
       <div style={{ padding: 16, flex: 1 }}>{children}</div>
     </section>
@@ -64,14 +74,17 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div style={{ font: `400 12px/1.4 ${T.sans}`, color: T.tertiary }}>{children}</div>;
 }
 
-export function OverviewTab({ projectId, onOpenFactory }: { projectId: string; onOpenFactory: () => void }) {
+export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResume }:
+  { projectId: string; onOpenFactory: () => void; onOpenDocuments?: () => void; onResume?: () => void }) {
   const [ov, setOv] = useState<ProjectOverview | null>(null);
   const [docs, setDocs] = useState<ProjectDocuments | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [goalDraft, setGoalDraft] = useState("");
   const [scopeDraft, setScopeDraft] = useState("");
+  const addInputRef = useRef<HTMLInputElement | null>(null);
 
+  const loadDocs = () => api.documents(projectId).then(setDocs).catch(() => setDocs(null));
   const loadOverview = () => api.overview(projectId).then(setOv).catch(() => setOv(null));
   useEffect(() => {
     setLoading(true);
@@ -89,6 +102,19 @@ export function OverviewTab({ projectId, onOpenFactory }: { projectId: string; o
   const materials: ProjectMaterial[] = docs?.uploaded || [];
   const produced: ProjectArtifact[] = docs?.produced || [];
   const pct = build.pct ?? 0;
+  // A draft = onboarding intake not yet handed off (factory hasn't started). Drives the whole
+  // "finish setup" treatment instead of the build-oriented overview.
+  const isDraft = (brief.phase || "").toLowerCase() === "draft";
+
+  // "+ Add" on Uploaded materials → attach a real file via POST /api/projects/{id}/materials, refetch.
+  const addMaterials = async (list: FileList | null) => {
+    if (!list || !list.length) return;
+    for (const file of Array.from(list)) {
+      try { await api.uploadMaterial(projectId, { name: file.name, content_type: file.type || undefined, data_b64: await fileToB64(file) }); }
+      catch { /* endpoint not live yet — degrade silently */ }
+    }
+    await loadDocs();
+  };
 
   // Edit the project brief post-promote: goal via PUT /api/projects/{id}/brief (live); scope via
   // PATCH /api/projects/{id} {scope} (graceful until tjyb5gmy ships it).
@@ -113,14 +139,28 @@ export function OverviewTab({ projectId, onOpenFactory }: { projectId: string; o
       <div style={{ padding: "22px 24px 36px" }}>
         <div style={{ maxWidth: 1080, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, alignItems: "start" }}>
 
+          {/* draft banner — the factory hasn't started; finish intake to kick it off */}
+          {isDraft && (
+            <section style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 16, padding: "16px 20px", borderRadius: T.rXl, border: `1px solid ${T.warning}`, background: T.warningSoft, boxShadow: T.shadowXs }}>
+              <span style={{ width: 13, height: 13, background: T.warning, transform: "rotate(45deg)", borderRadius: 2, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: `700 15px/1.2 ${T.display}`, letterSpacing: "-0.01em", color: T.fg }}>Finish setup to start building</div>
+                <p style={{ margin: "4px 0 0", font: `400 12.5px/1.5 ${T.sans}`, color: T.secondary }}>This project is still a draft — the factory hasn’t started. Complete the brief and scope, then hand off to kick off the pipeline.</p>
+              </div>
+              {onResume && <Btn variant="primary" onClick={onResume}>Complete setup &amp; start building <Icon name="arrowRight" size={14} color="#fff" /></Btn>}
+            </section>
+          )}
+
           {/* project brief */}
           <Panel title="Project brief" span={2} accent>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: -8 }}>
-                {editing
-                  ? <div style={{ display: "flex", gap: 8 }}><Btn variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Btn><Btn variant="primary" size="sm" onClick={saveBrief}>Save</Btn></div>
-                  : <Btn variant="secondary" size="sm" onClick={startEdit}>Edit brief</Btn>}
-              </div>
+              {!isDraft && (
+                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: -8 }}>
+                  {editing
+                    ? <div style={{ display: "flex", gap: 8 }}><Btn variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Btn><Btn variant="primary" size="sm" onClick={saveBrief}>Save</Btn></div>
+                    : <Btn variant="secondary" size="sm" onClick={startEdit}>Edit brief</Btn>}
+                </div>
+              )}
               {editing ? (
                 <>
                   <div>
@@ -138,14 +178,19 @@ export function OverviewTab({ projectId, onOpenFactory }: { projectId: string; o
                     <CategoryLabel style={{ marginBottom: 6 }}>Goal</CategoryLabel>
                     <p style={{ margin: 0, font: `400 14px/1.55 ${T.sans}`, color: T.fg }}>{brief.goal || brief.description || <Empty>No goal captured yet.</Empty>}</p>
                   </div>
-                  {!!(brief.scope && brief.scope.length) && (
+                  {!!(brief.scope && brief.scope.length) ? (
                     <div>
                       <CategoryLabel style={{ marginBottom: 7 }}>Scope</CategoryLabel>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
                         {brief.scope.map((s) => <span key={s} style={{ font: `500 12px/1 ${T.sans}`, color: T.brandDeep, background: T.brandSoft, padding: "6px 11px", borderRadius: 9999 }}>{s}</span>)}
                       </div>
                     </div>
-                  )}
+                  ) : isDraft ? (
+                    <div>
+                      <CategoryLabel style={{ marginBottom: 7 }}>Scope</CategoryLabel>
+                      <span style={{ font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary, fontStyle: "italic" }}>Defined during setup.</span>
+                    </div>
+                  ) : null}
                 </>
               )}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, paddingTop: 4 }}>
@@ -156,8 +201,27 @@ export function OverviewTab({ projectId, onOpenFactory }: { projectId: string; o
             </div>
           </Panel>
 
-          {/* build status */}
+          {/* build status — draft = setup checklist; live = progress + factory console */}
           <Panel title="Build status">
+            {isDraft ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <span style={{ font: `700 24px/1.1 ${T.display}`, letterSpacing: "-0.01em", color: T.tertiary }}>Not started</span>
+                <p style={{ margin: 0, font: `400 12px/1.5 ${T.sans}`, color: T.secondary }}>The factory hasn’t run yet. Finish setup and hand off — agents, tickets, and spend appear once the build starts.</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 9, padding: "11px 0", borderTop: `1px solid ${T.borderSubtle}`, borderBottom: `1px solid ${T.borderSubtle}` }}>
+                  {([
+                    ["Project brief", !!(brief.goal || brief.description)],
+                    ["Scope of work", !!(brief.scope && brief.scope.length)],
+                    ["Materials (optional)", materials.length > 0],
+                  ] as [string, boolean][]).map(([k, done]) => (
+                    <div key={k} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                      <span style={{ width: 16, height: 16, borderRadius: "50%", flexShrink: 0, display: "grid", placeItems: "center", background: done ? T.success : "transparent", border: `1.5px solid ${done ? T.success : T.borderDefault}` }}>{done && <Icon name="check" size={10} color="#fff" />}</span>
+                      <span style={{ font: `500 12.5px/1.2 ${T.sans}`, color: done ? T.fg : T.secondary }}>{k}</span>
+                    </div>
+                  ))}
+                </div>
+                {onResume && <Btn variant="primary" size="sm" full onClick={onResume}>Complete setup &amp; start building <Icon name="arrowRight" size={13} color="#fff" /></Btn>}
+              </div>
+            ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                 <span style={{ font: `700 30px/1 ${T.display}`, color: T.brandDeep }}>{pct}%</span>
@@ -175,6 +239,7 @@ export function OverviewTab({ projectId, onOpenFactory }: { projectId: string; o
               </div>
               <Btn variant="primary" size="sm" full onClick={onOpenFactory}>Open factory console <Icon name="arrowRight" size={13} color="#fff" /></Btn>
             </div>
+            )}
           </Panel>
 
           {/* services at work */}
@@ -195,7 +260,7 @@ export function OverviewTab({ projectId, onOpenFactory }: { projectId: string; o
                   </div>
                 ))}
               </div>
-            ) : <Empty>No services connected yet.</Empty>}
+            ) : <Empty>{isDraft ? "No services connected yet — you’ll link them during setup." : "No services connected yet."}</Empty>}
           </Panel>
 
           {/* agents on this project */}
@@ -213,21 +278,26 @@ export function OverviewTab({ projectId, onOpenFactory }: { projectId: string; o
                   </div>
                 ))}
               </div>
-            ) : <Empty>No agents on this project yet.</Empty>}
+            ) : <Empty>{isDraft ? "No agents yet — they spin up when the build starts." : "No agents on this project yet."}</Empty>}
           </Panel>
 
-          {/* uploaded materials */}
-          <Panel title="Uploaded materials" count={materials.length || undefined}>
+          {/* uploaded materials — "+ Add" attaches a real file (POST /api/projects/{id}/materials) */}
+          <Panel title="Uploaded materials" count={materials.length || undefined}
+            action={<>
+              <input ref={addInputRef} type="file" multiple style={{ display: "none" }} onChange={(e) => { addMaterials(e.target.files); e.currentTarget.value = ""; }} />
+              <button onClick={() => addInputRef.current?.click()} style={{ font: `500 11.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>+ Add</button>
+            </>}>
             {materials.length ? <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>{materials.map((d, i) => <FileRow key={d.name + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} />)}</div> : <Empty>Nothing uploaded.</Empty>}
           </Panel>
 
           {/* produced documents */}
-          <Panel title="Produced documents" count={produced.length || undefined} span={2}>
+          <Panel title="Produced documents" count={produced.length || undefined} span={2}
+            action={!isDraft && onOpenDocuments ? <button onClick={onOpenDocuments} style={{ font: `500 11.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>View all →</button> : null}>
             {produced.length ? (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
                 {produced.map((d, i) => <FileRow key={d.title + i} label={d.title} kind={d.kind} sub={d.agent} onOpen={d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
               </div>
-            ) : <Empty>The factory hasn’t produced documents yet.</Empty>}
+            ) : <Empty>{isDraft ? "The factory produces PRDs, architecture, designs, and tickets here once the build starts." : "The factory hasn’t produced documents yet."}</Empty>}
           </Panel>
 
           {/* inherited org context */}

@@ -108,6 +108,8 @@ export type Org = {
   location?: string | null;
   website?: string | null;
   connected_systems: string[];
+  plan?: string | null;               // billing plan + monthly cap (set via /api/org/billing)
+  monthly_budget_cap?: number | null;
   created_at?: number;
   created_by?: string;
 };

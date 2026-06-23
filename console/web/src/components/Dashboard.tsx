@@ -144,6 +144,8 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [me, setMe] = useState<Me | null>(null);
   const [org, setOrg] = useState<Org | null>(null);
+  const [docCount, setDocCount] = useState<number | null>(null);
+  const [memberCount, setMemberCount] = useState<number | null>(null);
 
   const [loading, setLoading] = useState(true);
   const loadProjects = () => api.projects().then((d) => setProjects(d.projects || [])).catch(() => setProjects([]));
@@ -152,6 +154,9 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
     loadProjects().finally(() => setLoading(false));
     api.me().then(setMe).catch(() => setMe(null));
     api.getOrg().then((d) => setOrg(d.org)).catch(() => setOrg(null));
+    // counts for the org-preview card (Knowledge base · Team) — real org endpoints, degrade to —
+    api.orgDocs().then((d) => setDocCount(d.docs?.length ?? 0)).catch(() => setDocCount(null));
+    api.orgMembers().then((d) => setMemberCount(d.members?.length ?? 0)).catch(() => setMemberCount(null));
   }, []);
 
   // Project CRUD (NEW endpoints — graceful until tjyb5gmy ships; refetch on success).
@@ -172,14 +177,15 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
   const totalSpend = projects.reduce((s, r) => s + (r.spent_usd || 0), 0);
   const orgName = org?.name || "Your organization";
 
-  // Org-admin preview stats — built only from real org fields we have.
+  // Org-admin preview stats — built only from real org data (KB doc count + team member count
+  // come from the live /api/org/docs and /api/org/members endpoints; degrade to — until loaded).
   const orgStats: [string, string][] = org
     ? ([
         ["Industry", org.industry || "—"],
         ["Scale", org.headcount || "—"],
-        ["Revenue", org.revenue || "—"],
+        ["Knowledge base", docCount != null ? `${docCount} document${docCount === 1 ? "" : "s"}` : "—"],
         ["Connected systems", org.connected_systems?.length ? org.connected_systems.join(", ") : "—"],
-        ["Location", org.location || "—"],
+        ["Team", memberCount != null ? `${memberCount} member${memberCount === 1 ? "" : "s"}` : "—"],
       ] as [string, string][])
     : [];
 
@@ -221,7 +227,7 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
             <MetricCard label="Active projects" value={String(active.length)} hint={`${withAgents} with agents working now`} accent />
             <MetricCard label="In build" value={String(building.length)} hint={`${researching.length} researching`} />
             <MetricCard label="Deployed" value={String(shipped.length)} hint={shipped[0] ? (shipped[0].name || shipped[0].project_id) + " · live" : "none yet"} />
-            <MetricCard label="Spend" value={money(totalSpend) === "—" ? "$0.00" : money(totalSpend)} hint={`across ${projects.length} project${projects.length === 1 ? "" : "s"}`} />
+            <MetricCard label="Spend to date" value={money(totalSpend) === "—" ? "$0.00" : money(totalSpend)} hint={org?.monthly_budget_cap != null ? `of $${org.monthly_budget_cap} cap` : `across ${projects.length} project${projects.length === 1 ? "" : "s"}`} />
           </div>
 
           {/* org admin preview — ADMINS ONLY; non-admins see nothing (the list moves up). */}
