@@ -517,6 +517,37 @@ class Console:
             return float(state.budget_ceiling)
         return float(os.environ.get("SF_COST_CEILING", "30") or 30)
 
+    def _kill_stage_process(self, project_id: str) -> bool:
+        """Terminate this run's live stage process: SIGTERM → 5s grace → SIGKILL. opencode processes
+        SURVIVE a plain SIGTERM (confirmed in prod — serve ignored SIGTERM and even pkill), so escalate
+        to SIGKILL if still alive. Returns True iff a live process was killed. Only reaches THIS
+        instance's tracked process (self._procs); a process orphaned by a console restart has no handle
+        here (phase=stopped still halts its re-advance, it just can't be signalled)."""
+        p = self._procs.get(project_id)
+        if p is not None and hasattr(p, "poll") and p.poll() is None and hasattr(p, "terminate"):
+            p.terminate()
+            if hasattr(p, "wait") and hasattr(p, "kill"):
+                try:
+                    p.wait(timeout=5)
+                except Exception:
+                    p.kill()
+            return True
+        return False
+
+    def stop_project(self, project_id: str) -> dict:
+        """Operator 'stop all progress': kill any live stage process + set phase=stopped (TERMINAL —
+        the poller won't re-advance, relaunch, or re-enter deploy-db provision; a stopped run stays
+        stopped, NOT budget-paused) + finalize orphaned agents so the canvas shows no ghost-running
+        agents. Idempotent: a second call re-kills (no-op) and leaves the stopped state untouched."""
+        killed = self._kill_stage_process(project_id)
+        state = self._load_state(project_id)
+        if state.phase != "stopped":
+            state.phase = "stopped"
+            state.spent_usd = max(state.spent_usd or 0, self._cost(project_id))
+            state.save()
+            AgentRegistry(self._paths(project_id)["agents_db"]).finalize_orphans(project_id, stage_ok=False)
+        return {"project_id": project_id, "phase": "stopped", "killed": killed}
+
     def enforce_budget(self, project_id: str) -> bool:
         """SPEC §4 mid-stage teeth: if this run's spend crossed its ceiling, terminate the live
         stage process, record a recoverable 'budget' blocker, and finalize orphaned agents.
@@ -525,20 +556,7 @@ class Console:
         spend = self._project_spend(project_id)
         if spend <= ceiling:
             return False
-        p = self._procs.get(project_id)
-        killed = False
-        if p is not None and hasattr(p, "poll") and p.poll() is None and hasattr(p, "terminate"):
-            p.terminate()
-            # opencode processes SURVIVE a plain SIGTERM (confirmed in production by the
-            # opencode-swarm session: serve ignored SIGTERM and even pkill). A budget-stopped
-            # run that keeps spending is the worst failure mode this brake exists to prevent —
-            # escalate to SIGKILL if the process is still alive after a short grace.
-            if hasattr(p, "wait") and hasattr(p, "kill"):
-                try:
-                    p.wait(timeout=5)
-                except Exception:
-                    p.kill()
-            killed = True
+        self._kill_stage_process(project_id)
         db = ProjectStore(self._paths(project_id)["db"])
         already = any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers())
         if not already:

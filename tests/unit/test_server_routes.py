@@ -283,6 +283,14 @@ def test_promote_endpoint_wires_to_console(client, app_mod, monkeypatch):
     assert res.status_code == 200 and res.json() == {"project_id": rid, "status": "started"}
 
 
+def test_stop_endpoint_wires_to_console(client, app_mod, monkeypatch):
+    # POST /stop → console.stop_project; stub it to avoid a real run, assert the endpoint shape.
+    monkeypatch.setattr(app_mod.console, "stop_project",
+                        lambda pid: {"project_id": pid, "phase": "stopped", "killed": False})
+    res = client.post("/api/projects/project-1e17ea6a/stop")
+    assert res.status_code == 200 and res.json()["phase"] == "stopped"
+
+
 def test_push_sse_delivers_to_registered_client(app_mod):
     # The SSE mechanic: _push_sse fans a message out to every queue registered for the run
     # (the stream endpoint registers one such queue; the poller + chat/deps handlers push).

@@ -389,6 +389,39 @@ def test_budget_kill_is_recoverable_raise_and_resume(tmp_path, monkeypatch):
     assert c.start_stage2(rid) == rid                             # launch-gate honors the override
 
 
+def test_stop_project_kills_process_and_marks_terminal_stopped(tmp_path):
+    # Operator "stop all progress": kill the live stage process + phase=stopped (terminal — the poller
+    # won't re-advance/relaunch/re-provision). Idempotent.
+    class FakeProc:
+        def __init__(self): self.exit_code = None; self.terminated = False
+        def poll(self): return self.exit_code
+        def terminate(self): self.terminated = True; self.exit_code = -15
+        def wait(self, timeout=None): return self.exit_code
+        def kill(self): self.exit_code = -9
+    proc = FakeProc()
+    ids = iter(["project-stop1"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
+    rid = c.start_project(ProjectRequest(description="x"))
+    res = c.stop_project(rid)
+    assert res == {"project_id": rid, "phase": "stopped", "killed": True}
+    assert proc.terminated is True
+    state = c._load_state(rid)
+    assert state.phase == "stopped" and c._terminal(state) is True   # poller treats it terminal
+    # idempotent: already stopped + process already exited → no-op, killed False
+    res2 = c.stop_project(rid)
+    assert res2["phase"] == "stopped" and res2["killed"] is False
+
+
+def test_stop_project_without_live_process_still_stops(tmp_path):
+    # No tracked process (e.g. console restarted since launch) → can't kill, but phase=stopped still
+    # halts the run (the loop can't resume).
+    c = Console(str(tmp_path), launch=FakeLauncher(), new_id=lambda: "project-stop2")
+    rid = c.start_project(ProjectRequest(description="x"))
+    res = c.stop_project(rid)
+    assert res["phase"] == "stopped" and res["killed"] is False
+    assert c._terminal(c._load_state(rid)) is True
+
+
 def test_run_spend_is_per_run_not_cumulative(tmp_path):
     # Per-run budget: each run/project is capped independently. _project_spend reflects ONLY this run's
     # own spend; a prior run's spend does not count against another.
