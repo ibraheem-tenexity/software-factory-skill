@@ -346,9 +346,19 @@ class Console:
             return False
         if not os.path.exists(log):
             return True
-        # No handle (server restart / port eviction): a live stage3.pid is proof of life —
-        # the swarm driver can sit quiet in project.log for >2min mid-Kimi-turn, and treating
-        # that as finished relaunched a second orchestrator on run-5b7aef7a (§1 race).
+        # No handle (server restart / port eviction). Opencode processes LINGER after a COMPLETED
+        # session (zombie proc), so a still-alive stage pid is NOT proof of work: when the log's last
+        # event is the session-terminal step_finish AND it's idle past the 5-min grace, the stage is
+        # FINISHED — let the poller advance Stage2→3 even though the lingering pid is alive. Inverse of
+        # the live-pid-over-idle-log guard below (a finished-session signal wins over a live pid).
+        # Mirrors the live-handle opencode exception above for the post-restart no-handle path.
+        if (self._load_state(project_id).runtime == "opencode"
+                and (time.time() - os.path.getmtime(log)) > 300
+                and self._log_session_completed(log)):
+            return True
+        # A live stage3.pid is proof of life — the swarm driver can sit quiet in project.log for >2min
+        # mid-Kimi-turn, and treating that as finished relaunched a second orchestrator on run-5b7aef7a
+        # (§1 race). Claude has no session-complete signal, so it stays gated here.
         if self._stage_pid_alive(project_id):
             return False
         return (time.time() - os.path.getmtime(log)) > 120
