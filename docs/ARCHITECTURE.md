@@ -110,7 +110,7 @@ Stage 3 BUILD      tickets → built app(s) → deploy → verify  gate: done ti
 | `input_pipeline.py`, `pdf_extract.py`, `docx_extract.py` | Ingest: attachments → Markdown, compose the Stage-1 input (`context.txt` + `brief.md` + `interview.md`). `docx_extract.extract_with_images` (mammoth + markdownify) keeps **wireframe images inside Word tables** → `input/images/`. |
 | `workspace_setup.py`, `workspace.py` | Per-stage ephemeral workspace: SKILL contract, `.mcp.json`, prior-stage artifacts, vendored design skills. |
 | `deploy.py` | Railway deploy + health-check helpers (stage 3). |
-| `deploy_db.py` | Factory-provisions a per-project Railway Postgres and writes `context/deploy-db.json` for the build (agents have no Supabase access). |
+| `deploy_db.py` | Factory-provisions a per-project Railway Postgres and writes `context/deploy-db.json` for the build (agents have no Supabase access). Uses `railway add --database postgres --json` (the bare form is interactive and hangs headless) → **captures the real auto-named serviceId** → reads `DATABASE_URL` via `railway variables --service <serviceId> --json`. Idempotent: the serviceId is persisted before the variables read, so a retry **reuses** that service (never re-adds → no orphan); `_launch_stage` caps provision attempts (`_DEPLOY_DB_MAX_ATTEMPTS=2`) and parks the run on repeated failure. serviceId is the durable handle for teardown. |
 | `gate.py` | Happy-flow verdict from the Playwright result. |
 | `streamlog.py` | Parses `project.log` (claude stream-json / opencode JSON) → authoritative cost + agent graph. |
 | `tracing.py` | Langfuse exporter (project.log → traces); env-gated no-op. |
