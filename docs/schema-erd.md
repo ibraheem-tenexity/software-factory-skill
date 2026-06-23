@@ -3,7 +3,7 @@
 Flat single `public` schema. `src/software_factory/models.py` is the single source of truth: Alembic
 owns it in prod (baseline `0001_project_baseline` = `models.metadata.create_all`) and
 `metadata.create_all` builds it in the test suite — both from the same `metadata`, so they cannot
-drift. All DML goes through `dbshim` (a `sqlite3.Connection`-shaped wrapper over psycopg3 against the
+drift. All DML goes through `dbshim` (a minimal DB-API wrapper over psycopg3 against the
 Supabase 6543 transaction pooler). Every per-project table is keyed by a `project_id` Text column; the
 global directory tables are single row-sets. See `schema-erd.svg` (regenerated from `schema-erd.dot`).
 

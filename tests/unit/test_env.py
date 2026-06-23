@@ -22,15 +22,6 @@ def test_explicit_sf_environment_overrides_railway(monkeypatch):
     assert env.sf_environment() == "staging"
 
 
-def test_db_backend_is_always_postgres(monkeypatch):
-    # Postgres everywhere — there is no sqlite backend.
-    monkeypatch.delenv("SF_DB", raising=False)
-    monkeypatch.setenv("SF_ENVIRONMENT", "dev")
-    assert env.db_backend() == "postgres"
-    monkeypatch.setenv("SF_ENVIRONMENT", "prod")
-    assert env.db_backend() == "postgres"
-
-
 def test_stage_env_baseline_drops_console_secrets(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://secret")
     monkeypatch.setenv("SF_DB", "postgres")

@@ -22,7 +22,6 @@ _FLAT_TABLES = ("projectstate", "phases", "artifacts", "blockers", "gates",
 @pytest.fixture()
 def pg_env(monkeypatch, tmp_path):
     monkeypatch.setenv("SF_ENVIRONMENT", "test")
-    monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", os.environ["SF_TEST_DATABASE_URL"])
     rid = "project-it" + uuid.uuid4().hex[:8]
     yield str(tmp_path), rid

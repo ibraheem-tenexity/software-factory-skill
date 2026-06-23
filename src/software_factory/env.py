@@ -5,7 +5,6 @@ image, so the only real boundary between them is the environment variables we ha
 stage process. This module centralises the tier concept (dev/test/staging/prod) and the
 rules for
 
-* which DB backend may be used,
 * which env vars a stage agent is allowed to inherit, and
 * which Railway project IDs may be targeted by run apps.
 """
@@ -61,13 +60,6 @@ def sf_environment() -> str:
 
 def is_prod() -> bool:
     return sf_environment() == "prod"
-
-
-def db_backend(requested: str | None = None) -> str:
-    """Postgres everywhere — there is no sqlite backend. Kept as a single seam (and for
-    call-site compatibility); the store layer always talks to `DATABASE_URL` via `dbshim`.
-    Dev/test point `DATABASE_URL` at a local/throwaway Postgres; prod at Supabase."""
-    return "postgres"
 
 
 def stage_env_baseline(provided: dict | None = None) -> dict:

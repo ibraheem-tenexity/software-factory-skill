@@ -93,7 +93,7 @@ def _exec(sql, params=()):
 
 
 class ToolStore:
-    def __init__(self, sqlite_path: str = ""):
+    def __init__(self):
         pass
 
     def _seed_if_empty(self):
@@ -129,7 +129,7 @@ class ToolStore:
 
 
 class AgentRegistryStore:
-    def __init__(self, sqlite_path: str = ""):
+    def __init__(self):
         # Reconcile the registry ONCE at init (boot), NOT on the read path — the old _seed_if_empty was
         # called by all() on EVERY request, so a delete was undone on the next dashboard load. Best-effort
         # so a transient boot DB issue never crashes app start (retried next boot).
