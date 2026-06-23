@@ -41,7 +41,7 @@ export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
 export type Brief = Record<string, string>;
 export type BriefResponse = { brief: Brief; coverage: Record<string, boolean> };
 
-export type Me = { email: string; name?: string; role: string; auth: boolean; is_staff?: boolean };
+export type Me = { email: string; name?: string; role: string; auth: boolean; is_internal?: boolean };
 
 // GET /api/projects/{id}/deployments → console.deployments(). Per-deliverable: a run ships 1..N apps.
 export type Deployment = { app?: string; url?: string; repo?: string; [k: string]: any };

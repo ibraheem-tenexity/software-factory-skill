@@ -54,7 +54,7 @@ export function AccountMenu() {
   }, [open]);
 
   const displayName = me?.name?.trim() || me?.email || "User";
-  const isStaff = me?.is_staff ?? true; // OS portal is staff-gated; default true avoids flash
+  const isStaff = me?.is_internal ?? true; // OS portal is staff-gated; default true avoids flash
 
   const signOut = async () => {
     setSigningOut(true);
@@ -178,13 +178,6 @@ export function AccountMenu() {
             </span>
           </div>
           <div style={{ height: 1, background: T.borderSubtle, margin: "2px 0 4px" }} />
-          {item(
-            "Account settings",
-            T.fg,
-            () => {},
-            <Icon name="settings" size={14} color={T.tertiary} />,
-            true
-          )}
           {item(
             "Switch to console",
             T.fg,
