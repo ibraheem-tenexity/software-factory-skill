@@ -16,6 +16,9 @@ export function App() {
   const [showProjects, setShowProjects] = useState<boolean>(!readInitialProject());
   // The Option C onboarding is the "new project" front door (shown instead of an empty build console).
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
+  // Resuming an existing draft (project-view "Complete setup & start building"): the onboarding adopts
+  // this draft id instead of minting a new one, and rehydrates its fields from GET /draft. null = fresh.
+  const [resumeProjectId, setResumeProjectId] = useState<string | null>(null);
   // Org admin route (dashboard org switcher / "Manage organization →"). Placeholder until §2.3.
   const [showOrg, setShowOrg] = useState<boolean>(false);
   // Open-run peer view (§2.5): 'project' = ProjectView (Overview/Documents tabs); 'factory' = the
@@ -35,7 +38,7 @@ export function App() {
   useEffect(() => { if (!projectId) api.projects().catch(() => {}); }, [projectId]);
 
   if (showOnboarding) {
-    return <OnboardingScreen onComplete={openProject} />;
+    return <OnboardingScreen resumeProjectId={resumeProjectId} onComplete={(id) => { setResumeProjectId(null); openProject(id); }} />;
   }
 
   if (showOrg) {
@@ -48,7 +51,7 @@ export function App() {
     return (
       <Dashboard
         onOpen={openProject}
-        onNew={() => { setProjectId(null); setShowProjects(false); setShowOnboarding(true); }}
+        onNew={() => { setResumeProjectId(null); setProjectId(null); setShowProjects(false); setShowOnboarding(true); }}
         onOrg={() => setShowOrg(true)}
       />
     );
@@ -59,7 +62,8 @@ export function App() {
   if (openView === "factory") {
     return <FactoryConsole projectId={projectId} onBack={() => setOpenView("project")} />;
   }
-  return <ProjectView projectId={projectId} onBack={backToProjects} onOpenFactory={() => setOpenView("factory")} />;
+  return <ProjectView projectId={projectId} onBack={backToProjects} onOpenFactory={() => setOpenView("factory")}
+    onResume={() => { setResumeProjectId(projectId); setShowProjects(false); setShowOnboarding(true); }} />;
 }
 
 // ── Auth gate (Option B) ───────────────────────────────────────────────────────────────────

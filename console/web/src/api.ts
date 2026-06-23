@@ -324,6 +324,10 @@ export const api = {
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),
   patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[] }) =>
     send<{ name: string; goal: string; scope: string[]; description: string; brief: Record<string, string>; coverage: Record<string, boolean> }>(`/api/projects/${id}/draft`, "PATCH", body),
+  // Read counterpart to PATCH /draft (qsvigmth's run-control PR #48) — rehydrates the intake form
+  // when RESUMING an existing draft instead of minting a new one.
+  getDraft: (id: string) =>
+    get<{ name: string; goal: string; scope: string[]; description: string; brief: Record<string, string>; coverage: Record<string, boolean> }>(`/api/projects/${id}/draft`),
   attach: (id: string, files: { name: string; content_b64: string }[]) =>
     send<{ attached: string[] }>(`/api/projects/${id}/attach`, "POST", { files }),
   promote: (id: string, body?: { description?: string; target?: string }) =>

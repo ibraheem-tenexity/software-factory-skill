@@ -122,7 +122,7 @@ function fmtBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function OnboardingScreen({ onComplete }: { onComplete: (projectId: string) => void }) {
+export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: (projectId: string) => void; resumeProjectId?: string | null }) {
   const [mode, setMode] = useState<"loading" | "fresh" | "returning">("loading");
   const [onFile, setOnFile] = useState<Org | null>(null);
   const [editOrg, setEditOrg] = useState(false);
@@ -161,14 +161,31 @@ export function OnboardingScreen({ onComplete }: { onComplete: (projectId: strin
   const orgSavedRef = useRef(false);   // fresh: org POSTed once, then PATCH
   const orgBusyRef = useRef(false);
 
-  // mount: resolve org path + mint the eager draft
+  // mount: resolve org path + get the draft. RESUME (existing draft) adopts that pid and rehydrates
+  // the form from GET /draft + /documents — NO new POST /api/drafts (which would orphan a duplicate).
+  // Fresh start mints the one eager draft as before.
   useEffect(() => {
     api.getOrg().then(({ org: o }) => {
       setOnFile(o);
       setMode(o ? "returning" : "fresh");
     }).catch(() => setMode("fresh"));
-    api.createDraft().then(({ project_id }) => setDraftId(project_id)).catch(() => {});
-  }, []);
+    if (resumeProjectId) {
+      setDraftId(resumeProjectId);
+      api.getDraft(resumeProjectId).then((d) => {
+        setP((x) => ({ ...x, name: d.name || "", goal: d.goal || d.description || "", scope: d.scope || [] }));
+        if (d.scope) setScopeOptions((opts) => Array.from(new Set([...opts, ...d.scope])));
+      }).catch(() => {});
+      api.documents(resumeProjectId).then((docs) => {
+        const ups = docs.uploaded || [];
+        const vids = ups.filter((m) => m.kind === "video").map((m) => ({ name: m.name, size: fmtBytes(m.size_bytes || 0) }));
+        const others = ups.filter((m) => m.kind !== "video").map((m) => ({ name: m.name, size: fmtBytes(m.size_bytes || 0) }));
+        setMats({ video: vids, docs: others });
+        setP((x) => ({ ...x, video: vids.length > 0, docs: others.length > 0 }));
+      }).catch(() => {});
+    } else {
+      api.createDraft().then(({ project_id }) => setDraftId(project_id)).catch(() => {});
+    }
+  }, [resumeProjectId]);
 
   // DEBOUNCED project write-through. Fire-and-forget — the response is intentionally ignored so it
   // can never overwrite what the user is typing (the focus-loss trap).
