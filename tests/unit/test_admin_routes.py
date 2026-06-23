@@ -191,7 +191,8 @@ def test_stage_skill_detail_serves_real_skill_md(staff_mod, staff_client, monkey
     _login(staff_mod, staff_client, monkeypatch)
     d = staff_client.get("/api/admin/agents/STAGE-1").json()
     assert d["prompt_source"] == "skill_file" and d["prompt_applied"] is True   # live, file-backed
-    assert d["editable"] is False and d["runtime"] == "claude"
+    assert d["editable"] is True and d["runtime"] == "claude"    # now editable (Part 2)
+    assert d["is_default"] is True and d["overridden"] is False and d["version"] == 0
     assert "research orchestrator" in d["prompt"].lower()        # the REAL SKILL.md body
     assert d["skill_path"] == "skills/stage-1-research/SKILL.md"
     # the opencode variant is served on request and differs from the claude one
@@ -208,10 +209,48 @@ def test_concierge_card_is_code_backed_and_live(staff_mod, staff_client, monkeyp
     card = next(a for a in agents if a["callsign"] == "CONCIERGE")
     assert card["kind"] == "concierge" and card["name"] == "Factory Concierge"
     d = staff_client.get("/api/admin/agents/CONCIERGE").json()
-    assert d["prompt_source"] == "code" and d["prompt_applied"] is True and d["editable"] is False
+    assert d["prompt_source"] == "code" and d["prompt_applied"] is True and d["editable"] is True
     assert "Factory Concierge" in d["prompt"]                 # the REAL CONCIERGE_INSTRUCTIONS
     assert d["model"] == "gpt-5.4"                             # default concierge model
     assert d["source_ref"].endswith("CONCIERGE_INSTRUCTIONS")
+
+
+def test_stage_prompt_edit_applies_per_runtime_and_reverts(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    # edit STAGE-1's CLAUDE prompt → applied (drives next run), GET reflects the override
+    r = staff_client.patch("/api/admin/agents/STAGE-1/prompt",
+                           json={"prompt": "EDITED claude S1", "runtime": "claude"})
+    assert r.status_code == 200 and r.json()["applied"] is True and r.json()["is_default"] is False
+    assert r.json()["runtime"] == "claude" and r.json()["version"] == 1
+    d = staff_client.get("/api/admin/agents/STAGE-1?runtime=claude").json()
+    assert d["prompt"] == "EDITED claude S1" and d["overridden"] is True and d["is_default"] is False
+    # the OPENCODE variant is a SEPARATE override — still the default
+    oc = staff_client.get("/api/admin/agents/STAGE-1?runtime=opencode").json()
+    assert oc["is_default"] is True and oc["prompt"] != "EDITED claude S1"
+    # stage edit WITHOUT runtime → 400
+    assert staff_client.patch("/api/admin/agents/STAGE-1/prompt",
+                              json={"prompt": "x"}).status_code == 400
+    # revert (DELETE) → back to default
+    assert staff_client.delete("/api/admin/agents/STAGE-1/prompt?runtime=claude").json()["is_default"] is True
+    back = staff_client.get("/api/admin/agents/STAGE-1?runtime=claude").json()
+    assert back["is_default"] is True and "research orchestrator" in back["prompt"].lower()
+
+
+def test_concierge_prompt_edit_applies_without_runtime(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    r = staff_client.patch("/api/admin/agents/CONCIERGE/prompt", json={"prompt": "EDITED concierge"})
+    assert r.status_code == 200 and r.json()["applied"] is True and r.json()["runtime"] is None
+    d = staff_client.get("/api/admin/agents/CONCIERGE").json()
+    assert d["prompt"] == "EDITED concierge" and d["overridden"] is True
+    staff_client.delete("/api/admin/agents/CONCIERGE/prompt")
+    assert staff_client.get("/api/admin/agents/CONCIERGE").json()["is_default"] is True
+
+
+def test_role_agent_prompt_edit_stays_unapplied(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    r = staff_client.patch("/api/admin/agents/ATLAS/prompt", json={"prompt": "be terse"})
+    assert r.status_code == 200 and r.json()["applied"] is False   # role cards = part-2b, NOT applied
+    assert staff_client.delete("/api/admin/agents/ATLAS/prompt").status_code == 404  # not an orchestrator
 
 
 def test_tools_registry(staff_mod, staff_client, monkeypatch):

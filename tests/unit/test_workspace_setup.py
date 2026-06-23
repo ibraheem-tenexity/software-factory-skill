@@ -32,6 +32,24 @@ def _make_phase_dir(tmp_path):
     return str(d)
 
 
+def test_skill_override_replaces_the_on_disk_skill(tmp_path):
+    # An operator's web-edited prompt (skill_override) drives the run: it lands as ws/SKILL.md verbatim
+    # INSTEAD of the on-disk default. This is the seam that makes a dashboard edit take effect.
+    runs = tmp_path / "runs"; runs.mkdir()
+    skills_dir = _make_skills_dir(tmp_path)
+    ws = prepare_workspace(str(runs), "project-ovr", 1, skills_dir=skills_dir,
+                           phase_dir=_make_phase_dir(tmp_path), skill_override="# EDITED BY OPERATOR")
+    assert open(os.path.join(ws, "SKILL.md")).read() == "# EDITED BY OPERATOR"
+
+
+def test_no_override_uses_the_on_disk_default(tmp_path):
+    runs = tmp_path / "runs"; runs.mkdir()
+    skills_dir = _make_skills_dir(tmp_path)
+    ws = prepare_workspace(str(runs), "project-def", 1, skills_dir=skills_dir,
+                           phase_dir=_make_phase_dir(tmp_path))
+    assert open(os.path.join(ws, "SKILL.md")).read() == "# Stage 1 Research Skill"   # copied default
+
+
 def test_stage1_workspace_has_mcp_and_settings(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()

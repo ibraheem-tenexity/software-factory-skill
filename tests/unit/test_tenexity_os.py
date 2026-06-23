@@ -22,7 +22,7 @@ def test_stage_skill_cards_are_three_file_backed_orchestrators():
 def test_stage_skill_detail_reads_real_file_and_variants():
     d = tos.stage_skill_detail("stage-2", )                # case-insensitive callsign match
     assert d["callsign"] == "STAGE-2" and d["prompt_source"] == "skill_file"
-    assert d["prompt_applied"] is True and d["editable"] is False
+    assert d["prompt_applied"] is True and d["editable"] is True    # editable in Part 2
     assert d["prompt"].startswith("---") and "design orchestrator" in d["prompt"].lower()
     assert d["variants"]["opencode"] == "skills/stage-2-design/SKILL.opencode.md"
     assert tos.stage_skill_detail("ATLAS") is None         # role agent → not a stage skill
@@ -144,6 +144,18 @@ def _seed(tmp_path, rid):
     c = Console(str(tmp_path), launch=FakeLauncher(), new_id=lambda: rid)
     c.start_project(ProjectRequest(description="app", target="railway"))
     return c
+
+
+def test_stage_override_drives_the_run_workspace(tmp_path):
+    # END-TO-END proof Part 2 works: a stored STAGE-1 (claude) override becomes the run's ws/SKILL.md
+    # at launch — i.e. a web edit DRIVES the actual run. start_project → _launch_stage(1) → prepare_workspace.
+    import os
+    from software_factory.agent_prompts import PromptStore, override_key
+    PromptStore().set(override_key("STAGE-1", "claude"), "# OVERRIDE DRIVES THE RUN")
+    rid = "project-ovrd1111"
+    _seed(tmp_path, rid)
+    skill = os.path.join(str(tmp_path), rid, "workspace", "SKILL.md")
+    assert open(skill).read() == "# OVERRIDE DRIVES THE RUN"
 
 
 def test_agent_rollups_active_and_burn(tmp_path):

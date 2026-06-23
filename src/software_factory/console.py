@@ -617,8 +617,18 @@ class Console:
         _runner_key = "OPENROUTER_API_KEY" if runtime == "opencode" else "ANTHROPIC_API_KEY"
         if not env.get(_runner_key) and os.environ.get(_runner_key):
             env = {**env, _runner_key: os.environ[_runner_key]}
+        # Operator override: if staff edited THIS stage's prompt for THIS runtime in the OS Agents
+        # dashboard, that stored text drives the run (written as ws/SKILL.md); else the on-disk
+        # default. Per-runtime + best-effort — a store hiccup must never block a launch.
+        override = None
+        try:
+            from .agent_prompts import PromptStore, override_key
+            row = PromptStore().get(override_key(f"STAGE-{stage}", runtime))
+            override = row["prompt"] if row else None
+        except Exception:
+            override = None
         ws = prepare_workspace(
-            self._projects_dir, project_id, stage, runtime=runtime,
+            self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
         )
         # Stage 3 with a database dependency: the FACTORY provisions the DB (per-project Railway
         # Postgres) and hands the agent context/deploy-db.json — the agent has no Supabase access

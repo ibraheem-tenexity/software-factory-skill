@@ -156,6 +156,7 @@ class DemoIn(BaseModel):
 
 class PromptIn(BaseModel):
     prompt: str = ""
+    runtime: str | None = None   # "claude"|"opencode" for stage-skill prompts; omitted for others
 
 
 class PasswordLoginIn(BaseModel):
