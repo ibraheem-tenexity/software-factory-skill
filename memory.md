@@ -136,3 +136,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/admin/modals.tsx (planned changes), console/web/src/api.ts (planned PATCH contract).
 3. Need to reverse read-only rendering, add Save (PATCH /api/admin/agents/{callsign}/prompt), default-vs-override indicator, version display, revert-to-default. Coordinate with qsvigmth on runtime keying for stage skills.
 4. Summary: asked qsvigmth for PATCH body shape, default signal, revert endpoint, versioning, per-runtime overrides. Holding PR #39 FE changes until contract is locked.
+
+# Tenexity OS agent Update at Time: 23:06:2026:20:40:00.000  [HOLD — qsvigmth proposed contract]
+1. qsvigmth proposed PATCH/store contract: PATCH body {prompt, runtime?}, GET returns is_default/overridden/version, DELETE reverts to default, stage overrides per-runtime, concierge single.
+2. console/web/src/admin/modals.tsx (pending), console/web/src/api.ts (pending endpoint additions).
+3. Contract not yet coordinator-validated; FE changes remain on hold.
+4. Summary: pre-plan only; awaiting l2a7ngax sign-off before implementing edits.
