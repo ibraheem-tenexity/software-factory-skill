@@ -135,6 +135,8 @@ digraph SchemaERD {
       <tr><td align="left"><b>FK</b> invited_by → users; onboarded_at</td></tr>
       <tr><td align="left">created_at, updated_at (trigger)</td></tr>
       <tr><td align="left"><b>FK</b> org_id; designation, role_description</td></tr>
+      <tr><td align="left">name; sign_in_method : google | microsoft | password | sso</td></tr>
+      <tr><td align="left">last_active; password_hash (scrypt; null = no password)</td></tr>
     </table>>];
 
   blobs [label=<

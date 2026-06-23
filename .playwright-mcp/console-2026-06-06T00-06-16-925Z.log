@@ -1,3 +1,0 @@
-[    1110ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://factory-console-software-factory-as-skill.up.railway.app/favicon.ico:0
-[   10228ms] [WARNING] You have set a custom wheel sensitivity.  This will make your app zoom unnaturally when using mainstream mice.  You should change this value from the default only if you can guarantee that all your users will use the same hardware and OS configuration as your current machine. @ https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js:22
-[   77338ms] [ERROR] Failed to load resource: the server responded with a status of 500 () @ https://factory-console-software-factory-as-skill.up.railway.app/api/chat:0

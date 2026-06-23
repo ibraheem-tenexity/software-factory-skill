@@ -164,19 +164,50 @@ not numbers. `sub_focus` and `connected_systems` are JSON-encoded lists.
 | created_at | DateTime(tz) | server_default `now()` |
 | created_by | Text | |
 
-### users
-The user directory, keyed by email and linked to an org.
+### roles
+RBAC role definitions (seeded `admin` / `member`). A user links to exactly one role via `role_id`.
 
 | Column | Type | Notes |
 |---|---|---|
-| email | Text | PK |
-| role | Text | not null, server_default `'member'` |
+| id | uuid | PK, `gen_random_uuid()` |
+| name | Text | not null, unique — `'admin'` \| `'member'` |
+| description | Text | |
+| created_at | DateTime(tz) | server_default `now()` |
+
+### role_permissions
+Per-role permission grants (composite PK). Cascade-deleted with the role.
+
+| Column | Type | Notes |
+|---|---|---|
+| role_id | uuid | PK (composite), FK → roles.id (ON DELETE CASCADE) |
+| permission | Text | PK (composite) — e.g. `'projects.delete'` |
+
+### users
+The user directory **and** the single-source-of-truth allowlist (no env allowlist). Identity is the
+uuid `id`; `email` is the invite/match key; access is governed by `status` (invited→active→disabled)
+and `role_id`→`roles`, resolved per-request. `password_hash` (scrypt) backs email+password sign-in.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid | PK, `gen_random_uuid()` |
+| google_sub | Text | unique; null until first Google sign-in (match key thereafter) |
+| email | Text | not null, unique — invite/allowlist key |
+| role_id | uuid | not null, FK → roles.id |
+| is_internal | Boolean | not null, default `false` — Tenexity-staff flag (gates `/admin`) |
+| status | Text | not null, default `'invited'` — `invited` \| `active` \| `disabled` (CHECK) |
+| token_version | Integer | not null, default `0` — bump to revoke live sessions |
+| metadata | jsonb | not null, default `'{}'` — non-auth extensibility |
+| invited_by | uuid | FK → users.id |
+| onboarded_at | DateTime(tz) | set on first sign-in |
+| created_at | DateTime(tz) | not null, server_default `now()` |
+| updated_at | DateTime(tz) | not null, server_default `now()` |
 | org_id | Text | FK → organizations.id |
 | designation | Text | |
 | role_description | Text | |
-| tenexity | Integer | |
-| created_at | DateTime(tz) | server_default `now()` |
-| created_by | Text | |
+| name | Text | display name |
+| sign_in_method | Text | not null, default `'google'` — `google` \| `microsoft` \| `password` \| `sso` |
+| last_active | DateTime(tz) | touched per authed request (throttled) |
+| password_hash | Text | scrypt hash; null = no password set (never selected into the general user row) |
 
 ### blobs
 Metadata for stored files (the bytes live in object storage, addressed by `storage_key`). `scope` is

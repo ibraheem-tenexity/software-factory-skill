@@ -6,8 +6,7 @@ Real-data backend for the operator portal (`AdminPortal.tsx`, owner: mhk7nz7i). 
 ## Auth gate (baked into every route)
 `require_staff` — admits ONLY Tenexity platform staff, because these expose cross-tenant data:
 - a valid `X-SF-Service-Token` (headless), **or**
-- the session email is in `SF_ADMIN_EMAILS` (the bootstrap platform operators), **or**
-- the session user's `tenexity` flag is set.
+- a human session that is BOTH role `admin` AND has `is_internal` set (Tenexity platform staff).
 
 A customer **org-admin** (role=`admin`) does **NOT** qualify — `require_admin` is per-org; this is
 platform-staff only. Cookie auth works for the browser (operator just needs to be staff); no extra

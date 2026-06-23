@@ -192,7 +192,7 @@ users = Table(
     Column("designation", Text),
     Column("role_description", Text),
     # user-management (first-class columns, NOT metadata): display name, sign-in method, activity,
-    # and the bcrypt password hash for email+password sign-in (NULL = no password set).
+    # and the scrypt password hash for email+password sign-in (NULL = no password set).
     Column("name", Text),
     Column("sign_in_method", Text, nullable=False, server_default="google"),  # google|microsoft|password|sso
     Column("last_active", DateTime(timezone=True)),

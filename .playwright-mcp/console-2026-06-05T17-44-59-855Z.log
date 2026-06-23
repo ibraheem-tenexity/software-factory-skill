@@ -1,2 +1,0 @@
-[      56ms] [WARNING] You have set a custom wheel sensitivity.  This will make your app zoom unnaturally when using mainstream mice.  You should change this value from the default only if you can guarantee that all your users will use the same hardware and OS configuration as your current machine. @ https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js:22
-[      83ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:8765/:0

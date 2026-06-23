@@ -5,7 +5,7 @@ the single reference for both frontends (mwbcupd9 customer product · mhk7nz7i T
 `worktree-tenexity-os-api` off main `daf5878`. `[EXISTS]` = already shipped; `[NEW]` = this CRUD pass.
 
 > Auth legend: **owner** = run owner or admin (`authorize_run`); **member** = has an org on file;
-> **org-admin** = role `admin`; **staff** = `require_staff` (service-token ∪ SF_ADMIN_EMAILS ∪ tenexity).
+> **org-admin** = role `admin`; **staff** = `require_staff` (service-token ∪ (role `admin` AND `is_internal`)).
 > Rebases onto the run→project rename (`run_id`→`project_id`, `/api/runs`→`/api/projects`); shapes stable.
 
 ## Mock-data elimination (2 sources)

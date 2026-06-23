@@ -30,7 +30,7 @@ def admin_portal(v: tuple = Depends(viewer)):
     # The Tenexity OS operator portal (separate SPA entry, React mode only) exposes CROSS-TENANT
     # data, so the PAGE is hard-gated server-side (not just the /api/admin/* data): an unauthenticated
     # caller is sent to sign in; a signed-in non-staff user (incl. a customer org-admin) gets 403.
-    # Only platform staff (service token, or a human session role==admin AND tenexity==true) get it.
+    # Only platform staff (service token, or a human session role==admin AND is_internal==true) get it.
     if not state._react_enabled():
         raise HTTPException(status_code=404, detail="not found")
     if not v[2]:                                   # no session → bounce to sign-in

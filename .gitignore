@@ -15,3 +15,14 @@ client_secret_*.json
 .design-source/
 console/web/node_modules
 opencode.json
+
+# Playwright MCP session dumps (browser console logs + page snapshots) — generated, never commit
+.playwright-mcp/
+
+# claude-flow GENERATED runtime state — never commit (config.yaml / CAPABILITIES.md ARE tracked)
+.claude-flow/agents/
+.claude-flow/embeddings.json
+.claude-flow/metrics/
+.claude-flow/security/
+.claude-flow/swarm/
+.claude-flow/terminals/

@@ -96,9 +96,9 @@ def password_login(body: PasswordLoginIn, request: Request):
     # 401 for every failure (bad email, bad password, no password set, disabled) — never leak which.
     email = (body.email or "").strip().lower()
     ip = _client_ip(request)
-    # Login-source audit + empirical IP-resolution check: one structured line per attempt with the
-    # resolved IP and the raw upstream headers, so we can confirm prod resolves the REAL external
-    # client (not a 10.x proxy hop) and tune SF_TRUSTED_PROXY_HOPS if Railway's XFF semantics differ.
+    # Login-source audit + IP-resolution check: one structured line per attempt with the resolved IP
+    # and the raw upstream headers, so we can confirm prod keeps resolving the REAL external client
+    # (the edge-set leftmost XFF, not a rotating internal hop) if Railway's edge behavior changes.
     print(json.dumps({"evt": "auth_password", "ip": ip,
                       "envoy": request.headers.get("x-envoy-external-address"),
                       "xff": request.headers.get("x-forwarded-for")}), flush=True)
