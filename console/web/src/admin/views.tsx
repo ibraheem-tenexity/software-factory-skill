@@ -507,8 +507,9 @@ function AgentCard({
   onEdit: (a: AdminAgent) => void;
   onDelete: (a: AdminAgent) => void;
 }) {
-  const isSkill = a.kind === "stage_skill";
+  const isLive = !!a.kind;
   const title = a.name || a.role;
+  const kindLabel = a.kind ? a.kind.replace("_", " ") : "";
   return (
     <button
       onClick={() => onOpen(a)}
@@ -516,7 +517,7 @@ function AgentCard({
         textAlign: "left",
         cursor: "pointer",
         background: T.raised,
-        border: `1px solid ${a.callsign === "ORCHESTRATOR.MAIN" || isSkill ? T.brand : T.borderSubtle}`,
+        border: `1px solid ${a.callsign === "ORCHESTRATOR.MAIN" || isLive ? T.brand : T.borderSubtle}`,
         borderRadius: T.rLg,
         padding: "16px 17px",
         display: "flex",
@@ -528,8 +529,8 @@ function AgentCard({
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ font: `600 15px/1.2 ${T.sans}`, color: T.brandDeep }}>{title}</span>
-          {!isSkill && <span style={{ width: 7, height: 7, borderRadius: "50%", background: a.on ? T.success : T.borderDefault }} />}
-          {isSkill && (
+          {!isLive && <span style={{ width: 7, height: 7, borderRadius: "50%", background: a.on ? T.success : T.borderDefault }} />}
+          {isLive && (
             <span
               style={{
                 font: `600 8px/1 ${T.mono}`,
@@ -541,7 +542,7 @@ function AgentCard({
                 borderRadius: 3,
               }}
             >
-              stage skill
+              {kindLabel}
             </span>
           )}
         </div>
@@ -576,7 +577,7 @@ function AgentCard({
           <CostDots n={a.cost_tier} />
         </span>
       </div>
-      {!isSkill && (
+      {!isLive && (
         <div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
             <ColHead style={{ fontSize: 9.5 }}>Autonomy / Success</ColHead>
@@ -595,18 +596,22 @@ function AgentCard({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <button
-          onClick={() => onEdit(a)}
-          style={{ font: `500 11px/1 ${T.mono}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}
-        >
-          Edit
-        </button>
-        <button
-          onClick={() => onDelete(a)}
-          style={{ font: `500 11px/1 ${T.mono}`, color: T.danger, background: "none", border: "none", cursor: "pointer" }}
-        >
-          ×
-        </button>
+        {!isLive && (
+          <>
+            <button
+              onClick={() => onEdit(a)}
+              style={{ font: `500 11px/1 ${T.mono}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => onDelete(a)}
+              style={{ font: `500 11px/1 ${T.mono}`, color: T.danger, background: "none", border: "none", cursor: "pointer" }}
+            >
+              ×
+            </button>
+          </>
+        )}
       </div>
     </button>
   );

@@ -156,15 +156,16 @@ export type AdminAgent = {
   success?: number | null;
   runs?: number | null;
   on?: boolean;
-  kind?: "stage_skill";
+  kind?: "stage_skill" | "concierge";
   stage?: number;
   prompt_version?: number;
   prompt_applied?: boolean;
   prompt?: string;
-  prompt_source?: "skill_file" | "store" | string;
+  prompt_source?: "skill_file" | "code" | "store" | string;
   editable?: boolean;
   skill?: string;
   skill_path?: string;
+  source_ref?: string;
   runtime?: string;
   variants?: Record<string, string>;
   tools?: { name: string; type?: string; scope?: string }[];

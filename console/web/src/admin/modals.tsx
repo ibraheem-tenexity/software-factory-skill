@@ -122,7 +122,7 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
       .catch(() => setSaving(false));
   };
   const readOnly = active.editable === false;
-  const promptLabel = readOnly ? "Skill source" : "System prompt";
+  const promptLabel = readOnly ? "Prompt source" : "System prompt";
   return (
     <div
       onClick={onClose}
@@ -262,7 +262,7 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
                         color: T.success,
                       }}
                     >
-                      {active.prompt_source === "skill_file" ? "live skill" : active.prompt_source}
+                      {active.prompt_source === "skill_file" ? "live skill" : active.prompt_source === "code" ? "live code" : active.prompt_source || "live"}
                     </span>
                   </span>
                 )}
@@ -309,7 +309,7 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
               <Mono style={{ fontSize: 10.5, marginTop: 8, display: "block" }}>
                 {prompt.length} chars
                 {!readOnly && detail?.prompt_version ? ` · version ${detail.prompt_version}` : ""}
-                {readOnly && active.skill_path ? ` · ${active.skill_path}` : ""}
+                {readOnly && (active.source_ref || active.skill_path) ? ` · ${active.source_ref || active.skill_path}` : ""}
                 {appliedNote ? ` · ${appliedNote}` : ""}
               </Mono>
             </>
