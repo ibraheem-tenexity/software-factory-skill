@@ -8,6 +8,7 @@
 // Liveness: polls status + tickets + graph every 4s (agents run server-side; no sim button).
 import { useEffect, useState } from "react";
 import { T, Icon, Wordmark, StatusPill, Btn } from "../onboarding/design";
+import { AccountMenu } from "../AccountMenu";
 import { api, ProjectSummary, Graph, Ticket } from "../../api";
 import { phaseStatesFromGraph, atWaitForDeps, PhaseStatus } from "./pipeline";
 import { StageRail } from "./StageRail";
@@ -98,6 +99,7 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
         <span style={{ font: `500 12px/1 ${T.mono}`, color: overCap ? T.danger : T.secondary }}>
           spent <b style={{ color: overCap ? T.danger : T.fg }}>${spent.toFixed(2)}</b>{cap > 0 && ` / $${cap.toFixed(0)} cap`}
         </span>
+        <AccountMenu size={26} />
       </header>
 
       {/* ── body: Concierge rail + main column ── */}

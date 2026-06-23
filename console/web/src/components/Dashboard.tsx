@@ -5,6 +5,7 @@
 import React, { useEffect, useState } from "react";
 import { api, ProjectSummary, Org, Me } from "../api";
 import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, TextInput } from "./onboarding/design";
+import { AccountMenu } from "./AccountMenu";
 
 type StatusKey = "deployed" | "needs-input" | "draft" | "researching" | "building";
 type Tone = "success" | "warning" | "neutral" | "brand" | "info";
@@ -197,7 +198,7 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <span style={{ display: "grid", placeItems: "center", width: 32, height: 32, borderRadius: "50%", border: `1px solid ${T.borderSubtle}`, background: T.raised }}><Icon name="search" size={15} color={T.secondary} /></span>
-          <Avatar name={me?.email || "You"} size={30} tone="brand" />
+          <AccountMenu size={30} />
         </div>
       </div>
 
