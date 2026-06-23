@@ -105,6 +105,7 @@ def test_google_login_rejected_for_unallowed_email(auth_mod, auth_client, monkey
 def test_run_scoped_route_forbidden_for_non_owner(auth_mod, auth_client, monkeypatch):
     # op@tenexity.ai is a *member* here (seeded with role 'member') → may only see runs it owns.
     _login(auth_mod, auth_client, monkeypatch)
+    monkeypatch.setattr(auth_mod.console, "project_exists", lambda rid: True)
     monkeypatch.setattr(auth_mod.console, "project_owner", lambda rid: "someone-else@tenexity.ai")
     r = auth_client.get("/api/projects/project-deadbeef")
     assert r.status_code == 403
@@ -255,8 +256,8 @@ def test_get_draft_rehydrates_intake_fields(client):
     assert d["scope"] == ["Quoting / RFQ"] and "description" in d and "brief" in d and "coverage" in d
 
 
-def test_get_draft_409_on_non_draft(client):
-    assert client.get("/api/projects/project-deadbeef/draft").status_code == 409
+def test_get_draft_404_on_unknown_pid(client):
+    assert client.get("/api/projects/project-deadbeef/draft").status_code == 404
 
 
 def test_attach_to_draft_endpoint(client):
@@ -265,12 +266,12 @@ def test_attach_to_draft_endpoint(client):
     assert r.status_code == 200 and r.json() == {"attached": []}
 
 
-def test_draft_writethrough_409_on_non_draft(client):
-    # PATCH/attach/promote refuse a non-draft (already promoted or nonexistent) run.
+def test_draft_writethrough_404_on_unknown_pid(client):
+    # Unknown pid → 404 at authorize_project (never materializes a dir).
     for path, payload in [("/draft", {"goal": "x"}), ("/attach", {"files": []}), ("/promote", {})]:
         method = client.patch if path == "/draft" else client.post
         r = method(f"/api/projects/project-deadbeef{path}", json=payload)
-        assert r.status_code == 409, path
+        assert r.status_code == 404, path
 
 
 def test_promote_endpoint_wires_to_console(client, app_mod, monkeypatch):
@@ -285,6 +286,7 @@ def test_promote_endpoint_wires_to_console(client, app_mod, monkeypatch):
 
 def test_stop_endpoint_wires_to_console(client, app_mod, monkeypatch):
     # POST /stop → console.stop_project; stub it to avoid a real run, assert the endpoint shape.
+    monkeypatch.setattr(app_mod.console, "project_exists", lambda pid: True)
     monkeypatch.setattr(app_mod.console, "stop_project",
                         lambda pid: {"project_id": pid, "phase": "stopped", "killed": False})
     res = client.post("/api/projects/project-1e17ea6a/stop")

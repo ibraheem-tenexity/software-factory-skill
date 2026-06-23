@@ -51,7 +51,9 @@ def _can_see(v: tuple, project_id: str) -> bool:
 
 
 def authorize_project(pid: str, v: tuple = Depends(require_authed)) -> tuple:
-    """For run-scoped routes carrying {pid}: 403 unless admin/service or the run's owner."""
+    """For run-scoped routes carrying {pid}: 404 if the project doesn't exist, 403 if not the owner."""
+    if not state.console.project_exists(pid):
+        raise HTTPException(status_code=404, detail="project not found")
     if not _can_see(v, pid):
         raise HTTPException(status_code=403, detail="forbidden")
     return v

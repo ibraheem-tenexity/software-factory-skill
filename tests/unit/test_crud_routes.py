@@ -107,6 +107,7 @@ def test_kb_doc_patch(mod, client, monkeypatch):
 # ── project rename / archive / materials ─────────────────────────────────────────────────────
 def test_project_rename_and_archive(mod, client, monkeypatch):
     _login(mod, client, monkeypatch)
+    monkeypatch.setattr(mod.console, "project_exists", lambda rid: True)
     monkeypatch.setattr(mod.console, "project_owner", lambda rid: "op@tenexity.ai")
     monkeypatch.setattr(mod.console, "rename_project",
                         lambda rid, name=None, description=None, scope=None: {"project_id": rid, "name": name})
@@ -117,6 +118,7 @@ def test_project_rename_and_archive(mod, client, monkeypatch):
 
 def test_run_material_upload(mod, client, monkeypatch):
     _login(mod, client, monkeypatch)
+    monkeypatch.setattr(mod.console, "project_exists", lambda rid: True)
     monkeypatch.setattr(mod.console, "project_owner", lambda rid: "op@tenexity.ai")
     monkeypatch.setattr(mod.console, "artifacts", lambda rid: [])
     r = client.post("/api/projects/project-z/materials", json={
@@ -129,6 +131,7 @@ def test_run_material_upload(mod, client, monkeypatch):
 
 def test_project_scope_edit_wires_through(mod, client, monkeypatch):
     _login(mod, client, monkeypatch)
+    monkeypatch.setattr(mod.console, "project_exists", lambda pid: True)
     monkeypatch.setattr(mod.console, "project_owner", lambda pid: "op@tenexity.ai")
     monkeypatch.setattr(mod.console, "rename_project",
                         lambda pid, name=None, description=None, scope=None: {
@@ -140,6 +143,7 @@ def test_project_scope_edit_wires_through(mod, client, monkeypatch):
 def test_material_scope_toggle_moves_to_org_kb(mod, client, monkeypatch):
     _login(mod, client, monkeypatch)
     client.post("/api/org", json={"name": "Acme"})        # op gets an org
+    monkeypatch.setattr(mod.console, "project_exists", lambda pid: True)
     monkeypatch.setattr(mod.console, "project_owner", lambda pid: "op@tenexity.ai")
     monkeypatch.setattr(mod.console, "artifacts", lambda pid: [])
     up = client.post("/api/projects/project-z/materials", json={

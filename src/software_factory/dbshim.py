@@ -60,6 +60,22 @@ def registry_projects() -> list:
         return []
 
 
+def project_in_registry(project_id: str) -> bool:
+    """True if this project_id has a row in the projectstate table. False on miss or any pg error."""
+    try:
+        conn = _pg_connect(os.environ["DATABASE_URL"])
+        try:
+            with conn.transaction():
+                cur = conn.cursor()
+                cur.execute("SELECT 1 FROM public.projectstate WHERE project_id = %s LIMIT 1",
+                            (project_id,))
+                return cur.fetchone() is not None
+        finally:
+            conn.close()
+    except Exception:
+        return False
+
+
 def _translate(sql: str) -> str:
     return sql.replace("?", "%s")
 

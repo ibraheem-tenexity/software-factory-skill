@@ -1398,6 +1398,11 @@ class Console:
             "owner": state.owner,
         }
 
+    def project_exists(self, project_id: str) -> bool:
+        """True if the project exists on disk OR in the pg registry. Pure read — never materializes a dir."""
+        base = os.path.join(self._projects_dir, project_id)
+        return os.path.isdir(base) or dbshim.project_in_registry(project_id)
+
     def project_owner(self, project_id: str) -> str:
         """The email that owns this run ('' = legacy/unowned). The per-route visibility gate."""
         return (self._load_state(project_id).owner or "").lower()
