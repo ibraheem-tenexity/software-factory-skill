@@ -162,6 +162,9 @@ export type AdminAgent = {
   prompt_applied?: boolean;
   prompt?: string;
   prompt_source?: "skill_file" | "code" | "store" | string;
+  is_default?: boolean;
+  overridden?: boolean;
+  version?: number;
   editable?: boolean;
   skill?: string;
   skill_path?: string;
@@ -294,7 +297,8 @@ export const api = {
   adminUpdateAgent: (callsign: string, body: Partial<AdminAgent>) => send<{ agent: AdminAgent }>(`/api/admin/agents/${encodeURIComponent(callsign)}`, "PATCH", body),
   adminDeleteAgent: (callsign: string) => send<{ ok?: boolean }>(`/api/admin/agents/${encodeURIComponent(callsign)}`, "DELETE"),
   adminAgent: (callsign: string, runtime?: string) => get<AdminAgent>(`/api/admin/agents/${encodeURIComponent(callsign)}${runtime ? `?runtime=${encodeURIComponent(runtime)}` : ""}`),
-  adminPatchAgentPrompt: (callsign: string, prompt: string) => send<{ version?: number; applied: boolean }>(`/api/admin/agents/${encodeURIComponent(callsign)}/prompt`, "PATCH", { prompt }),
+  adminPatchAgentPrompt: (callsign: string, prompt: string, runtime?: string) => send<{ version?: number; applied: boolean; is_default?: boolean }>(`/api/admin/agents/${encodeURIComponent(callsign)}/prompt`, "PATCH", runtime ? { prompt, runtime } : { prompt }),
+  adminRevertAgentPrompt: (callsign: string, runtime?: string) => send<{ version?: number; is_default?: boolean }>(`/api/admin/agents/${encodeURIComponent(callsign)}/prompt${runtime ? `?runtime=${encodeURIComponent(runtime)}` : ""}`, "DELETE"),
   adminTools: () => get<{ tools: AdminTool[] }>("/api/admin/tools"),
   adminCreateTool: (body: Partial<AdminTool> & { name: string; type: AdminTool["type"]; provider: string }) => send<{ tool: AdminTool }>("/api/admin/tools", "POST", body),
   adminUpdateTool: (id: string, body: Partial<AdminTool>) => send<{ tool: AdminTool }>(`/api/admin/tools/${encodeURIComponent(id)}`, "PATCH", body),
