@@ -262,7 +262,7 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
                         color: T.success,
                       }}
                     >
-                      {active.prompt_source === "skill_file" ? "live skill" : active.prompt_source === "code" ? "live code" : active.prompt_source || "live"}
+                      {active.prompt_source === "skill_file" ? "live skill" : active.prompt_source === "code" ? "live concierge" : active.prompt_source || "live"}
                     </span>
                   </span>
                 )}
