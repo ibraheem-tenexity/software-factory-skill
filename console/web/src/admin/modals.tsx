@@ -100,29 +100,52 @@ export function ConfirmDelete({
 }
 
 export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgent; onClose: () => void; onSaved?: () => void }) {
-  const { data: detail } = useAdminFetch(() => api.adminAgent(agent.callsign));
+  const isLive = !!agent.kind;
+  const hasVariants = agent.variants && Object.keys(agent.variants).length > 0;
+  const defaultRuntime = agent.runtime || (hasVariants ? Object.keys(agent.variants!)[0] : undefined);
+  const [runtime, setRuntime] = React.useState<string | undefined>(defaultRuntime);
+  const { data: detail, refetch } = useAdminFetch(() => api.adminAgent(agent.callsign, runtime));
   const [prompt, setPrompt] = React.useState(agent.prompt || "");
   const [tab, setTab] = React.useState<"prompt" | "tools" | "activity">("prompt");
   const [saving, setSaving] = React.useState(false);
   const [appliedNote, setAppliedNote] = React.useState<string | null>(null);
   React.useEffect(() => {
-    if (detail?.prompt) setPrompt(detail.prompt);
+    if (detail?.prompt !== undefined) setPrompt(detail.prompt);
   }, [detail?.prompt]);
-  const dirty = prompt !== (detail?.prompt || agent.prompt || "");
   const active = detail ?? agent;
+  const dirty = prompt !== (detail?.prompt ?? agent.prompt ?? "");
+  const isDefault = active.is_default ?? false;
   const save = () => {
     setSaving(true);
     api
-      .adminPatchAgentPrompt(agent.callsign, prompt)
+      .adminPatchAgentPrompt(agent.callsign, prompt, runtime)
       .then((res) => {
         setSaving(false);
-        setAppliedNote(res.applied ? "saved & applied" : "saved — not yet applied to live agents");
+        setAppliedNote(`saved & applied · v${res.version ?? "?"}`);
         onSaved?.();
+        refetch();
       })
       .catch(() => setSaving(false));
   };
-  const readOnly = active.editable === false;
-  const promptLabel = readOnly ? "Prompt source" : "System prompt";
+  const revert = () => {
+    if (!confirm("Revert to the built-in default prompt? Your override will be discarded.")) return;
+    setSaving(true);
+    api
+      .adminRevertAgentPrompt(agent.callsign, runtime)
+      .then((res) => {
+        setSaving(false);
+        setAppliedNote(`reverted to default · v${res.version ?? 0}`);
+        refetch();
+      })
+      .catch(() => setSaving(false));
+  };
+  const promptLabel = isLive ? "Prompt source" : "System prompt";
+  const sourceBadge =
+    active.prompt_source === "skill_file"
+      ? "live skill"
+      : active.prompt_source === "code"
+      ? "live concierge"
+      : active.prompt_source || "live";
   return (
     <div
       onClick={onClose}
@@ -216,41 +239,42 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
         <div style={{ flex: 1, overflow: "auto", padding: "16px 20px" }}>
           {tab === "prompt" && (
             <>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
                 <Mono>{promptLabel}</Mono>
-                {!readOnly && (
-                  <button
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  {hasVariants && (
+                    <select
+                      value={runtime}
+                      onChange={(e) => { setRuntime(e.target.value); }}
+                      disabled={saving}
+                      style={{
+                        font: `500 11px/1 ${T.mono}`,
+                        padding: "4px 7px",
+                        borderRadius: 5,
+                        border: `1px solid ${T.borderDefault}`,
+                        background: T.bg,
+                        color: T.fg,
+                      }}
+                    >
+                      {Object.keys(agent.variants!).map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  )}
+                  <span
                     style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 5,
-                      font: `500 11px/1 ${T.sans}`,
-                      color: T.brandDeep,
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
+                      font: `600 9px/1 ${T.mono}`,
+                      letterSpacing: "0.05em",
+                      textTransform: "uppercase",
+                      padding: "3px 6px",
+                      borderRadius: 3,
+                      background: T.successSoft,
+                      color: T.success,
                     }}
                   >
-                    <Sparkle size={10} color={T.brandDeep} /> Suggest improvements
-                  </button>
-                )}
-                {readOnly && (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                    {active.runtime && (
-                      <span
-                        style={{
-                          font: `600 9px/1 ${T.mono}`,
-                          letterSpacing: "0.05em",
-                          textTransform: "uppercase",
-                          padding: "3px 6px",
-                          borderRadius: 3,
-                          background: T.brandSoft,
-                          color: T.brandDeep,
-                        }}
-                      >
-                        {active.runtime}
-                      </span>
-                    )}
+                    {sourceBadge}
+                  </span>
+                  {isLive && (
                     <span
                       style={{
                         font: `600 9px/1 ${T.mono}`,
@@ -258,16 +282,36 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
                         textTransform: "uppercase",
                         padding: "3px 6px",
                         borderRadius: 3,
-                        background: T.successSoft,
-                        color: T.success,
+                        background: isDefault ? T.sunken : T.warningSoft,
+                        color: isDefault ? T.secondary : T.warning,
+                        border: `1px solid ${isDefault ? T.borderDefault : "transparent"}`,
                       }}
                     >
-                      {active.prompt_source === "skill_file" ? "live skill" : active.prompt_source === "code" ? "live concierge" : active.prompt_source || "live"}
+                      {isDefault ? "default" : "override"}
                     </span>
-                  </span>
-                )}
+                  )}
+                </span>
               </div>
-              {readOnly ? (
+              {isLive ? (
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  disabled={saving}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    minHeight: 280,
+                    padding: "13px 15px",
+                    borderRadius: T.rMd,
+                    resize: "vertical",
+                    border: `1px solid ${T.borderDefault}`,
+                    background: T.bg,
+                    color: T.fg,
+                    font: `400 13px/1.65 ${T.mono}`,
+                    outline: "none",
+                  }}
+                />
+              ) : (
                 <div
                   style={{
                     width: "100%",
@@ -287,31 +331,20 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
                 >
                   {prompt}
                 </div>
-              ) : (
-                <textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    minHeight: 280,
-                    padding: "13px 15px",
-                    borderRadius: T.rMd,
-                    resize: "vertical",
-                    border: `1px solid ${T.borderDefault}`,
-                    background: T.bg,
-                    color: T.fg,
-                    font: `400 13px/1.65 ${T.mono}`,
-                    outline: "none",
-                  }}
-                />
               )}
-              <Mono style={{ fontSize: 10.5, marginTop: 8, display: "block" }}>
-                {prompt.length} chars
-                {!readOnly && detail?.prompt_version ? ` · version ${detail.prompt_version}` : ""}
-                {readOnly && (active.source_ref || active.skill_path) ? ` · ${active.source_ref || active.skill_path}` : ""}
-                {appliedNote ? ` · ${appliedNote}` : ""}
-              </Mono>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, flexWrap: "wrap", gap: 8 }}>
+                <Mono style={{ fontSize: 10.5 }}>
+                  {prompt.length} chars
+                  {active.version != null ? ` · version ${active.version}` : ""}
+                  {active.source_ref || active.skill_path ? ` · ${active.source_ref || active.skill_path}` : ""}
+                  {appliedNote ? ` · ${appliedNote}` : ""}
+                </Mono>
+                {isLive && (
+                  <Mono style={{ fontSize: 10.5, color: T.warning }}>
+                    Changes apply to new runs, not in-flight ones.
+                  </Mono>
+                )}
+              </div>
             </>
           )}
           {tab === "tools" && (
@@ -378,16 +411,15 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
             <Mono style={{ fontSize: 11.5 }}>{active.on ? "active" : "idle"}</Mono>
           </span>
           <div style={{ display: "flex", gap: 9 }}>
-            {readOnly ? (
-              <Btn variant="primary" onClick={onClose}>Close</Btn>
-            ) : (
-              <>
-                <Btn onClick={onClose}>Cancel</Btn>
-                <Btn variant="primary" onClick={save} disabled={!dirty || saving}>
-                  {saving ? "Saving…" : dirty ? "Save prompt" : "Saved"}
-                </Btn>
-              </>
+            <Btn onClick={onClose}>Cancel</Btn>
+            {isLive && (
+              <Btn onClick={revert} disabled={isDefault || saving}>
+                Revert to default
+              </Btn>
             )}
+            <Btn variant="primary" onClick={save} disabled={(!isLive && !dirty) || saving}>
+              {saving ? "Saving…" : dirty ? "Save prompt" : "Saved"}
+            </Btn>
           </div>
         </div>
       </div>
