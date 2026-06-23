@@ -46,6 +46,7 @@ def _login(mod, client, monkeypatch, email="op@tenexity.ai"):
 
 def _wire(mod, monkeypatch, owner="op@tenexity.ai"):
     c = mod.console
+    monkeypatch.setattr(c, "project_exists", lambda rid: True)
     monkeypatch.setattr(c, "project_owner", lambda rid: owner)
     monkeypatch.setattr(c, "status", lambda rid: {
         "owner": owner, "phase": "Build · stage 3", "stage": 3, "done": False, "deploy_url": "",
@@ -104,5 +105,6 @@ def test_overview_requires_session(auth_client):
 
 def test_overview_forbidden_for_non_owner(auth_mod, auth_client, monkeypatch):
     _login(auth_mod, auth_client, monkeypatch)
+    monkeypatch.setattr(auth_mod.console, "project_exists", lambda rid: True)
     monkeypatch.setattr(auth_mod.console, "project_owner", lambda rid: "someone@else.com")
     assert auth_client.get("/api/projects/project-abc/overview").status_code == 403
