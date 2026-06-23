@@ -15,7 +15,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api, Org, OrgInput } from "../../api";
 import {
   T, Icon, Sparkle, Wordmark, Avatar, StatusPill, CategoryLabel, Btn, TextInput, TextArea,
-  Field, Chips, IndustryTile, IntegrationRow, Dropzone, Message, Composer,
+  Field, Chip, Chips, IndustryTile, IntegrationRow, Dropzone, Message, Composer,
   INDUSTRIES, SIZES, REVENUE, ROLES, INTEGRATIONS,
 } from "./design";
 
@@ -59,6 +59,56 @@ function Card({ cat, title, desc, children, accent }:
   );
 }
 
+// One cell of the returning "on file" org grid: label + value, or an inline input in Manage mode.
+// MODULE-SCOPE (never define inside render — that remounts the <input> on each keystroke → focus loss).
+function OrgCell({ label, value, editing, onChange }: { label: string; value: string; editing: boolean; onChange: (v: string) => void }) {
+  return (
+    <div style={{ background: T.raised, padding: "11px 20px" }}>
+      <CategoryLabel style={{ display: "block", marginBottom: editing ? 6 : 4 }}>{label}</CategoryLabel>
+      {editing ? (
+        <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="—"
+          style={{ width: "100%", boxSizing: "border-box", height: 30, padding: "0 9px", borderRadius: T.rSm, border: `1px solid ${T.borderDefault}`, background: T.bg, color: T.fg, font: `500 13px/1 ${T.sans}`, outline: "none" }} />
+      ) : (
+        <span style={{ font: `500 13px/1.35 ${T.sans}`, color: value ? T.fg : T.tertiary }}>{value || "—"}</span>
+      )}
+    </div>
+  );
+}
+
+// Scope-of-work multi-select with a "+ Add" affordance for a custom scope / software type.
+function ScopeOfWork({ options, value, onChange, onAddOption }:
+  { options: string[]; value: string[]; onChange: (v: string[]) => void; onAddOption: (o: string) => void }) {
+  const [adding, setAdding] = useState(false);
+  const [text, setText] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => { if (adding && inputRef.current) inputRef.current.focus(); }, [adding]);
+  const sel = value || [];
+  const toggle = (o: string) => onChange(sel.includes(o) ? sel.filter((x) => x !== o) : [...sel, o]);
+  const commit = () => {
+    const t = text.trim();
+    if (t) { onAddOption(t); if (!sel.includes(t)) onChange([...sel, t]); }
+    setText(""); setAdding(false);
+  };
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      {options.map((o) => <Chip key={o} selected={sel.includes(o)} onClick={() => toggle(o)}>{o}</Chip>)}
+      {adding ? (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 4px 3px 11px", borderRadius: 9999, border: `1px solid ${T.brand}`, background: T.brandSoft }}>
+          <input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } else if (e.key === "Escape") { setText(""); setAdding(false); } }}
+            onBlur={commit} placeholder="Custom scope or software…"
+            style={{ width: 168, border: "none", outline: "none", background: "transparent", font: `500 13px/1 ${T.sans}`, color: T.brandDeep }} />
+          <button onMouseDown={(e) => e.preventDefault()} onClick={commit} title="Add" style={{ width: 24, height: 24, flexShrink: 0, display: "grid", placeItems: "center", borderRadius: "50%", border: "none", background: T.brand, color: "#fff", cursor: "pointer" }}><Icon name="check" size={12} color="#fff" /></button>
+        </span>
+      ) : (
+        <button onClick={() => setAdding(true)} style={{ display: "inline-flex", alignItems: "center", gap: 5, font: `500 13px/1 ${T.sans}`, padding: "8px 13px", borderRadius: 9999, cursor: "pointer", border: `1px dashed ${T.borderDefault}`, background: T.raised, color: T.secondary }}>
+          <Icon name="plus" size={13} color={T.tertiary} /> Add
+        </button>
+      )}
+    </div>
+  );
+}
+
 const fileToB64 = (file: File): Promise<string> => new Promise((resolve) => {
   const r = new FileReader();
   r.onload = () => resolve(String(r.result || "").split(",")[1] || "");
@@ -82,8 +132,11 @@ export function OnboardingScreen({ onComplete }: { onComplete: (projectId: strin
   // the one eager draft the form + rail share
   const [draftId, setDraftId] = useState<string | null>(null);
 
-  // returning Manage-editor draft (seeded from the org on file)
-  const [org, setOrg] = useState<{ name: string; size: string; revenue: string; ints: string[] }>({ name: "", size: "", revenue: "", ints: [] });
+  // returning "on file" org card — inline-edit (Manage) state, seeded from onFile when editing starts.
+  const [orgEdit, setOrgEdit] = useState<{ company: string; industry: string; scale: string; systems: string; subFocus: string; website: string }>(
+    { company: "", industry: "", scale: "", systems: "", subFocus: "", website: "" });
+  // Scope-of-work options; grows when the user adds a custom scope/software via "+ Add".
+  const [scopeOptions, setScopeOptions] = useState<string[]>(SCOPE);
 
   // fresh-user company setup
   const [f, setF] = useState<{ industry: string; sub: string[]; name: string; size: string; revenue: string; role: string; site: string; ints: string[] }>(
@@ -113,7 +166,6 @@ export function OnboardingScreen({ onComplete }: { onComplete: (projectId: strin
     api.getOrg().then(({ org: o }) => {
       setOnFile(o);
       setMode(o ? "returning" : "fresh");
-      if (o) setOrg({ name: o.name, size: o.headcount || "", revenue: o.revenue || "", ints: o.connected_systems || [] });
     }).catch(() => setMode("fresh"));
     api.createDraft().then(({ project_id }) => setDraftId(project_id)).catch(() => {});
   }, []);
@@ -166,13 +218,33 @@ export function OnboardingScreen({ onComplete }: { onComplete: (projectId: strin
   const projReady = projChecks.every((c) => c.done);
   const ready = fresh ? !!(f.industry && f.name && f.size && projReady) : projReady;
 
-  const saveManage = async () => {
+  // Returning org card: "Manage" seeds the inline editor from onFile; "Done" commits via PATCH /api/org
+  // (the same org-patch the OrgAdmin screen uses) and refreshes the on-file card.
+  const startManage = () => {
+    setOrgEdit({
+      company: onFile?.name || "",
+      industry: industryLabel(onFile?.industry || ""),
+      scale: onFile?.headcount || "",
+      systems: (onFile?.connected_systems || []).map(integrationLabel).join(", "),
+      subFocus: (onFile?.sub_focus || []).join(", "),
+      website: onFile?.website || "",
+    });
+    setEditOrg(true);
+  };
+  const doneManage = async () => {
+    setEditOrg(false);
+    const list = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
+    // map connected-system LABELS back to their ids where known (custom values pass through)
+    const sysIds = list(orgEdit.systems).map((x) => INTEGRATIONS.find((i) => i.label === x)?.id || x);
     try {
-      const { org: updated } = await api.patchOrg({ name: org.name, headcount: org.size, revenue: org.revenue, connected_systems: org.ints });
+      const { org: updated } = await api.patchOrg({
+        name: orgEdit.company, industry: orgEdit.industry, headcount: orgEdit.scale,
+        connected_systems: sysIds, sub_focus: list(orgEdit.subFocus), website: orgEdit.website || undefined,
+      });
       setOnFile(updated);
-      setEditOrg(false);
     } catch (e: any) { setError(String(e?.message || e)); }
   };
+  const addScopeOption = (o: string) => setScopeOptions((s) => (s.includes(o) ? s : [...s, o]));
 
   const attachFiles = async (list: FileList | null, kind: "video" | "docs") => {
     if (!draftId || !list || !list.length) return;
@@ -295,7 +367,7 @@ export function OnboardingScreen({ onComplete }: { onComplete: (projectId: strin
                     </div>
                   </Card>
                   <Card cat="Your first project" title="Scope of work" desc="Which parts of the business does this project touch?">
-                    <Chips multi options={SCOPE} value={p.scope} onChange={(v) => setProj("scope", v)} />
+                    <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
                   </Card>
                   <Card cat="Your first project" title="Project materials" desc="A walkthrough recording is the highest-signal input you can give.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -314,45 +386,29 @@ export function OnboardingScreen({ onComplete }: { onComplete: (projectId: strin
                     </p>
                   </div>
 
-                  <section style={{ borderRadius: T.rXl, border: `1px solid ${T.borderSubtle}`, background: T.sunken, overflow: "hidden" }}>
+                  <section style={{ borderRadius: T.rXl, border: `1px solid ${editOrg ? T.brand + "55" : T.borderSubtle}`, background: T.sunken, overflow: "hidden" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <Icon name="check" size={15} color={T.success} />
                         <span style={{ font: `600 13.5px/1.2 ${T.sans}`, color: T.fg }}>From {company} · on file</span>
                         <span style={{ font: `400 12px/1.2 ${T.sans}`, color: T.tertiary }}>· reused automatically</span>
                       </div>
-                      <button onClick={() => setEditOrg((v) => !v)} style={{ font: `500 12.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                      <button onClick={() => (editOrg ? doneManage() : startManage())} style={{ font: `500 12.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
                         {editOrg ? "Done" : "Manage"} <Icon name={editOrg ? "chevronDown" : "chevronRight"} size={13} color={T.brandDeep} />
                       </button>
                     </div>
-                    {!editOrg ? (
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "1px", background: T.borderSubtle, borderTop: `1px solid ${T.borderSubtle}` }}>
-                        {([
-                          ["Company", company],
-                          ["Industry", industryLabel(onFile?.industry || "") || "—"],
-                          ["Scale", scaleText || "—"],
-                          ["Connected systems", (onFile?.connected_systems || []).map(integrationLabel).join(", ") || "—"],
-                          ["Sub-focus", (onFile?.sub_focus || []).join(", ") || "—"],
-                          ["Website", onFile?.website || "—"],
-                        ] as [string, string][]).map(([k, val]) => (
-                          <div key={k} style={{ background: T.raised, padding: "11px 20px" }}>
-                            <CategoryLabel style={{ display: "block", marginBottom: 4 }}>{k}</CategoryLabel>
-                            <span style={{ font: `500 13px/1.35 ${T.sans}`, color: T.fg }}>{val}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div style={{ background: T.raised, borderTop: `1px solid ${T.borderSubtle}`, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
-                        <Field label="Company name"><TextInput value={org.name} onChange={(v) => setOrg({ ...org, name: v })} /></Field>
-                        <Field label="Headcount"><Chips options={SIZES} value={org.size} onChange={(v) => setOrg({ ...org, size: v })} /></Field>
-                        <Field label="Annual revenue"><Chips options={REVENUE} value={org.revenue} onChange={(v) => setOrg({ ...org, revenue: v })} /></Field>
-                        <Field label="Connected systems" hint="Linked once, reused across every project.">
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                            {INTEGRATIONS.map((it) => <IntegrationRow key={it.id} item={it} connected={org.ints.includes(it.id)}
-                              onToggle={() => setOrg({ ...org, ints: org.ints.includes(it.id) ? org.ints.filter((x) => x !== it.id) : [...org.ints, it.id] })} />)}
-                          </div>
-                        </Field>
-                        <Btn variant="primary" size="sm" onClick={saveManage} style={{ alignSelf: "flex-start" }}>Save changes</Btn>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "1px", background: T.borderSubtle, borderTop: `1px solid ${T.borderSubtle}` }}>
+                      <OrgCell label="Company" editing={editOrg} value={editOrg ? orgEdit.company : company} onChange={(v) => setOrgEdit({ ...orgEdit, company: v })} />
+                      <OrgCell label="Industry" editing={editOrg} value={editOrg ? orgEdit.industry : (industryLabel(onFile?.industry || "") || "")} onChange={(v) => setOrgEdit({ ...orgEdit, industry: v })} />
+                      <OrgCell label="Scale" editing={editOrg} value={editOrg ? orgEdit.scale : scaleText} onChange={(v) => setOrgEdit({ ...orgEdit, scale: v })} />
+                      <OrgCell label="Connected systems" editing={editOrg} value={editOrg ? orgEdit.systems : (onFile?.connected_systems || []).map(integrationLabel).join(", ")} onChange={(v) => setOrgEdit({ ...orgEdit, systems: v })} />
+                      <OrgCell label="Sub-focus" editing={editOrg} value={editOrg ? orgEdit.subFocus : (onFile?.sub_focus || []).join(", ")} onChange={(v) => setOrgEdit({ ...orgEdit, subFocus: v })} />
+                      <OrgCell label="Website" editing={editOrg} value={editOrg ? orgEdit.website : (onFile?.website || "")} onChange={(v) => setOrgEdit({ ...orgEdit, website: v })} />
+                    </div>
+                    {editOrg && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 20px", borderTop: `1px solid ${T.borderSubtle}`, background: T.raised }}>
+                        <Sparkle size={11} color={T.brandDeep} />
+                        <span style={{ font: `400 11.5px/1.4 ${T.sans}`, color: T.tertiary }}>Edits update your organization profile — reused on every future project.</span>
                       </div>
                     )}
                   </section>
@@ -366,7 +422,7 @@ export function OnboardingScreen({ onComplete }: { onComplete: (projectId: strin
                     </div>
                   </Card>
                   <Card cat="This project" title="Scope of work" desc="Which parts of the business does this project touch?">
-                    <Chips multi options={SCOPE} value={p.scope} onChange={(v) => setProj("scope", v)} />
+                    <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
                   </Card>
                   <Card cat="This project" title="Project materials" desc="We already have your line card & pricing on file — only add what's specific to this project.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
