@@ -15,9 +15,11 @@ import time
 
 
 class LoginThrottle:
-    def __init__(self, free_email=5, free_ip=20, base=2.0, cap=900.0, window=900.0):
-        # free_*: failed attempts allowed before the first lock (email tighter than IP, since a NAT can
-        # legitimately share one IP across many users). base/cap: exponential backoff seconds, clamped.
+    def __init__(self, free_email=5, free_ip=10, base=2.0, cap=900.0, window=900.0):
+        # free_*: failed attempts allowed before the first lock. email (5) is the tight per-account net;
+        # ip (10) is looser — it shares one IP across a NAT/office, and must stay above free_email so a
+        # single user hitting their own email limit doesn't prematurely trip the IP net — but tight
+        # enough to bound a single-source spray across many accounts. base/cap: exp backoff sec, clamped.
         # window: idle TTL — a key with no failure for this long is forgotten (counter resets to 0).
         self.free = {"email": free_email, "ip": free_ip}
         self.base, self.cap, self.window = base, cap, window

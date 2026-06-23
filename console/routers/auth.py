@@ -1,6 +1,5 @@
 """Auth exchange + identity/team routes: /api/auth/config, /api/auth/google, /api/me, /api/users."""
 import json
-import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -67,15 +66,16 @@ def google_login(body: GoogleLoginIn):
 
 
 def _client_ip(request: Request) -> str:
-    # NON-SPOOFABLE client IP for the throttle key. The LEFTMOST X-Forwarded-For hop is
-    # client-controlled (a client can prefill its own XFF; the proxy only appends) — keying on it lets
-    # an attacker rotate a forged leftmost per request and evade the per-IP counter. So we trust only
-    # what OUR proxy appended:
-    #   1) X-Envoy-External-Address — Railway's Envoy edge sets this to the real external client; the
-    #      client cannot set it through the proxy. Preferred when present.
-    #   2) Else X-Forwarded-For indexed from the RIGHT by the trusted-proxy-hop count: the entry the
-    #      outermost trusted proxy appended is the real client; everything to its left is forgeable and
-    #      ignored. SF_TRUSTED_PROXY_HOPS (default 1 = single Railway edge) tunes this with no redeploy.
+    # NON-SPOOFABLE client IP for the throttle key, canonicalized for Railway's edge (verified
+    # empirically on prod 2026-06-23):
+    #   1) X-Envoy-External-Address — defensive first-check. Railway's current edge does NOT set it
+    #      (always null here), so this is harmless dead weight today; it auto-wins if a future edge
+    #      sets a real client address.
+    #   2) Else X-Forwarded-For LEFTMOST entry (parts[0]). Railway's edge STRIPS any client-supplied
+    #      XFF and PREPENDS the real client IP, so the leftmost is the real, non-forgeable client AND
+    #      is independent of how many internal hops Railway adds (the rightmost entries are ROTATING
+    #      Railway-internal addresses — unstable, useless as a throttle key). ⚠️ This non-forgeability
+    #      RELIES on Railway's edge stripping inbound XFF; re-verify if the edge/ingress/routing changes.
     #   3) Else the direct socket peer (local/dev, no proxy).
     envoy = request.headers.get("x-envoy-external-address")
     if envoy:
@@ -83,9 +83,8 @@ def _client_ip(request: Request) -> str:
     xff = request.headers.get("x-forwarded-for")
     if xff:
         parts = [p.strip() for p in xff.split(",") if p.strip()]
-        hops = max(1, int(os.environ.get("SF_TRUSTED_PROXY_HOPS", "1")))
-        if len(parts) >= hops:
-            return parts[-hops]          # appended by the outermost trusted proxy = the real client
+        if parts:
+            return parts[0]              # leftmost = real client (edge-set, hop-count-independent)
     return request.client.host if request.client else "?"
 
 

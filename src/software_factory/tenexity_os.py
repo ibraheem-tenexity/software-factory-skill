@@ -130,6 +130,12 @@ def overview(orgs, runs, rollups, agents_active, burn, roster, o2o):
         "pulse": {
             "tenants": len(orgs),
             "projects": len(runs),
+            # Runs genuinely executing now: not finished (phase ∉ done/stopped), not budget-frozen,
+            # not gated-pre-launch (held). A frozen/gated run isn't "running" — counting it would
+            # inflate the operator's pulse. Computed over the runs already in hand (no extra query).
+            "projects_active": sum(1 for r in runs
+                                   if r.get("phase") not in ("done", "stopped")
+                                   and not r.get("budget_stopped") and not r.get("held")),
             "agents_active": agents_active,
             "agents_total": sum(int(r.get("total") or 0) for r in rollups),
             "today_burn": round(burn, 2),

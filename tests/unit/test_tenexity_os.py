@@ -77,10 +77,27 @@ def test_overview_pulse_counts_and_null_friction():
     roster = tos.agent_roster(_REG, rollups, {})
     ov = tos.overview(orgs, runs, rollups, 2, 1.234, roster, {"a@x.com": "Acme"})
     assert ov["pulse"]["tenants"] == 1 and ov["pulse"]["projects"] == 1
+    assert ov["pulse"]["projects_active"] == 1           # the single "build" run is in-flight
     assert ov["pulse"]["agents_active"] == 2 and ov["pulse"]["agents_total"] == 10
     assert ov["pulse"]["today_burn"] == 1.23 and ov["pulse"]["avg_friction"] is None
     assert ov["active_projects"][0]["client"] == "Acme"
     assert len(ov["agents"]) <= 6
+
+
+def test_pulse_projects_active_excludes_finished_frozen_and_gated():
+    # projects_active (definition A) = genuinely executing: phase ∉ {done,stopped} AND not
+    # budget_stopped AND not held. Finished, budget-frozen, and gated-pre-launch runs are NOT running.
+    runs = [
+        {"project_id": "a", "phase": "build"},                          # active
+        {"project_id": "b", "phase": "research"},                       # active
+        {"project_id": "c", "phase": "done"},                           # finished → excluded
+        {"project_id": "d", "phase": "stopped"},                        # canceled → excluded
+        {"project_id": "e", "phase": "build", "budget_stopped": True},  # frozen → excluded
+        {"project_id": "f", "phase": "research", "held": True},         # gated-pre-launch → excluded
+    ]
+    ov = tos.overview([], runs, [], 0, 0.0, [], {})
+    assert ov["pulse"]["projects"] == 6          # total = every run
+    assert ov["pulse"]["projects_active"] == 2   # only a + b are genuinely running
 
 
 # ── cross-run SQL (seeded Postgres) ──────────────────────────────────────────────────────────

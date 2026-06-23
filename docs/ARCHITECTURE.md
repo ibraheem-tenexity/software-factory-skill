@@ -235,13 +235,16 @@ key (a one-time `SUPABASE_AT` setup step), and the full write-through of inputs/
   hash (`password_hash`, never selected into the general user row), and mints the **same** `uid`+`tv`
   cookie. Generic `401` for every failure (never leaks which). A **brute-force/DoS throttle**
   (`console/throttle.py`, in-process per-replica, behind `state.login_throttle`) gates it: per-email
-  (free 5) **and** per-IP (free 20; client IP from the **non-spoofable** source — `X-Envoy-External-Address`
-  set by Railway's edge, else `X-Forwarded-For` indexed from the right by `SF_TRUSTED_PROXY_HOPS`
-  (default 1), never the client-settable leftmost hop) failed-attempt counters with exponential
+  (free 5, the tight per-account net) **and** per-IP (free 10) failed-attempt counters with exponential
   backoff (2s→…, capped 15 min) → `429` + `Retry-After`, **checked before the scrypt verify** so a
   throttled attempt pays no hash cost (closes online brute-force *and* the scrypt-per-attempt DoS). A
-  good login clears the counters; idle keys reset after 15 min. Multi-replica scale-out would move the
-  counters to a shared store (flagged, not built).
+  good login clears the counters; idle keys reset after 15 min. The per-IP key uses the **LEFTMOST**
+  `X-Forwarded-For` entry: Railway's edge **strips** any client-supplied XFF and **prepends** the real
+  client, so leftmost is the real, non-forgeable client and is independent of internal-hop count (the
+  rightmost entries are rotating Railway-internal addresses — verified empirically on prod 2026-06-23,
+  `X-Envoy-External-Address` absent; kept only as a defensive first-check). ⚠️ Non-forgeability relies
+  on Railway's edge stripping inbound XFF — re-verify if the edge/ingress changes. Multi-replica
+  scale-out would move the counters to a shared store (flagged, not built).
 - **Allowlist = the `public.users` table only** (no env allowlist — `SF_AUTH_EMAILS`/`SF_ADMIN_EMAILS`
   are gone). `status ∈ invited|active|disabled` is the whole "who can access" question. Machine callers
   use the constant-time-checked `X-SF-Service-Token` header. `/api/health` is open; everything else gated.

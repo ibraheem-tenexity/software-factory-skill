@@ -57,12 +57,12 @@ def test_success_reset_clears_counter():
 
 
 def test_ip_tier_is_looser_than_email():
-    t = LoginThrottle(free_email=5, free_ip=20, base=2.0)
+    t = LoginThrottle()                              # real defaults: free_email=5, free_ip=10
     for _ in range(10):
-        t.record_failure(["ip:1.2.3.4"], now=0)      # 10 ≤ 20 free for IP
+        t.record_failure(["ip:1.2.3.4"], now=0)      # 10 ≤ 10 free for IP → still not locked
     assert t.retry_after(["ip:1.2.3.4"], now=0) == 0
     for _ in range(6):
-        t.record_failure(["email:a@b.com"], now=0)   # 6 > 5 free for email
+        t.record_failure(["email:a@b.com"], now=0)   # 6 > 5 free for email → locked
     assert t.retry_after(["email:a@b.com"], now=0) > 0
 
 
@@ -128,39 +128,43 @@ def test_throttle_fires_before_verify_even_with_correct_password(mod, client, mo
     assert blocked.status_code == 429
 
 
-def test_forged_leftmost_xff_does_not_evade_the_ip_lock(mod):
-    # The IP layer must key on the TRUSTED (proxy-appended) hop, not the client-controlled leftmost.
-    # Simulate one real attacker (rightmost 5.5.5.5, what our edge would append) rotating a forged
-    # leftmost XFF + a distinct email each request (so the email counter never trips — isolates IP).
-    # free_ip=20 → 21 failures arm the lock → the 22nd request is 429. If the code keyed on the
-    # leftmost, every request would be its own bucket (count=1) and the 22nd would be a plain 401.
+def test_client_ip_selection_prefers_leftmost_then_envoy_then_socket():
+    # Unit-test the IP resolver directly. On Railway the leftmost XFF is the real edge-set client and
+    # the rightmost entries are rotating internal hops, so leftmost must win; X-Envoy-External-Address
+    # (null on Railway today) wins if ever present; bare socket peer is the local/dev fallback.
+    from console.routers.auth import _client_ip
+
+    class _Req:
+        def __init__(self, headers=None, client_host=None):
+            self.headers = headers or {}
+            self.client = type("C", (), {"host": client_host})() if client_host else None
+
+    assert _client_ip(_Req({"x-forwarded-for": "1.2.3.4, 84.17.44.9, 10.0.0.1"})) == "1.2.3.4"
+    assert _client_ip(_Req({"x-envoy-external-address": "9.9.9.9",
+                            "x-forwarded-for": "1.2.3.4"})) == "9.9.9.9"   # envoy wins when present
+    assert _client_ip(_Req(client_host="127.0.0.1")) == "127.0.0.1"        # no proxy headers
+    assert _client_ip(_Req()) == "?"
+
+
+def test_ip_key_uses_leftmost_real_client_not_the_rotating_internal_hop(mod):
+    # DOCUMENTED ASSUMPTION (verified on prod 2026-06-23): Railway's edge STRIPS any client-supplied
+    # X-Forwarded-For and PREPENDS the real client, so the LEFTMOST entry is the real, non-forgeable
+    # client; the RIGHTMOST rotates per request (Railway-internal) and is useless as a key. We can't
+    # unit-test the edge's stripping (no edge under TestClient) — this pins the code-side contract and
+    # flags re-verification if the edge/ingress changes.
+    # One real client (leftmost 1.2.3.4) whose rightmost internal hop rotates each request, distinct
+    # email per request (isolates the IP layer). free_ip=10 → 11 failures arm the lock → 12th is 429.
+    # Keying on the rotating rightmost (the OLD bug) would give a fresh bucket each time → never locks.
     c = TestClient(mod.app, base_url="https://testserver")
-    last = None
-    for i in range(21):
-        last = c.post("/api/auth/password",
-                      headers={"X-Forwarded-For": f"9.9.9.{i}, 5.5.5.5"},
-                      json={"email": f"spray{i}@x.com", "password": "x"})
-        assert last.status_code == 401          # under the IP cap, each distinct email = its own 401
+    for i in range(11):
+        r = c.post("/api/auth/password",
+                   headers={"X-Forwarded-For": f"1.2.3.4, 84.17.44.{i}"},
+                   json={"email": f"r{i}@x.com", "password": "x"})
+        assert r.status_code == 401
     blocked = c.post("/api/auth/password",
-                     headers={"X-Forwarded-For": "9.9.9.99, 5.5.5.5"},
-                     json={"email": "spray-final@x.com", "password": "x"})
-    assert blocked.status_code == 429            # IP counter held across the rotating forged leftmost
-
-
-def test_envoy_external_address_is_preferred_over_xff(mod):
-    # Railway's Envoy sets X-Envoy-External-Address to the real (non-spoofable) client; it wins over a
-    # forged XFF. Same real client (7.7.7.7) behind two different forged XFFs shares one IP counter.
-    c = TestClient(mod.app, base_url="https://testserver")
-    last = None
-    for i in range(21):
-        last = c.post("/api/auth/password",
-                      headers={"X-Envoy-External-Address": "7.7.7.7",
-                               "X-Forwarded-For": f"{i}.{i}.{i}.{i}"},
-                      json={"email": f"ev{i}@x.com", "password": "x"})
-        assert last.status_code == 401
-    assert c.post("/api/auth/password",
-                  headers={"X-Envoy-External-Address": "7.7.7.7", "X-Forwarded-For": "1.2.3.4"},
-                  json={"email": "ev-final@x.com", "password": "x"}).status_code == 429
+                     headers={"X-Forwarded-For": "1.2.3.4, 84.17.44.250"},
+                     json={"email": "r-final@x.com", "password": "x"})
+    assert blocked.status_code == 429            # IP counter held on the stable leftmost client
 
 
 def test_under_threshold_does_not_block_a_good_login(mod, client, monkeypatch):
