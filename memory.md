@@ -112,3 +112,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/routers/auth.py (POST /api/auth/logout clears sf_session max-age=0; /api/me→{email,role,name,is_internal,auth}); console/web/src/components/{AccountMenu,Dashboard,OrgAdminScreen,project/ProjectView,factory/FactoryConsole,onboarding/OnboardingScreen}.tsx + admin/{AccountMenu,AdminPortal,primitives}.tsx + api.ts.
 3. MERGE: #35+#36 both touched api.ts → resolved 2 conflicts (kept is_internal Me + never-throw logout). #36's 1st commit had a Me.is_staff/backend.is_internal MISMATCH but its own 2nd commit (4b38e43) already fixed it to is_internal — no manual fix needed. tsc -b clean validated the resolution.
 4. Verify GREEN: logout 200 + cookie cleared (max-age=0, same flags); /api/me new shape; both bundles served; /admin gate + admin API no-regression; ibraheem admin/active; /api/org PATCH wired. DEPLOY GOTCHA: `railway up --ci` hit a transient Railway-API streaming timeout (reqwest error) and exited before "Deploy complete" — but the deploy COMPLETED server-side; first verify was premature (rolling lag). LESSON: on a railway-up CLI timeout, re-probe the served bundle before concluding failure (don't re-deploy blindly). Human spot-checks (account-menu render, sign-out redirect, onboarding inline-edit PATCH persistence) are ibraheem's behind the session gate.
+
+# Tenexity OS agent Update at Time: 23:06:2026:20:15:00.000
+1. Implemented OS §3.4 Agents dashboard wiring to real stage SKILL.md sources and opened PR #39.
+2. console/web/src/admin/{modals,views}.tsx, console/web/src/api.ts.
+3. Locked contract with qsvigmth: stage cards have kind="stage_skill" and callsigns STAGE-1/2/3; detail endpoint returns prompt=full SKILL.md markdown, prompt_source="skill_file", editable=false. FE renders read-only with "live skill" badge and skill_path.
+4. Summary: tsc + build green; branch worktree-os-stage-skills; ready for coordinator batch with qsvigmth's backend PR.
