@@ -507,6 +507,8 @@ function AgentCard({
   onEdit: (a: AdminAgent) => void;
   onDelete: (a: AdminAgent) => void;
 }) {
+  const isSkill = a.kind === "stage_skill";
+  const title = a.name || a.role;
   return (
     <button
       onClick={() => onOpen(a)}
@@ -514,7 +516,7 @@ function AgentCard({
         textAlign: "left",
         cursor: "pointer",
         background: T.raised,
-        border: `1px solid ${a.callsign === "ORCHESTRATOR.MAIN" ? T.brand : T.borderSubtle}`,
+        border: `1px solid ${a.callsign === "ORCHESTRATOR.MAIN" || isSkill ? T.brand : T.borderSubtle}`,
         borderRadius: T.rLg,
         padding: "16px 17px",
         display: "flex",
@@ -525,8 +527,23 @@ function AgentCard({
     >
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ font: `600 15px/1.2 ${T.sans}`, color: T.brandDeep }}>{a.role}</span>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: a.on ? T.success : T.borderDefault }} />
+          <span style={{ font: `600 15px/1.2 ${T.sans}`, color: T.brandDeep }}>{title}</span>
+          {!isSkill && <span style={{ width: 7, height: 7, borderRadius: "50%", background: a.on ? T.success : T.borderDefault }} />}
+          {isSkill && (
+            <span
+              style={{
+                font: `600 8px/1 ${T.mono}`,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                color: T.brandDeep,
+                background: T.brandSoft,
+                padding: "2px 5px",
+                borderRadius: 3,
+              }}
+            >
+              stage skill
+            </span>
+          )}
         </div>
         <span
           style={{
@@ -559,13 +576,15 @@ function AgentCard({
           <CostDots n={a.cost_tier} />
         </span>
       </div>
-      <div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
-          <ColHead style={{ fontSize: 9.5 }}>Autonomy / Success</ColHead>
-          <Mono style={{ fontSize: 11, color: T.fg }}>{a.success}%</Mono>
+      {!isSkill && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+            <ColHead style={{ fontSize: 9.5 }}>Autonomy / Success</ColHead>
+            <Mono style={{ fontSize: 11, color: T.fg }}>{a.success}%</Mono>
+          </div>
+          <MiniBar pct={a.success ?? 0} />
         </div>
-        <MiniBar pct={a.success} />
-      </div>
+      )}
       <div
         style={{
           display: "flex",
@@ -613,6 +632,7 @@ export function AdminAgents({
     if (!q) return list;
     return list.filter(
       (a) =>
+        (a.name ?? "").toLowerCase().includes(q) ||
         a.role.toLowerCase().includes(q) ||
         a.callsign.toLowerCase().includes(q) ||
         a.sign.toLowerCase().includes(q) ||

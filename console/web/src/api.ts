@@ -148,16 +148,25 @@ export type AdminProjectRow = {
 export type AdminAgent = {
   callsign: string;
   sign: string;
+  name?: string;
   role: string;
   desc: string;
   model: string;
   cost_tier: number;
-  success: number;
-  runs: number;
-  on: boolean;
+  success?: number | null;
+  runs?: number | null;
+  on?: boolean;
+  kind?: "stage_skill";
+  stage?: number;
   prompt_version?: number;
   prompt_applied?: boolean;
   prompt?: string;
+  prompt_source?: "skill_file" | "store" | string;
+  editable?: boolean;
+  skill?: string;
+  skill_path?: string;
+  runtime?: string;
+  variants?: Record<string, string>;
   tools?: { name: string; type?: string; scope?: string }[];
   activity?: { text: string; ts?: string }[];
 };
@@ -283,7 +292,7 @@ export const api = {
   adminCreateAgent: (body: Partial<Omit<AdminAgent, "callsign">> & { callsign: string }) => send<{ agent: AdminAgent }>("/api/admin/agents", "POST", body),
   adminUpdateAgent: (callsign: string, body: Partial<AdminAgent>) => send<{ agent: AdminAgent }>(`/api/admin/agents/${encodeURIComponent(callsign)}`, "PATCH", body),
   adminDeleteAgent: (callsign: string) => send<{ ok?: boolean }>(`/api/admin/agents/${encodeURIComponent(callsign)}`, "DELETE"),
-  adminAgent: (callsign: string) => get<AdminAgent>(`/api/admin/agents/${encodeURIComponent(callsign)}`),
+  adminAgent: (callsign: string, runtime?: string) => get<AdminAgent>(`/api/admin/agents/${encodeURIComponent(callsign)}${runtime ? `?runtime=${encodeURIComponent(runtime)}` : ""}`),
   adminPatchAgentPrompt: (callsign: string, prompt: string) => send<{ version?: number; applied: boolean }>(`/api/admin/agents/${encodeURIComponent(callsign)}/prompt`, "PATCH", { prompt }),
   adminTools: () => get<{ tools: AdminTool[] }>("/api/admin/tools"),
   adminCreateTool: (body: Partial<AdminTool> & { name: string; type: AdminTool["type"]; provider: string }) => send<{ tool: AdminTool }>("/api/admin/tools", "POST", body),

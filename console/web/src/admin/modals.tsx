@@ -121,6 +121,8 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
       })
       .catch(() => setSaving(false));
   };
+  const readOnly = active.editable === false;
+  const promptLabel = readOnly ? "Skill source" : "System prompt";
   return (
     <div
       onClick={onClose}
@@ -147,7 +149,7 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${T.borderSubtle}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ font: `600 16px/1.2 ${T.sans}`, color: T.fg }}>{active.role}</span>
+            <span style={{ font: `600 16px/1.2 ${T.sans}`, color: T.fg }}>{active.name || active.role}</span>
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: active.on ? T.success : T.borderDefault }} />
             <span
               style={{
@@ -176,7 +178,7 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
           {[
             ["Model", active.model],
             ["Callsign", active.sign],
-            ["Success", `${active.success}%`],
+            ["Success", active.success == null ? "—" : `${active.success}%`],
           ].map(([k, v]) => (
             <div key={k} style={{ background: T.raised, padding: "11px 16px" }}>
               <Mono style={{ display: "block", marginBottom: 4 }}>{k}</Mono>
@@ -186,7 +188,7 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
         </div>
         <div style={{ display: "flex", gap: 2, padding: "8px 16px 0" }}>
           {[
-            { id: "prompt", l: "System prompt" },
+            { id: "prompt", l: promptLabel },
             { id: "tools", l: "Tools" },
             { id: "activity", l: "Activity" },
           ].map((t) => {
@@ -215,41 +217,99 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
           {tab === "prompt" && (
             <>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                <Mono>System prompt</Mono>
-                <button
+                <Mono>{promptLabel}</Mono>
+                {!readOnly && (
+                  <button
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      font: `500 11px/1 ${T.sans}`,
+                      color: T.brandDeep,
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Sparkle size={10} color={T.brandDeep} /> Suggest improvements
+                  </button>
+                )}
+                {readOnly && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    {active.runtime && (
+                      <span
+                        style={{
+                          font: `600 9px/1 ${T.mono}`,
+                          letterSpacing: "0.05em",
+                          textTransform: "uppercase",
+                          padding: "3px 6px",
+                          borderRadius: 3,
+                          background: T.brandSoft,
+                          color: T.brandDeep,
+                        }}
+                      >
+                        {active.runtime}
+                      </span>
+                    )}
+                    <span
+                      style={{
+                        font: `600 9px/1 ${T.mono}`,
+                        letterSpacing: "0.05em",
+                        textTransform: "uppercase",
+                        padding: "3px 6px",
+                        borderRadius: 3,
+                        background: T.successSoft,
+                        color: T.success,
+                      }}
+                    >
+                      {active.prompt_source === "skill_file" ? "live skill" : active.prompt_source}
+                    </span>
+                  </span>
+                )}
+              </div>
+              {readOnly ? (
+                <div
                   style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 5,
-                    font: `500 11px/1 ${T.sans}`,
-                    color: T.brandDeep,
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
+                    width: "100%",
+                    boxSizing: "border-box",
+                    minHeight: 280,
+                    maxHeight: "calc(100vh - 320px)",
+                    padding: "13px 15px",
+                    borderRadius: T.rMd,
+                    border: `1px solid ${T.borderDefault}`,
+                    background: T.bg,
+                    color: T.fg,
+                    font: `400 13px/1.65 ${T.mono}`,
+                    whiteSpace: "pre-wrap",
+                    overflow: "auto",
+                    userSelect: "text",
                   }}
                 >
-                  <Sparkle size={10} color={T.brandDeep} /> Suggest improvements
-                </button>
-              </div>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  minHeight: 280,
-                  padding: "13px 15px",
-                  borderRadius: T.rMd,
-                  resize: "vertical",
-                  border: `1px solid ${T.borderDefault}`,
-                  background: T.bg,
-                  color: T.fg,
-                  font: `400 13px/1.65 ${T.mono}`,
-                  outline: "none",
-                }}
-              />
+                  {prompt}
+                </div>
+              ) : (
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    minHeight: 280,
+                    padding: "13px 15px",
+                    borderRadius: T.rMd,
+                    resize: "vertical",
+                    border: `1px solid ${T.borderDefault}`,
+                    background: T.bg,
+                    color: T.fg,
+                    font: `400 13px/1.65 ${T.mono}`,
+                    outline: "none",
+                  }}
+                />
+              )}
               <Mono style={{ fontSize: 10.5, marginTop: 8, display: "block" }}>
-                {prompt.length} chars{detail?.prompt_version ? ` · version ${detail.prompt_version}` : ""}
+                {prompt.length} chars
+                {!readOnly && detail?.prompt_version ? ` · version ${detail.prompt_version}` : ""}
+                {readOnly && active.skill_path ? ` · ${active.skill_path}` : ""}
                 {appliedNote ? ` · ${appliedNote}` : ""}
               </Mono>
             </>
@@ -318,10 +378,16 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
             <Mono style={{ fontSize: 11.5 }}>{active.on ? "active" : "idle"}</Mono>
           </span>
           <div style={{ display: "flex", gap: 9 }}>
-            <Btn onClick={onClose}>Cancel</Btn>
-            <Btn variant="primary" onClick={save} disabled={!dirty || saving}>
-              {saving ? "Saving…" : dirty ? "Save prompt" : "Saved"}
-            </Btn>
+            {readOnly ? (
+              <Btn variant="primary" onClick={onClose}>Close</Btn>
+            ) : (
+              <>
+                <Btn onClick={onClose}>Cancel</Btn>
+                <Btn variant="primary" onClick={save} disabled={!dirty || saving}>
+                  {saving ? "Saving…" : dirty ? "Save prompt" : "Saved"}
+                </Btn>
+              </>
+            )}
           </div>
         </div>
       </div>
