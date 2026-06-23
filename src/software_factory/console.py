@@ -64,6 +64,8 @@ for _p in STAGE_3:
 # Per-stage model: research (1) & design (2) on Opus 4.8; build (3) on Sonnet (cheaper for
 # high-volume code edits). SF_MODEL env overrides all stages if set.
 _STAGE_MODEL = {1: "claude-opus-4-8", 2: "claude-opus-4-8", 3: "claude-sonnet-4-6"}
+# Hard cap on deploy-db provision attempts per run — a failure must never spawn unbounded orphan DBs.
+_DEPLOY_DB_MAX_ATTEMPTS = 2
 # opencode runtime: one model for all stages (monolithic v1 — no per-stage split).
 _STAGE_MODEL_OPENCODE = {
     1: "openrouter/moonshotai/kimi-k2.7-code",
@@ -635,15 +637,34 @@ class Console:
         # and never provisions a DB. Provision failure blocks the launch (don't build DB-less).
         if stage == 3 and deploy_db.needs_deploy_db(state.deps_required):
             ctx = os.path.join(ws, "context")
-            if not os.path.exists(os.path.join(ctx, deploy_db.DEPLOY_DB_FILE)):
+            info_path = os.path.join(ctx, deploy_db.DEPLOY_DB_FILE)
+            have_url = False
+            if os.path.exists(info_path):
                 try:
-                    info = deploy_db.provision(project_id)
-                    deploy_db.write_file(ctx, info)
-                    ProjectStore(paths["db"]).record_artifact(
-                        "Deploy DB", "context/" + deploy_db.DEPLOY_DB_FILE, kind="deploy-db")
+                    with open(info_path) as f:
+                        have_url = bool(json.load(f).get("DATABASE_URL"))
+                except Exception:
+                    have_url = False
+            if not have_url:
+                # HARD retry cap: a provision failure must never spawn unbounded DBs (the orphan leak).
+                # Count the attempt BEFORE trying; after the cap, park the run with a blocker instead of
+                # re-provisioning. provision() itself is idempotent (reuses this run's captured service).
+                attempts = int(getattr(state, "deploy_db_attempts", 0) or 0)
+                db = ProjectStore(paths["db"])
+                if attempts >= _DEPLOY_DB_MAX_ATTEMPTS:
+                    if not any(b.get("blocks") == "deploy-db" and not b["cleared"] for b in db.blockers()):
+                        db.add_blocker(
+                            f"deploy-db provisioning failed {attempts}× — parked (clear to retry)",
+                            blocks="deploy-db")
+                    return None
+                state.deploy_db_attempts = attempts + 1
+                state.save()
+                try:
+                    deploy_db.provision(project_id, ctx)
+                    db.record_artifact("Deploy DB", "context/" + deploy_db.DEPLOY_DB_FILE,
+                                       kind="deploy-db")
                 except Exception as e:
-                    ProjectStore(paths["db"]).add_blocker(
-                        f"deploy-db provisioning failed: {e}", blocks="deploy-db")
+                    db.add_blocker(f"deploy-db provisioning failed: {e}", blocks="deploy-db")
                     return None
         mcp_path = os.path.join(ws, ".mcp.json")
         checks = check_mcp(mcp_path)

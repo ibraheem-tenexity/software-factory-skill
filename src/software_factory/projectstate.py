@@ -77,6 +77,7 @@ class ProjectState:
     deps_satisfied: bool = False
     deps_disposition: dict = field(default_factory=dict)  # name -> provide|mock|mcp|env (metadata, safe on disk)
     budget_ceiling: Optional[float] = None  # per-project override of SF_COST_CEILING (SPEC §4, recoverable kill)
+    deploy_db_attempts: int = 0  # provision-attempt counter — hard cap so a failure can't spawn unbounded DBs
     held: bool = False  # gated hold: created but NOT launched until released (survives restarts)
     owner: str = ""  # email of the creating user; members see only their own runs (admins see all)
     # Structured onboarding brief (see brief.BRIEF_SECTIONS) + per-section covered flags. Accumulated

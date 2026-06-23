@@ -38,29 +38,75 @@ def _pg_url_from(text: str) -> str | None:
     return m.group(0).rstrip("/") if m else None
 
 
-def provision(project_id: str, run: Callable[[list[str]], RunResult] = _real_runner) -> dict:
-    """Create a Railway Postgres for this run and return its connection info:
-    {DATABASE_URL, provider, service, project_id}. Raises RuntimeError if no URL can be obtained —
-    the caller turns that into a deps blocker rather than letting the run proceed DB-less."""
+def _parse_added_service(text: str) -> tuple[str | None, str | None]:
+    """(serviceId, serviceName) from `railway add --database postgres --json`. Railway AUTO-NAMES the
+    service "Postgres-XXXX" (NOT a name we pass) — so we capture the REAL id it returns, never a guess."""
+    try:
+        d = json.loads(text)
+        return d.get("serviceId"), d.get("serviceName")
+    except Exception:
+        return None, None
+
+
+def _parse_database_url(text: str) -> str | None:
+    try:
+        d = json.loads(text)
+        u = d.get("DATABASE_URL") or d.get("DATABASE_PUBLIC_URL")
+        if u:
+            return u.rstrip("/")
+    except Exception:
+        pass
+    return _pg_url_from(text)
+
+
+def provision(project_id: str, context_dir: str,
+              run: Callable[[list[str]], RunResult] = _real_runner) -> dict:
+    """Provision (or RESUME) this run's Railway Postgres and return + persist its connection info
+    {DATABASE_URL, provider, service, service_id, project_id} to context_dir/deploy-db.json.
+
+    Behavior verified against the live railway CLI (5.12.1):
+      • `railway add --database postgres` is INTERACTIVE (prompts + hangs headless) — the bare form was
+        the original stall. We use `--json`, which returns {serviceId, serviceName:"Postgres-XXXX"}.
+      • Railway auto-names the service; we CAPTURE the returned serviceId and read DATABASE_URL from THAT
+        id (`railway variables --service <serviceId> --json`) — reading by a guessed name was the bug.
+    IDEMPOTENT: the serviceId is persisted the MOMENT `add` succeeds (before the variables read), so a
+    retry REUSES that service (no second `add` → no orphan); a fully-provisioned file is a no-op. Raises
+    RuntimeError on failure (the caller records a blocker + counts the attempt against the retry cap)."""
     railway_project_id = os.environ.get("RAILWAY_PROJECT_ID")
     if not env.railway_project_allowed(railway_project_id):
         raise RuntimeError(
             f"RAILWAY_PROJECT_ID={railway_project_id!r} is not allowed for run-app DB provisioning")
-    svc = f"sf-{project_id}-db"
-    # Add a managed Postgres to the run-app project. Re-runs are tolerated: an "already exists"
-    # is not fatal — we still read the connection string below.
-    run(["railway", "add", "--database", "postgres", "--service", svc])
-    out = run(["railway", "variables", "--service", svc, "--json"]).stdout
-    url = None
-    try:
-        data = json.loads(out)
-        url = data.get("DATABASE_URL") or data.get("DATABASE_PUBLIC_URL")
-    except Exception:
-        url = None
-    url = url or _pg_url_from(out)
+
+    info_path = os.path.join(context_dir, DEPLOY_DB_FILE)
+    info: dict = {}
+    if os.path.exists(info_path):
+        try:
+            with open(info_path) as f:
+                info = json.load(f)
+        except Exception:
+            info = {}
+    if info.get("DATABASE_URL"):
+        return info                              # already provisioned — idempotent no-op
+
+    svc_id, svc_name = info.get("service_id"), info.get("service")
+    if not svc_id:
+        add_out = run(["railway", "add", "--database", "postgres", "--json"]).stdout
+        svc_id, svc_name = _parse_added_service(add_out)
+        if not svc_id:
+            raise RuntimeError(f"railway add --json returned no serviceId: {(add_out or '')[:200]!r}")
+        # Persist the handle BEFORE reading variables: if the read fails, the retry reuses this exact
+        # service instead of adding another one. service_id is also the durable teardown handle.
+        write_file(context_dir, {"service_id": svc_id, "service": svc_name,
+                                 "provider": "railway-postgres", "project_id": project_id})
+
+    var_out = run(["railway", "variables", "--service", svc_id, "--json"]).stdout
+    url = _parse_database_url(var_out)
     if not url:
-        raise RuntimeError(f"could not obtain a Postgres DATABASE_URL for {svc}")
-    return {"DATABASE_URL": url, "provider": "railway-postgres", "service": svc, "project_id": project_id}
+        raise RuntimeError(f"could not obtain a Postgres DATABASE_URL for service {svc_id}")
+    info = {"DATABASE_URL": url, "provider": "railway-postgres",
+            "service": svc_name, "service_id": svc_id, "project_id": project_id}
+    write_file(context_dir, info)
+    return info
 
 
 def write_file(context_dir: str, info: dict) -> str:
