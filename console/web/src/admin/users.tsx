@@ -2,7 +2,7 @@ import React from "react";
 import { T } from "./tokens";
 import { Icon, Sparkle, StatusPill, MetricCard, TextInput } from "./primitives";
 import { api } from "../api";
-import type { AdminAccessUser, AdminClient } from "../api";
+import type { AdminAccessUser, AdminClient, Me } from "../api";
 import { useAdminFetch, fmtRel } from "./hooks";
 import { PageTitle, Mono, ColHead, AdminBtn } from "./views";
 
@@ -15,7 +15,6 @@ function isInternal(u: AdminAccessUser): boolean {
 }
 
 function displayRole(u: AdminAccessUser): string {
-  if (isInternal(u)) return "Operator";
   const r = u.role || "";
   return r ? r.charAt(0).toUpperCase() + r.slice(1) : "—";
 }
@@ -54,12 +53,7 @@ function Avatar({ name, size = 30, internal }: { name: string; size?: number; in
 }
 
 function RoleBadge({ role }: { role: string }) {
-  const internal = role === "Operator";
-  const [bg, color] = internal
-    ? ["#f3e9fb", "#7a3ea8"]
-    : role === "Admin"
-      ? [T.brandSoft, T.brandDeep]
-      : [T.sunken, T.secondary];
+  const [bg, color] = role === "Admin" ? [T.brandSoft, T.brandDeep] : [T.sunken, T.secondary];
   return (
     <span
       style={{
@@ -429,23 +423,33 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   );
 }
 
-function UserDrawer({ user, onClose, onChanged }: { user: AdminAccessUser; onClose: () => void; onChanged: () => void }) {
+function UserDrawer({ user, currentUserEmail, onClose, onChanged }: { user: AdminAccessUser; currentUserEmail?: string; onClose: () => void; onChanged: () => void }) {
   const [role, setRole] = React.useState(displayRole(user));
   const [internal, setInternal] = React.useState(isInternal(user));
   const [saving, setSaving] = React.useState(false);
 
   const patchRole = async () => {
+    const apiRole = role.toLowerCase();
+    const removingOwnStaff =
+      user.email === currentUserEmail &&
+      isInternal(user) &&
+      (!internal || apiRole !== "admin");
+    if (removingOwnStaff) {
+      alert("You cannot remove your own staff admin access from this UI.");
+      return;
+    }
     setSaving(true);
     try {
-      if (role === "Operator") {
-        await api.adminUpdateAccess(user.email, { role: "admin", is_internal: true });
-      } else {
-        await api.adminUpdateAccess(user.email, { role: role.toLowerCase(), is_internal: internal });
-      }
+      await api.adminUpdateAccess(user.email, { role: apiRole, is_internal: internal });
       onChanged();
       onClose();
-    } catch {
-      alert("Failed to update role.");
+    } catch (e) {
+      const msg = (e as Error).message || "";
+      if (msg.includes("409")) {
+        alert("Cannot update role: this would leave the organization without a staff admin, or you cannot demote this session.");
+      } else {
+        alert("Failed to update user.");
+      }
     } finally {
       setSaving(false);
     }
@@ -537,7 +541,7 @@ function UserDrawer({ user, onClose, onChanged }: { user: AdminAccessUser; onClo
 
           <div>
             <label style={{ font: `500 13px/1.2 ${T.sans}`, color: T.fg, display: "block", marginBottom: 6 }}>Role</label>
-            <SelectField value={role} onChange={setRole} options={internal ? ["Operator"] : ["Admin", "Member"]} />
+            <SelectField value={role} onChange={setRole} options={["Admin", "Member"]} />
             <label
               style={{
                 display: "flex",
@@ -555,8 +559,7 @@ function UserDrawer({ user, onClose, onChanged }: { user: AdminAccessUser; onClo
                 onChange={(e) => {
                   const next = e.target.checked;
                   setInternal(next);
-                  if (next) setRole("Operator");
-                  else setRole("Member");
+                  if (next) setRole("Admin");
                 }}
                 style={{ cursor: "pointer" }}
               />
@@ -650,7 +653,7 @@ function UserDrawer({ user, onClose, onChanged }: { user: AdminAccessUser; onClo
   );
 }
 
-function RowMenu({ user, onAct }: { user: AdminAccessUser; onAct: (id: string, user: AdminAccessUser) => void }) {
+function RowMenu({ user, sessionStaff, onAct }: { user: AdminAccessUser; sessionStaff?: boolean; onAct: (id: string, user: AdminAccessUser) => void }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLSpanElement>(null);
   React.useEffect(() => {
@@ -665,7 +668,7 @@ function RowMenu({ user, onAct }: { user: AdminAccessUser; onAct: (id: string, u
     user.status === "invited" && ["resend", "Resend invite", T.fg],
     user.status === "active" && ["disable", "Disable sign-in", T.warning],
     user.status === "disabled" && ["enable", "Re-enable", T.success],
-    !isInternal(user) && ["make-tenexity-admin", "Make Tenexity admin", T.brandDeep],
+    sessionStaff && !isInternal(user) && ["make-tenexity-admin", "Make Tenexity admin", T.brandDeep],
     ["edit", "Edit user", T.fg],
     ["remove", "Remove user", T.danger],
   ].filter(Boolean) as [string, string, string][];
@@ -732,6 +735,13 @@ export function UsersManagement() {
   const { users, clients, refresh } = useUsersAndClients();
   const [add, setAdd] = React.useState(false);
   const [drawer, setDrawer] = React.useState<AdminAccessUser | null>(null);
+  const [me, setMe] = React.useState<Me | null>(null);
+
+  React.useEffect(() => {
+    api.me().then(setMe).catch(() => setMe(null));
+  }, []);
+
+  const sessionStaff = me?.role === "admin" && me?.is_internal === true;
   const [audience, setAudience] = React.useState<Audience>("ALL");
   const [fOrg, setFOrg] = React.useState("All organizations");
   const [fRole, setFRole] = React.useState("All roles");
@@ -794,8 +804,13 @@ export function UsersManagement() {
       try {
         await api.adminUpdateAccess(user.email, { role: "admin", is_internal: true });
         refresh();
-      } catch {
-        alert("Failed to promote user.");
+      } catch (e) {
+        const msg = (e as Error).message || "";
+        if (msg.includes("409")) {
+          alert("Cannot promote user: this would conflict with staff-admin rules.");
+        } else {
+          alert("Failed to promote user.");
+        }
       }
     }
     // resend is a no-op until backend ships a resend endpoint
@@ -959,7 +974,7 @@ export function UsersManagement() {
               <StatusCell status={u.status} />
             </span>
             <Mono style={{ fontSize: 10.5, whiteSpace: "nowrap" }}>{u.last_active ? fmtRel(u.last_active as number) : "—"}</Mono>
-            <RowMenu user={u} onAct={act} />
+            <RowMenu user={u} sessionStaff={sessionStaff} onAct={act} />
           </div>
         ))}
         {filtered.length === 0 && (
@@ -970,7 +985,7 @@ export function UsersManagement() {
       </div>
 
       {add && <AddUserModal onClose={() => setAdd(false)} onCreated={refresh} />}
-      {drawer && <UserDrawer user={drawer} onClose={() => setDrawer(null)} onChanged={refresh} />}
+      {drawer && <UserDrawer user={drawer} currentUserEmail={me?.email} onClose={() => setDrawer(null)} onChanged={refresh} />}
     </>
   );
 }
