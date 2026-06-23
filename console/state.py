@@ -26,6 +26,8 @@ from software_factory.blobs import BlobStore  # noqa: E402
 from software_factory.agent_prompts import PromptStore  # noqa: E402
 from software_factory.registries import ToolStore, AgentRegistryStore  # noqa: E402
 
+from console.throttle import LoginThrottle  # noqa: E402
+
 HERE = os.path.dirname(__file__)
 # The React SPA (console/web/dist) is served when SF_CONSOLE=react AND it's been built; otherwise the
 # legacy single-file console (index.html) is the default — so the migration is opt-in and safe.
@@ -44,13 +46,14 @@ _chat_runner = None
 _sse_clients: dict[str, list] = {}
 _sse_lock = threading.Lock()
 _project_stages: dict[str, int] = {}
+login_throttle = None
 
 
 def reset():
     """(Re)instantiate the long-lived singletons from the current environment. Called at import and
     by app.py on every reload — matches the monolith's reload-re-instantiates-stores behavior."""
     global PROJECTS_DIR, console, users, blobs, prompts, tool_store, agent_store
-    global _has_chat_key, _chat_runner, _sse_clients, _sse_lock, _project_stages
+    global _has_chat_key, _chat_runner, _sse_clients, _sse_lock, _project_stages, login_throttle
 
     PROJECTS_DIR = os.environ.get("SF_PROJECTS_DIR", os.path.join(HERE, "..", ".projects"))
     console = Console(PROJECTS_DIR)
@@ -68,6 +71,7 @@ def reset():
     _sse_clients = {}
     _sse_lock = threading.Lock()
     _project_stages = {}
+    login_throttle = LoginThrottle()   # brute-force/DoS guard for POST /api/auth/password (in-process)
 
 
 reset()
