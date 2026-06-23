@@ -124,3 +124,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/admin/{modals,views}.tsx, console/web/src/api.ts.
 3. Read-only rendering now keys off `editable===false` and any `kind` present; badges skill_file→"live skill", code→"live code"; AgentCard hides Edit/Delete for live cards. Concierge source_ref displayed.
 4. Summary: pushed additional commit 13169b2; tsc + build green; PR body updated to locked contract incl. concierge.
+
+# Tenexity OS agent Update at Time: 23:06:2026:20:30:00.000
+1. Final badge labeling tweak per qsvigmth: prompt_source==="code" now badges as "live concierge" instead of generic "live code".
+2. console/web/src/admin/modals.tsx.
+3. Matches backend contract exactly; no functional change.
+4. Summary: PR #39 final; tsc + build green; waiting for qsvigmth deployed-tip ping and coordinator batch.
