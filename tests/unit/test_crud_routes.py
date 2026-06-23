@@ -60,7 +60,7 @@ def test_tools_crud(mod, client, monkeypatch):
 # ── agents CRUD ──────────────────────────────────────────────────────────────────────────────
 def test_agents_crud(mod, client, monkeypatch):
     _login(mod, client, monkeypatch)
-    assert any(a["callsign"] == "ATLAS" for a in client.get("/api/admin/agents").json()["agents"])
+    assert any(a["callsign"] == "STAGE-1" for a in client.get("/api/admin/agents").json()["agents"])
     r = client.post("/api/admin/agents", json={"callsign": "nova", "name": "Novelist",
                                                "role": "nova", "model": "m"})
     assert r.status_code == 200 and r.json()["agent"]["callsign"] == "NOVA"

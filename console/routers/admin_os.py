@@ -60,12 +60,14 @@ def admin_set_demo(pid: str, body: DemoIn, v: tuple = Depends(require_staff)):
 # Agents (identity from agent_registry table; cost/success merged live; prompt editable) ----------
 @router.get("/api/admin/agents")
 def admin_agents(v: tuple = Depends(require_staff)):
-    # Role agents (agent_registry + store-backed prompts) + the LIVE real-prompt cards: 3 stage
-    # orchestrators (file-backed SKILL.md, kind:'stage_skill') + the Factory Concierge (code-backed
-    # CONCIERGE_INSTRUCTIONS, kind:'concierge'). See tenexity_os.live_agent_cards.
+    # The 4 REAL orchestrators (STAGE-1/2/3 + CONCIERGE) now have BOTH a registry row AND a richer
+    # live card (kind/stage/runtimes/prompt_source + effective prompt). Render each ONCE: the live card
+    # wins for those callsigns; the registry roster contributes only OTHER (custom) agents → no dupes.
+    live = tenexity_os.live_agent_cards()
+    live_cs = {c["callsign"] for c in live}
     roster = tenexity_os.agent_roster(state.agent_store.all(), tenexity_os.agent_rollups(),
                                       state.prompts.all())
-    return {"agents": roster + tenexity_os.live_agent_cards()}
+    return {"agents": [r for r in roster if r["callsign"] not in live_cs] + live}
 
 
 @router.get("/api/admin/agents/{callsign}")
@@ -121,6 +123,10 @@ def admin_agent_update(callsign: str, body: AgentPatchIn, v: tuple = Depends(req
 @router.delete("/api/admin/agents/{callsign}")
 def admin_agent_delete(callsign: str, v: tuple = Depends(require_staff)):
     cs = callsign.upper()
+    # The 4 real orchestrators ARE the factory — refuse to delete them (boot would re-ensure anyway, so
+    # a delete would be a confusing no-op-then-reappear). Custom agents remain freely deletable.
+    if tenexity_os.is_editable_orchestrator(cs):
+        raise HTTPException(status_code=409, detail="structural agent — required by the pipeline")
     if not state.agent_store.get(cs):
         raise HTTPException(status_code=404, detail="unknown agent")
     state.agent_store.delete(cs)

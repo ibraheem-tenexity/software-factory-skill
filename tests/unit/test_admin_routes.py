@@ -154,22 +154,58 @@ def test_set_demo_toggle(staff_mod, staff_client, monkeypatch):
 
 
 # ── agents + editable prompt ────────────────────────────────────────────────────────────────────
-def test_agents_roster_has_curated_callsigns(staff_mod, staff_client, monkeypatch):
+def test_agents_roster_is_the_real_agents_not_fakes(staff_mod, staff_client, monkeypatch):
     _login(staff_mod, staff_client, monkeypatch)
-    agents = staff_client.get("/api/admin/agents").json()["agents"]
-    signs = {a["callsign"] for a in agents}
-    assert {"ATLAS", "HORIZON", "CHROMA"} <= signs
+    signs = {a["callsign"] for a in staff_client.get("/api/admin/agents").json()["agents"]}
+    assert {"STAGE-1", "STAGE-2", "STAGE-3", "CONCIERGE"} <= signs       # the 4 REAL orchestrators
+    assert not ({"ATLAS", "HORIZON", "CHROMA", "SIREN", "TENDER", "FORGE", "GARRISON", "MATRIX",
+                 "LEDGER", "CONDUIT", "CARGO", "PROFIT"} & signs)         # the 12 fakes are GONE
 
 
-def test_agent_prompt_edit_is_saved_but_not_applied(staff_mod, staff_client, monkeypatch):
+def test_real_agent_purge_sticks_no_per_request_reseed(staff_mod, staff_client, monkeypatch):
+    # The core fix: deleting a registry row must NOT be undone by the next read. Inject a legacy fake,
+    # then confirm a plain .all() (what the dashboard GET calls) never reseeds it back.
     _login(staff_mod, staff_client, monkeypatch)
-    r = staff_client.patch("/api/admin/agents/ATLAS/prompt", json={"prompt": "be terse"})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["version"] == 1 and body["applied"] is False     # honest: stored, not applied
-    detail = staff_client.get("/api/admin/agents/ATLAS").json()
+    mod = staff_mod
+    mod.agent_store.create("ATLAS", "Orchestrator", role="orchestrator")  # simulate a stale fake row
+    mod.agent_store.delete("ATLAS")
+    assert mod.agent_store.get("ATLAS") is None
+    mod.agent_store.all()                                                 # the read path — must NOT reseed
+    assert mod.agent_store.get("ATLAS") is None                           # stays gone (was the bug)
+
+
+def test_custom_agent_prompt_edit_is_saved_but_not_applied(staff_mod, staff_client, monkeypatch):
+    # The role/custom-agent prompt path stays stored-not-applied (part-2b). Create a custom agent first
+    # (the fakes are gone), then edit its prompt.
+    _login(staff_mod, staff_client, monkeypatch)
+    staff_client.post("/api/admin/agents", json={"callsign": "CUSTOM1", "name": "Custom One"})
+    r = staff_client.patch("/api/admin/agents/CUSTOM1/prompt", json={"prompt": "be terse"})
+    assert r.status_code == 200 and r.json()["version"] == 1 and r.json()["applied"] is False
+    detail = staff_client.get("/api/admin/agents/CUSTOM1").json()
     assert detail["prompt"] == "be terse" and detail["prompt_applied"] is False
-    assert detail["prompt_version"] == 1
+
+
+def test_structural_agents_cannot_be_deleted_but_custom_can(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    for cs in ("STAGE-1", "STAGE-2", "STAGE-3", "CONCIERGE"):
+        assert staff_client.delete(f"/api/admin/agents/{cs}").status_code == 409   # structural
+    staff_client.post("/api/admin/agents", json={"callsign": "CUSTOM2", "name": "Custom Two"})
+    assert staff_client.delete("/api/admin/agents/CUSTOM2").status_code == 200      # custom = deletable
+
+
+def test_real_agents_carry_true_model_data(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    monkeypatch.delenv("SF_MODEL", raising=False)
+    monkeypatch.delenv("SF_CHAT_MODEL", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    by_cs = {a["callsign"]: a for a in staff_client.get("/api/admin/agents").json()["agents"]}
+    assert by_cs["STAGE-1"]["model"] == "claude-opus-4-8"      # from console._STAGE_MODEL (live config)
+    assert by_cs["STAGE-3"]["model"] == "claude-sonnet-4-6"
+    assert by_cs["CONCIERGE"]["model"] == "gpt-5.4"            # from chat_model_label (live config)
+    # each real agent appears exactly ONCE (no registry-row + live-card duplicate)
+    signs = [a["callsign"] for a in staff_client.get("/api/admin/agents").json()["agents"]]
+    assert signs.count("STAGE-1") == 1 and signs.count("CONCIERGE") == 1
 
 
 def test_agent_detail_unknown_404(staff_mod, staff_client, monkeypatch):
@@ -184,7 +220,7 @@ def test_stage_skill_cards_appear_in_roster(staff_mod, staff_client, monkeypatch
     assert set(stage) == {"STAGE-1", "STAGE-2", "STAGE-3"}
     assert stage["STAGE-1"]["stage"] == 1 and stage["STAGE-3"]["model"] == "claude-sonnet-4-6"
     assert stage["STAGE-1"]["runtimes"] == ["claude", "opencode"]
-    assert "ATLAS" in {a["callsign"] for a in agents}            # role agents still present
+    assert "CONCIERGE" in {a["callsign"] for a in agents}        # the concierge coexists; no fakes
 
 
 def test_stage_skill_detail_serves_real_skill_md(staff_mod, staff_client, monkeypatch):

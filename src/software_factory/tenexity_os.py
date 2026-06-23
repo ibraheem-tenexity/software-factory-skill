@@ -32,14 +32,22 @@ _ROLE_ALIASES = {
 _SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "skills")
 
 STAGE_SKILLS = [
-    {"callsign": "STAGE-1", "stage": 1, "slug": "stage-1-research",
-     "name": "Stage 1 · Research", "model": "claude-opus-4-8"},
-    {"callsign": "STAGE-2", "stage": 2, "slug": "stage-2-design",
-     "name": "Stage 2 · Design", "model": "claude-opus-4-8"},
-    {"callsign": "STAGE-3", "stage": 3, "slug": "stage-3-build",
-     "name": "Stage 3 · Build", "model": "claude-sonnet-4-6"},
+    {"callsign": "STAGE-1", "stage": 1, "slug": "stage-1-research", "name": "Stage 1 · Research"},
+    {"callsign": "STAGE-2", "stage": 2, "slug": "stage-2-design", "name": "Stage 2 · Design"},
+    {"callsign": "STAGE-3", "stage": 3, "slug": "stage-3-build", "name": "Stage 3 · Build"},
 ]
 _STAGE_BY_CALLSIGN = {s["callsign"]: s for s in STAGE_SKILLS}
+
+
+def _stage_model(stage: int) -> str:
+    """The model a stage ACTUALLY runs on, from live config (SF_MODEL override else console._STAGE_MODEL
+    default) — data provenance, not a hardcoded literal. Lazy import avoids a tenexity_os↔console cycle;
+    empty string if no real source."""
+    try:
+        from .console import _STAGE_MODEL
+        return os.environ.get("SF_MODEL") or _STAGE_MODEL.get(stage, "") or ""
+    except Exception:
+        return ""
 
 
 def _skill_filename(runtime: str) -> str:
@@ -84,7 +92,7 @@ def stage_skill_cards() -> list:
         cards.append({
             "callsign": s["callsign"], "sign": s["callsign"], "name": s["name"],
             "role": "stage-orchestrator", "kind": "stage_skill", "stage": s["stage"],
-            "desc": desc, "model": s["model"], "cost_tier": 3,
+            "desc": desc, "model": _stage_model(s["stage"]), "cost_tier": 3,
             "success": None, "runs": 0, "on": False, "runtimes": ["claude", "opencode"],
         })
     return cards

@@ -16,14 +16,20 @@ def test_tool_store_seeds_then_crud():
     assert len(s.all()) == n
 
 
-def test_agent_store_seeds_then_crud():
-    s = AgentRegistryStore()
-    agents = s.all()                        # seeds the 12 canonical callsigns
-    assert any(a["callsign"] == "ATLAS" for a in agents)
-    assert s.get("ATLAS")["name"] == "Orchestrator"
+def test_agent_store_ensures_real_agents_and_purges_fakes():
+    s = AgentRegistryStore()                # init ensures the 4 REAL orchestrators + purges the fakes
+    signs = {a["callsign"] for a in s.all()}
+    assert {"STAGE-1", "STAGE-2", "STAGE-3", "CONCIERGE"} <= signs
+    assert "ATLAS" not in signs and "PROFIT" not in signs   # the 12 fakes are gone, never reseeded
+    assert s.get("STAGE-1")["name"] == "Stage 1 · Research"
+    # a delete of a fake STICKS — .all() is a pure read and must not resurrect it
+    s.create("ATLAS", "x")
+    s.delete("ATLAS")
+    s.all()
+    assert s.get("ATLAS") is None
+    # custom-agent CRUD still works
     a = s.create("NOVA", "Novelist", role="nova", model="m", cost_tier=2, descr="d")
     assert a["callsign"] == "NOVA"
-    upd = s.update("NOVA", {"model": "m2"})
-    assert upd["model"] == "m2"
+    assert s.update("NOVA", {"model": "m2"})["model"] == "m2"
     s.delete("NOVA")
     assert s.get("NOVA") is None

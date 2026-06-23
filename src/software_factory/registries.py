@@ -30,32 +30,42 @@ SEED_TOOLS = [
      "scope": "operator email", "status": "available", "auth": "service key"},
 ]
 
-SEED_AGENTS = [
-    {"callsign": "ATLAS", "name": "Orchestrator", "role": "orchestrator", "model": "claude-opus-4-8",
-     "cost_tier": 3, "descr": "Plans the run, spawns + sequences stage agents."},
-    {"callsign": "HORIZON", "name": "Product Manager", "role": "horizon", "model": "claude-opus-4-8",
-     "cost_tier": 2, "descr": "Synthesizes the PRD from research + brief."},
-    {"callsign": "CHROMA", "name": "Design", "role": "chroma", "model": "claude-sonnet-4-6",
-     "cost_tier": 2, "descr": "Designs screens + the visual system."},
-    {"callsign": "SIREN", "name": "Marketing", "role": "siren", "model": "claude-sonnet-4-6",
-     "cost_tier": 1, "descr": "Positioning + marketing copy."},
-    {"callsign": "TENDER", "name": "Proposal", "role": "tender", "model": "claude-sonnet-4-6",
-     "cost_tier": 1, "descr": "Drafts proposals + scoping."},
-    {"callsign": "FORGE", "name": "DevOps", "role": "forge", "model": "claude-sonnet-4-6",
-     "cost_tier": 2, "descr": "Provisions infra + deploys."},
-    {"callsign": "GARRISON", "name": "Ops", "role": "garrison", "model": "claude-sonnet-4-6",
-     "cost_tier": 1, "descr": "Runtime ops + monitoring."},
-    {"callsign": "MATRIX", "name": "Data", "role": "matrix", "model": "claude-sonnet-4-6",
-     "cost_tier": 2, "descr": "Data modeling + pipelines."},
-    {"callsign": "LEDGER", "name": "EDI", "role": "ledger", "model": "claude-sonnet-4-6",
-     "cost_tier": 1, "descr": "EDI + document interchange."},
-    {"callsign": "CONDUIT", "name": "ERP", "role": "conduit", "model": "claude-sonnet-4-6",
-     "cost_tier": 2, "descr": "ERP integration (Epicor etc.)."},
-    {"callsign": "CARGO", "name": "WMS", "role": "cargo", "model": "claude-sonnet-4-6",
-     "cost_tier": 1, "descr": "Warehouse / inventory flows."},
-    {"callsign": "PROFIT", "name": "Pricing", "role": "profit", "model": "claude-sonnet-4-6",
-     "cost_tier": 2, "descr": "Pricing rules + approvals."},
+# Legacy demo-roster callsigns — fake agents that "don't do anything" (the old seed-the-dashboard
+# convenience). PURGED on every store init so they can't reappear, and a delete STICKS. Scoped to this
+# EXACT list so a custom agent is never touched.
+LEGACY_FAKE_CALLSIGNS = ["ATLAS", "HORIZON", "CHROMA", "SIREN", "TENDER", "FORGE",
+                         "GARRISON", "MATRIX", "LEDGER", "CONDUIT", "CARGO", "PROFIT"]
+
+# The REAL working orchestrators — the agents that actually run. Their prompts live in the SKILL.md
+# files / CONCIERGE_INSTRUCTIONS (editable via the PromptStore override, #43). callsigns MATCH the
+# tenexity_os live cards + PromptStore keys. `model` is resolved from LIVE config at ensure-time (data
+# provenance — never a guessed literal); `stage` is only used to look up that model, not stored.
+REAL_AGENTS = [
+    {"callsign": "STAGE-1", "name": "Stage 1 · Research", "role": "stage-orchestrator", "stage": 1,
+     "cost_tier": 3, "descr": "Research orchestrator — a validated PRD from the brief."},
+    {"callsign": "STAGE-2", "name": "Stage 2 · Design", "role": "stage-orchestrator", "stage": 2,
+     "cost_tier": 3, "descr": "Design orchestrator — architecture, dependencies, tickets."},
+    {"callsign": "STAGE-3", "name": "Stage 3 · Build", "role": "stage-orchestrator", "stage": 3,
+     "cost_tier": 3, "descr": "Build orchestrator — builds, deploys, browser-verifies the app."},
+    {"callsign": "CONCIERGE", "name": "Factory Concierge", "role": "concierge", "stage": 0,
+     "cost_tier": 2, "descr": "Onboarding concierge — gathers requirements and drives the pipeline."},
 ]
+
+
+def _real_agent_model(agent: dict) -> str:
+    """The model an orchestrator ACTUALLY runs on, read from live config (no guessed values; empty if
+    no real source). Lazy imports avoid a registries↔console/chat_agent import cycle."""
+    try:
+        stage = agent.get("stage") or 0
+        if stage >= 1:
+            from .console import _STAGE_MODEL
+            return os.environ.get("SF_MODEL") or _STAGE_MODEL.get(stage, "") or ""
+        if agent["callsign"] == "CONCIERGE":
+            from .chat_agent import chat_model_label
+            return chat_model_label()
+    except Exception:
+        return ""
+    return ""
 
 
 def _conn():
@@ -120,17 +130,27 @@ class ToolStore:
 
 class AgentRegistryStore:
     def __init__(self, sqlite_path: str = ""):
-        pass
+        # Reconcile the registry ONCE at init (boot), NOT on the read path — the old _seed_if_empty was
+        # called by all() on EVERY request, so a delete was undone on the next dashboard load. Best-effort
+        # so a transient boot DB issue never crashes app start (retried next boot).
+        try:
+            self._ensure_real_agents()
+        except Exception:
+            pass
 
-    def _seed_if_empty(self):
-        if not _rows("SELECT 1 FROM public.agent_registry LIMIT 1"):
-            for a in SEED_AGENTS:
-                _exec("INSERT INTO public.agent_registry (callsign,name,role,model,cost_tier,descr) "
-                      "VALUES (%s,%s,%s,%s,%s,%s)",
-                      (a["callsign"], a["name"], a["role"], a["model"], a["cost_tier"], a["descr"]))
+    def _ensure_real_agents(self):
+        """Purge the legacy fake roster (permanently — a delete now STICKS) and ensure the 4 REAL
+        orchestrators exist with model data from live config. Scoped to the exact known fake callsigns,
+        so a custom agent is never touched; reals are created ON CONFLICT DO NOTHING (idempotent)."""
+        for cs in LEGACY_FAKE_CALLSIGNS:
+            _exec("DELETE FROM public.agent_registry WHERE callsign=%s", (cs,))
+        for a in REAL_AGENTS:
+            _exec("INSERT INTO public.agent_registry (callsign,name,role,model,cost_tier,descr) "
+                  "VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (callsign) DO NOTHING",
+                  (a["callsign"], a["name"], a["role"], _real_agent_model(a), a["cost_tier"], a["descr"]))
 
     def all(self) -> list[dict]:
-        self._seed_if_empty()
+        # Pure read — never reseeds (that was the per-request bug). Reconciliation is at init only.
         return _rows("SELECT callsign,name,role,model,cost_tier,descr FROM public.agent_registry "
                      "ORDER BY callsign")
 
