@@ -23,8 +23,7 @@ def override_key(callsign: str, runtime: str | None = None) -> str:
 
 
 class PromptStore:
-    def __init__(self, sqlite_path: str = ""):
-        # `sqlite_path` is vestigial (Postgres everywhere); kept for call-site symmetry.
+    def __init__(self):
         pass
 
     def _conn(self):

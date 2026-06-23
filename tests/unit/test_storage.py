@@ -67,7 +67,6 @@ def test_sha256(local):
 # -- manifest ---------------------------------------------------------------------------
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
-    monkeypatch.delenv("SF_DB", raising=False)
     return BlobStore()
 
 

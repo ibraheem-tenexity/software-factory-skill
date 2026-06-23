@@ -128,21 +128,19 @@ def _narrate_project(pid: str, st: dict):
 
 
 def _health() -> dict:
-    """Liveness for probes + the console dot. pg=None means sqlite mode (nothing to check)."""
+    """Liveness for probes + the console dot."""
     import shutil as _sh
-    pg = None
-    if (os.environ.get("SF_DB") or "").lower() == "postgres":
-        from software_factory import dbshim
-        try:
-            dbshim.registry_projects()
-            pg = True
-        except Exception:
-            pg = False
+    from software_factory import dbshim
+    try:
+        dbshim.registry_projects()
+        pg = True
+    except Exception:
+        pg = False
     try:
         free_mb = int(_sh.disk_usage(state.PROJECTS_DIR).free / 1048576)
     except OSError:
         free_mb = -1
-    ok = (pg is not False) and free_mb > 200
+    ok = pg and free_mb > 200
     return {"ok": ok, "pg": pg, "disk_free_mb": free_mb}
 
 

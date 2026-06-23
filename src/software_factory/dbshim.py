@@ -1,11 +1,11 @@
 """The Postgres connection seam the run stores use.
 
-Postgres everywhere — there is no sqlite backend. `connect(path)` returns a `PgConn` over psycopg3
+`connect(path)` returns a `PgConn` over psycopg3
 against `DATABASE_URL` (the Supabase transaction pooler on 6543 in prod; a local Postgres in dev/test).
 The `path` only names the run directory (project.log/chat.jsonl still live on the volume) and the run id
 the stores scope by; no per-project schema or database file is created.
 
-`PgConn` presents the small `sqlite3.Connection` surface the stores were written against:
+`PgConn` presents a minimal DB-API connection surface over psycopg3:
   - `?`->`%s` placeholder translation (the stores' SQL uses `?`);
   - `.lastrowid` via an appended `RETURNING id` on inserts into the surrogate-id tables;
   - `prepare_threshold=None` — the 6543 pooler multiplexes backends, so server-side prepares break;
@@ -97,7 +97,7 @@ class _Cursor:
 
 
 class PgConn:
-    """The sqlite3.Connection surface the stores use, against the single `public` schema."""
+    """Minimal DB-API connection layer over psycopg3 against the flat `public` schema."""
 
     def __init__(self, conn):
         self._conn = conn

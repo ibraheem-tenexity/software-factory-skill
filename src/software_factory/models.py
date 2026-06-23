@@ -1,6 +1,6 @@
 """SQLAlchemy models — the SINGLE, object-oriented definition of every table.
 
-Postgres everywhere (no sqlite): the schema is owned by Alembic in prod and by `metadata.create_all`
+Postgres everywhere: the schema is owned by Alembic in prod and by `metadata.create_all`
 against the test Postgres in the suite — both build from THIS `metadata`, so they cannot drift.
 Query routing goes through `dbshim` (the Postgres connection wrapper that handles the Supabase 6543
 transaction pooler) — the recorded "hybrid": ORM for schema definition, `dbshim` for DML.

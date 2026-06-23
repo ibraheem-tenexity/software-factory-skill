@@ -1,5 +1,5 @@
-"""dbshim: the Postgres connection seam (Supabase transaction pooler on 6543). Postgres everywhere
-— there is no sqlite backend. The pg path is tested against a FAKE psycopg connection (no live DB)."""
+"""dbshim: the Postgres connection seam (Supabase transaction pooler on 6543).
+Tested against a FAKE psycopg connection (no live DB)."""
 import os
 
 import pytest
@@ -59,7 +59,6 @@ class FakePgConn:
 @pytest.fixture()
 def pg(monkeypatch, tmp_path):
     monkeypatch.setenv("SF_ENVIRONMENT", "test")
-    monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@pooler:6543/postgres")
     fake = FakePgConn()
     monkeypatch.setattr(dbshim, "_pg_connect", lambda url: fake)
@@ -95,7 +94,6 @@ def test_pg_executescript_runs_each_statement(pg):
 
 def test_pg_write_retries_then_raises(monkeypatch, tmp_path):
     monkeypatch.setenv("SF_ENVIRONMENT", "test")
-    monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@pooler:6543/postgres")
     attempts = []
 
@@ -117,7 +115,6 @@ def test_pg_connect_creates_no_schema_or_registry(monkeypatch, tmp_path):
     # write (those were the schema-per-project machinery, now retired). The first statement is the
     # caller's own; nothing is injected ahead of it.
     monkeypatch.setenv("SF_ENVIRONMENT", "test")
-    monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@x:6543/postgres")
     fake = FakePgConn()
     monkeypatch.setattr(dbshim, "_pg_connect", lambda url: fake)
@@ -132,7 +129,6 @@ def test_pg_connect_creates_no_schema_or_registry(monkeypatch, tmp_path):
 def test_registry_runs_reads_runstate(monkeypatch):
     # Run discovery in flat mode comes from public.projectstate (the sf_runs registry is retired).
     monkeypatch.setenv("SF_ENVIRONMENT", "test")
-    monkeypatch.setenv("SF_DB", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@x:6543/postgres")
 
     class RunstateCursor(FakeCursor):

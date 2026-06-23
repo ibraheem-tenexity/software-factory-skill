@@ -5,7 +5,7 @@ analysis in chat. Owner: software-factory-skill (main) session._
 
 ## Context
 The console HTTP layer is a hand-rolled stdlib `BaseHTTPRequestHandler` (`console/server.py`) and the
-storage layer is hand-rolled SQL in store constructors + `dbshim`'s sqlite↔pg translation + per-project
+storage layer is hand-rolled SQL in store constructors + `dbshim`'s `?`→`%s` translation + per-project
 `SET LOCAL search_path`. Two goals: (1) move the HTTP shell to **FastAPI** (typed routes, pydantic
 validation, OpenAPI, testable, cleaner auth/ownership dependencies); (2) **replace the DB integration**
 with **SQLAlchemy models + Alembic migrations** — killing the no-migrations `ALTER`-by-hand hazard and
@@ -46,8 +46,6 @@ migrate it. Files: `tickets.py`, `agents.py`, `db.py` CLI, callers in `console.p
     `_tx`/advisory-lock primitive under a SQLAlchemy Core/ORM surface, or `schema_translate_map`). This is
     the load-bearing, risky part (transaction-pooler resets search_path per statement) — keep dbshim's
     routing semantics, swap only the SQL-building/translation.
-  - sqlite (dev/tests) → per-project file engine; SQLAlchemy emits sqlite-correct DDL natively (retires the
-    `?`→`%s` / `AUTOINCREMENT`→`IDENTITY` / `RETURNING` hand-translation).
 - **Repositories preserved**: `ProjectDB`, `TicketStore`, `AgentRegistry`, `UserStore` keep their
   constructor signatures (`path` arg) and method APIs — reimplemented over SQLAlchemy. The
   `python3 -m software_factory.db <verb> <projects_dir> <project_id>` CLI and the `TicketStore('<project.db>')`
@@ -127,6 +125,6 @@ tables. Each is its own change once Phases 1–3 are stable.
 
 ## Verification (end-to-end)
 - Phase 0: pg insert of a commit-SHA provenance succeeds; opencode run closes a ticket on pg.
-- Phase 1: hermetic sqlite suite green; `list_projects` reads `project_index` (one query); duplicate name → DB
+- Phase 1: `list_projects` reads `project_index` (one query); duplicate name → DB
   `UNIQUE` violation surfaced as 409; Alembic upgrade/downgrade clean.
 - Phase 2/3: route-parity tests vs the stdlib server; live smoke (login, list, graph/log, health).

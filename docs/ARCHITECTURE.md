@@ -103,8 +103,8 @@ Stage 3 BUILD      tickets → built app(s) → deploy → verify  gate: done ti
 | `projectstate.py` | `ProjectState` dataclass (project metadata, incl. `brief` + `interview_coverage`, `phase="draft"` for pre-run interviews) + the `Store` protocol; persisted as JSON in the `projectstate` table. |
 | `db.py` | `ProjectStore` — the per-project datastore (projectstate + canvas tables incl. `deployments`) + the `python3 -m software_factory.db` CLI (incl. `record-deployment`) the stage agents call to record state. |
 | `tickets.py`, `agents.py` | `TicketStore` (work units, per-wave, each tagged with its target `app` for multi-deliverable builds) and `AgentRegistry` (per-agent telemetry/cost). |
-| `dbshim.py` | The storage seam: `connect(path)` returns a sqlite3-`Connection`-shaped wrapper over **psycopg3** against the one flat `public` schema (Supabase 6543 transaction pooler, `prepare_threshold=None`); `?`→`%s` + DDL/`RETURNING` translation. All per-project stores go through it; `registry_projects()` lists `public.projectstate`. |
-| `env.py` | dev/prod tiering (`SF_ENVIRONMENT`): `db_backend()` (Postgres everywhere — kept as a single seam, no sqlite backend), `stage_env_baseline()` (scrubs console secrets from stage child processes), Railway project allowlist. |
+| `dbshim.py` | The storage seam: `connect(path)` returns a minimal DB-API wrapper over **psycopg3** against the flat `public` schema (Supabase 6543 transaction pooler, `prepare_threshold=None`); `?`→`%s` + `RETURNING` translation. All per-project stores go through it; `registry_projects()` lists `public.projectstate`. |
+| `env.py` | dev/prod tiering (`SF_ENVIRONMENT`): `stage_env_baseline()` (scrubs console secrets from stage child processes), Railway project allowlist. |
 | `auth.py` + `users.py` | Google-OAuth login (`google-auth` token verify) + HMAC `uid`/`token_version` session cookie + service token; `UserStore` = the allowlist+RBAC directory (`roles`/`role_permissions`, status invited/active/disabled, per-request role resolution) backing membership + per-project ownership. |
 | `chat_agent.py` | The "Factory Concierge" — an OpenAI-Agents-SDK agent that turns a chat conversation into a `start_project` (and answers status/deps questions). |
 | `input_pipeline.py`, `pdf_extract.py`, `docx_extract.py` | Ingest: attachments → Markdown, compose the Stage-1 input (`context.txt` + `brief.md` + `interview.md`). `docx_extract.extract_with_images` (mammoth + markdownify) keeps **wireframe images inside Word tables** → `input/images/`. |
@@ -175,9 +175,9 @@ prod and `metadata.create_all` builds it in tests, so the two cannot drift.
   the doc's "used by N projects" count is `COUNT(DISTINCT project_id)`.
 
 *Access + migrations:*
-- `dbshim` is the storage seam: `connect(path)` returns a **sqlite3-`Connection`-shaped wrapper over
-  psycopg3** against the single `public` schema (Supabase 6543 transaction pooler, `prepare_threshold=
-  None`); it translates `?`→`%s`, DDL deltas, and `RETURNING id`. Every per-project store goes through it.
+- `dbshim` is the storage seam: `connect(path)` returns a **minimal DB-API wrapper over psycopg3**
+  against the flat `public` schema (Supabase 6543 transaction pooler, `prepare_threshold=None`);
+  it translates `?`→`%s` and appends `RETURNING id`. Every per-project store goes through it.
 - **Migrations (Alembic):** `software_factory.migrate` (run at deploy via `entrypoint.sh` + defensively
   in the boot lifespan; no-op when `DATABASE_URL` is unset) applies **Alembic** revisions to the one
   `public` schema (`migrations/`, baseline **`0001_project_baseline`** = `models.metadata.create_all`).
