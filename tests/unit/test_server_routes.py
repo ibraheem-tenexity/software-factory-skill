@@ -204,9 +204,10 @@ def test_auth_config_public_and_returns_client_id_when_enabled(auth_client):
 
 def test_me_open_when_auth_disabled(client):
     # Backs the SPA's disabled-path: auth off ⇒ /api/me is 200 admin ⇒ LoginScreen never shows.
+    # No user row when auth is off (email None) → name None, is_internal True (admin operator).
     r = client.get("/api/me")
     assert r.status_code == 200
-    assert r.json() == {"email": None, "role": "admin", "auth": False}
+    assert r.json() == {"email": None, "role": "admin", "name": None, "is_internal": True, "auth": False}
 
 
 def test_react_mode_serves_spa_to_unauthed(auth_mod, auth_client, monkeypatch):

@@ -119,3 +119,39 @@ def test_access_rows_carry_new_columns(mod, client, monkeypatch):
               if u["email"] == "op@tenexity.ai")
     assert {"name", "designation", "sign_in_method", "last_active", "invited_by"} <= set(op)
     assert op["type"] == "Tenexity" and op["org"] == "Tenexity"   # internal staff
+
+
+# ── /api/me enrichment (AccountMenu) + logout ────────────────────────────────────────────────
+def test_me_carries_name_and_is_internal(mod, client, monkeypatch):
+    _login_google(mod, client, monkeypatch)                       # op = bootstrap staff admin
+    me = client.get("/api/me").json()
+    assert me["email"] == "op@tenexity.ai" and me["role"] == "admin"
+    assert me["name"] == "op@tenexity.ai"        # no name set → falls back to email
+    assert me["is_internal"] is True             # staff → OPERATOR badge
+
+    # a named, non-staff org member: name surfaces, is_internal False
+    client.post("/api/admin/access", json={"email": "mem@acme.com", "access_type": "org",
+                                           "org_name": "Acme", "method": "password",
+                                           "password": "pw-123456", "name": "Mem Ber", "role": "member"})
+    c2 = TestClient(mod.app, base_url="https://testserver")
+    c2.post("/api/auth/password", json={"email": "mem@acme.com", "password": "pw-123456"})
+    me2 = c2.get("/api/me").json()
+    assert me2["name"] == "Mem Ber" and me2["is_internal"] is False and me2["role"] == "member"
+
+
+def test_logout_clears_cookie_and_deauthenticates(mod, client, monkeypatch):
+    _login_google(mod, client, monkeypatch)
+    assert client.get("/api/me").json()["email"] == "op@tenexity.ai"   # authed
+    out = client.post("/api/auth/logout")
+    assert out.status_code == 200 and out.json() == {"ok": True}
+    cookie = out.headers.get("set-cookie", "")
+    assert "sf_session=" in cookie and ("Max-Age=0" in cookie or "expires=" in cookie.lower())
+    assert "HttpOnly" in cookie and "Secure" in cookie and "SameSite=lax" in cookie   # same flags
+    # the cleared cookie de-authenticates the next request on the same client
+    assert client.get("/api/me").status_code == 401
+
+
+def test_logout_is_idempotent_without_a_session(mod):
+    c = TestClient(mod.app, base_url="https://testserver")   # never logged in
+    r = c.post("/api/auth/logout")
+    assert r.status_code == 200 and r.json() == {"ok": True}  # ungated — succeeds with no cookie
