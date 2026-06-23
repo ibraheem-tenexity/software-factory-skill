@@ -332,3 +332,40 @@ def test_login_flips_invited_to_active(staff_mod, staff_client, monkeypatch):
     rows = staff_client.get("/api/admin/access").json()["users"]
     newbie = next(u for u in rows if u["email"] == "newbie@acme.com")
     assert newbie["status"] == "active"
+
+
+# ── staff-admin toggle (role + is_internal, with strand-the-platform guards) ──────────────────
+def test_make_and_revoke_tenexity_admin(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    staff_client.post("/api/admin/access", json={"email": "m@acme.com", "access_type": "org",
+                                                 "org_name": "Acme"})        # plain org member
+    r = staff_client.patch("/api/admin/access/m@acme.com",
+                           json={"role": "admin", "is_internal": True})       # Make Tenexity admin
+    assert r.status_code == 200
+    u = staff_mod.users.get_user("m@acme.com")
+    assert u["role"] == "admin" and u["is_internal"] in (1, True)
+    # revoke staff — op is still a staff admin, so this is allowed (not the last)
+    r2 = staff_client.patch("/api/admin/access/m@acme.com", json={"is_internal": False})
+    assert r2.status_code == 200 and staff_mod.users.get_user("m@acme.com")["is_internal"] in (0, False)
+
+
+def test_cannot_demote_own_staff_session(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)                # op = staff admin AND the requester
+    assert staff_client.patch("/api/admin/access/op@tenexity.ai",
+                              json={"is_internal": False}).status_code == 409
+    assert staff_client.patch("/api/admin/access/op@tenexity.ai",
+                              json={"role": "member"}).status_code == 409
+    assert staff_mod.users.get_user("op@tenexity.ai")["is_internal"] in (1, True)   # unchanged
+
+
+def test_cannot_remove_last_staff_admin(tmp_path, monkeypatch):
+    from software_factory import auth
+    mod = _load_app(tmp_path, monkeypatch, SF_BOOTSTRAP_ADMIN_EMAIL="op@tenexity.ai",
+                    SF_SERVICE_TOKEN="svc-secret-token", **_AUTH)
+    c = TestClient(mod.app, base_url="https://testserver")
+    # service-token session (viewer email=None) → not "your own session", so guard (a) is reachable:
+    # op is the LONE staff admin, de-staffing it would strand the platform → 409.
+    r = c.patch("/api/admin/access/op@tenexity.ai", json={"is_internal": False},
+                headers={auth.SERVICE_HEADER: "svc-secret-token"})
+    assert r.status_code == 409
+    assert mod.users.get_user("op@tenexity.ai")["is_internal"] in (1, True)   # refused, unchanged

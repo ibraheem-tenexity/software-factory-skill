@@ -282,10 +282,35 @@ def admin_invite(body: InviteIn, v: tuple = Depends(require_staff)):
 @router.patch("/api/admin/access/{email}")
 def admin_access_update(email: str, body: AccessPatchIn, v: tuple = Depends(require_staff)):
     em = (email or "").strip().lower()
-    if not state.users.get_user(em):
+    u = state.users.get_user(em)
+    if not u:
         raise HTTPException(status_code=404, detail="unknown user")
+
+    # "Make Tenexity admin" = {role:"admin", is_internal:true}; revoke staff = {is_internal:false}.
+    # Compute the RESULTING staff-admin status so we can guard against stranding the platform.
+    def _is_staff_admin(role, internal, status):
+        return role == "admin" and internal in (1, True) and (status or "active") != "disabled"
+    cur_role, cur_internal, cur_status = u["role"], u.get("is_internal"), (u.get("status") or "active")
+    new_role = body.role if body.role in ("admin", "member") else cur_role
+    new_internal = body.is_internal if body.is_internal is not None else cur_internal
+    new_status = body.status if body.status in ("active", "invited", "disabled") else cur_status
+    was, will = _is_staff_admin(cur_role, cur_internal, cur_status), _is_staff_admin(new_role, new_internal, new_status)
+
+    if was and not will:
+        # Guard (b): never let an admin de-staff/lock out their OWN active session.
+        if em == (v[0] or "").lower():
+            raise HTTPException(status_code=409, detail="cannot remove your own staff-admin access")
+        # Guard (a): keep at least one Tenexity staff admin — never strand the platform.
+        others = [x for x in state.users.list_users()
+                  if (x["email"] or "").lower() != em
+                  and _is_staff_admin(x["role"], x.get("is_internal"), x.get("status"))]
+        if not others:
+            raise HTTPException(status_code=409, detail="cannot remove the last Tenexity staff admin")
+
     if body.role in ("admin", "member"):
         state.users.upsert(em, body.role, by=v[0] or "")
+    if body.is_internal is not None:
+        state.users.set_profile(em, is_internal=body.is_internal)   # toggle Tenexity-staff
     if body.status == "disabled":
         state.users.disable(em)                            # status→disabled + token_version bump (revokes cookie)
     elif body.status in ("active", "invited"):
