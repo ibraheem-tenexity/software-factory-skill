@@ -100,3 +100,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/admin/AccountMenu.tsx, console/web/src/admin/AdminPortal.tsx, console/web/src/admin/primitives.tsx, console/web/src/api.ts.
 3. Wires to assumed contract from qsvigmth: GET /api/me adds optional name/is_staff; POST /api/auth/logout ends session. No mock data: name fallback to email, OPERATOR badge from is_staff, Account settings disabled/flagged.
 4. Summary: tsc + build green on console/web; PR body documents required backend contract and disabled Account-settings follow-up. Coordinator to batch/deploy with qsvigmth's backend changes.
+
+# Tenexity OS agent Update at Time: 22:06:2026:17:02:00.000
+1. Aligned AccountMenu PR #36 to qsvigmth's locked backend contract and l2a7ngax's simpler scope (per-app instance).
+2. console/web/src/admin/AccountMenu.tsx, console/web/src/api.ts.
+3. Renamed FE field is_staff → is_internal for OPERATOR badge; removed Account-settings item entirely (no screen exists); sign-out flow unchanged.
+4. Summary: pushed fixup commit 4b38e43; tsc + build green; waiting for qsvigmth deployed-tip ping before merge/deploy.
