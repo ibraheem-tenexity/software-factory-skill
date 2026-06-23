@@ -87,7 +87,7 @@ export function AdminPortal() {
 
   const pulseItems = [
     ["AGENTS_ACTIVE", pulse?.agents_active ?? "—"],
-    ["TASKS_RUNNING", pulse?.projects_active ?? "—"],
+    ["TASKS_RUNNING", pulse?.projects_active ?? 0],
     ["AVG_FRICTION", pulse?.avg_friction ?? "—"],
     ["TODAY_BURN", typeof pulse?.today_burn === "number" ? `$${pulse.today_burn.toFixed(2)}` : pulse?.today_burn ?? "—"],
     ["PROJECTS", pulse?.projects ?? "—"],
