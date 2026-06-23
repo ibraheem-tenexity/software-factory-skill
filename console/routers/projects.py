@@ -231,7 +231,13 @@ def project_continue(pid: str, body: ContinueIn, v: tuple = Depends(authorize_pr
 
 @router.post("/api/projects/{pid}/deps")
 def project_submit_deps(pid: str, body: DepsIn, v: tuple = Depends(authorize_project)):
-    return state.console.submit_deps(pid, body.deps)
+    result = state.console.submit_deps(pid, body.deps)
+    # Launch Stage 3 immediately once deps are satisfied — mirror the chat submit path (chat.py).
+    # The background poller would also pick this up, but launching here starts the build without
+    # waiting for the next poll tick. extract_env_creds rides provided dep VALUES into the stage env.
+    if result.get("satisfied"):
+        state.console.start_stage3(pid, extra_creds=extract_env_creds(body.deps))
+    return result
 
 
 @router.post("/api/projects/{pid}/stage2")

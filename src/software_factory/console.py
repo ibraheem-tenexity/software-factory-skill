@@ -603,6 +603,20 @@ class Console:
 
         state = self._load_state(project_id)
         runtime = state.runtime or "claude"
+        # The stage RUNNER (`claude -p` / `opencode run`) is itself an LLM agent and needs its OWN
+        # provider key to authenticate. stage_env_baseline scrubs the console's env down to a tiny
+        # allowlist (so the BUILT APP can't inherit factory secrets) — which also strips the runner's
+        # key, leaving Stage 1 unable to even start (claude -p dies at auth → no PRD → run parked at
+        # 0%). Inject ONLY the active runtime's key into the runner env here. This reaches the
+        # `claude -p`/`opencode` process; it does NOT reach the customer's deployed app, whose Railway
+        # env is set explicitly by the Stage-3 agent (deps only) and never inherits this process env.
+        # Resolution is PER-RUN, not platform-hardcoded: BYOK first (the run declared its own
+        # provider key in req.credentials → already in `env`), else the platform key from the console
+        # env ("use ours"). Don't overwrite a BYOK key with the platform one. (Stage-2/3 retry
+        # re-injection of a BYOK value — not in os.environ — is a tracked follow-up.)
+        _runner_key = "OPENROUTER_API_KEY" if runtime == "opencode" else "ANTHROPIC_API_KEY"
+        if not env.get(_runner_key) and os.environ.get(_runner_key):
+            env = {**env, _runner_key: os.environ[_runner_key]}
         ws = prepare_workspace(
             self._projects_dir, project_id, stage, runtime=runtime,
         )

@@ -1227,3 +1227,41 @@ def test_assign_unowned_is_idempotent(tmp_path):
     assert c.project_owner(leg) == "admin@x.com"
     assert c.project_owner(owned) == "alice@x.com"               # untouched
     assert c.assign_unowned("admin@x.com") == 0              # nothing left
+
+
+def test_stage_runner_gets_the_runtime_llm_key_injected(tmp_path, monkeypatch):
+    # The stage runner (`claude -p`) must authenticate; stage_env_baseline scrubs the console env, so
+    # _launch_stage injects the active runtime's key. Without this, Stage 1 dies at auth → run at 0%.
+    monkeypatch.delenv("SF_RUNTIME", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    c.start_project(ProjectRequest(description="a guestbook app", target="railway"))   # default claude
+    assert "claude" in launcher.argv[0]
+    assert launcher.env.get("ANTHROPIC_API_KEY") == "sk-ant-test"   # the runner can authenticate
+
+
+def test_stage_env_baseline_scrubs_llm_key_so_it_never_leaks_to_a_built_app(monkeypatch):
+    # GUARDRAIL: the factory LLM key reaches the RUNNER only via explicit injection; the baseline
+    # scrub still excludes it, so any context that does NOT inject (the customer's deployed app env)
+    # stays clean — the factory's Anthropic key can never land in a customer deployment.
+    from software_factory import env as _env
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    base = _env.stage_env_baseline({})
+    assert "ANTHROPIC_API_KEY" not in base and "OPENROUTER_API_KEY" not in base
+    # an explicitly-provided key still passes through — that is exactly how the runner receives it
+    assert _env.stage_env_baseline({"ANTHROPIC_API_KEY": "x"})["ANTHROPIC_API_KEY"] == "x"
+
+
+def test_runner_key_is_byok_first_then_platform(tmp_path, monkeypatch):
+    # Per-run resolution (NOT platform-hardcoded): a run that brings its OWN key (req.credentials)
+    # uses it; the platform key must not overwrite it. (Values live only in the launch env, never
+    # persisted — only names land in creds_provided.)
+    monkeypatch.delenv("SF_RUNTIME", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-PLATFORM")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    c.start_project(ProjectRequest(description="byok app", target="railway",
+                                   credentials={"ANTHROPIC_API_KEY": "sk-ant-BYOK"}))
+    assert launcher.env.get("ANTHROPIC_API_KEY") == "sk-ant-BYOK"   # BYOK wins, platform doesn't clobber
