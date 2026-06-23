@@ -339,6 +339,9 @@ export const api = {
   setMaterialScope: (id: string, materialId: string, scope: "project" | "org") =>
     send<ProjectDocuments>(`/api/projects/${id}/materials/${materialId}`, "PATCH", { scope }),
   deleteProject: (id: string) => send<{ ok?: boolean }>(`/api/projects/${id}`, "DELETE"),
+  // Manual kill-switch — halts the live stage process, sets phase=stopped, stops the poller
+  // re-advancing. Endpoint shipping in qsvigmth's run-control PR; graceful until then.
+  stopProject: (id: string) => send<ProjectSummary & Record<string, any>>(`/api/projects/${id}/stop`, "POST"),
   uploadMaterial: (id: string, file: { name: string; tag?: string; content_type?: string; data_b64: string }) =>
     send<{ ok?: boolean }>(`/api/projects/${id}/materials`, "POST", file),
   orgDocUpload: (body: { name: string; tag?: string; content_type?: string; data_b64: string }) =>

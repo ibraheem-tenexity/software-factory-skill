@@ -74,6 +74,13 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
   const delivered = status.done || allTicketsDone;
   const liveUrl = liveArt?.url || status.deploy_url;
 
+  // manual kill-switch — only while a live run is in flight (a stage/poller to halt)
+  const running = !!status.phase && !status.deploy_url && !status.done && !["done", "draft", "stopped"].includes(status.phase);
+  const stopRun = async () => {
+    if (!confirm("Stop all work on this project? Running agents will be halted.")) return;
+    try { const s = await api.stopProject(projectId); setStatus(s as Status); } catch { /* run-control endpoint ships in qsvigmth's PR */ }
+  };
+
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: T.bg, color: T.fg, font: `400 14px/1.5 ${T.sans}` }}>
       {/* ── top bar ── */}
@@ -99,6 +106,12 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
         <span style={{ font: `500 12px/1 ${T.mono}`, color: overCap ? T.danger : T.secondary }}>
           spent <b style={{ color: overCap ? T.danger : T.fg }}>${spent.toFixed(2)}</b>{cap > 0 && ` / $${cap.toFixed(0)} cap`}
         </span>
+        {running && (
+          <button onClick={stopRun} title="Stop all work on this project"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, padding: "0 12px", borderRadius: T.rMd, cursor: "pointer", border: `1px solid ${T.danger}`, background: "transparent", color: T.danger, font: `600 12.5px/1 ${T.sans}` }}>
+            <span style={{ width: 9, height: 9, borderRadius: 2, background: T.danger, flexShrink: 0 }} /> Stop all progress
+          </button>
+        )}
         <AccountMenu size={26} />
       </header>
 
