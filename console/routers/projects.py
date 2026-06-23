@@ -265,6 +265,13 @@ def project_budget(pid: str, body: BudgetIn, v: tuple = Depends(authorize_projec
     return state.console.raise_budget(pid, ceiling)
 
 
+@router.post("/api/projects/{pid}/stop")
+def project_stop(pid: str, v: tuple = Depends(authorize_project)):
+    """Operator 'stop all progress': kill the live stage process + mark the run stopped (terminal —
+    the poller won't re-advance or re-provision). Idempotent. Pairs with the dashboard Stop button."""
+    return state.console.stop_project(pid)
+
+
 @router.post("/api/projects/{pid}/retry")
 def project_retry(pid: str, body: RetryIn, v: tuple = Depends(authorize_project)):
     result = state.console.retry_stage(pid, int(body.stage), extra_creds=body.creds)
