@@ -15,7 +15,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api, Org, OrgInput } from "../../api";
 import {
   T, Icon, Sparkle, Wordmark, Avatar, StatusPill, CategoryLabel, Btn, TextInput, TextArea,
-  Field, Chip, Chips, IndustryTile, IntegrationRow, Dropzone, Message, Composer,
+  Field, Chip, Chips, IndustryTile, IntegrationRow, Dropzone, Message, Composer, Segmented,
   INDUSTRIES, SIZES, REVENUE, ROLES, INTEGRATIONS,
 } from "./design";
 
@@ -109,6 +109,93 @@ function ScopeOfWork({ options, value, onChange, onAddOption }:
   );
 }
 
+// ── Build engine picker (the "Build engine" card). MODULE-SCOPE — never define inside render
+//    (that remounts inputs on each keystroke → focus loss). provider=claude|opencode;
+//    model=kimi|glm; keySource=tenexity|byok. Backend persists only `runtime` today (claude|opencode);
+//    GLM + BYOK are gated "coming soon" until #38 wires them (no selectable-but-noop options). ──
+export type EngineValue = { provider: "claude" | "opencode"; model: "kimi" | "glm"; keySource: "tenexity" | "byok"; key: string };
+
+const ENGINES = [
+  { id: "claude", name: "Claude", tag: "Default", desc: "Anthropic Claude — the factory's native build agent." },
+  { id: "opencode", name: "OpenCode", tag: "", desc: "Open-source agent runtime — pick the model below." },
+] as const;
+const OC_MODELS = [
+  { id: "kimi", name: "Kimi K2.7", vendor: "Moonshot AI" },
+  { id: "glm", name: "GLM 5.2", vendor: "Zhipu AI" },
+] as const;
+
+// One selectable engine radio-card. Selected = brand border + soft fill; "Default"/"SOON" tag inline.
+function EngineCardBtn({ item, selected, onClick, disabled }:
+  { item: { id: string; name: string; tag: string; desc: string }; selected: boolean; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button onClick={disabled ? undefined : onClick} disabled={disabled}
+      style={{ textAlign: "left", cursor: disabled ? "not-allowed" : "pointer", flex: 1, background: selected ? T.brandSoft : T.raised,
+        border: `1px solid ${selected ? T.brand : T.borderDefault}`, borderRadius: T.rLg, padding: "12px 14px",
+        opacity: disabled ? 0.6 : 1, display: "flex", flexDirection: "column", gap: 3 }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ font: `600 14px/1.2 ${T.sans}`, color: selected ? T.brandDeep : T.fg }}>{item.name}</span>
+        {item.tag && <span style={{ font: `700 8px/1 ${T.mono}`, color: T.brandDeep, background: T.brandSoft, padding: "2px 5px", borderRadius: 3 }}>{item.tag.toUpperCase()}</span>}
+      </span>
+      <span style={{ font: `400 12px/1.4 ${T.sans}`, color: T.secondary }}>{item.desc}</span>
+    </button>
+  );
+}
+
+function EnginePicker({ value, onChange }:
+  { value: EngineValue; onChange: (v: EngineValue) => void }) {
+  const set = (patch: Partial<EngineValue>) => onChange({ ...value, ...patch });
+  // Switching provider away from opencode resets model to the default (kimi); switching to opencode
+  // keeps whatever model was set (default kimi). key is cleared whenever BYOK is left.
+  const chooseProvider = (p: "claude" | "opencode") => set({ provider: p, key: p === "claude" ? "" : value.key });
+  const chooseKeySource = (k: string) => set({ keySource: k as "tenexity" | "byok", key: k === "tenexity" ? "" : value.key });
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 10 }}>
+        {ENGINES.map((it) => (
+          <EngineCardBtn key={it.id} item={it} selected={value.provider === it.id} onClick={() => chooseProvider(it.id as "claude" | "opencode")} />
+        ))}
+      </div>
+
+      {value.provider === "opencode" && (
+        <Field label="OpenCode model">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {OC_MODELS.map((m) => {
+              const on = value.model === m.id;
+              const soon = m.id === "glm";   // GLM 5.2 not wired backend-side (#38) — gated, not a noop.
+              return (
+                <button key={m.id} disabled={soon} onClick={() => !soon && set({ model: m.id as "kimi" | "glm" })}
+                  style={{ font: `500 13px/1 ${T.sans}`, padding: "8px 13px", borderRadius: 9999, cursor: soon ? "not-allowed" : "pointer",
+                    border: `1px solid ${on ? T.brand : T.borderSubtle}`, background: on ? T.brandSoft : T.sunken,
+                    color: on ? T.brandDeep : soon ? T.tertiary : T.secondary, opacity: soon ? 0.6 : 1,
+                    display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  {m.name} <span style={{ font: `400 11px/1 ${T.sans}`, color: T.tertiary }}>· {m.vendor}</span>
+                  {soon && <span style={{ font: `700 8px/1 ${T.mono}`, color: T.tertiary, background: T.raised, padding: "2px 4px", borderRadius: 3 }}>SOON</span>}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+      )}
+
+      <Field label="API key">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <Segmented value={value.keySource} onChange={chooseKeySource}
+            options={[{ id: "tenexity", label: "Use Tenexity's key" }, { id: "byok", label: "Bring your own key", disabled: true }]} />
+          {value.keySource === "tenexity"
+            ? <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 11px", background: T.brandSoft + "66", border: `1px solid ${T.brand}33`, borderRadius: T.rMd }}>
+              <Sparkle size={12} color={T.brandDeep} />
+              <span style={{ font: `400 12px/1.4 ${T.sans}`, color: T.secondary }}>
+                {value.provider === "claude" ? "Claude" : "OpenCode"} runs on Tenexity's key — billed through your plan + rolled into the project budget.
+              </span>
+            </div>
+            : <TextInput type="password" value={value.key} onChange={(v) => set({ key: v })}
+                placeholder={value.provider === "claude" ? "sk-ant-…" : "paste provider API key"} />}
+        </div>
+      </Field>
+    </div>
+  );
+}
+
 const fileToB64 = (file: File): Promise<string> => new Promise((resolve) => {
   const r = new FileReader();
   r.onload = () => resolve(String(r.result || "").split(",")[1] || "");
@@ -146,6 +233,9 @@ export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: 
   // project answers (shared)
   const [p, setP] = useState<{ name: string; goal: string; scope: string[]; video: boolean; docs: boolean }>(
     { name: "", goal: "", scope: [], video: false, docs: false });
+  // Build engine (Claude | OpenCode+Kimi/GLM). Default = Claude on Tenexity's key. GLM + BYOK are
+  // gated "coming soon" in the picker until #38 wires them; only the two live paths persist runtime.
+  const [engine, setEngine] = useState<EngineValue>({ provider: "claude", model: "kimi", keySource: "tenexity", key: "" });
   // Real uploaded filenames per material slot (drives the Dropzone list — no dummy data).
   const [mats, setMats] = useState<{ video: { name: string; size?: string }[]; docs: { name: string; size?: string }[] }>({ video: [], docs: [] });
   const setProj = (k: string, v: any) => setP((x) => ({ ...x, [k]: v }));
@@ -183,7 +273,7 @@ export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: 
         setP((x) => ({ ...x, video: vids.length > 0, docs: others.length > 0 }));
       }).catch(() => {});
     } else {
-      api.createDraft().then(({ project_id }) => setDraftId(project_id)).catch(() => {});
+      api.createDraft({ runtime: engine.provider }).then(({ project_id }) => setDraftId(project_id)).catch(() => {});
     }
   }, [resumeProjectId]);
 
@@ -197,6 +287,18 @@ export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: 
     }, 700);
     return () => clearTimeout(t);
   }, [draftId, p.name, p.goal, p.scope]);
+
+  // DEBOUNCED build-engine write-through: runtime (claude|opencode) is the only field the backend
+  // persists today; model/keySource/key ride along forward-ready (ignored by Pydantic until #38).
+  // Without this the eager create's runtime (default claude) is the value used at promote, silently
+  // dropping an OpenCode selection.
+  useEffect(() => {
+    if (!draftId) return;
+    const t = setTimeout(() => {
+      api.patchDraft(draftId, { runtime: engine.provider, model: engine.model, keySource: engine.keySource, key: engine.key }).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [draftId, engine.provider, engine.model, engine.keySource, engine.key]);
 
   // fresh company write-through: POST once (create + link), PATCH thereafter. Guarded against dup.
   const saveCompanyFresh = useCallback(async () => {
@@ -283,6 +385,7 @@ export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: 
     try {
       if (fresh) await saveCompanyFresh();                                    // flush company
       await api.patchDraft(draftId, { name: p.name, goal: p.goal, scope: p.scope }).catch(() => {}); // flush project
+      await api.patchDraft(draftId, { runtime: engine.provider, model: engine.model, keySource: engine.keySource, key: engine.key }).catch(() => {}); // flush engine
       const { project_id } = await api.promote(draftId, { target: "railway" });
       onComplete(project_id);
     } catch (e: any) {
@@ -386,6 +489,9 @@ export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: 
                   <Card cat="Your first project" title="Scope of work" desc="Which parts of the business does this project touch?">
                     <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
                   </Card>
+                  <Card cat="Your first project" title="Build engine" desc="Choose the coding agent that builds this project. The factory, console, and output look the same either way.">
+                    <EnginePicker value={engine} onChange={setEngine} />
+                  </Card>
                   <Card cat="Your first project" title="Project materials" desc="A walkthrough recording is the highest-signal input you can give.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                       <Field label="Walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} /></Field>
@@ -440,6 +546,9 @@ export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: 
                   </Card>
                   <Card cat="This project" title="Scope of work" desc="Which parts of the business does this project touch?">
                     <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
+                  </Card>
+                  <Card cat="This project" title="Build engine" desc="Choose the coding agent that builds this project. The factory, console, and output look the same either way.">
+                    <EnginePicker value={engine} onChange={setEngine} />
                   </Card>
                   <Card cat="This project" title="Project materials" desc="We already have your line card & pricing on file — only add what's specific to this project.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

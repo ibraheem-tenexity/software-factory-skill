@@ -138,6 +138,7 @@ class DraftPatchIn(BaseModel):
     name: str | None = None
     goal: str | None = None
     scope: list | None = None
+    runtime: str | None = None   # "claude"|"opencode" — lets the Build-engine card update the draft's runtime after the eager create
 
 
 class AttachIn(BaseModel):

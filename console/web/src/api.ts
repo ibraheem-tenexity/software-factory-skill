@@ -320,9 +320,12 @@ export const api = {
     send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "PATCH", body),
   adminDeleteAccess: (email: string) => send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "DELETE"),
   // ── Onboarding draft model (docs/plans/concierge-onboarding-api.md) ──
-  createDraft: (body?: { project_name?: string }) =>
+  // runtime ("claude"|"opencode") is the only field the backend persists today (DraftCreateIn.runtime
+  // → projectstate.runtime → promote). model/keySource/key are sent forward-ready — ignored by the
+  // backend until #38 wires GLM + BYOK key storage. keySource stays "tenexity" while BYOK is gated.
+  createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string }) =>
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),
-  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[] }) =>
+  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string }) =>
     send<{ name: string; goal: string; scope: string[]; description: string; brief: Record<string, string>; coverage: Record<string, boolean> }>(`/api/projects/${id}/draft`, "PATCH", body),
   // Read counterpart to PATCH /draft (qsvigmth's run-control PR #48) — rehydrates the intake form
   // when RESUMING an existing draft instead of minting a new one.

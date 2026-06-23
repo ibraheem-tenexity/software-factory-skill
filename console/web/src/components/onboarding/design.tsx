@@ -199,6 +199,31 @@ export function Chips({ options, value, onChange, multi }:
   return <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{options.map((o) => <Chip key={o} selected={isOn(o)} onClick={() => toggle(o)}>{o}</Chip>)}</div>;
 }
 
+// Pill-track segmented control (two-option toggle). Options may be disabled — a disabled option
+// renders greyed with a "SOON" tag and is not selectable (used to gate not-yet-wired backend paths).
+export function Segmented({ value, onChange, options }:
+  { value: string; onChange?: (v: string) => void;
+    options: { id: string; label: string; disabled?: boolean }[] }) {
+  return (
+    <div style={{ display: "inline-flex", padding: 3, gap: 2, background: T.sunken, borderRadius: 9999, border: `1px solid ${T.borderSubtle}` }}>
+      {options.map((o) => {
+        const on = value === o.id;
+        return (
+          <button key={o.id} disabled={o.disabled} onClick={() => !o.disabled && onChange && onChange(o.id)}
+            style={{ font: `500 12.5px/1 ${T.sans}`, padding: "7px 13px", borderRadius: 9999,
+              cursor: o.disabled ? "not-allowed" : "pointer", border: "none",
+              background: on ? T.raised : "transparent", color: on ? T.fg : o.disabled ? T.tertiary : T.secondary,
+              opacity: o.disabled ? 0.55 : 1, display: "inline-flex", alignItems: "center", gap: 5,
+              boxShadow: on ? T.shadowXs : "none" }}>
+            {o.label}
+            {o.disabled && <span style={{ font: `700 8px/1 ${T.mono}`, color: T.tertiary, background: T.raised, padding: "2px 4px", borderRadius: 3 }}>SOON</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function IndustryTile({ item, selected, onClick, compact }:
   { item: Industry; selected?: boolean; onClick?: () => void; compact?: boolean }) {
   return (

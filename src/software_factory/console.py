@@ -934,17 +934,21 @@ class Console:
                 "description": state.description or "", "brief": brief, "coverage": _cov(brief)}
 
     def set_draft_project(self, project_id: str, name: str | None = None,
-                          goal: str | None = None, scope: list | None = None) -> dict:
+                          goal: str | None = None, scope: list | None = None,
+                          runtime: str | None = None) -> dict:
         """Structured project setter for the Option C onboarding (draft phase). Writes the project
-        name, the goal (into brief.goals so it reaches the Stage-1 brief block), and the scope-of-work
-        backing — then RECOMPOSES the canonical description = compose(goal, scope) server-side, so the
-        form and the concierge agent never duplicate the format. Each field is optional; goal and scope
-        recompose against each other's persisted value so independent calls stay idempotent.
+        name, the goal (into brief.goals so it reaches the Stage-1 brief block), the scope-of-work
+        backing, and the build-engine runtime (claude|opencode) — then RECOMPOSES the canonical
+        description = compose(goal, scope) server-side, so the form and the concierge agent never
+        duplicate the format. Each field is optional; goal and scope recompose against each other's
+        persisted value so independent calls stay idempotent.
         Returns {name, goal, scope, description, brief, coverage}."""
         from .brief import compose_description, coverage as _cov
         state = self._load_state(project_id)
         if name is not None:
             state.name = name
+        if runtime is not None:
+            state.runtime = runtime
         brief = dict(state.brief or {})
         if goal is not None:
             brief["goals"] = goal
