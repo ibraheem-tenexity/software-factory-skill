@@ -281,6 +281,16 @@ def project_release(pid: str, v: tuple = Depends(authorize_project)):
 
 
 # ── Draft write-through + handoff (Option C onboarding; drafts only) ──────────────────────────
+@router.get("/api/projects/{pid}/draft")
+def get_draft(pid: str, v: tuple = Depends(authorize_project)):
+    """Read the draft's intake fields to REHYDRATE the onboarding form when resuming an existing draft
+    (the read counterpart to PATCH /draft). Returns {name, goal, scope, description, brief, coverage}.
+    Draft-only: a promoted project has no editable draft intake."""
+    if not state.console.is_draft(pid):
+        raise HTTPException(status_code=409, detail="not a draft (already promoted)")
+    return state.console.draft_project(pid)
+
+
 @router.patch("/api/projects/{pid}/draft")
 def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_project)):
     """Structured project write-through: {name?, goal?, scope?}. Server composes the canonical

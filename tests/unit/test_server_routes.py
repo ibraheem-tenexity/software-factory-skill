@@ -243,6 +243,22 @@ def test_create_draft_then_patch_composes_description(client):
     assert body["brief"]["goals"] == "Replace the manual quoting spreadsheet."
 
 
+def test_get_draft_rehydrates_intake_fields(client):
+    # Resume an existing draft: GET /draft returns the fields to refill the onboarding form (read
+    # counterpart to PATCH /draft) — no new draft minted.
+    rid = client.post("/api/drafts", json={"project_name": "Quote-to-Epicor"}).json()["project_id"]
+    client.patch(f"/api/projects/{rid}/draft", json={
+        "name": "Quote-to-Epicor", "goal": "Replace the manual quoting spreadsheet.",
+        "scope": ["Quoting / RFQ"]})
+    d = client.get(f"/api/projects/{rid}/draft").json()
+    assert d["name"] == "Quote-to-Epicor" and d["goal"] == "Replace the manual quoting spreadsheet."
+    assert d["scope"] == ["Quoting / RFQ"] and "description" in d and "brief" in d and "coverage" in d
+
+
+def test_get_draft_409_on_non_draft(client):
+    assert client.get("/api/projects/project-deadbeef/draft").status_code == 409
+
+
 def test_attach_to_draft_endpoint(client):
     rid = client.post("/api/drafts", json={}).json()["project_id"]
     r = client.post(f"/api/projects/{rid}/attach", json={"files": []})
