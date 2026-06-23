@@ -154,3 +154,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. src/software_factory/console.py (_launch_stage: BYOK-or-platform runner-key inject), console/routers/projects.py (deps-route launches Stage 3), tests/unit/test_console.py (+3 tests).
 3. ROOT CAUSE: stage_env_baseline scrubbed ANTHROPIC/OPENROUTER from the claude -p runner (the scrub protects the BUILT APP, but the runner needs the key) → Stage 1 died at auth → 0%. Fix injects the runtime key into the runner env only (guardrail: stage_env_baseline still scrubs by default → never reaches the customer app); BYOK wins over platform.
 4. PROVEN LIVE (project-b0227fcf): stage1_done+stage2_done+14 real tickets, claude -p authed ($0.55→$10). gpt-5.4 probed VALID (gpt-5.4-2026-03-05). (A) verify: 4 live cards render real SKILL.md/CONCIERGE prompts (prompt_applied=true). KNOWN edge: mid-run console restart leaves finished Stage-2 child reading "alive" via _stage_process_alive → Stage2→3 won't auto-advance (deployed-app bonus blocked; optional qsvigmth follow-up). See [[factory-runs-keyinjection]].
+
+# Tenexity OS agent Update at Time: 23:06:2026:21:25:00.000
+1. Implemented staff-only "Make Tenexity admin" control in the OS master users table and opened PR #49.
+2. console/web/src/admin/users.tsx, console/web/src/api.ts.
+3. PATCH /api/admin/access/{email} now sends role + is_internal together; UI adds a Tenexity internal toggle in the user drawer + a row-menu quick action. Backend queued after provision-capture fix.
+4. Summary: tsc + build green; branch worktree-users-staff-toggle; hold merge until qsvigmth deploys the backend endpoint.
