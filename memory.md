@@ -64,3 +64,15 @@ phase complete.
 4. Summary: full unit suite 526 passed/1 skipped (the only reds were a missing google-auth dep in the local venv, now installed — not a code issue). Every route path/method/auth-dep/response shape byte-identical. Atomic PR; merge held by coordinator behind the OS-PR train. No data wiring changed; flagged agent_registry/mcp_tools as seeded-real-table (not fake) and activity[]/avg_friction as honest empties.
 
 KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued user-mgmt work) has NO brute-force throttle — add a minimal per-email/IP attempt limit or backoff before/after it ships. Generic 401 (never leak bad-pw vs no-pw vs disabled) is intentional.
+
+# main integrator (software-factory-skill) Update at Time: 23:06:2026:00:08:00.000
+1. SHIPPED the user-mgmt + OS-users train to prod in two serialized windows (ibraheem direct GO + standing operator-greenlight delegation): #25→#26→#24 (main 7aeedf4) then #27 OS users-management (main 51d241e).
+2. console/* (modularized package: state/deps/schemas/poller/routers), migrations/versions/0004_user_mgmt.py, src/software_factory/{auth,users,models}.py (scrypt hash_password/verify_password + authenticate_password + set_password + last_active + Tenexity-org seed), console/web/src/admin/users.tsx + LoginScreen.tsx + api.ts.
+3. Pre-flighted all 4 gates locally before GO (0003→0004 rehearsed additive/idempotent; password reuses sign_session+status gate; pure-move preserved viewer/_staff_session; 534 green). Each window: rebase→build SPA→railway up→verify checklist.
+4. Verify GREEN both windows: 0004 applied, auth gates no-regression after pure-move, Tenexity-org seed (ibraheem row org="Tenexity"/admin/active + 0004 cols), password error-path generic-401, users screen renders REAL /api/admin/access rows. Closed merged-but-open PRs #19/20/21/24/26.
+
+# main integrator (software-factory-skill) Update at Time: 23:06:2026:00:09:00.000  [SECURITY — ACTION NEEDED]
+1. RATE-LIMIT HARD GATE IS LIVE-SCOPE NOW, not a future window: #26 already shipped password PROVISIONING (admin_os.py admin_invite → users.set_password when method=="password") AND the unthrottled POST /api/auth/password login — both live @7aeedf4/51d241e. #27 adds the AddUser password UI.
+2. console/routers/admin_os.py:215 (set_password call), console/routers/auth.py (/api/auth/password, no throttle), src/software_factory/users.py authenticate_password.
+3. Not exploitable THIS instant (provisioning is require_staff; ZERO passwords provisioned — ibraheem=google/hash NULL), but one staff click from a brute-forceable account on an unthrottled endpoint. I escalated to ibraheem.
+4. REQUIRED before anyone uses method=password in prod: qsvigmth's per-email/IP throttle (or hard-disable method==password in admin_invit until then). Interim control: provision NO passwords. Escalated to ibraheem for his call (throttle-first vs code-guard vs operational-hold).
