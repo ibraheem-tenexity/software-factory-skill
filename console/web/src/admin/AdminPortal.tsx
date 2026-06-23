@@ -3,6 +3,7 @@ import { T } from "./tokens";
 import { Icon } from "./primitives";
 import { api } from "../api";
 import type { AdminAgent, AdminClient, AdminTool } from "../api";
+import { useAdminFetch } from "./hooks";
 import { UsersManagement } from "./users";
 import { AdminClients, AdminProjectsView, AdminAgents, AdminTools, AdminOverview, AdminFactories, AdminSettings, AdminSymphony } from "./views";
 import { AgentPromptPanel, ClientModal, AgentModal, ToolModal, ConfirmDelete } from "./modals";
@@ -81,13 +82,16 @@ export function AdminPortal() {
     { id: "settings", label: "Settings", icon: "settings" },
   ] as const;
 
-  const pulse = [
-    ["AGENTS_ACTIVE", "—"],
-    ["TASKS_RUNNING", "—"],
-    ["AVG_FRICTION", "—"],
-    ["TODAY_BURN", "—"],
-    ["PROJECTS", "—"],
-  ];
+  const { data: overview } = useAdminFetch(() => api.adminOverview());
+  const pulse = overview?.pulse;
+
+  const pulseItems = [
+    ["AGENTS_ACTIVE", pulse?.agents_active ?? "—"],
+    ["TASKS_RUNNING", pulse?.projects_active ?? "—"],
+    ["AVG_FRICTION", pulse?.avg_friction ?? "—"],
+    ["TODAY_BURN", typeof pulse?.today_burn === "number" ? `$${pulse.today_burn.toFixed(2)}` : pulse?.today_burn ?? "—"],
+    ["PROJECTS", pulse?.projects ?? "—"],
+  ] as [string, string | number][];
 
   const handleDelete = () => {
     if (!deleteTarget) return;
@@ -208,7 +212,7 @@ export function AdminPortal() {
               </span>
               <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.success }} />
             </div>
-            {pulse.map(([k, v]) => (
+            {pulseItems.map(([k, v]) => (
               <span key={k} style={{ display: "inline-flex", alignItems: "baseline", gap: 6 }}>
                 <span style={{ font: `500 11px/1 ${T.mono}`, letterSpacing: "0.04em", color: T.tertiary }}>{k}:</span>
                 <span style={{ font: `600 12px/1 ${T.mono}`, color: T.fg }}>{v}</span>

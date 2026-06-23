@@ -123,9 +123,10 @@ export type OrgInput = Partial<Omit<Org, "id" | "created_at" | "created_by">> & 
 export type AdminPulse = {
   tenants?: number;
   projects?: number;
+  projects_active?: number | null;
   agents_active?: number;
   agents_total?: number;
-  today_burn?: string;
+  today_burn?: number | string;
   avg_friction?: number | null;
 };
 
