@@ -634,40 +634,6 @@ export function AdminAgents({
           </>
         }
       />
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          padding: "12px 16px",
-          borderRadius: T.rLg,
-          border: `1px solid ${T.warning}55`,
-          background: `${T.warningSoft}55`,
-          marginBottom: 20,
-          flexWrap: "wrap",
-        }}
-      >
-        <span
-          style={{
-            font: `600 10px/1 ${T.mono}`,
-            letterSpacing: "0.06em",
-            color: T.warning,
-            background: T.warningSoft,
-            border: `1px solid ${T.warning}55`,
-            padding: "4px 7px",
-            borderRadius: 4,
-          }}
-        >
-          {String.fromCharCode(9888)} DRIFT DETECTED · 1
-        </span>
-        <Mono style={{ fontSize: 11.5 }}>
-          pinned <b style={{ color: T.fg }}>0.0.0</b> · current <b style={{ color: T.fg }}>0.1.0</b> (Δ 1 minor)
-        </Mono>
-        <Mono style={{ flex: 1, fontSize: 11.5, color: T.danger }}>
-          [MISSING] .tenexity/lockfile.json — repo never synced with tenexity standards
-        </Mono>
-        <Mono style={{ fontSize: 11 }}>ok 0 · missing 1 · modified 0 · outdated 0</Mono>
-      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
         {filtered.map((a) => (
           <AgentCard key={a.callsign} a={a} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} />
