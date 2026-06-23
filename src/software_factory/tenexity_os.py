@@ -100,7 +100,7 @@ def stage_skill_detail(callsign: str, runtime: str = "claude") -> dict | None:
     card = next(c for c in stage_skill_cards() if c["callsign"] == s["callsign"])
     return {
         **card, "desc": desc if desc is not None else card["desc"],
-        "prompt": body, "prompt_source": "skill_file", "prompt_applied": True, "editable": False,
+        "prompt": body, "prompt_source": "skill_file", "prompt_applied": True, "editable": True,
         "skill": s["slug"], "skill_path": f"skills/{s['slug']}/{_skill_filename(runtime)}",
         "runtime": runtime, "variants": _skill_variants(s["slug"]),
     }
@@ -140,7 +140,7 @@ def concierge_detail(callsign: str) -> dict | None:
     prompt, model = _concierge()
     return {
         **concierge_card(), "model": model, "prompt": prompt, "prompt_source": "code",
-        "prompt_applied": True, "editable": False,
+        "prompt_applied": True, "editable": True,
         "source_ref": "src/software_factory/chat_agent.py:CONCIERGE_INSTRUCTIONS",
     }
 
@@ -153,6 +153,13 @@ def live_agent_cards() -> list:
 def live_agent_detail(callsign: str, runtime: str = "claude") -> dict | None:
     """Detail for a stage skill or the concierge; None if `callsign` is neither."""
     return stage_skill_detail(callsign, runtime) or concierge_detail(callsign)
+
+
+def is_editable_orchestrator(callsign: str) -> bool:
+    """True for the 4 MAIN cards whose web edits DRIVE runs (3 stage skills + concierge). The 12 role
+    cards are NOT here — their prompt edits stay stored-not-applied (subagent prompts = later part-2b)."""
+    cs = (callsign or "").upper()
+    return cs in _STAGE_BY_CALLSIGN or cs == CONCIERGE_CALLSIGN
 
 
 # ── cross-run SQL (flat Postgres tables; no per-run accessor exposes these) ───────────────────────

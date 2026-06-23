@@ -95,6 +95,7 @@ def prepare_workspace(
     skills_dir: str | None = None,
     phase_dir: str | None = None,
     runtime: str = "claude",
+    skill_override: str | None = None,
 ) -> str:
     ws = workspace.create(projects_dir, project_id)
 
@@ -110,16 +111,21 @@ def prepare_workspace(
         with open(os.path.join(ws, "claude-settings.json"), "w") as f:
             json.dump(CLAUDE_SETTINGS, f, indent=2)
 
-    # Stage contract: the opencode variant (monolithic framing) when it exists and the runtime
-    # asks for it; the claude SKILL.md otherwise. Both land as ws/SKILL.md — the prompts and
-    # opencode.json `instructions` reference that one name.
-    src_skill = _skill_file(stage, skills_dir)
-    if runtime == "opencode":
-        oc_skill = src_skill.replace("SKILL.md", "SKILL.opencode.md")
-        if os.path.isfile(oc_skill):
-            src_skill = oc_skill
-    if os.path.isfile(src_skill):
-        shutil.copy2(src_skill, os.path.join(ws, "SKILL.md"))
+    # Stage contract → ws/SKILL.md (both the prompt and opencode.json `instructions` reference that
+    # one name). An operator's web edit (skill_override, resolved per-runtime by the caller from the
+    # PromptStore) WINS — written verbatim; otherwise copy the on-disk default (the opencode variant's
+    # monolithic framing when it exists and the runtime asks for it, else the claude SKILL.md).
+    if skill_override is not None:
+        with open(os.path.join(ws, "SKILL.md"), "w") as f:
+            f.write(skill_override)
+    else:
+        src_skill = _skill_file(stage, skills_dir)
+        if runtime == "opencode":
+            oc_skill = src_skill.replace("SKILL.md", "SKILL.opencode.md")
+            if os.path.isfile(oc_skill):
+                src_skill = oc_skill
+        if os.path.isfile(src_skill):
+            shutil.copy2(src_skill, os.path.join(ws, "SKILL.md"))
 
     src_phases = phase_dir or PHASE_DIR
     if os.path.isdir(src_phases):

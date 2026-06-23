@@ -11,6 +11,17 @@ import os
 from . import dbshim
 
 
+def override_key(callsign: str, runtime: str | None = None) -> str:
+    """Composite PromptStore key for the EDITABLE orchestrator prompts (the override that drives runs).
+    Single source of truth shared by the OS Agents API and the pipeline:
+      • stage skills are PER-RUNTIME → "STAGE-1::claude" / "STAGE-1::opencode" (the claude & opencode
+        SKILL.md variants are framed differently and must never cross over);
+      • the concierge is single → "CONCIERGE".
+    Distinct from role-agent callsigns (ATLAS/…) so override rows never collide with role-prompt rows."""
+    cs = (callsign or "").upper()
+    return f"{cs}::{runtime}" if runtime and cs.startswith("STAGE-") else cs
+
+
 class PromptStore:
     def __init__(self, sqlite_path: str = ""):
         # `sqlite_path` is vestigial (Postgres everywhere); kept for call-site symmetry.
@@ -61,3 +72,12 @@ class PromptStore:
         finally:
             conn.close()
         return self.get(callsign)
+
+    def delete(self, callsign: str) -> None:
+        """Drop a stored prompt (revert-to-default for the editable orchestrator overrides)."""
+        conn = self._conn()
+        try:
+            with conn.transaction():
+                conn.cursor().execute("DELETE FROM public.agent_prompts WHERE callsign=%s", (callsign,))
+        finally:
+            conn.close()

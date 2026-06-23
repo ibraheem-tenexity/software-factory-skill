@@ -4,6 +4,7 @@ import datetime
 from fastapi import APIRouter, Depends, HTTPException
 
 from software_factory import tenexity_os
+from software_factory.agent_prompts import override_key
 from software_factory.users import TENEXITY_ORG_ID
 
 import console.state as state
@@ -74,6 +75,15 @@ def admin_agent(callsign: str, runtime: str = "claude", v: tuple = Depends(requi
     # editable PromptStore prompt (applied=false).
     live = tenexity_os.live_agent_detail(callsign, runtime)
     if live:
+        # Overlay any operator override → the EFFECTIVE prompt that will drive the next run. Stages key
+        # per-runtime ("STAGE-1::claude"); concierge is single. is_default/overridden/version let the FE
+        # show edited-vs-default + a revert control.
+        ov = state.prompts.get(override_key(callsign, live.get("runtime")))
+        if ov:
+            live = {**live, "prompt": ov["prompt"], "version": ov["version"], "is_default": False,
+                    "overridden": True, "updated_by": ov["updated_by"], "updated_at": ov["updated_at"]}
+        else:
+            live = {**live, "version": 0, "is_default": True, "overridden": False}
         return {**live, "tools": [t for t in state.tool_store.all() if t["status"] == "connected"],
                 "activity": []}
     cs = callsign.upper()
@@ -117,12 +127,44 @@ def admin_agent_delete(callsign: str, v: tuple = Depends(require_staff)):
     return {"ok": True}
 
 
+def _stage_runtime(cs: str, runtime: str | None) -> str | None:
+    """Validate + normalize the runtime for a prompt write/revert: required (claude|opencode) for stage
+    skills, ignored for the concierge."""
+    if not cs.startswith("STAGE-"):
+        return None
+    if runtime not in ("claude", "opencode"):
+        raise HTTPException(status_code=400, detail="runtime (claude|opencode) required for stage skills")
+    return runtime
+
+
 @router.patch("/api/admin/agents/{callsign}/prompt")
 def admin_set_prompt(callsign: str, body: PromptIn, v: tuple = Depends(require_staff)):
-    row = state.prompts.set(callsign.upper(), body.prompt or "", by=v[0] or "")
+    cs = callsign.upper()
+    if tenexity_os.is_editable_orchestrator(cs):
+        # The 4 MAIN cards: the edit is the override that DRIVES the next run (stages per-runtime via
+        # ws/SKILL.md, concierge via the Agent's instructions). applied=true, NOT retroactive to in-flight.
+        rt = _stage_runtime(cs, body.runtime)
+        row = state.prompts.set(override_key(cs, rt), body.prompt or "", by=v[0] or "")
+        return {"callsign": cs, "runtime": rt, "version": row["version"],
+                "updated_by": row["updated_by"], "updated_at": row["updated_at"],
+                "applied": True, "is_default": False}
+    # Role/specialist agents: stored, NOT yet applied (subagent managed prompts = later part-2b).
+    row = state.prompts.set(cs, body.prompt or "", by=v[0] or "")
     return {"callsign": row["callsign"], "prompt": row["prompt"], "version": row["version"],
             "updated_by": row["updated_by"], "updated_at": row["updated_at"],
-            "applied": False}   # honest: stored, not yet applied to live agents
+            "applied": False}
+
+
+@router.delete("/api/admin/agents/{callsign}/prompt")
+def admin_revert_prompt(callsign: str, runtime: str | None = None, v: tuple = Depends(require_staff)):
+    # Revert an editable orchestrator to its on-disk/code default (drop the override). Per-runtime for
+    # stages. The next run uses the default again.
+    cs = callsign.upper()
+    if not tenexity_os.is_editable_orchestrator(cs):
+        raise HTTPException(status_code=404, detail="no editable override for this agent")
+    rt = _stage_runtime(cs, runtime)
+    state.prompts.delete(override_key(cs, rt))
+    return {"callsign": cs, "runtime": rt, "version": 0, "is_default": True}
 
 
 # Tools / MCP registry (real datastore) -----------------------------------------------------------

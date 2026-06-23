@@ -318,9 +318,20 @@ class ChatAgentRunner:
                            viewer=lambda: self._pending_viewer,
                            draft_id=lambda: self._pending_draft_id,
                            interview=lambda: self._pending_interview_md)
+        # Operator override: a staff edit to the CONCIERGE prompt in the OS Agents dashboard drives the
+        # live agent; else the CONCIERGE_INSTRUCTIONS default. Best-effort — a store hiccup must never
+        # stop the concierge from starting. Read at construction → takes effect for the next session.
+        instructions = CONCIERGE_INSTRUCTIONS
+        try:
+            from software_factory.agent_prompts import PromptStore, override_key
+            row = PromptStore().get(override_key("CONCIERGE"))
+            if row and row.get("prompt"):
+                instructions = row["prompt"]
+        except Exception:
+            pass
         self._agent = Agent(
             name="Factory Concierge",
-            instructions=CONCIERGE_INSTRUCTIONS,
+            instructions=instructions,
             tools=tools,
             model=select_chat_model(),
         )
