@@ -333,7 +333,9 @@ def test_stage_finished_respects_a_live_stage3_pidfile_over_an_idle_log(tmp_path
         f.write("{}\n")
     idle = _time.time() - 600
     os.utime(log, (idle, idle))                      # idle far past the 2-min grace
-    p = subprocess.Popen(["bash", "-c", f"# {rid}\nsleep 30"])
+    # python (not `bash -c`) so the rid stays in /proc cmdline — bash exec-optimizes `-c` into bare
+    # `sleep`, dropping the comment, which made the pid-alive check race (flaky).
+    p = subprocess.Popen(["python3", "-c", f"import time;time.sleep(30)  # {rid}"])
     with open(os.path.join(base, "stage3.pid"), "w") as f:
         f.write(str(p.pid))
     try:
@@ -342,6 +344,42 @@ def test_stage_finished_respects_a_live_stage3_pidfile_over_an_idle_log(tmp_path
         p.kill()
         p.wait()
     assert c.stage_finished(rid) is True             # dead pid -> log-idle fallback
+
+
+def test_completed_opencode_session_beats_a_lingering_pid_after_restart(tmp_path, monkeypatch):
+    # 45b8c4d5 + 5b7aef7a combined: after a console RESTART (no handle), an opencode proc that LINGERS
+    # post-session keeps stage3.pid "alive" — which previously WEDGED the Stage2→3 advance. A
+    # session-terminal log past the grace must WIN over the lingering pid so the poller advances.
+    import subprocess
+    import json as _json, os as _os, time as _time
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    ids = iter(["project-rs"])
+    c = Console(str(tmp_path), launch=FakeLauncher(), new_id=lambda: next(ids), extract=lambda p: "# x")
+    rid = c.start_project(ProjectRequest(description="x"))
+    c._procs.pop(rid, None)                          # simulate the restart — handle is gone
+    base = _os.path.join(str(tmp_path), rid)
+    log = _os.path.join(base, "project.log")
+    with open(log, "w") as f:                        # session-terminal: step_finish reason=stop
+        f.write(_json.dumps({"type": "step_finish",
+                             "part": {"type": "step-finish", "reason": "stop"}}) + "\n")
+    old = _time.time() - 400
+    _os.utime(log, (old, old))                       # idle past the 5-min grace
+    # python (not `bash -c`) so the rid stays in /proc cmdline — bash exec-optimizes `-c` into bare
+    # `sleep`, dropping the comment, which made the pid-alive check race (flaky).
+    p = subprocess.Popen(["python3", "-c", f"import time;time.sleep(30)  # {rid}"])   # lingering zombie naming the run
+    with open(_os.path.join(base, "stage3.pid"), "w") as f:
+        f.write(str(p.pid))
+    try:
+        assert c.stage_finished(rid) is True         # completed session beats the lingering pid → advance
+        # control: a mid-flight pause (reason=tool-calls) with the SAME live pid must NOT finish
+        with open(log, "w") as f:
+            f.write(_json.dumps({"type": "step_finish",
+                                 "part": {"type": "step-finish", "reason": "tool-calls"}}) + "\n")
+        _os.utime(log, (old, old))
+        assert c.stage_finished(rid) is False        # not session-complete + live pid = still running
+    finally:
+        p.kill()
+        p.wait()
 
 
 def test_stage_pid_alive_rejects_recycled_pids(tmp_path):
