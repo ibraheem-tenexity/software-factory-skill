@@ -5,7 +5,8 @@ import { api } from "../api";
 import type { AdminAgent, AdminClient, AdminTool } from "../api";
 import { useAdminFetch } from "./hooks";
 import { UsersManagement } from "./users";
-import { AdminClients, AdminProjectsView, AdminAgents, AdminTools, AdminOverview, AdminFactories, AdminSettings, AdminSymphony } from "./views";
+import { AccountMenu } from "./AccountMenu";
+import { AdminClients, AdminProjectsView, AdminAgents, AdminTools, AdminOverview, AdminFactories, AdminSettings, AdminSymphony, AdminBtn } from "./views";
 import { AgentPromptPanel, ClientModal, AgentModal, ToolModal, ConfirmDelete } from "./modals";
 
 const NAV_PATHS: Record<string, string> = {
@@ -269,6 +270,12 @@ export function AdminPortal() {
               >
                 ⌘K
               </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <AdminBtn onClick={() => (window.location.href = "/")}>
+                <Icon name="arrowLeft" size={14} color={T.fg} /> Back to console
+              </AdminBtn>
+              <AccountMenu />
             </div>
           </div>
           {/* content */}
