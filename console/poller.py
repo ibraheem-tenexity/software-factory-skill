@@ -247,6 +247,14 @@ def _boot():
         except Exception as e:
             print(f"[owners] backfill FAILED: {e}", flush=True)
 
+    # Backfill the immutable created_by from the current owner for pre-existing projects (idempotent).
+    try:
+        n = console.backfill_created_by()
+        if n:
+            print(f"[created_by] backfilled {n} project(s) from owner", flush=True)
+    except Exception as e:
+        print(f"[created_by] backfill FAILED: {e}", flush=True)
+
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -422,6 +422,38 @@ def test_stop_project_without_live_process_still_stops(tmp_path):
     assert c._terminal(c._load_state(rid)) is True
 
 
+def test_created_by_stamped_at_draft_and_immutable_through_promote(tmp_path):
+    # created_by is set ONCE at creation and never mutates — even when owner is reassigned or the draft
+    # is promoted. owner stays the reassignable current owner.
+    c = Console(str(tmp_path), launch=FakeLauncher(), new_id=lambda: "project-cb1")
+    rid = c.create_draft(owner="alice@x.com", name="P")
+    st = c._load_state(rid)
+    assert st.created_by == "alice@x.com" and st.created_at > 0
+    st.owner = "bob@x.com"; st.save()                       # owner reassigned
+    c.promote_draft(rid)                                    # _provision_and_launch runs
+    after = c._load_state(rid)
+    assert after.created_by == "alice@x.com"                # IMMUTABLE
+    assert after.owner == "bob@x.com"                       # owner is the reassignable one
+
+
+def test_created_by_stamped_on_direct_start_project(tmp_path):
+    c = Console(str(tmp_path), launch=FakeLauncher(), new_id=lambda: "project-cb3")
+    rid = c.start_project(ProjectRequest(description="x", owner="carol@x.com"))
+    assert c._load_state(rid).created_by == "carol@x.com"
+
+
+def test_backfill_created_by_from_owner_is_idempotent_and_surfaced(tmp_path):
+    c = Console(str(tmp_path), launch=FakeLauncher(), new_id=lambda: "project-cb4")
+    rid = c.start_project(ProjectRequest(description="x", owner="dan@x.com"))
+    st = c._load_state(rid); st.created_by = ""; st.created_at = 0.0; st.save()   # simulate legacy row
+    assert c.backfill_created_by() == 1
+    st2 = c._load_state(rid)
+    assert st2.created_by == "dan@x.com" and st2.created_at > 0
+    assert c.backfill_created_by() == 0                     # idempotent
+    row = next(r for r in c.list_projects() if r["project_id"] == rid)
+    assert row["created_by"] == "dan@x.com"                 # surfaced for "which projects did X create"
+
+
 def test_run_spend_is_per_run_not_cumulative(tmp_path):
     # Per-run budget: each run/project is capped independently. _project_spend reflects ONLY this run's
     # own spend; a prior run's spend does not count against another.
