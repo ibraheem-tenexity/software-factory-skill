@@ -110,7 +110,7 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
         </div>
 
         <main style={{ overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
-          <StageRail graph={graph} phaseStates={phaseStates} depsSatisfied={!!status.deps_satisfied} />
+          <StageRail graph={graph} phaseStates={phaseStates} depsSatisfied={!!status.deps_satisfied} atDeps={showDeps} />
 
           {showDeps && <WaitForDeps projectId={projectId} onResolved={() => api.status(projectId).then(setStatus).catch(() => {})} />}
 
