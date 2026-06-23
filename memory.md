@@ -130,3 +130,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/admin/modals.tsx.
 3. Matches backend contract exactly; no functional change.
 4. Summary: PR #39 final; tsc + build green; waiting for qsvigmth deployed-tip ping and coordinator batch.
+
+# Tenexity OS agent Update at Time: 23:06:2026:20:35:00.000  [RE-SCOPE / HOLD]
+1. Operator re-scoped the 4 live prompt cards to be EDITABLE from the OS web UI. Pending qsvigmth's PATCH/store contract before FE changes.
+2. console/web/src/admin/modals.tsx (planned changes), console/web/src/api.ts (planned PATCH contract).
+3. Need to reverse read-only rendering, add Save (PATCH /api/admin/agents/{callsign}/prompt), default-vs-override indicator, version display, revert-to-default. Coordinate with qsvigmth on runtime keying for stage skills.
+4. Summary: asked qsvigmth for PATCH body shape, default signal, revert endpoint, versioning, per-runtime overrides. Holding PR #39 FE changes until contract is locked.
