@@ -818,6 +818,11 @@ class Console:
         state.impl_model = req.impl_model if req.impl_model in IMPL_MODELS else ""
         state.held = bool(gated)
         state.owner = (req.owner or state.owner or "").lower()
+        # Immutable creator stamp — set ONCE (covers a direct start_project with no prior draft; a draft
+        # already stamped it in create_draft, so this never overwrites). Falls back to owner.
+        if not state.created_by:
+            state.created_by = state.owner
+            state.created_at = time.time()
         if brief is not None:
             state.brief = brief
         state.save()
@@ -854,6 +859,10 @@ class Console:
         state.skill_version = SKILL_VERSION
         state.name = name or ""
         state.owner = (owner or "").lower()
+        # Immutable creator stamp — set ONCE here (the earliest creation point); never mutated after.
+        if not state.created_by:
+            state.created_by = (owner or "").lower()
+            state.created_at = time.time()
         state.runtime = runtime or os.environ.get("SF_RUNTIME", "claude")
         state.planning_model = planning_model if planning_model in PLANNING_MODELS else ""
         state.impl_model = impl_model if impl_model in IMPL_MODELS else ""
@@ -1386,6 +1395,20 @@ class Console:
                 n += 1
         return n
 
+    def backfill_created_by(self) -> int:
+        """Backfill the immutable creator stamp from the current owner for pre-existing projects that
+        have no created_by yet. Idempotent (skips any already stamped). Returns how many it set."""
+        n = 0
+        for r in self.list_projects():
+            st = self._load_state(r["project_id"])
+            if not (st.created_by or "") and (st.owner or ""):
+                st.created_by = st.owner
+                if not st.created_at:
+                    st.created_at = r.get("updated") or time.time()
+                st.save()
+                n += 1
+        return n
+
     def list_projects(self, owner: str | None = None) -> list[dict]:
         """All runs (owner=None — admin/internal callers like the poller), or only those
         owned by `owner` (a member's email; '' never matches, so unowned runs stay admin-only)."""
@@ -1440,6 +1463,9 @@ class Console:
                 "budget_stopped": budget_stopped,
                 "held": st.held,
                 "owner": st.owner,
+                # Immutable creator (falls back to current owner for not-yet-backfilled rows).
+                "created_by": getattr(st, "created_by", "") or st.owner,
+                "created_at": getattr(st, "created_at", 0.0) or None,
                 "agents": roles[:5],
                 "updated": updated,
                 "runtime": st.runtime,

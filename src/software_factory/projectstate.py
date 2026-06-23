@@ -47,6 +47,7 @@ _PERSISTED = {
     "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
     "budget_ceiling", "held", "owner",
     "brief", "interview_coverage", "scope", "is_demo", "archived",
+    "created_by", "created_at",
 }
 
 
@@ -94,6 +95,10 @@ class ProjectState:
 
     # Soft-delete: archived projects are hidden from every listing (DELETE /api/runs/{id}).
     archived: bool = False
+    # IMMUTABLE creator attribution — set ONCE at creation, NEVER mutated (unlike `owner`, which is the
+    # reassignable current owner). created_by = the email that created the project; created_at = epoch.
+    created_by: str = ""
+    created_at: float = 0.0
     _store: Optional[Store] = field(default=None, repr=False, compare=False)
 
     @classmethod
