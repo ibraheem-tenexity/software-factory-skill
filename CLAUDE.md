@@ -64,6 +64,13 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## Goal & acceptance criteria (every task)
+
+Every task has a GOAL and explicit SATISFACTION / ACCEPTANCE CRITERIA — the concrete, verifiable conditions that define "done" (tests pass, endpoint returns X, screen renders/behaves like Y, no regression in Z). When you deliver (open the PR / hand off), RETURN both in your report:
+- **Goal** — what the task achieves, in one line.
+- **Acceptance criteria** — the checkable conditions that prove the goal is met, each marked pass/fail.
+This lets the integrator JUDGE the delivery against its own criteria before merging — not merely that it builds. If the operator handed you criteria, restate them and report pass/fail against each. If a task arrives without criteria, define them, state them back, and build to them. A PR/hand-off that doesn't state its goal + acceptance criteria gets bounced back.
+
 ## Architecture doc
 
 `docs/ARCHITECTURE.md` is the canonical description of how the system is built. **Update it on every
