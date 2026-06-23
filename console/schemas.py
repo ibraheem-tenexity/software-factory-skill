@@ -178,6 +178,7 @@ class InviteIn(BaseModel):
 class AccessPatchIn(BaseModel):
     role: str | None = None
     status: str | None = None
+    is_internal: bool | None = None   # Tenexity-staff flag; {role:"admin", is_internal:true} = "Make Tenexity admin"
 
 
 class AgentIn(BaseModel):
