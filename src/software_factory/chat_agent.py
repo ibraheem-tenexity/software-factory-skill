@@ -13,17 +13,25 @@ from software_factory.chat_store import ChatMessage
 from software_factory.console import Console
 
 
-def select_chat_model():
-    """Concierge model: gpt-4o (OpenAI) or Kimi K2.7 Code via OpenRouter's OpenAI-compatible API.
+_DEFAULT_OPENAI_CHAT_MODEL = "gpt-5.4"   # concierge default (was gpt-4o); SF_CHAT_MODEL overrides it
+_KIMI_MODEL = "moonshotai/kimi-k2.7-code"
 
-    SF_CHAT_MODEL=kimi forces Kimi; SF_CHAT_MODEL=gpt-4o forces OpenAI; unset picks gpt-4o when
-    OPENAI_API_KEY exists, else Kimi when only OPENROUTER_API_KEY does. The env flag IS the
-    rollback path if Kimi's function-calling misbehaves through the compat proxy."""
-    choice = os.environ.get("SF_CHAT_MODEL", "").strip().lower()
-    use_kimi = choice == "kimi" or (
+
+def _use_kimi(choice: str) -> bool:
+    return choice == "kimi" or (
         not choice and not os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENROUTER_API_KEY")
     )
-    if use_kimi:
+
+
+def select_chat_model():
+    """Concierge model: gpt-5.4 (OpenAI) or Kimi K2.7 Code via OpenRouter's OpenAI-compatible API.
+
+    SF_CHAT_MODEL=kimi forces Kimi; unset picks gpt-5.4 when OPENAI_API_KEY exists, else Kimi when only
+    OPENROUTER_API_KEY does. Any OTHER SF_CHAT_MODEL value is passed through verbatim as the OpenAI
+    model id — so it's the no-redeploy rollback lever for the OpenAI model too (e.g. set it back to a
+    known-good id if gpt-5.4 is ever rejected), alongside the Kimi rollback."""
+    choice = os.environ.get("SF_CHAT_MODEL", "").strip().lower()
+    if _use_kimi(choice):
         from agents import OpenAIChatCompletionsModel, set_tracing_disabled
         from openai import AsyncOpenAI
 
@@ -32,8 +40,16 @@ def select_chat_model():
             base_url="https://openrouter.ai/api/v1",
             api_key=os.environ.get("OPENROUTER_API_KEY", ""),
         )
-        return OpenAIChatCompletionsModel(model="moonshotai/kimi-k2.7-code", openai_client=client)
-    return "gpt-4o"
+        return OpenAIChatCompletionsModel(model=_KIMI_MODEL, openai_client=client)
+    return choice or _DEFAULT_OPENAI_CHAT_MODEL
+
+
+def chat_model_label() -> str:
+    """Display id of the live concierge model (no client constructed) — for the OS Agents card."""
+    choice = os.environ.get("SF_CHAT_MODEL", "").strip().lower()
+    if _use_kimi(choice):
+        return _KIMI_MODEL
+    return choice or _DEFAULT_OPENAI_CHAT_MODEL
 
 
 CONCIERGE_INSTRUCTIONS = """\

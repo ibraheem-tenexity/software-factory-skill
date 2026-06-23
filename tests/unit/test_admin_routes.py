@@ -177,6 +177,43 @@ def test_agent_detail_unknown_404(staff_mod, staff_client, monkeypatch):
     assert staff_client.get("/api/admin/agents/NOPE").status_code == 404
 
 
+def test_stage_skill_cards_appear_in_roster(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    agents = staff_client.get("/api/admin/agents").json()["agents"]
+    stage = {a["callsign"]: a for a in agents if a.get("kind") == "stage_skill"}
+    assert set(stage) == {"STAGE-1", "STAGE-2", "STAGE-3"}
+    assert stage["STAGE-1"]["stage"] == 1 and stage["STAGE-3"]["model"] == "claude-sonnet-4-6"
+    assert stage["STAGE-1"]["runtimes"] == ["claude", "opencode"]
+    assert "ATLAS" in {a["callsign"] for a in agents}            # role agents still present
+
+
+def test_stage_skill_detail_serves_real_skill_md(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    d = staff_client.get("/api/admin/agents/STAGE-1").json()
+    assert d["prompt_source"] == "skill_file" and d["prompt_applied"] is True   # live, file-backed
+    assert d["editable"] is False and d["runtime"] == "claude"
+    assert "research orchestrator" in d["prompt"].lower()        # the REAL SKILL.md body
+    assert d["skill_path"] == "skills/stage-1-research/SKILL.md"
+    # the opencode variant is served on request and differs from the claude one
+    oc = staff_client.get("/api/admin/agents/STAGE-3?runtime=opencode").json()
+    assert oc["runtime"] == "opencode" and oc["skill_path"].endswith("SKILL.opencode.md")
+    assert oc["prompt"] != staff_client.get("/api/admin/agents/STAGE-3").json()["prompt"]
+
+
+def test_concierge_card_is_code_backed_and_live(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    monkeypatch.delenv("SF_CHAT_MODEL", raising=False)        # make the model label deterministic
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)   # (no kimi fallback)
+    agents = staff_client.get("/api/admin/agents").json()["agents"]
+    card = next(a for a in agents if a["callsign"] == "CONCIERGE")
+    assert card["kind"] == "concierge" and card["name"] == "Factory Concierge"
+    d = staff_client.get("/api/admin/agents/CONCIERGE").json()
+    assert d["prompt_source"] == "code" and d["prompt_applied"] is True and d["editable"] is False
+    assert "Factory Concierge" in d["prompt"]                 # the REAL CONCIERGE_INSTRUCTIONS
+    assert d["model"] == "gpt-5.4"                             # default concierge model
+    assert d["source_ref"].endswith("CONCIERGE_INSTRUCTIONS")
+
+
 def test_tools_registry(staff_mod, staff_client, monkeypatch):
     _login(staff_mod, staff_client, monkeypatch)
     tools = staff_client.get("/api/admin/tools").json()["tools"]

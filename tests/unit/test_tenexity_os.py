@@ -10,6 +10,45 @@ class FakeLauncher:
         return {"pid": 1}
 
 
+# ── stage skills (§3.4 Part 1) ─────────────────────────────────────────────────────────────────
+def test_stage_skill_cards_are_three_file_backed_orchestrators():
+    cards = tos.stage_skill_cards()
+    assert [c["callsign"] for c in cards] == ["STAGE-1", "STAGE-2", "STAGE-3"]
+    assert all(c["kind"] == "stage_skill" and c["role"] == "stage-orchestrator" for c in cards)
+    assert [c["model"] for c in cards] == ["claude-opus-4-8", "claude-opus-4-8", "claude-sonnet-4-6"]
+    assert cards[0]["desc"] and "research" in cards[0]["desc"].lower()   # from SKILL.md frontmatter
+
+
+def test_stage_skill_detail_reads_real_file_and_variants():
+    d = tos.stage_skill_detail("stage-2", )                # case-insensitive callsign match
+    assert d["callsign"] == "STAGE-2" and d["prompt_source"] == "skill_file"
+    assert d["prompt_applied"] is True and d["editable"] is False
+    assert d["prompt"].startswith("---") and "design orchestrator" in d["prompt"].lower()
+    assert d["variants"]["opencode"] == "skills/stage-2-design/SKILL.opencode.md"
+    assert tos.stage_skill_detail("ATLAS") is None         # role agent → not a stage skill
+
+
+def test_stage_skill_missing_file_degrades_gracefully(monkeypatch):
+    monkeypatch.setattr(tos, "_SKILLS_DIR", "/nonexistent/skills")
+    d = tos.stage_skill_detail("STAGE-1")
+    assert d is not None and "not found" in d["prompt"].lower()   # clear placeholder, no raise
+    assert d["desc"] is None
+
+
+def test_concierge_card_is_code_backed(monkeypatch):
+    monkeypatch.delenv("SF_CHAT_MODEL", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x")              # OpenAI path → gpt-5.4 label
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    card = tos.concierge_card()
+    assert card["callsign"] == "CONCIERGE" and card["kind"] == "concierge" and card["model"] == "gpt-5.4"
+    d = tos.concierge_detail("concierge")                    # case-insensitive
+    assert d["prompt_source"] == "code" and d["prompt_applied"] is True
+    assert "Factory Concierge" in d["prompt"]                # the REAL CONCIERGE_INSTRUCTIONS constant
+    assert tos.stage_skill_detail("CONCIERGE") is None       # concierge is NOT a stage skill
+    assert tos.live_agent_detail("STAGE-2") and tos.live_agent_detail("CONCIERGE")   # both via combiner
+    assert {c["callsign"] for c in tos.live_agent_cards()} == {"STAGE-1", "STAGE-2", "STAGE-3", "CONCIERGE"}
+
+
 # ── pure assemblers ──────────────────────────────────────────────────────────────────────────
 _REG = [
     {"callsign": "ATLAS", "name": "Orchestrator", "role": "orchestrator",
