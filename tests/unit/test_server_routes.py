@@ -276,3 +276,26 @@ def test_push_sse_delivers_to_registered_client(app_mod):
         app_mod._sse_clients.setdefault("project-1e17ea6a", []).append(q)
     app_mod._push_sse("project-1e17ea6a", [ChatMessage(role="assistant", content="ping")])
     assert q and q[0].startswith("data: ") and "ping" in q[0] and q[0].endswith("\n\n")
+
+
+# ── local .env loading (console startup) ──────────────────────────────────────────────────────
+def test_load_local_env_fills_gaps_but_does_not_override(tmp_path, monkeypatch):
+    import console.app as app_mod
+    envf = tmp_path / ".env"
+    envf.write_text("SF_GAP_KEY=from_dotenv\nSF_EXISTING_KEY=from_dotenv\n")
+    monkeypatch.setenv("SF_ENVIRONMENT", "dev")            # not 'test' → the loader runs
+    monkeypatch.delenv("SF_GAP_KEY", raising=False)
+    monkeypatch.setenv("SF_EXISTING_KEY", "from_process")
+    app_mod._load_local_env(str(envf))
+    assert os.environ["SF_GAP_KEY"] == "from_dotenv"       # absent var → filled from .env
+    assert os.environ["SF_EXISTING_KEY"] == "from_process"  # override=False → process env wins
+
+
+def test_load_local_env_skipped_under_test_suite(tmp_path, monkeypatch):
+    import console.app as app_mod
+    envf = tmp_path / ".env"
+    envf.write_text("SF_SHOULD_NOT_LOAD=nope\n")
+    monkeypatch.setenv("SF_ENVIRONMENT", "test")           # the suite guard
+    monkeypatch.delenv("SF_SHOULD_NOT_LOAD", raising=False)
+    app_mod._load_local_env(str(envf))
+    assert "SF_SHOULD_NOT_LOAD" not in os.environ          # guard skipped the load entirely
