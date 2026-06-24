@@ -466,7 +466,7 @@ export function ClientModal({
     <div style={overlay}>
       <div style={modalCard}>
         <div style={modalHeader}>
-          <h2 style={{ font: `400 19px/1.2 ${T.display}`, color: T.fg, margin: 0 }}>{client ? "Edit client" : "New client"}</h2>
+          <h2 style={{ font: `400 19px/1.2 ${T.display}`, color: T.fg, margin: 0 }}>{client ? "Edit organization" : "New organization"}</h2>
           <CloseBtn onClick={onClose} />
         </div>
         <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14, overflow: "auto" }}>

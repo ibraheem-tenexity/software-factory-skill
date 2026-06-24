@@ -275,7 +275,7 @@ export function AdminPortal() {
               <AdminBtn onClick={() => (window.location.href = "/")}>
                 <Icon name="arrowLeft" size={14} color={T.fg} /> Back to console
               </AdminBtn>
-              <AccountMenu />
+              <AccountMenu onAccountSettings={() => setView("settings")} />
             </div>
           </div>
           {/* content */}
