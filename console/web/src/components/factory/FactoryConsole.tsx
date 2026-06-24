@@ -130,7 +130,7 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
       <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "340px 1fr", gap: 0 }}>
         <div style={{ borderRight: `1px solid ${T.borderSubtle}`, padding: 16, overflowY: "auto", background: T.raised }}>
           <Concierge projectId={projectId} artifacts={artifacts}
-            onOpenArtifact={(a) => setDoc({ label: a.label, path: a.path })} />
+            onOpenArtifact={(a) => setDoc({ label: a.label, path: a.path })} isBuilding={running} />
         </div>
 
         <main style={{ overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
