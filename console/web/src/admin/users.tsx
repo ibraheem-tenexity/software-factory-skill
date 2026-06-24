@@ -183,6 +183,7 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [method, setMethod] = React.useState<"google" | "password">("google");
   const [password, setPassword] = React.useState("");
   const [loading, setLoading] = React.useState(false);
+  const [createdLink, setCreatedLink] = React.useState<string | null>(null);
   const { clients } = useUsersAndClients();
   const valid = /^\S+@\S+\.\S+$/.test(email);
   const isTenexity = audience === "tenexity";
@@ -208,7 +209,16 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         ...(isTenexity ? {} : { role: role.toLowerCase() as "admin" | "member" }),
       };
       await api.adminInvite(body);
-      onCreated();
+      if (method === "password") {
+        try {
+          const r = await api.adminResendInvite(email);
+          setCreatedLink(r.link);
+        } catch {
+          onCreated();
+        }
+      } else {
+        onCreated();
+      }
     } catch {
       alert("Failed to invite user.");
     } finally {
@@ -408,16 +418,42 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 9, padding: "13px 20px", borderTop: `1px solid ${T.borderSubtle}`, background: T.sunken }}>
-          <AdminBtn onClick={onClose}>Cancel</AdminBtn>
-          <AdminBtn
-            primary
-            onClick={submit}
-            disabled={!valid || (!isTenexity && !orgName) || (method === "password" && password.length < 6) || loading}
-          >
-            {loading ? "Sending…" : method === "password" ? "Create user" : "Send invite"}
-          </AdminBtn>
-        </div>
+        {createdLink && (
+          <div style={{ padding: "14px 20px", borderTop: `1px solid ${T.borderSubtle}`, background: T.sunken }}>
+            <ColHead style={{ display: "block", marginBottom: 8 }}>User created — share this sign-in link</ColHead>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  height: 36,
+                  padding: "0 11px",
+                  borderRadius: T.rMd,
+                  border: `1px solid ${T.borderSubtle}`,
+                  background: T.raised,
+                  overflow: "hidden",
+                }}
+              >
+                <Mono style={{ fontSize: 11, color: T.secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{createdLink}</Mono>
+              </div>
+              <AdminBtn onClick={() => navigator.clipboard.writeText(createdLink!)}>Copy</AdminBtn>
+              <AdminBtn primary onClick={() => { onCreated(); }}>Done</AdminBtn>
+            </div>
+          </div>
+        )}
+        {!createdLink && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 9, padding: "13px 20px", borderTop: `1px solid ${T.borderSubtle}`, background: T.sunken }}>
+            <AdminBtn onClick={onClose}>Cancel</AdminBtn>
+            <AdminBtn
+              primary
+              onClick={submit}
+              disabled={!valid || (!isTenexity && !orgName) || (method === "password" && password.length < 6) || loading}
+            >
+              {loading ? "Sending…" : method === "password" ? "Create user" : "Send invite"}
+            </AdminBtn>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -427,6 +463,20 @@ function UserDrawer({ user, currentUserEmail, onClose, onChanged }: { user: Admi
   const [role, setRole] = React.useState(displayRole(user));
   const [internal, setInternal] = React.useState(isInternal(user));
   const [saving, setSaving] = React.useState(false);
+  const [inviteLink, setInviteLink] = React.useState<string | null>(null);
+  const [resending, setResending] = React.useState(false);
+
+  const resendInvite = async () => {
+    setResending(true);
+    try {
+      const r = await api.adminResendInvite(user.email);
+      setInviteLink(r.link);
+    } catch {
+      alert("Failed to get invite link.");
+    } finally {
+      setResending(false);
+    }
+  };
 
   const patchRole = async () => {
     const apiRole = role.toLowerCase();
@@ -604,6 +654,34 @@ function UserDrawer({ user, currentUserEmail, onClose, onChanged }: { user: Admi
               {user.designation || "—"}
             </div>
           </div>
+
+          {user.status === "invited" && (
+            <div>
+              <label style={{ font: `500 13px/1.2 ${T.sans}`, color: T.fg, display: "block", marginBottom: 6 }}>Invite link</label>
+              {inviteLink ? (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      height: 36,
+                      padding: "0 11px",
+                      borderRadius: T.rMd,
+                      border: `1px solid ${T.borderSubtle}`,
+                      background: T.sunken,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <Mono style={{ fontSize: 11, color: T.secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inviteLink}</Mono>
+                  </div>
+                  <AdminBtn onClick={() => navigator.clipboard.writeText(inviteLink)}>Copy</AdminBtn>
+                </div>
+              ) : (
+                <AdminBtn onClick={resendInvite} disabled={resending}>{resending ? "Fetching…" : "Get invite link"}</AdminBtn>
+              )}
+            </div>
+          )}
 
           <div style={{ marginTop: 6, paddingTop: 14, borderTop: `1px solid ${T.borderSubtle}` }}>
             <ColHead style={{ display: "block", marginBottom: 10, color: T.danger }}>Danger zone</ColHead>
@@ -798,7 +876,7 @@ export function UsersManagement() {
       } catch {
         alert("Failed to enable user.");
       }
-    } else if (id === "edit") {
+    } else if (id === "resend" || id === "edit") {
       setDrawer(user);
     } else if (id === "make-tenexity-admin") {
       try {
@@ -813,7 +891,6 @@ export function UsersManagement() {
         }
       }
     }
-    // resend is a no-op until backend ships a resend endpoint
   };
 
   return (
