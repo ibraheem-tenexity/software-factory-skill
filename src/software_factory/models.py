@@ -225,8 +225,8 @@ blob_uses = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
 )
 
-# Editable agent system prompts (Tenexity OS §3.4). One row per agent callsign; the live pipeline
-# does NOT yet read these (operator-editable + versioned here; wiring into agents is a follow-up).
+# Editable agent system prompts (Tenexity OS §3.4). One row per agent callsign; live orchestrator
+# overrides are applied, while role-agent prompts remain stored until subagent prompt wiring exists.
 agent_prompts = Table(
     "agent_prompts", metadata,
     Column("callsign", Text, primary_key=True),     # e.g. "ATLAS"

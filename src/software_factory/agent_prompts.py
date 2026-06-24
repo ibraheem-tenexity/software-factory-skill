@@ -1,8 +1,8 @@
 """Editable agent system prompts (Tenexity OS §3.4) — `public.agent_prompts`.
 
-Operator-editable, versioned prompts keyed by agent callsign. NOTE: the live pipeline does NOT read
-these yet (it still builds prompts in code) — storing/serving here is decoupled from applying them;
-wiring is a follow-up. Callers/UI should present a saved prompt as "saved, not yet applied".
+Operator-editable, versioned prompts keyed by agent callsign. The main orchestrator prompts
+(STAGE-1/2/3 and CONCIERGE) are applied by the live pipeline; role-agent prompts are still
+stored/served for editing without being applied to spawned subagents yet.
 """
 from __future__ import annotations
 

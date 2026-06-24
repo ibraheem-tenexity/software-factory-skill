@@ -6,8 +6,21 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
-from software_factory.chat_agent import ChatAgentRunner, make_tools, CONCIERGE_INSTRUCTIONS
+from software_factory.chat_agent import (
+    ChatAgentRunner,
+    CONCIERGE_INSTRUCTIONS,
+    make_tools,
+    reset_concierge_prompt_cache,
+    resolve_concierge_instructions,
+)
 from software_factory.chat_store import ChatMessage
+
+
+@pytest.fixture(autouse=True)
+def _reset_concierge_prompt_cache():
+    reset_concierge_prompt_cache()
+    yield
+    reset_concierge_prompt_cache()
 
 
 @pytest.fixture
@@ -354,6 +367,37 @@ class TestChatAgentRunner:
 
     def test_concierge_instructions_exist(self):
         assert "Factory Concierge" in CONCIERGE_INSTRUCTIONS or len(CONCIERGE_INSTRUCTIONS) > 100
+
+    def test_concierge_prompt_db_override_wins(self, mock_console):
+        store = MagicMock()
+        store.get.return_value = {"prompt": "EDITED concierge prompt"}
+        with patch("software_factory.agent_prompts.PromptStore", return_value=store):
+            assert resolve_concierge_instructions() == "EDITED concierge prompt"
+            runner = ChatAgentRunner(mock_console)
+        assert runner._agent.instructions == "EDITED concierge prompt"
+
+    def test_concierge_prompt_falls_back_without_override(self, mock_console):
+        store = MagicMock()
+        store.get.return_value = None
+        with patch("software_factory.agent_prompts.PromptStore", return_value=store):
+            runner = ChatAgentRunner(mock_console)
+        assert runner._agent.instructions == CONCIERGE_INSTRUCTIONS
+
+    def test_concierge_prompt_db_failure_does_not_break_runner(self, mock_console):
+        store = MagicMock()
+        store.get.side_effect = RuntimeError("database unavailable")
+        with patch("software_factory.agent_prompts.PromptStore", return_value=store):
+            runner = ChatAgentRunner(mock_console)
+        assert runner._agent is not None
+        assert runner._agent.instructions == CONCIERGE_INSTRUCTIONS
+
+    def test_concierge_prompt_cache_avoids_repeated_db_reads(self):
+        store = MagicMock()
+        store.get.return_value = {"prompt": "CACHED concierge prompt"}
+        with patch("software_factory.agent_prompts.PromptStore", return_value=store):
+            assert resolve_concierge_instructions() == "CACHED concierge prompt"
+            assert resolve_concierge_instructions() == "CACHED concierge prompt"
+        store.get.assert_called_once()
 
     def test_check_and_notify_stage1_done(self, mock_console):
         mock_console.status.return_value = {

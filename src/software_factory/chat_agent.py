@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from typing import Callable
 
 from agents import Agent, FunctionTool, ItemHelpers
 from agents.items import MessageOutputItem, ToolCallItem
@@ -15,6 +16,7 @@ from software_factory.console import Console
 
 _DEFAULT_OPENAI_CHAT_MODEL = "gpt-5.4"   # concierge default (was gpt-4o); SF_CHAT_MODEL overrides it
 _KIMI_MODEL = "moonshotai/kimi-k2.7-code"
+_CONCIERGE_PROMPT_CACHE_TTL_SECONDS = 60.0
 
 
 def _use_kimi(choice: str) -> bool:
@@ -92,6 +94,48 @@ URL(s) when it's done — a project may ship more than one deliverable.
 ## Style
 Concise — 1-3 sentences per turn, ONE question, specific not generic. A short "got it — <next>" is ideal.
 """
+
+
+class _ConciergePromptCache:
+    def __init__(self, default_prompt: str, ttl_seconds: float,
+                 clock: Callable[[], float] = time.monotonic):
+        self._default_prompt = default_prompt
+        self._ttl_seconds = ttl_seconds
+        self._clock = clock
+        self._prompt = default_prompt
+        self._expires_at = 0.0
+
+    def get(self) -> str:
+        now = self._clock()
+        if now < self._expires_at:
+            return self._prompt
+        try:
+            from software_factory.agent_prompts import PromptStore, override_key
+            row = PromptStore().get(override_key("CONCIERGE"))
+            self._prompt = row["prompt"] if row and row.get("prompt") else self._default_prompt
+        except Exception:
+            # Keep the last known good prompt; if none has loaded, that is the code default.
+            pass
+        self._expires_at = now + self._ttl_seconds
+        return self._prompt
+
+    def reset(self) -> None:
+        self._prompt = self._default_prompt
+        self._expires_at = 0.0
+
+
+_CONCIERGE_PROMPT_CACHE = _ConciergePromptCache(
+    CONCIERGE_INSTRUCTIONS, _CONCIERGE_PROMPT_CACHE_TTL_SECONDS)
+
+
+def resolve_concierge_instructions() -> str:
+    """Effective concierge prompt: DB override with a short cache, default constant on miss/error."""
+    return _CONCIERGE_PROMPT_CACHE.get()
+
+
+def reset_concierge_prompt_cache() -> None:
+    """Test/maintenance hook: force the next prompt resolve to hit PromptStore."""
+    _CONCIERGE_PROMPT_CACHE.reset()
 
 
 def make_tools(console: Console, users=None, attachments=lambda: [],
@@ -334,17 +378,10 @@ class ChatAgentRunner:
                            viewer=lambda: self._pending_viewer,
                            draft_id=lambda: self._pending_draft_id,
                            interview=lambda: self._pending_interview_md)
-        # Operator override: a staff edit to the CONCIERGE prompt in the OS Agents dashboard drives the
-        # live agent; else the CONCIERGE_INSTRUCTIONS default. Best-effort — a store hiccup must never
-        # stop the concierge from starting. Read at construction → takes effect for the next session.
-        instructions = CONCIERGE_INSTRUCTIONS
-        try:
-            from software_factory.agent_prompts import PromptStore, override_key
-            row = PromptStore().get(override_key("CONCIERGE"))
-            if row and row.get("prompt"):
-                instructions = row["prompt"]
-        except Exception:
-            pass
+        # Operator override: a staff edit to the CONCIERGE prompt in the OS Agents dashboard drives
+        # new concierge sessions. The DB read is TTL-cached and best-effort so prompt editability
+        # never adds meaningful per-turn latency or breaks chat when Postgres is briefly unavailable.
+        instructions = resolve_concierge_instructions()
         self._agent = Agent(
             name="Factory Concierge",
             instructions=instructions,
