@@ -8,6 +8,7 @@ import { UsersManagement } from "./users";
 import { AccountMenu } from "./AccountMenu";
 import { AdminProjectDashboard } from "./AdminProjectDashboard";
 import { AdminClients, AdminProjectsView, AdminAgents, AdminTools, AdminOverview, AdminFactories, AdminSettings, AdminSymphony, AdminBtn } from "./views";
+import { SowManagement } from "./sow";
 import { AgentPromptPanel, ClientModal, AgentModal, ToolModal, ConfirmDelete } from "./modals";
 
 const NAV_PATHS: Record<string, string> = {
@@ -23,6 +24,7 @@ const NAV_PATHS: Record<string, string> = {
   tools: "M14.7 6.3a4 4 0 0 0 5 5l-9 9a2 2 0 0 1-3-3l9-9a4 4 0 0 0-2-2z",
   factories: "M2 20h20 M4 20V8l5 4V8l5 4V8l5 4v8",
   symphony: "M6 3v12 M18 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M18 9V3l-9 2",
+  sow: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8",
   settings:
     "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 6.6 19l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H2a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 3.2 6.6l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 2.7-1.1V2a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8",
 };
@@ -83,6 +85,7 @@ export function AdminPortal() {
     { id: "tools", label: "Tools", icon: "tools" },
     { id: "factories", label: "Factories", icon: "factories" },
     { id: "symphony", label: "Symphony", icon: "symphony" },
+    { id: "sow", label: "SOW", icon: "sow" },
     { id: "settings", label: "Settings", icon: "settings" },
   ] as const;
 
@@ -319,6 +322,7 @@ export function AdminPortal() {
             )}
             {view === "factories" && <AdminFactories />}
             {view === "symphony" && <AdminSymphony />}
+            {view === "sow" && <SowManagement />}
             {view === "settings" && <AdminSettings />}
               </>
             )}

@@ -225,6 +225,20 @@ export type AdminOverview = {
 
 export type AdminProjectMode = "all" | "real" | "demo";
 
+export type AdminSow = {
+  id: number;
+  title: string;
+  org?: string | null;
+  project?: string | null;
+  value?: string | null;
+  file?: string | null;
+  version: number;
+  status: string;
+  body?: string | null;
+  created_at?: string | number | null;
+  updated_at?: string | number | null;
+};
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(path, { credentials: "include" });
   if (!r.ok) throw new Error(`${path} → ${r.status}`);
@@ -326,6 +340,10 @@ export const api = {
     send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "PATCH", body),
   adminDeleteAccess: (email: string) => send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "DELETE"),
   adminResendInvite: (email: string) => send<{ email: string; status: string; link: string }>(`/api/admin/access/${encodeURIComponent(email)}/resend`, "POST"),
+  adminSowList: () => get<{ sows: AdminSow[] }>("/api/admin/sow"),
+  adminSowGet: (id: number) => get<AdminSow>(`/api/admin/sow/${id}`),
+  adminSowCreate: (body: { title: string; org?: string; project?: string; value?: string; file?: string; version?: number; status?: string; body?: string }) => send<AdminSow>("/api/admin/sow", "POST", body),
+  adminSowUpdate: (id: number, body: { title?: string; org?: string; project?: string; value?: string; file?: string; version?: number; status?: string; body?: string }) => send<AdminSow>(`/api/admin/sow/${id}`, "PATCH", body),
   // ── Onboarding draft model (docs/plans/concierge-onboarding-api.md) ──
   // runtime ("claude"|"opencode") + model ("kimi"|"glm") are persisted by the backend (DraftCreateIn
   // → projectstate). BYOK keys: when keySource="byok", the FE POSTs the runtime-specific runner key

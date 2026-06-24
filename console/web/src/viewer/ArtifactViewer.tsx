@@ -240,7 +240,9 @@ function ContentBody({ artifact }: { artifact: ArtifactDetail }) {
 // ── Main viewer ───────────────────────────────────────────────────────────────
 
 export function ArtifactViewer() {
-  const docId = new URLSearchParams(location.search).get("doc");
+  const params = new URLSearchParams(location.search);
+  const docId = params.get("doc");
+  const sowId = params.get("sow");
 
   const [artifact, setArtifact] = useState<ArtifactDetail | null>(null);
   const [railItems, setRailItems] = useState<ProjectArtifact[]>([]);
@@ -252,7 +254,25 @@ export function ArtifactViewer() {
   const [overrideLoading, setOverrideLoading] = useState(false);
 
   useEffect(() => {
-    if (!docId) { setError("No doc= parameter in URL."); return; }
+    if (sowId) {
+      // SOW mode: fetch from /api/admin/sow/{id} and synthesise an ArtifactDetail
+      api.adminSowGet(Number(sowId))
+        .then((sow) => {
+          setArtifact({
+            id: sow.id,
+            project_id: `sow-${sow.id}`,
+            title: sow.title,
+            kind: "sow",
+            path: `sow-${sow.id}.md`,
+            content: sow.body ?? "",
+            updated: typeof sow.updated_at === "number" ? sow.updated_at : 0,
+            agent: null,
+          });
+        })
+        .catch((e) => setError(String(e)));
+      return;
+    }
+    if (!docId) { setError("No doc= or sow= parameter in URL."); return; }
     api.getArtifact(docId)
       .then((a) => {
         setArtifact(a as ArtifactDetail);
@@ -262,7 +282,7 @@ export function ArtifactViewer() {
           .catch(() => {});
       })
       .catch((e) => setError(String(e)));
-  }, [docId]);
+  }, [docId, sowId]);
 
   const displayArtifact = artifact
     ? (override

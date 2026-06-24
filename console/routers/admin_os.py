@@ -371,6 +371,14 @@ def admin_sow_list(v: tuple = Depends(require_staff)):
     return {"sows": state.sow_store.list_all()}
 
 
+@router.get("/api/admin/sow/{sow_id}")
+def admin_sow_get(sow_id: int, v: tuple = Depends(require_staff)):
+    row = state.sow_store.get(sow_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="sow not found")
+    return row
+
+
 @router.post("/api/admin/sow")
 def admin_sow_create(body: SowIn, v: tuple = Depends(require_staff)):
     try:
