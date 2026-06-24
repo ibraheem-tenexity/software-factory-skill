@@ -282,7 +282,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   useEffect(() => {
     if (resumeProjectId || draftId || draftCreatingRef.current || !p.name.trim()) return;
     draftCreatingRef.current = true;
-    api.createDraft({ runtime: engineProviderRef.current })
+    api.createDraft({ runtime: engineProviderRef.current, project_name: p.name })
       .then(({ project_id }) => setDraftId(project_id))
       .catch(() => { draftCreatingRef.current = false; });
   }, [resumeProjectId, draftId, p.name]);
