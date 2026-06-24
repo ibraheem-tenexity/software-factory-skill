@@ -64,7 +64,8 @@ def create_draft(body: DraftCreateIn, v: tuple = Depends(require_authed)):
         raise HTTPException(status_code=400, detail="project_name is required")
     project_id = state.console.create_draft(owner=v[0] or "", name=body.project_name,
                                   runtime=body.runtime, planning_model=body.planning_model,
-                                  impl_model=body.impl_model, model=body.model)
+                                  impl_model=body.impl_model, model=body.model,
+                                  budget=body.budget)
     return {"project_id": project_id}
 
 
@@ -374,8 +375,12 @@ def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_proje
     after the eager create. Call debounced/on-blur, NOT per keystroke."""
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
-    return state.console.set_draft_project(pid, name=body.name, goal=body.goal, scope=body.scope,
-                                           runtime=body.runtime, model=body.model)
+    result = state.console.set_draft_project(pid, name=body.name, goal=body.goal, scope=body.scope,
+                                             runtime=body.runtime, model=body.model)
+    if body.budget is not None:
+        state.console.raise_budget(pid, body.budget)
+        result["budget_ceiling"] = body.budget
+    return result
 
 
 @router.post("/api/projects/{pid}/attach")
