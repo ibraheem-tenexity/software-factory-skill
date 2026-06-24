@@ -769,12 +769,14 @@ export function AdminTools({
   onEdit,
   onDelete,
   onRefresh,
+  onSyncAgents,
 }: {
   query: string;
   onNew: () => void;
   onEdit: (t: AdminTool) => void;
   onDelete: (t: AdminTool) => void;
   onRefresh?: () => void;
+  onSyncAgents?: () => void;
 }) {
   const { data } = useAdminFetch(() => api.adminTools());
   const TYPE_C: Record<string, [string, string]> = {
@@ -797,6 +799,17 @@ export function AdminTools({
     );
   }, [data, query]);
   const all = data?.tools ?? [];
+  const [syncState, setSyncState] = React.useState<{ busy: boolean; notice?: string; error?: string }>({ busy: false });
+  const syncAgents = () => {
+    setSyncState({ busy: true });
+    api
+      .adminSyncAgents()
+      .then((res) => {
+        setSyncState({ busy: false, notice: `Synced ${res.synced} agent${res.synced === 1 ? "" : "s"}` });
+        onSyncAgents?.();
+      })
+      .catch((err) => setSyncState({ busy: false, error: err.message || "Agent sync failed" }));
+  };
   const setStatus = (t: AdminTool, status: AdminTool["status"]) => {
     api.adminUpdateTool(t.name, { status }).then(onRefresh).catch(() => {});
   };
@@ -807,13 +820,17 @@ export function AdminTools({
         sub="Every tool, MCP server, and connector available to the factory’s agents."
         actions={
           <>
-            <AdminBtn>{String.fromCharCode(8644)} Sync registry</AdminBtn>
+            <AdminBtn disabled={syncState.busy} onClick={syncAgents}>
+              {syncState.busy ? "Syncing…" : `${String.fromCharCode(8644)} Sync registry`}
+            </AdminBtn>
             <AdminBtn primary onClick={onNew}>
               + Register tool
             </AdminBtn>
           </>
         }
       />
+      {syncState.notice && <Mono style={{ color: T.success, marginBottom: 10 }}>{syncState.notice}</Mono>}
+      {syncState.error && <Mono style={{ color: T.danger, marginBottom: 10 }}>{syncState.error}</Mono>}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
         <MetricCard label="Registered" value={all.length} hint="across all factories" accent />
         <MetricCard label="Connected" value={all.filter((t) => t.status === "connected").length} hint="live & authenticated" />
