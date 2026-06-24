@@ -109,6 +109,18 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
           </>
         )}
         <span style={{ flex: 1 }} />
+        {(status.runtime || status.model) && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5,
+            font: `500 11px/1 ${T.mono}`, color: T.tertiary,
+            padding: "3px 9px", borderRadius: T.rMd, border: `1px solid ${T.borderSubtle}` }}>
+            engine
+            <span style={{ color: T.fg }}>{status.model || status.runtime}</span>
+            ·
+            <span style={{ color: status.key_source === "BYOK" ? T.brand : T.secondary }}>
+              {status.key_source === "BYOK" ? "BYO KEY" : "TENEXITY KEY"}
+            </span>
+          </span>
+        )}
         {status.phase && (
           <StatusPill tone={phaseTone(status.phase)}>
             {status.phase === "done" || status.phase === "stopped" ? status.phase : `phase ${status.phase} · stage ${status.stage || ""}`}
