@@ -304,6 +304,7 @@ export function AdminPortal() {
                 onEdit={(t) => setToolModal(t)}
                 onDelete={(t) => setDeleteTarget({ kind: "tool", item: t })}
                 onRefresh={() => setToolVersion((v) => v + 1)}
+                onSyncAgents={() => setAgentVersion((v) => v + 1)}
               />
             )}
             {view === "factories" && <AdminFactories />}

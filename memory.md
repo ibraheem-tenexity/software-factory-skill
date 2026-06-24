@@ -178,3 +178,8 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. `console/web/src/admin/views.tsx` — new `FilterSelect` component; `AdminProjectsView` derives options from loaded projects; `AdminAgents` no longer shows Configure repo.
 3. Sync registry button left untouched — no backend sync endpoint exists; stopped and escalated to l2a7ngax/qsvigmth per instruction.
 4. Summary: tsc + build green. Honest "coming soon" cards (Factories/Settings/Symphony, Microsoft/SSO) unchanged.
+# Tenexity OS agent Update at Time: 23:06:2026:18:55:00.000
+1. Wired Sync registry button to the upcoming POST /api/admin/agents/sync endpoint (PR #71 follow-up).
+2. `console/web/src/api.ts` (adminSyncAgents), `console/web/src/admin/views.tsx` (AdminTools loading/toast/error), `console/web/src/admin/AdminPortal.tsx` (agent table refetch callback).
+3. PR opened as #69 follow-up; held for qsvigmth endpoint deploy before merge.
+4. Summary: tsc + build green; no silent no-op; surfaces synced count or error.

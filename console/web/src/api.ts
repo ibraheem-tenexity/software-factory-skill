@@ -299,6 +299,7 @@ export const api = {
   adminProjects: (mode?: AdminProjectMode) => get<{ projects: AdminProjectRow[] }>(`/api/admin/projects${mode ? `?mode=${mode}` : ""}`),
   adminSetProjectMode: (rid: string, is_demo: boolean) => send<{ project: AdminProjectRow }>(`/api/admin/projects/${encodeURIComponent(rid)}`, "PATCH", { is_demo }),
   adminAgents: () => get<{ agents: AdminAgent[] }>("/api/admin/agents"),
+  adminSyncAgents: () => send<{ synced: number; agents: AdminAgent[] }>("/api/admin/agents/sync", "POST"),
   adminCreateAgent: (body: Partial<Omit<AdminAgent, "callsign">> & { callsign: string }) => send<{ agent: AdminAgent }>("/api/admin/agents", "POST", body),
   adminUpdateAgent: (callsign: string, body: Partial<AdminAgent>) => send<{ agent: AdminAgent }>(`/api/admin/agents/${encodeURIComponent(callsign)}`, "PATCH", body),
   adminDeleteAgent: (callsign: string) => send<{ ok?: boolean }>(`/api/admin/agents/${encodeURIComponent(callsign)}`, "DELETE"),
