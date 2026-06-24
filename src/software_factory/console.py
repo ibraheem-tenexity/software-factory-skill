@@ -1601,6 +1601,8 @@ class Console:
                      else (state.impl_model or state.planning_model or ""),
             "key_source": _key_source(state.runtime or "claude", state.creds_provided or []),
             "budget_ceiling": self._budget_ceiling(project_id),
+            "paused_at_node": state.paused_at_node or "",
+            "crashed_at_node": state.crashed_at_node or "",
             "held": state.held,
             "owner": state.owner,
         }
