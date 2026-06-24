@@ -42,6 +42,7 @@ def projects_create(body: ProjectCreateIn, v: tuple = Depends(require_authed)):
         runtime=body.runtime,
         planning_model=body.planning_model,
         impl_model=body.impl_model,
+        model=body.model,
         name=body.project_name,
         gated=bool(body.gated),
         owner=v[0] or "",
@@ -60,7 +61,7 @@ def create_draft(body: DraftCreateIn, v: tuple = Depends(require_authed)):
     PATCH/attach/promote and into /api/chat so the rail and the form share ONE draft."""
     project_id = state.console.create_draft(owner=v[0] or "", name=body.project_name,
                                   runtime=body.runtime, planning_model=body.planning_model,
-                                  impl_model=body.impl_model)
+                                  impl_model=body.impl_model, model=body.model)
     return {"project_id": project_id}
 
 
@@ -305,7 +306,8 @@ def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_proje
     after the eager create. Call debounced/on-blur, NOT per keystroke."""
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
-    return state.console.set_draft_project(pid, name=body.name, goal=body.goal, scope=body.scope, runtime=body.runtime)
+    return state.console.set_draft_project(pid, name=body.name, goal=body.goal, scope=body.scope,
+                                           runtime=body.runtime, model=body.model)
 
 
 @router.post("/api/projects/{pid}/attach")

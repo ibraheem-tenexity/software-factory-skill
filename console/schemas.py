@@ -75,6 +75,7 @@ class ChatIn(BaseModel):
     runtime: str = ""
     planning_model: str = ""
     impl_model: str = ""
+    model: str = ""   # opencode model alias: "kimi"|"glm"
     project_name: str = ""
     gated: bool = False
 
@@ -119,6 +120,7 @@ class ProjectCreateIn(BaseModel):
     runtime: str = ""
     planning_model: str = ""
     impl_model: str = ""
+    model: str = ""   # opencode model alias: "kimi"|"glm"
     project_name: str = ""
     gated: bool = False
     railway_token: str = ""
@@ -132,6 +134,7 @@ class DraftCreateIn(BaseModel):
     runtime: str = ""
     planning_model: str = ""
     impl_model: str = ""
+    model: str = ""   # opencode model alias: "kimi"|"glm"
 
 
 class DraftPatchIn(BaseModel):
@@ -139,6 +142,7 @@ class DraftPatchIn(BaseModel):
     goal: str | None = None
     scope: list | None = None
     runtime: str | None = None   # "claude"|"opencode" — lets the Build-engine card update the draft's runtime after the eager create
+    model: str | None = None     # opencode model alias: "kimi"|"glm"
 
 
 class AttachIn(BaseModel):
