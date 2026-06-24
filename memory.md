@@ -183,3 +183,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. `console/web/src/api.ts` (adminSyncAgents), `console/web/src/admin/views.tsx` (AdminTools loading/toast/error), `console/web/src/admin/AdminPortal.tsx` (agent table refetch callback).
 3. PR opened as #69 follow-up; held for qsvigmth endpoint deploy before merge.
 4. Summary: tsc + build green; no silent no-op; surfaces synced count or error.
+
+# Codex Update at Time: 24:06:2026:16:39:53.312
+1. Refactored `chat_agent.py` for readability without changing the 14-tool concierge behavior or public runner API.
+2. `src/software_factory/chat_agent.py`; worktree `../software-factory-skill-chat-agent-cleanup`.
+3. Extracted prompt loading, FunctionTool construction, user-input rendering, pending-turn state handling, and SDK-result translation into named helpers.
+4. Summary: focused chat-agent tests passed; full non-live suite passed; branch ready for PR review.
