@@ -175,9 +175,10 @@ def test_run_swarm_waves_skips_empty_wave_after_all_tickets_filtered(tmp_path):
 # 4. Crash detection — auto_resume_dead_stage sets phase='crashed'
 # ────────────────────────────────────────────────────────────────────────────────
 
-def test_auto_resume_dead_stage_sets_crashed_not_retry(tmp_path):
-    """When a stage dies unexpectedly, the poller sets phase='crashed' and
-    does NOT relaunch — the Recovery bar drives the operator-controlled resume."""
+def test_auto_resume_relaunches_dead_stage_transient_crash(tmp_path):
+    """Transient crash path: auto_resume_dead_stage relaunches the stage (returns True).
+    The poller's _AUTO_RESUME_MAX cap gates how many times this fires.
+    mark_stage_crashed() (poller path after cap exhaustion) handles the persistent case."""
     from software_factory.console import Console, ProjectRequest
 
     launched = []
@@ -202,11 +203,10 @@ def test_auto_resume_dead_stage_sets_crashed_not_retry(tmp_path):
 
     result = c.auto_resume_dead_stage(rid)
 
-    assert result is False                        # no auto-resume
-    assert len(launched) == 0                     # no process launched
+    assert result is True                         # auto-resumes within cap
+    assert len(launched) == 1                     # stage relaunched
     st2 = c._load_state(rid)
-    assert st2.phase == "crashed"
-    assert st2.crashed_at_node == "build"
+    assert st2.phase != "crashed"                 # NOT crashed — transient self-heal
 
 
 def test_auto_resume_skips_paused_runs(tmp_path):

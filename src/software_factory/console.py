@@ -593,17 +593,15 @@ class Console:
         status query after state loss) has no brief to build from — resuming it burns spend on
         an empty prompt (the run-b594a5f4/run-0eb69fdd double-ghost scar).
 
-        CRASH/PAUSE RECONCILIATION: when a process dies unexpectedly and the run is NOT already
-        in a terminal or operator-controlled state, this marks the run as "crashed" (sets
-        state.phase + crashed_at_node) rather than auto-resuming. The Recovery bar (FE) then
-        shows the user the crash and they decide to resume/retry/rewind. This prevents a
-        double-resume race where both the poller and an operator-driven rewind fire concurrently.
-        Runs already marked "paused" or "crashed" are left alone."""
+        CRASH/PAUSE RECONCILIATION: this method relaunches within the poller's _AUTO_RESUME_MAX
+        cap (transient crashes self-heal). Runs already in 'paused' or 'crashed' (operator-
+        controlled or already-exhausted) are skipped. When the poller exhausts its retry count
+        it calls mark_stage_crashed() to land the run in a resumable 'crashed' state for the
+        Recovery bar."""
         if not self.is_pipeline_project(project_id):
             return False
         state = self._load_state(project_id)
-        _TERMINAL = ("done", "stopped", "paused", "crashed")
-        if state.phase in _TERMINAL or not self.stage_finished(project_id):
+        if state.phase in ("done", "stopped", "paused", "crashed") or not self.stage_finished(project_id):
             return False   # terminal or operator-controlled — never auto-resume
         stage = state.stage
         db = ProjectStore(self._paths(project_id)["db"])
@@ -616,11 +614,33 @@ class Console:
         )
         if not incomplete:
             return False
-        # Mark crashed instead of auto-resuming — Recovery bar handles it.
+        return self.retry_stage(project_id, stage) is not None
+
+    def mark_stage_crashed(self, project_id: str) -> bool:
+        """Called by the poller after _AUTO_RESUME_MAX auto-resume attempts are exhausted.
+        If the stage is still dead+incomplete, marks phase='crashed' so the Recovery bar
+        shows the operator a resumable crashed state. Returns True if marked, False if
+        the run is terminal or already recovered (no-op)."""
+        if not self.is_pipeline_project(project_id):
+            return False
+        state = self._load_state(project_id)
+        if state.phase in ("done", "stopped", "paused", "crashed"):
+            return False   # already terminal or operator-controlled
+        if not self.stage_finished(project_id):
+            return False   # stage is still alive — don't mark crashed prematurely
+        stage = state.stage
+        db = ProjectStore(self._paths(project_id)["db"])
+        incomplete = (
+            (stage == 1 and not state.stage1_done)
+            or (stage == 2 and not state.stage2_done)
+            or (stage == 3 and not db.has_passing_verification())
+        )
+        if not incomplete:
+            return False
         state.crashed_at_node = state.phase
         state.phase = "crashed"
         state.save()
-        return False   # did NOT launch anything; caller should NOT count this as a resume
+        return True
 
     def pause_project(self, project_id: str) -> dict:
         """Operator 'pause': kill the live stage process and set phase='paused'.

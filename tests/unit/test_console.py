@@ -287,10 +287,11 @@ def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
     assert any(e["data"]["source"] == "orchestrator" for e in g["edges"])
 
 
-def test_auto_resume_sets_crashed_on_dead_incomplete_stage(tmp_path):
-    # Crash/pause recovery (#15): a stage that dies mid-flight (OOM/crash) is marked
-    # phase='crashed' instead of being auto-resumed. The operator-driven Recovery bar
-    # drives the resume (no double-resume race with the poller).
+def test_auto_resume_relaunches_a_dead_incomplete_stage(tmp_path):
+    # SPEC §3 zero-touch (retry path): auto_resume_dead_stage returns True + relaunches
+    # within the poller's _AUTO_RESUME_MAX cap. Transient crashes self-heal, never reaching
+    # 'crashed'. mark_stage_crashed (called by the poller after cap exhaustion) handles the
+    # persistent-crash case.
     class FakeProc:
         def __init__(self): self.exit_code = None
         def poll(self): return self.exit_code
@@ -302,17 +303,47 @@ def test_auto_resume_sets_crashed_on_dead_incomplete_stage(tmp_path):
     rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid)
     st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True; st.stage = 3
-    st.phase = "build"
     st.save()
     proc.exit_code = None
-    assert c.auto_resume_dead_stage(rid) is False    # process alive -> not dead, no action
+    assert c.auto_resume_dead_stage(rid) is False    # process alive -> not dead, no resume
     proc.exit_code = -9                              # killed mid-stage-3, no verification recorded
-    result = c.auto_resume_dead_stage(rid)
-    assert result is False                           # no auto-relaunch — operator must resume
+    assert c.auto_resume_dead_stage(rid) is True     # host auto-resumes (within cap)
+    assert "Stage 3" in argvs[-1][2]
+    # Transient recovery: run stays in normal phase (not 'crashed')
+    st2 = c._load_state(rid)
+    assert st2.phase not in ("crashed", "paused")
+
+
+def test_mark_stage_crashed_and_resume_project_restarts_stage(tmp_path):
+    # SPEC §3 persistent-crash path: after the poller exhausts _AUTO_RESUME_MAX, it calls
+    # mark_stage_crashed(). The run lands in 'crashed' for the Recovery bar. resume_project()
+    # clears the marker and relaunches — the operator's one action.
+    class FakeProc:
+        def __init__(self): self.exit_code = None
+        def poll(self): return self.exit_code
+    proc = FakeProc(); argvs = []
+    def launcher(argv, env=None, log_path=None, cwd=None):
+        argvs.append(argv); return proc
+    ids = iter(["project-pc"])
+    c = Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids))
+    rid = c.start_project(ProjectRequest(description="x"))
+    st = c._load_state(rid)
+    st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True
+    st.stage = 3; st.phase = "build"
+    st.save()
+    proc.exit_code = -9                                        # stage died, process exited
+    # mark_stage_crashed — called by poller after retry cap exhausted
+    assert c.mark_stage_crashed(rid) is True
     st2 = c._load_state(rid)
     assert st2.phase == "crashed"
-    assert st2.crashed_at_node == "build"
-    assert argvs == [argvs[0]]                       # only the original start_project launch
+    assert st2.crashed_at_node == "build"                     # recorded where it died
+    # operator clicks Resume in the Recovery bar → resume_project clears marker + relaunches
+    out = c.resume_project(rid)
+    assert out == rid
+    st3 = c._load_state(rid)
+    assert st3.phase != "crashed"                              # no longer crashed
+    assert st3.crashed_at_node == ""                          # marker cleared
+    assert "Stage 3" in argvs[-1][2]                          # Stage 3 relaunched
 
 
 def test_auto_resume_does_not_fire_at_the_deps_gate_or_when_budget_blocked(tmp_path):
