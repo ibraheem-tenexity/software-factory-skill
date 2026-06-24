@@ -99,7 +99,7 @@ def make_tools(console: Console, users=None, attachments=lambda: [],
                project_name=lambda: "", gated=lambda: False,
                owner=lambda: "", viewer=lambda: ("", "admin"),
                draft_id=lambda: "", interview=lambda: "") -> list[FunctionTool]:
-    """The locked 13-tool concierge set (Option C onboarding). Tools delegate to Console (draft/run)
+    """The 14-tool concierge set (Option C onboarding). Tools delegate to Console (draft/run)
     and the UserStore (company org). `users` is the UserStore; `owner`/`viewer` give the signed-in
     email + role; `draft_id` is the canonical run-<8hex> of the in-progress onboarding draft (the form
     eagerly creates it and shares the id); `interview` is the rendered transcript threaded into Stage 1
@@ -208,6 +208,18 @@ def make_tools(console: Console, users=None, attachments=lambda: [],
             return json.dumps({"error": "forbidden"})
         return json.dumps(console.status(project_id))
 
+    async def _restart_pipeline(project_id: str) -> str:
+        if not _allowed(project_id):
+            return json.dumps({"error": "forbidden"})
+        st = console.status(project_id)
+        stage = st.get("stage") or 1
+        result = console.retry_stage(project_id, stage)
+        if result is None:
+            return json.dumps({"error": "cannot restart", "reason":
+                               "run is stopped, already running, or prerequisites not met",
+                               "status": st})
+        return json.dumps({"restarted": True, "stage": stage, "status": console.status(project_id)})
+
     async def _request_dep_input(project_id: str, dep_names: list) -> str:
         if not _allowed(project_id):
             return json.dumps({"error": "forbidden"})
@@ -273,6 +285,10 @@ def make_tools(console: Console, users=None, attachments=lambda: [],
         _tool("check_status",
               "Check current pipeline status — phase, stage, cost — after handoff.",
               {"project_id": _str}, ["project_id"], _check_status),
+        _tool("restart_pipeline",
+              "Re-launch the current stage of a stopped or stalled run (resume/retry, not a "
+              "from-scratch wipe). Use when the user says the build crashed, stalled, or is stuck.",
+              {"project_id": _str}, ["project_id"], _restart_pipeline),
         _tool("request_dep_input",
               "Signal the frontend to show secure input fields for dependency tokens. Use this instead "
               "of asking the user to paste tokens in chat.",
