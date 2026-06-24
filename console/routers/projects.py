@@ -7,6 +7,7 @@ from fastapi.responses import PlainTextResponse
 
 from software_factory import storage, project_view
 from software_factory.console import ProjectRequest
+from software_factory.db import artifact_by_id
 from software_factory.deps import extract_env_creds
 
 import console.state as state
@@ -113,6 +114,35 @@ def update_project_brief(pid: str, body: dict, v: tuple = Depends(authorize_proj
 @router.get("/api/projects/{pid}/events")
 def project_events(pid: str, v: tuple = Depends(authorize_project)):
     return {"events": state.console.events(pid)}
+
+
+@router.get("/api/artifacts/{artifact_id}")
+def artifact_detail(artifact_id: int, v: tuple = Depends(require_authed)):
+    """Fetch an artifact by its stable integer id (cross-project lookup for the standalone viewer).
+
+    Returns: {id, project_id, title, kind, path, content, updated, agent}
+    content is the file text (up to 200 KB); null when the path is a URL or the file is absent.
+    No confidence field — not in the artifacts table; viewer must omit that pill.
+    """
+    row = artifact_by_id(artifact_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    content = None
+    path = row.get("path") or ""
+    if path and not path.startswith(("http://", "https://")):
+        # Resolve via the owning project's content reader (path-escape-safe).
+        result = state.console.artifact(row["project_id"], path)
+        content = result.get("content")
+    return {
+        "id": row["id"],
+        "project_id": row["project_id"],
+        "title": row.get("title"),
+        "kind": row.get("kind"),
+        "path": path,
+        "content": content,
+        "updated": row.get("ts"),
+        "agent": row.get("agent"),
+    }
 
 
 @router.get("/api/projects/{pid}/artifact")

@@ -156,6 +156,14 @@ class ProjectStore:
             "SELECT * FROM deployments WHERE project_id = ? ORDER BY id", (self._project_id,)).fetchall()]
 
 
+def artifact_by_id(artifact_id: int) -> Optional[dict]:
+    """Look up a single artifact row by its primary-key id (cross-project).
+    Returns None when the id is unknown. Used by GET /api/artifacts/{id}."""
+    conn = dbshim.connect(os.environ["SF_RUNS_DIR"])
+    rows = conn.execute("SELECT * FROM artifacts WHERE id = ?", (artifact_id,)).fetchall()
+    return dict(rows[0]) if rows else None
+
+
 # --- CLI the headless orchestrator uses instead of emitting events --------------------
 _USAGE = (
     "usage: python3 -m software_factory.db <verb> <projects_dir> <project_id> [args]\n"
