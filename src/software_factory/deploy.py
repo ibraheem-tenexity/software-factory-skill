@@ -21,6 +21,7 @@ from . import env
 class RunResult:
     stdout: str
     returncode: int
+    stderr: str = ""   # captured so callers can read CLI errors that land on stderr (e.g. teardown's "not found")
 
 
 def _real_runner(args: list[str]) -> RunResult:
@@ -31,7 +32,7 @@ def _real_runner(args: list[str]) -> RunResult:
     target = env.runapp_railway_project_id()
     run_env = {**os.environ, "RAILWAY_PROJECT_ID": target} if target else None
     proc = subprocess.run(args, capture_output=True, text=True, env=run_env)
-    return RunResult(stdout=proc.stdout, returncode=proc.returncode)
+    return RunResult(stdout=proc.stdout, returncode=proc.returncode, stderr=proc.stderr or "")
 
 
 _TARGETS = ("vercel", "railway")

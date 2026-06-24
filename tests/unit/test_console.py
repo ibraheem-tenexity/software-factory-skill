@@ -1497,3 +1497,87 @@ def test_extra_creds_override_vault_stored_values(tmp_path, monkeypatch):
     c.start_stage3(pid, extra_creds={"RAILWAY_TOKEN": override_val})
     # The explicitly-supplied gate value must win over the vault-retrieved one
     assert launcher3.env.get("RAILWAY_TOKEN") == override_val
+
+
+# ---------------------------------------------------------------------------------------
+# Deploy-DB teardown wiring (the second half of the orphan-leak fix). The console captures
+# the provisioned serviceId, reaps it on archive per the A/B policy (DISARMED by default →
+# dry-run), and the reaper sweeps ALL runs INCLUDING archived ones (list_projects hides those).
+# ---------------------------------------------------------------------------------------
+
+def test_launch_stage_persists_captured_deploy_db_service_id(tmp_path, monkeypatch):
+    import os
+    from software_factory import console as console_mod
+    c = console(tmp_path, FakeLauncher())
+    project_id = c.start_project(ProjectRequest(description="needs a db", target="railway"))
+    st = c._load_state(project_id)
+    st.stage = 3; st.deps_required = ["DATABASE_URL"]; st.deps_satisfied = True; st.save()
+
+    def fake_prepare(*a, **k):
+        ws = os.path.join(str(tmp_path), project_id, "workspace")
+        os.makedirs(os.path.join(ws, "context"), exist_ok=True)
+        return ws
+    monkeypatch.setattr(console_mod, "prepare_workspace", fake_prepare)
+    monkeypatch.setattr(console_mod, "check_mcp", lambda path: [])
+    monkeypatch.setattr(console_mod.deploy_db, "provision",
+                        lambda pid, ctx: {"service_id": "svc-xyz", "DATABASE_URL": "postgres://x",
+                                          "provider": "railway-postgres", "service": "Postgres-XX"})
+
+    c._launch_stage(project_id, 3, "prompt", {})
+    # The captured serviceId is persisted on state as the durable teardown handle.
+    assert c._load_state(project_id).deploy_db_service_id == "svc-xyz"
+
+
+def test_set_archived_reaps_captured_db_when_armed(tmp_path, monkeypatch):
+    from software_factory import console as console_mod
+    monkeypatch.setenv("SF_DEPLOY_DB_TEARDOWN", "persistent")        # armed, policy B
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="x"))
+    st = c._load_state(pid); st.deploy_db_service_id = "svc-arch"; st.save()
+    torn = []
+    monkeypatch.setattr(console_mod.deploy_db, "teardown",
+                        lambda service_id, run=None: (torn.append(service_id),
+                            {"service_id": service_id, "deleted": True, "already_gone": False,
+                             "ok": True, "detail": ""})[1])
+    assert c.set_archived(pid, True) is True
+    assert torn == ["svc-arch"]                                     # archived under B → reap the captured DB
+
+
+def test_set_archived_fires_teardown_hook_for_runs_with_a_captured_db(tmp_path, monkeypatch):
+    # The hook MUST fire on archive (so the disarmed default can dry-run-log a candidate) — whether
+    # it actually deletes is the policy gate's job, proven by the deploy_db.reap unit tests.
+    from software_factory import console as console_mod
+    monkeypatch.delenv("SF_DEPLOY_DB_TEARDOWN", raising=False)       # DISARMED (held)
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="x"))
+    st = c._load_state(pid); st.deploy_db_service_id = "svc-held"; st.save()
+    seen = []
+    monkeypatch.setattr(console_mod.deploy_db, "reap",
+                        lambda records, **k: (seen.extend(r.service_id for r in records), {"reaped": []})[1])
+    c.set_archived(pid, True)
+    assert seen == ["svc-held"]                                    # hook fired with the captured id
+
+
+def test_set_archived_does_not_fire_hook_when_no_db_was_provisioned(tmp_path, monkeypatch):
+    from software_factory import console as console_mod
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="static site, no db"))   # never provisioned a DB
+    called = []
+    monkeypatch.setattr(console_mod.deploy_db, "reap", lambda records, **k: called.append(1))
+    c.set_archived(pid, True)
+    assert called == []                                            # nothing to reap → no reaper call
+
+
+def test_reap_deploy_dbs_sweeps_archived_runs_that_lists_hide(tmp_path, monkeypatch):
+    from software_factory.console import Console
+    monkeypatch.delenv("SF_DEPLOY_DB_TEARDOWN", raising=False)       # dry-run preview
+    ids = iter(["project-aaaa1111", "project-bbbb2222"])
+    c = Console(str(tmp_path), launch=FakeLauncher(), new_id=lambda: next(ids))
+    a = c.start_project(ProjectRequest(description="archived one"))
+    b = c.start_project(ProjectRequest(description="live demo"))
+    sa = c._load_state(a); sa.deploy_db_service_id = "svc-a"; sa.archived = True; sa.save()
+    sb = c._load_state(b)
+    sb.deploy_db_service_id = "svc-b"; sb.phase = "done"; sb.deploy_url = "https://x"; sb.save()
+    report = c.reap_deploy_dbs(dry_run=True)
+    assert {w["service_id"] for w in report["would_reap"]} == {"svc-a"}   # archived surfaced + eligible
+    assert {k["service_id"] for k in report["kept"]} == {"svc-b"}         # live done kept

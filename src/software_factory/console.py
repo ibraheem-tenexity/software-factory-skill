@@ -696,7 +696,12 @@ class Console:
                 state.deploy_db_attempts = attempts + 1
                 state.save()
                 try:
-                    deploy_db.provision(project_id, ctx)
+                    info = deploy_db.provision(project_id, ctx)
+                    # Persist the captured serviceId as the DURABLE teardown handle: the reaper needs
+                    # it even after this run's context dir (which also holds it) is gone.
+                    if info.get("service_id"):
+                        state.deploy_db_service_id = info["service_id"]
+                        state.save()
                     db.record_artifact("Deploy DB", "context/" + deploy_db.DEPLOY_DB_FILE,
                                        kind="deploy-db")
                 except Exception as e:
@@ -1581,7 +1586,52 @@ class Console:
                     state.save()
                 except Exception:
                     pass  # best-effort: archive write must never fail due to Vault hiccup
+            self._maybe_teardown_deploy_db(project_id, state)
         return state.archived
+
+    def _maybe_teardown_deploy_db(self, project_id: str, state: ProjectState | None = None) -> dict | None:
+        """Reap THIS run's captured deploy-DB on a terminal/archive transition, per the configured
+        A/B policy (disarmed by default → dry-run-logs only). No-op when the run never provisioned a
+        DB. Best-effort: a teardown hiccup must never break the archive/lifecycle write that called it."""
+        try:
+            st = state or self._load_state(project_id)
+            sid = (getattr(st, "deploy_db_service_id", "") or "").strip()
+            if not sid:
+                return None
+            rec = deploy_db.ReapRecord(
+                project_id=project_id, service_id=sid,
+                archived=bool(getattr(st, "archived", False)),
+                phase=getattr(st, "phase", "") or "",
+                has_verified_deploy=bool(getattr(st, "deploy_url", None)),
+            )
+            return deploy_db.reap([rec], log=lambda m: print(m, file=sys.stderr))
+        except Exception as e:
+            print(f"[deploy-db] teardown hook error for {project_id}: {e}", file=sys.stderr)
+            return None
+
+    def reap_deploy_dbs(self, dry_run: bool = False) -> dict:
+        """Sweep EVERY run (including archived — which list_projects hides, yet are prime reap targets)
+        and tear down the deploy-DB of each whose run is terminal/discarded per the configured policy.
+        Disarmed by default (dry-run-logs candidates); dry_run=True forces a preview even when armed.
+        Matches persisted captured serviceIds ↔ run state — it only ever touches ids WE provisioned."""
+        local = [n for n in os.listdir(self._projects_dir)
+                 if PROJECT_ID_RE.fullmatch(n) and os.path.isdir(os.path.join(self._projects_dir, n))]
+        seen = set(local)
+        ids = local + [r["project_id"] for r in dbshim.registry_projects()
+                       if PROJECT_ID_RE.fullmatch(r["project_id"]) and r["project_id"] not in seen]
+        records = []
+        for pid in ids:
+            st = self._load_state(pid)
+            sid = (getattr(st, "deploy_db_service_id", "") or "").strip()
+            if not sid:
+                continue                                   # never provisioned a DB — nothing to reap
+            records.append(deploy_db.ReapRecord(
+                project_id=pid, service_id=sid,
+                archived=bool(getattr(st, "archived", False)),
+                phase=getattr(st, "phase", "") or "",
+                has_verified_deploy=bool(getattr(st, "deploy_url", None)),
+            ))
+        return deploy_db.reap(records, log=lambda m: print(m, file=sys.stderr), dry_run=dry_run)
 
     def rename_project(self, project_id: str, name: str | None = None,
                        description: str | None = None, scope: list | None = None) -> dict:

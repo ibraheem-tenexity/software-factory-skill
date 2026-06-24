@@ -45,7 +45,7 @@ _PERSISTED = {
     "stage", "stage1_done", "stage2_done", "runtime",
     "planning_model", "impl_model", "opencode_model",
     "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
-    "budget_ceiling", "held", "owner",
+    "budget_ceiling", "deploy_db_attempts", "deploy_db_service_id", "held", "owner",
     "brief", "interview_coverage", "scope", "is_demo", "archived",
     "created_by", "created_at",
     "creds_vault_ids",
@@ -82,6 +82,7 @@ class ProjectState:
     deps_disposition: dict = field(default_factory=dict)  # name -> provide|mock|mcp|env (metadata, safe on disk)
     budget_ceiling: Optional[float] = None  # per-project override of SF_COST_CEILING (SPEC §4, recoverable kill)
     deploy_db_attempts: int = 0  # provision-attempt counter — hard cap so a failure can't spawn unbounded DBs
+    deploy_db_service_id: str = ""  # captured Railway Postgres serviceId — the durable teardown handle
     held: bool = False  # gated hold: created but NOT launched until released (survives restarts)
     owner: str = ""  # email of the creating user; members see only their own runs (admins see all)
     # Structured onboarding brief (see brief.BRIEF_SECTIONS) + per-section covered flags. Accumulated
