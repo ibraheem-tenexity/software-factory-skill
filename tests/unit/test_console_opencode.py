@@ -425,6 +425,69 @@ def test_budget_kill_escalates_to_sigkill_when_terminate_is_ignored(tmp_path):
     assert p.killed, "SIGTERM-immune process must be SIGKILLed"
 
 
+GLM = "z-ai/glm-5.2"
+
+
+def test_glm_model_alias_launches_with_glm_model_id(tmp_path, monkeypatch):
+    """ProjectRequest(model='glm') → opencode argv uses z-ai/glm-5.2, not the Kimi default."""
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    c.start_project(ProjectRequest(description="a guestbook app", target="railway", model="glm"))
+    assert launcher.argv[launcher.argv.index("--model") + 1] == GLM
+
+
+def test_kimi_alias_still_uses_kimi_model_id(tmp_path, monkeypatch):
+    """ProjectRequest(model='kimi') → opencode argv uses the Kimi full id."""
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    c.start_project(ProjectRequest(description="a guestbook app", target="railway", model="kimi"))
+    assert launcher.argv[launcher.argv.index("--model") + 1] == KIMI
+
+
+def test_empty_model_alias_defaults_to_kimi(tmp_path, monkeypatch):
+    """ProjectRequest(model='') → falls back to the Kimi default."""
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    c.start_project(ProjectRequest(description="a guestbook app", target="railway"))
+    assert launcher.argv[launcher.argv.index("--model") + 1] == KIMI
+
+
+def test_set_draft_project_stores_glm_alias(tmp_path, monkeypatch):
+    """set_draft_project(model='glm') persists opencode_model='glm' in ProjectState."""
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    pid = c.create_draft(owner="a@b.com", runtime="opencode")
+    c.set_draft_project(pid, model="glm")
+    from software_factory.projectstate import ProjectState
+    state = c._load_state(pid)
+    assert state.opencode_model == "glm"
+
+
+def test_unknown_model_alias_is_rejected(tmp_path, monkeypatch):
+    """Unknown model alias is silently dropped → state.opencode_model stays empty."""
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    pid = c.create_draft(owner="a@b.com", runtime="opencode", model="unknown-model")
+    state = c._load_state(pid)
+    assert state.opencode_model == ""
+
+
+def test_promote_draft_threads_glm_alias_to_launch(tmp_path, monkeypatch):
+    """A draft with opencode_model='glm' launches Stage 1 with the GLM model id."""
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    pid = c.create_draft(owner="a@b.com", runtime="opencode", model="glm")
+    c.set_draft_project(pid, goal="a guestbook app")
+    c.promote_draft(pid, description="a guestbook app")
+    assert launcher.argv[launcher.argv.index("--model") + 1] == GLM
+
+
 def test_default_launch_child_owns_the_log_file_not_a_server_pipe(tmp_path):
     # project-5b7aef7a live scar: stdout piped through a server pump thread dies with the
     # server — project.log freezes and the §4 brake goes spend-blind while the orchestrator

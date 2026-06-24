@@ -30,7 +30,7 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
     if not project_id:
         project_id = console.create_draft(owner=v[0] or "", name=body.project_name or "",
                                       runtime=body.runtime, planning_model=body.planning_model,
-                                      impl_model=body.impl_model)
+                                      impl_model=body.impl_model, model=body.model)
     # Files/images attached during the interview persist into the draft now (wireframes survive),
     # so they're in input/ for Stage 1 regardless of which turn they arrived on. Drafts only.
     if (body.files or body.images) and console.is_draft(project_id):

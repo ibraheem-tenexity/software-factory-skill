@@ -66,12 +66,12 @@ for _p in STAGE_3:
 _STAGE_MODEL = {1: "claude-opus-4-8", 2: "claude-opus-4-8", 3: "claude-sonnet-4-6"}
 # Hard cap on deploy-db provision attempts per run — a failure must never spawn unbounded orphan DBs.
 _DEPLOY_DB_MAX_ATTEMPTS = 2
-# opencode runtime: one model for all stages (monolithic v1 — no per-stage split).
-_STAGE_MODEL_OPENCODE = {
-    1: "openrouter/moonshotai/kimi-k2.7-code",
-    2: "openrouter/moonshotai/kimi-k2.7-code",
-    3: "openrouter/moonshotai/kimi-k2.7-code",
+# opencode runtime: short alias → full OpenRouter model ID (all stages use the same model).
+_OPENCODE_MODEL_IDS = {
+    "kimi": "openrouter/moonshotai/kimi-k2.7-code",
+    "glm":  "z-ai/glm-5.2",
 }
+_OPENCODE_DEFAULT_ALIAS = "kimi"
 # Operator-pickable per-project models (claude runtime). The UI offers exactly these; anything
 # else is ignored at start_project so a bad request can never launch an unknown/unpriced model.
 PLANNING_MODELS = {"claude-opus-4-8", "claude-fable-5"}
@@ -89,6 +89,7 @@ class ProjectRequest:
     runtime: str = ""  # claude | opencode; empty -> SF_RUNTIME env (default claude)
     planning_model: str = ""  # S1/S2 orchestrator model (claude runtime); empty -> stage default
     impl_model: str = ""      # S3 model (claude runtime); empty -> stage default
+    model: str = ""           # opencode model alias: "kimi"|"glm"; empty -> _OPENCODE_DEFAULT_ALIAS
     name: str = ""            # operator-chosen project name (display label)
     gated: bool = False       # create held: registered + visible at $0, stage 1 launches on release
     owner: str = ""           # email of the creating user (multi-tenant: members see only their own)
@@ -713,8 +714,9 @@ class Console:
         state.save()
 
         if runtime == "opencode":
-            model = os.environ.get("SF_MODEL") or _STAGE_MODEL_OPENCODE.get(
-                stage, "openrouter/moonshotai/kimi-k2.7-code")
+            alias = state.opencode_model or _OPENCODE_DEFAULT_ALIAS
+            model = os.environ.get("SF_MODEL") or _OPENCODE_MODEL_IDS.get(
+                alias, _OPENCODE_MODEL_IDS[_OPENCODE_DEFAULT_ALIAS])
             argv = [
                 "opencode", "run", prompt,
                 "--model", model,
@@ -844,6 +846,7 @@ class Console:
         # the offered choices can ever launch. Empty = stage defaults.
         state.planning_model = req.planning_model if req.planning_model in PLANNING_MODELS else ""
         state.impl_model = req.impl_model if req.impl_model in IMPL_MODELS else ""
+        state.opencode_model = req.model if req.model in _OPENCODE_MODEL_IDS else ""
         state.held = bool(gated)
         state.owner = (req.owner or state.owner or "").lower()
         # Immutable creator stamp — set ONCE (covers a direct start_project with no prior draft; a draft
@@ -871,7 +874,7 @@ class Console:
 
     # ---- Durable drafts: an interview before a run exists -------------------------------
     def create_draft(self, owner: str = "", name: str = "", runtime: str = "",
-                     planning_model: str = "", impl_model: str = "") -> str:
+                     planning_model: str = "", impl_model: str = "", model: str = "") -> str:
         """Mint a CANONICAL run-<8hex> id at the START of the onboarding interview and persist a
         draft ProjectState (phase='draft', held, NO artifact recorded → is_pipeline_project False, so the
         poller/ghost-resume guard ignore it until promotion). Using a canonical id up front means
@@ -894,6 +897,7 @@ class Console:
         state.runtime = runtime or os.environ.get("SF_RUNTIME", "claude")
         state.planning_model = planning_model if planning_model in PLANNING_MODELS else ""
         state.impl_model = impl_model if impl_model in IMPL_MODELS else ""
+        state.opencode_model = model if model in _OPENCODE_MODEL_IDS else ""
         state.brief = {}
         state.interview_coverage = {}
         state.save()
@@ -945,7 +949,7 @@ class Console:
 
     def set_draft_project(self, project_id: str, name: str | None = None,
                           goal: str | None = None, scope: list | None = None,
-                          runtime: str | None = None) -> dict:
+                          runtime: str | None = None, model: str | None = None) -> dict:
         """Structured project setter for the Option C onboarding (draft phase). Writes the project
         name, the goal (into brief.goals so it reaches the Stage-1 brief block), the scope-of-work
         backing, and the build-engine runtime (claude|opencode) — then RECOMPOSES the canonical
@@ -959,6 +963,8 @@ class Console:
             state.name = name
         if runtime is not None:
             state.runtime = runtime
+        if model is not None:
+            state.opencode_model = model if model in _OPENCODE_MODEL_IDS else ""
         brief = dict(state.brief or {})
         if goal is not None:
             brief["goals"] = goal
@@ -989,6 +995,7 @@ class Console:
             runtime=state.runtime,
             planning_model=state.planning_model,
             impl_model=state.impl_model,
+            model=state.opencode_model,
             name=state.name,
             owner=state.owner,
         )
@@ -1403,6 +1410,7 @@ class Console:
             "deps_satisfied": state.deps_satisfied,
             "planning_model": state.planning_model,
             "impl_model": state.impl_model,
+            "opencode_model": state.opencode_model,
             "budget_ceiling": self._budget_ceiling(project_id),
             "held": state.held,
             "owner": state.owner,

@@ -43,7 +43,7 @@ _PERSISTED = {
     "project_id", "phase", "spent_usd", "repo_url", "deploy_url",
     "skill", "skill_version", "description", "name", "deploy_target", "creds_provided",
     "stage", "stage1_done", "stage2_done", "runtime",
-    "planning_model", "impl_model",
+    "planning_model", "impl_model", "opencode_model",
     "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
     "budget_ceiling", "held", "owner",
     "brief", "interview_coverage", "scope", "is_demo", "archived",
@@ -73,6 +73,7 @@ class ProjectState:
     # planning drives the S1/S2 orchestrators, impl drives S3.
     planning_model: str = ""
     impl_model: str = ""
+    opencode_model: str = ""  # short alias for the opencode runtime model: "kimi" | "glm"; empty = default (kimi)
     deps_required: list = field(default_factory=list)
     deps_provided: list = field(default_factory=list)  # dep NAMES only, never values
     deps_satisfied: bool = False
