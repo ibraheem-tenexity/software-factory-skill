@@ -33,6 +33,8 @@ class OrgPatchIn(BaseModel):
     location: str | None = None
     website: str | None = None
     connected_systems: list | None = None
+    plan: str | None = None
+    monthly_budget_cap: float | None = None
 
 
 class OrgDocIn(BaseModel):
@@ -135,8 +137,8 @@ class ProjectCreateIn(BaseModel):
     railway_project_id: str = ""
 
 
-# Option C onboarding (draft model): the form eagerly creates a draft on mount, write-throughs the
-# project fields, attaches materials, and promotes at handoff. See docs/plans/fastapi-db-replacement.md.
+# Option C onboarding (draft model): the form defers draft creation until the user types a name,
+# then write-throughs project fields, attaches materials, and promotes at handoff. See docs/plans/fastapi-db-replacement.md.
 class DraftCreateIn(BaseModel):
     project_name: str = ""
     runtime: str = ""
@@ -231,23 +233,6 @@ class ToolPatchIn(BaseModel):
     scope: str | None = None
     auth: str | None = None
     status: str | None = None
-
-
-class ClientIn(BaseModel):
-    name: str = ""
-    industry: str | None = None
-    website: str | None = None
-
-
-class ClientPatchIn(BaseModel):
-    name: str | None = None
-    industry: str | None = None
-    headcount: str | None = None
-    revenue: str | None = None
-    location: str | None = None
-    website: str | None = None
-    plan: str | None = None
-    monthly_budget_cap: float | None = None
 
 
 class SowIn(BaseModel):

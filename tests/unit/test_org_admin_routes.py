@@ -38,6 +38,17 @@ def admin_mod(tmp_path, monkeypatch):
 
 
 @pytest.fixture()
+def staff_mod(tmp_path, monkeypatch):
+    # platform staff = role==admin AND is_internal; seeded via SF_BOOTSTRAP_ADMIN_EMAIL
+    return _load_app(tmp_path, monkeypatch, SF_BOOTSTRAP_ADMIN_EMAIL="op@tenexity.ai", **_AUTH)
+
+
+@pytest.fixture()
+def staff_client(staff_mod):
+    return TestClient(staff_mod.app, base_url="https://testserver")
+
+
+@pytest.fixture()
 def admin_client(admin_mod):
     return TestClient(admin_mod.app, base_url="https://testserver")
 
@@ -164,3 +175,26 @@ def test_member_cannot_set_billing(member_mod, member_client, monkeypatch):
     _login(member_mod, member_client, monkeypatch)
     r = member_client.patch("/api/org/billing", json={"plan": "Team"})
     assert r.status_code == 403
+
+
+# ── schema field round-trips (regression: Client→Org rename must not shadow fields) ─────────────
+def test_patch_org_preserves_sub_focus_and_connected_systems(admin_mod, admin_client, monkeypatch):
+    _login(admin_mod, admin_client, monkeypatch)
+    _make_org(admin_client)
+    r = admin_client.patch("/api/org", json={"sub_focus": ["HR", "LMS"],
+                                              "connected_systems": ["Slack", "Jira"]})
+    assert r.status_code == 200
+    org = r.json()["org"]
+    assert org["sub_focus"] == ["HR", "LMS"]
+    assert org["connected_systems"] == ["Slack", "Jira"]
+
+
+def test_admin_client_update_preserves_plan_and_monthly_budget_cap(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    oid = _make_org(staff_client, name="TargetCo")
+    r = staff_client.patch(f"/api/admin/clients/{oid}",
+                           json={"plan": "Enterprise", "monthly_budget_cap": 500.0})
+    assert r.status_code == 200
+    client = r.json()["client"]
+    assert client["plan"] == "Enterprise"
+    assert client["monthly_budget_cap"] == 500.0
