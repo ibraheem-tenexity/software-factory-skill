@@ -11,7 +11,7 @@ from software_factory.db import artifact_by_id
 from software_factory.deps import extract_env_creds
 
 import console.state as state
-from console.deps import require_authed, authorize_project
+from console.deps import require_authed, authorize_project, _can_see
 from console.schemas import (ProjectCreateIn, DraftCreateIn, ProjectPatchIn, MaterialScopeIn, OrgDocIn,
                              ContinueIn, DepsIn, Stage3In, BudgetIn, RetryIn, DraftPatchIn, AttachIn,
                              PromoteIn, CredsIn)
@@ -127,6 +127,8 @@ def artifact_detail(artifact_id: int, v: tuple = Depends(require_authed)):
     row = artifact_by_id(artifact_id)
     if not row:
         raise HTTPException(status_code=404, detail="artifact not found")
+    if not _can_see(v, row["project_id"]):
+        raise HTTPException(status_code=403, detail="forbidden")
     content = None
     path = row.get("path") or ""
     if path and not path.startswith(("http://", "https://")):

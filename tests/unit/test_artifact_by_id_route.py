@@ -57,6 +57,7 @@ def test_artifact_detail_returns_full_shape(auth_mod, auth_client, monkeypatch):
     monkeypatch.setattr(rmod, "artifact_by_id", lambda aid: dict(_ARTIFACT_ROW))
     monkeypatch.setattr(auth_mod.console, "artifact",
                         lambda pid, path: {"content": "# Architecture\n..."})
+    monkeypatch.setattr(auth_mod.console, "project_owner", lambda pid: "user@tenexity.ai")
     j = auth_client.get("/api/artifacts/42").json()
     assert j["id"] == 42
     assert j["project_id"] == "project-abc12345"
@@ -84,6 +85,7 @@ def test_artifact_detail_url_path_skips_content_read(auth_mod, auth_client, monk
     import console.routers.projects as rmod
     url_row = dict(_ARTIFACT_ROW, path="https://example.com/deploy")
     monkeypatch.setattr(rmod, "artifact_by_id", lambda aid: url_row)
+    monkeypatch.setattr(auth_mod.console, "project_owner", lambda pid: "user@tenexity.ai")
     j = auth_client.get("/api/artifacts/42").json()
     assert j["path"] == "https://example.com/deploy"
     assert j["content"] is None
@@ -94,6 +96,18 @@ def test_artifact_detail_empty_path_returns_null_content(auth_mod, auth_client, 
     import console.routers.projects as rmod
     row = dict(_ARTIFACT_ROW, path=None)
     monkeypatch.setattr(rmod, "artifact_by_id", lambda aid: row)
+    monkeypatch.setattr(auth_mod.console, "project_owner", lambda pid: "user@tenexity.ai")
     j = auth_client.get("/api/artifacts/42").json()
     assert j["content"] is None
     assert j["path"] == ""
+
+
+def test_artifact_detail_403_for_other_users_project(auth_mod, auth_client, monkeypatch):
+    """IDOR guard: a member who doesn't own the artifact's project gets 403, not the artifact."""
+    _login(auth_mod, auth_client, monkeypatch)
+    import console.routers.projects as rmod
+    monkeypatch.setattr(rmod, "artifact_by_id", lambda aid: dict(_ARTIFACT_ROW))
+    # project owner is someone else; auth_mod user is a member (not admin)
+    monkeypatch.setattr(auth_mod.console, "project_owner",
+                        lambda pid: "other-user@elsewhere.com")
+    assert auth_client.get("/api/artifacts/42").status_code == 403
