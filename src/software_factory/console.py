@@ -77,6 +77,14 @@ _OPENCODE_DEFAULT_ALIAS = "kimi"
 PLANNING_MODELS = {"claude-opus-4-8", "claude-fable-5"}
 IMPL_MODELS = {"claude-sonnet-4-6", "claude-opus-4-8"}
 
+_RUNNER_KEYS = {"opencode": "OPENROUTER_API_KEY", "claude": "ANTHROPIC_API_KEY"}
+
+
+def _key_source(runtime: str, creds_provided: list) -> str:
+    """'BYOK' if the user supplied the runner key for this runtime; 'TENEXITY' otherwise."""
+    runner_key = _RUNNER_KEYS.get(runtime, "ANTHROPIC_API_KEY")
+    return "BYOK" if runner_key in (creds_provided or []) else "TENEXITY"
+
 
 @dataclass
 class ProjectRequest:
@@ -1459,6 +1467,10 @@ class Console:
             "planning_model": state.planning_model,
             "impl_model": state.impl_model,
             "opencode_model": state.opencode_model,
+            "runtime": state.runtime or "claude",
+            "model": (state.opencode_model or "kimi") if (state.runtime or "claude") == "opencode"
+                     else (state.impl_model or state.planning_model or ""),
+            "key_source": _key_source(state.runtime or "claude", state.creds_provided or []),
             "budget_ceiling": self._budget_ceiling(project_id),
             "held": state.held,
             "owner": state.owner,

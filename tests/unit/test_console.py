@@ -1582,3 +1582,58 @@ def test_reap_deploy_dbs_sweeps_archived_runs_that_lists_hide(tmp_path, monkeypa
     report = c.reap_deploy_dbs(dry_run=True)
     assert {w["service_id"] for w in report["would_reap"]} == {"svc-a"}   # archived surfaced + eligible
     assert {k["service_id"] for k in report["kept"]} == {"svc-b"}         # live done kept
+
+
+# ── #57-field: runtime / model / key_source in status() ─────────────────────────────────────────
+def test_status_exposes_runtime_model_key_source_defaults(tmp_path):
+    # Default project (claude runtime, no BYOK) → runtime=claude, key_source=TENEXITY
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="guestbook", target="railway"))
+    st = c.status(pid)
+    assert st["runtime"] == "claude"
+    assert st["key_source"] == "TENEXITY"
+    assert "model" in st   # present; may be empty string (stage default)
+
+
+def test_status_key_source_byok_when_anthropic_key_provided(tmp_path):
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="app",
+                                         credentials={"ANTHROPIC_API_KEY": "sk-byok"}))
+    st = c.status(pid)
+    assert st["runtime"] == "claude"
+    assert st["key_source"] == "BYOK"
+
+
+def test_status_key_source_byok_opencode_uses_openrouter_key(tmp_path):
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="app", runtime="opencode",
+                                         credentials={"OPENROUTER_API_KEY": "or-byok"}))
+    st = c.status(pid)
+    assert st["runtime"] == "opencode"
+    assert st["key_source"] == "BYOK"
+
+
+def test_status_key_source_tenexity_when_wrong_key_for_runtime(tmp_path):
+    # opencode runtime but user only supplied ANTHROPIC_API_KEY → TENEXITY for opencode runner
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="app", runtime="opencode",
+                                         credentials={"ANTHROPIC_API_KEY": "sk-byok"}))
+    st = c.status(pid)
+    assert st["runtime"] == "opencode"
+    assert st["key_source"] == "TENEXITY"
+
+
+def test_status_model_reflects_impl_model_for_claude(tmp_path):
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="app", impl_model="claude-sonnet-4-6"))
+    st = c.status(pid)
+    assert st["runtime"] == "claude"
+    assert st["model"] == "claude-sonnet-4-6"
+
+
+def test_status_model_reflects_opencode_alias(tmp_path):
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="app", runtime="opencode", model="glm"))
+    st = c.status(pid)
+    assert st["runtime"] == "opencode"
+    assert st["model"] == "glm"
