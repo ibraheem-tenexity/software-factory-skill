@@ -381,6 +381,11 @@ export const api = {
   // Manual kill-switch — halts the live stage process, sets phase=stopped, stops the poller
   // re-advancing. Endpoint shipping in qsvigmth's run-control PR; graceful until then.
   stopProject: (id: string) => send<ProjectSummary & Record<string, any>>(`/api/projects/${id}/stop`, "POST"),
+  // ── Recovery endpoints (bkkc52v5 PR #89) ──
+  pauseProject: (id: string) => send<Record<string, any>>(`/api/projects/${id}/pause`, "POST"),
+  resumeProject: (id: string) => send<Record<string, any>>(`/api/projects/${id}/resume`, "POST"),
+  retryNode: (id: string, node: string) => send<Record<string, any>>(`/api/projects/${id}/retry-node`, "POST", { node }),
+  rewindTo: (id: string, node: string) => send<Record<string, any>>(`/api/projects/${id}/rewind`, "POST", { node }),
   uploadMaterial: (id: string, file: { name: string; tag?: string; content_type?: string; data_b64: string }) =>
     send<{ ok?: boolean }>(`/api/projects/${id}/materials`, "POST", file),
   orgDocUpload: (body: { name: string; tag?: string; content_type?: string; data_b64: string }) =>

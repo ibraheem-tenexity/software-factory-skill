@@ -41,6 +41,15 @@ export const STAGES: { stage: number; title: string; phases: { id: string; label
 // All phase ids in pipeline order (matches server PIPELINE).
 export const PIPELINE_ORDER = STAGES.flatMap((s) => s.phases.map((p) => p.id));
 
+// Index map for O(1) downstream-of checks.
+const PIPELINE_INDEX: Record<string, number> = Object.fromEntries(PIPELINE_ORDER.map((id, i) => [id, i]));
+
+// True if `candidate` is strictly downstream of `halted` (comes after it in pipeline order).
+export function isDownstreamOf(candidate: string, halted: string): boolean {
+  const hi = PIPELINE_INDEX[halted], ci = PIPELINE_INDEX[candidate];
+  return hi !== undefined && ci !== undefined && ci > hi;
+}
+
 // The run is "at the wait-for-deps stage" when Stage 2 has completed (its gate passed) but deps
 // are not yet satisfied and Stage 3 has not started — the only moment the deps bar should show.
 // Derived from real status fields (stage2_done, deps_satisfied) + phase.
