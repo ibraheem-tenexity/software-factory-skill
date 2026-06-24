@@ -30,8 +30,8 @@ def db_path(projects_dir: str, project_id: str) -> str:
 
 
 def project_id_from_path(path: str) -> str:
-    """The run id a store at `path` belongs to — the run-dir name in
-    `<projects_dir>/<project_id>/project.db`. In the flat schema every per-project table is scoped by this."""
+    """The run id a store at `path` belongs to — the basename of `<projects_dir>/<project_id>`.
+    In the flat Postgres schema every per-project table row is scoped by this id; no file is created."""
     return os.path.basename(path.rstrip("/"))
 
 

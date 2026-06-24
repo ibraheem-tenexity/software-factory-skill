@@ -2,8 +2,8 @@
 
 Each run builds in its own disposable directory at `<projects_dir>/<project_id>/workspace/`. After the
 work is published to durable surfaces (GitHub + the live URL) and the run reaches a terminal
-state, the workspace is deleted. Proof artifacts (agents.db, tickets.db, projectstate) live at the
-run BASE beside the workspace, so teardown never touches them.
+state, the workspace is deleted. Proof artifacts (per-project Postgres rows: agents, tickets,
+projectstate) are durable and unaffected by teardown.
 
 `destroy` is the only destructive op in the skill, so it is gated: it refuses to remove anything
 that lacks our sentinel (i.e. a dir we didn't create) or that sits outside the runs dir.
