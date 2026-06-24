@@ -149,6 +149,28 @@ class AgentRegistryStore:
                   "VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (callsign) DO NOTHING",
                   (a["callsign"], a["name"], a["role"], _real_agent_model(a), a["cost_tier"], a["descr"]))
 
+    def sync_real_agents(self) -> list[dict]:
+        """On-demand reconciliation for POST /api/admin/agents/sync.
+
+        Unlike _ensure_real_agents (boot-time, ON CONFLICT DO NOTHING), this does a true upsert:
+        existing rows for the 4 canonical agents are UPDATED to match their authoritative definitions
+        so a stale model string or renamed callsign is corrected without a redeploy. Legacy fake rows
+        are purged. Custom (non-canonical) rows are never touched. Returns the 4 synced rows."""
+        for cs in LEGACY_FAKE_CALLSIGNS:
+            _exec("DELETE FROM public.agent_registry WHERE callsign=%s", (cs,))
+        canonical_callsigns = {a["callsign"] for a in REAL_AGENTS}
+        for a in REAL_AGENTS:
+            model = _real_agent_model(a)
+            _exec(
+                "INSERT INTO public.agent_registry (callsign,name,role,model,cost_tier,descr) "
+                "VALUES (%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT (callsign) DO UPDATE SET "
+                "name=EXCLUDED.name, role=EXCLUDED.role, model=EXCLUDED.model, "
+                "cost_tier=EXCLUDED.cost_tier, descr=EXCLUDED.descr",
+                (a["callsign"], a["name"], a["role"], model, a["cost_tier"], a["descr"]),
+            )
+        return [r for r in self.all() if r["callsign"] in canonical_callsigns]
+
     def all(self) -> list[dict]:
         # Pure read — never reseeds (that was the per-request bug). Reconciliation is at init only.
         return _rows("SELECT callsign,name,role,model,cost_tier,descr FROM public.agent_registry "

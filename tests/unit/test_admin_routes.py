@@ -369,3 +369,52 @@ def test_cannot_remove_last_staff_admin(tmp_path, monkeypatch):
                 headers={auth.SERVICE_HEADER: "svc-secret-token"})
     assert r.status_code == 409
     assert mod.users.get_user("op@tenexity.ai")["is_internal"] in (1, True)   # refused, unchanged
+
+
+# ── POST /api/admin/agents/sync ───────────────────────────────────────────────────────────────
+def test_agents_sync_returns_4_canonical_agents_for_staff(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    r = staff_client.post("/api/admin/agents/sync")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["synced"] == 4
+    callsigns = {a["callsign"] for a in body["agents"]}
+    assert callsigns == {"STAGE-1", "STAGE-2", "STAGE-3", "CONCIERGE"}
+
+
+def test_agents_sync_forbidden_for_non_staff(member_mod, member_client, monkeypatch):
+    _login(member_mod, member_client, monkeypatch)
+    assert member_client.post("/api/admin/agents/sync").status_code == 403
+
+
+def test_agents_sync_forbidden_for_admin_without_is_internal(adminonly_mod, adminonly_client,
+                                                               monkeypatch):
+    _login(adminonly_mod, adminonly_client, monkeypatch)
+    assert adminonly_client.post("/api/admin/agents/sync").status_code == 403
+
+
+def test_agents_sync_upserts_stale_name(staff_mod, staff_client, monkeypatch):
+    # If a canonical agent's name was drifted (e.g. via PATCH), sync must restore the canonical value.
+    _login(staff_mod, staff_client, monkeypatch)
+    staff_mod.agent_store.update("STAGE-1", {"name": "STALE NAME"})
+    assert staff_mod.agent_store.get("STAGE-1")["name"] == "STALE NAME"
+    r = staff_client.post("/api/admin/agents/sync")
+    assert r.status_code == 200
+    s1 = next(a for a in r.json()["agents"] if a["callsign"] == "STAGE-1")
+    assert s1["name"] == "Stage 1 · Research"                    # restored by upsert
+
+
+def test_agents_sync_is_idempotent(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    r1 = staff_client.post("/api/admin/agents/sync").json()
+    r2 = staff_client.post("/api/admin/agents/sync").json()
+    assert r1["synced"] == r2["synced"] == 4
+    assert {a["callsign"] for a in r1["agents"]} == {a["callsign"] for a in r2["agents"]}
+
+
+def test_agents_sync_does_not_touch_custom_agents(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    staff_client.post("/api/admin/agents", json={"callsign": "CUSTOM3", "name": "Custom Three"})
+    staff_client.post("/api/admin/agents/sync")
+    # custom agent must still exist after sync
+    assert staff_mod.agent_store.get("CUSTOM3") is not None
