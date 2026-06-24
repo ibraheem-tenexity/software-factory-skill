@@ -25,8 +25,11 @@ def _runner(outputs):
     return run
 
 
+_NO_SLEEP = lambda _: None  # noqa: E731 — injected as `sleep=` to skip actual waits in tests
+
 _ADD = json.dumps({"serviceId": "svc-123", "serviceName": "Postgres-RNK8", "templateName": "PostgreSQL"})
 _VARS = json.dumps({"DATABASE_URL": "postgresql://u:p@h:5432/railway", "PGHOST": "h"})
+_EMPTY_VARS = json.dumps({"PGHOST": "h"})  # no DATABASE_URL — simulates async provisioning in progress
 
 
 def test_needs_deploy_db():
@@ -70,17 +73,45 @@ def test_provision_resumes_from_persisted_service_without_re_adding(tmp_path):
 
 def test_handle_persisted_before_variables_so_retry_never_re_adds(tmp_path, monkeypatch):
     monkeypatch.delenv("RAILWAY_PROJECT_ID", raising=False)
-    # Attempt 1: add succeeds but variables returns no URL → raises. The serviceId MUST be persisted.
-    run1 = _runner([_ADD, json.dumps({"PGHOST": "h"})])   # vars without DATABASE_URL
+    # Attempt 1: add succeeds but ALL poll attempts return no URL → raises. serviceId MUST be persisted.
+    from software_factory import deploy_db as _db
+    n = _db._PROVISION_URL_POLL_ATTEMPTS
+    run1 = _runner([_ADD] + [_EMPTY_VARS] * n)   # n vars polls, all without DATABASE_URL
     with pytest.raises(RuntimeError):
-        deploy_db.provision("p", str(tmp_path), run=run1)
+        deploy_db.provision("p", str(tmp_path), run=run1, sleep=_NO_SLEEP)
     saved = json.load(open(os.path.join(str(tmp_path), deploy_db.DEPLOY_DB_FILE)))
     assert saved["service_id"] == "svc-123" and "DATABASE_URL" not in saved
     # Attempt 2: reuse the persisted service — NO second add (no orphan), just re-read variables.
     run2 = _runner([_VARS])
-    info = deploy_db.provision("p", str(tmp_path), run=run2)
+    info = deploy_db.provision("p", str(tmp_path), run=run2, sleep=_NO_SLEEP)
     assert info["DATABASE_URL"] == "postgresql://u:p@h:5432/railway"
     assert run2.calls[0][:2] == ["railway", "variables"]      # reused; no "railway add"
+
+
+def test_provision_polls_until_database_url_appears(tmp_path, monkeypatch):
+    """Railway provisions Postgres asynchronously: DATABASE_URL may be absent on early variable
+    reads. provision() must retry until it appears (up to _PROVISION_URL_POLL_ATTEMPTS)."""
+    monkeypatch.delenv("RAILWAY_PROJECT_ID", raising=False)
+    slept = []
+    # First 3 variable reads return no URL (async init in progress); 4th has the URL.
+    run = _runner([_ADD, _EMPTY_VARS, _EMPTY_VARS, _EMPTY_VARS, _VARS, "{}"])  # vol list = {}
+    info = deploy_db.provision("p", str(tmp_path), run=run, sleep=slept.append)
+    assert info["DATABASE_URL"] == "postgresql://u:p@h:5432/railway"
+    vars_calls = [c for c in run.calls if c[:2] == ["railway", "variables"]]
+    assert len(vars_calls) == 4          # 3 empty + 1 success
+    assert len(slept) == 3              # slept between each failed attempt
+
+
+def test_provision_raises_when_url_never_appears_after_all_polls(tmp_path, monkeypatch):
+    """If DATABASE_URL never appears across all poll attempts, provision() raises RuntimeError."""
+    monkeypatch.delenv("RAILWAY_PROJECT_ID", raising=False)
+    from software_factory import deploy_db as _db
+    n = _db._PROVISION_URL_POLL_ATTEMPTS
+    run = _runner([_ADD] + [_EMPTY_VARS] * n)
+    with pytest.raises(RuntimeError, match="after .* attempts"):
+        deploy_db.provision("p", str(tmp_path), run=run, sleep=_NO_SLEEP)
+    vars_calls = [c for c in run.calls if c[:2] == ["railway", "variables"]]
+    assert len(vars_calls) == n         # polled exactly _PROVISION_URL_POLL_ATTEMPTS times
 
 
 def test_provision_raises_when_add_returns_no_service_id(tmp_path, monkeypatch):

@@ -74,8 +74,13 @@ def _parse_database_url(text: str) -> str | None:
     return _pg_url_from(text)
 
 
+_PROVISION_URL_POLL_ATTEMPTS = int(os.environ.get("SF_PROVISION_URL_POLL_ATTEMPTS", "10") or 10)
+_PROVISION_URL_POLL_SLEEP = float(os.environ.get("SF_PROVISION_URL_POLL_SLEEP", "3") or 3)
+
+
 def provision(project_id: str, context_dir: str,
-              run: Callable[[list[str]], RunResult] = _real_runner) -> dict:
+              run: Callable[[list[str]], RunResult] = _real_runner,
+              sleep: Callable[[float], None] | None = None) -> dict:
     """Provision (or RESUME) this run's Railway Postgres and return + persist its connection info
     {DATABASE_URL, provider, service, service_id, project_id} to context_dir/deploy-db.json.
 
@@ -84,9 +89,14 @@ def provision(project_id: str, context_dir: str,
         the original stall. We use `--json`, which returns {serviceId, serviceName:"Postgres-XXXX"}.
       • Railway auto-names the service; we CAPTURE the returned serviceId and read DATABASE_URL from THAT
         id (`railway variables --service <serviceId> --json`) — reading by a guessed name was the bug.
+      • Railway provisions the Postgres ASYNCHRONOUSLY: DATABASE_URL may be absent on the first
+        variables read. We poll with backoff (~10× over ~30s) until it appears.
     IDEMPOTENT: the serviceId is persisted the MOMENT `add` succeeds (before the variables read), so a
     retry REUSES that service (no second `add` → no orphan); a fully-provisioned file is a no-op. Raises
     RuntimeError on failure (the caller records a blocker + counts the attempt against the retry cap)."""
+    import time as _time
+    _sleep = sleep if sleep is not None else _time.sleep
+
     # Use SF_RUNAPP_RAILWAY_PROJECT_IDS as the authoritative target: RAILWAY_PROJECT_ID is
     # Railway-reserved and forced to the console's own project on prod, so it can't be
     # overridden via the dashboard and must not be used as the DB provision target.
@@ -117,10 +127,19 @@ def provision(project_id: str, context_dir: str,
         write_file(context_dir, {"service_id": svc_id, "service": svc_name,
                                  "provider": "railway-postgres", "project_id": project_id})
 
-    var_out = run(["railway", "variables", "--service", svc_id, "--json"]).stdout
-    url = _parse_database_url(var_out)
+    # Railway provisions Postgres asynchronously: DATABASE_URL may not appear on the first
+    # variables read. Poll until it does (up to ~30s) before giving up.
+    url = None
+    for attempt in range(_PROVISION_URL_POLL_ATTEMPTS):
+        var_out = run(["railway", "variables", "--service", svc_id, "--json"]).stdout
+        url = _parse_database_url(var_out)
+        if url:
+            break
+        if attempt < _PROVISION_URL_POLL_ATTEMPTS - 1:
+            _sleep(_PROVISION_URL_POLL_SLEEP)
     if not url:
-        raise RuntimeError(f"could not obtain a Postgres DATABASE_URL for service {svc_id}")
+        raise RuntimeError(f"could not obtain a Postgres DATABASE_URL for service {svc_id} "
+                           f"after {_PROVISION_URL_POLL_ATTEMPTS} attempts")
     info = {"DATABASE_URL": url, "provider": "railway-postgres",
             "service": svc_name, "service_id": svc_id, "project_id": project_id}
     # Capture the volume ID while the service is still attached (serviceName is set on the volume).
