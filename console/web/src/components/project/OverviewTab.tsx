@@ -5,6 +5,7 @@
 // empty/“—” state until the data is live.
 import { useEffect, useRef, useState } from "react";
 import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact } from "../../api";
+import { openArtifact } from "../factory/Artifacts";
 import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, TextInput, TextArea } from "../onboarding/design";
 
 const fileToB64 = (file: File): Promise<string> => new Promise((resolve) => {
@@ -296,7 +297,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
             action={!isDraft && onOpenDocuments ? <button onClick={onOpenDocuments} style={{ font: `500 11.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>View all →</button> : null}>
             {produced.length ? (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
-                {produced.map((d, i) => <FileRow key={d.title + i} label={d.title} kind={d.kind} sub={d.agent} onOpen={d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
+                {produced.map((d, i) => <FileRow key={d.title + i} label={d.title} kind={d.kind} sub={d.agent} onOpen={d.id ? () => openArtifact(d.id!) : d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
               </div>
             ) : <Empty>{isDraft ? "The factory produces PRDs, architecture, designs, and tickets here once the build starts." : "The factory hasn’t produced documents yet."}</Empty>}
           </Panel>

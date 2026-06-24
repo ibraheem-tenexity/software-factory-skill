@@ -3,6 +3,7 @@
 // factory". Driven by tjyb5gmy's GET /api/projects/{id}/documents (PR #13); degrades to empty.
 import React, { useEffect, useRef, useState } from "react";
 import { api, ProjectDocuments, ProjectMaterial, ProjectArtifact } from "../../api";
+import { openArtifact } from "../factory/Artifacts";
 import { T, CategoryLabel, Btn, Icon } from "../onboarding/design";
 
 const FILE_KIND: Record<string, [string, string, string]> = {
@@ -100,7 +101,7 @@ export function DocumentsTab({ projectId }: { projectId: string }) {
         <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Produced by the factory</h3>
         {produced.length ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-            {produced.map((d, i) => <FileTile key={d.title + i} label={d.title} kind={d.kind} tag={d.agent} onOpen={d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
+            {produced.map((d, i) => <FileTile key={d.title + i} label={d.title} kind={d.kind} tag={d.agent} onOpen={d.id ? () => openArtifact(d.id!) : d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
           </div>
         ) : <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "20px", textAlign: "center", font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary }}>The factory hasn’t produced documents yet.</div>}
       </div>
