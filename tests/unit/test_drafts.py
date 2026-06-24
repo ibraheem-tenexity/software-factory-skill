@@ -156,3 +156,136 @@ def test_deployments_are_per_deliverable(tmp_path):
     assert out["apps"] == ["mobile-web", "web"]
     assert {d["url"] for d in out["deployments"]} == {
         "https://sf-x-mobile.up.railway.app", "https://sf-x-web.up.railway.app"}
+
+
+# ── BYOK draft-creds path ─────────────────────────────────────────────────────────────────────
+
+def _console_with_vault(tmp_path, vault_store_fn):
+    """Console wired with a fake vault_store so tests don't need Supabase."""
+    import software_factory.vault as _v
+    from unittest.mock import patch
+    launcher = FakeLauncher()
+    c = Console(str(tmp_path), launch=launcher,
+                new_id=lambda: "project-00000001", extract=lambda p: "# x")
+    return c, launcher, patch.object(_v, "vault_store", side_effect=vault_store_fn)
+
+
+def test_store_draft_creds_records_vault_uuids_in_state(tmp_path):
+    import software_factory.vault as _v
+    from unittest.mock import patch
+
+    stored = {}
+
+    def fake_vault_store(name, value):
+        uid = f"uuid-{name}"
+        stored[name] = value
+        return uid
+
+    launcher = FakeLauncher()
+    c = Console(str(tmp_path), launch=launcher,
+                new_id=lambda: "project-00000001", extract=lambda p: "# x")
+    rid = c.create_draft(owner="op@tenexity.ai")
+
+    with patch.object(_v, "vault_store", side_effect=fake_vault_store):
+        result = c.store_draft_creds(rid, {"ANTHROPIC_API_KEY": "sk-test"})
+
+    assert result["creds_provided"] == ["ANTHROPIC_API_KEY"]
+    state = c._load_state(rid)
+    assert "ANTHROPIC_API_KEY" in state.creds_vault_ids
+    assert state.creds_vault_ids["ANTHROPIC_API_KEY"].startswith("uuid-")
+    assert state.creds_provided == ["ANTHROPIC_API_KEY"]
+
+
+def test_store_draft_creds_skips_empty_values(tmp_path):
+    import software_factory.vault as _v
+    from unittest.mock import patch
+
+    call_count = {"n": 0}
+
+    def fake_vault_store(name, value):
+        call_count["n"] += 1
+        return f"uuid-{name}"
+
+    launcher = FakeLauncher()
+    c = Console(str(tmp_path), launch=launcher,
+                new_id=lambda: "project-00000001", extract=lambda p: "# x")
+    rid = c.create_draft(owner="op@tenexity.ai")
+
+    with patch.object(_v, "vault_store", side_effect=fake_vault_store):
+        result = c.store_draft_creds(rid, {"ANTHROPIC_API_KEY": "sk-test", "EMPTY_KEY": ""})
+
+    assert call_count["n"] == 1          # only the non-empty key was vaulted
+    assert result["creds_provided"] == ["ANTHROPIC_API_KEY"]
+
+
+def test_store_draft_creds_merges_with_existing_entries(tmp_path):
+    import software_factory.vault as _v
+    from unittest.mock import patch
+
+    launcher = FakeLauncher()
+    c = Console(str(tmp_path), launch=launcher,
+                new_id=lambda: "project-00000001", extract=lambda p: "# x")
+    rid = c.create_draft(owner="op@tenexity.ai")
+
+    def make_vault(prefix):
+        def fake_vault_store(name, value):
+            return f"{prefix}-{name}"
+        return fake_vault_store
+
+    with patch.object(_v, "vault_store", side_effect=make_vault("v1")):
+        c.store_draft_creds(rid, {"ANTHROPIC_API_KEY": "sk-a"})
+    with patch.object(_v, "vault_store", side_effect=make_vault("v2")):
+        result = c.store_draft_creds(rid, {"OPENROUTER_API_KEY": "or-b"})
+
+    assert set(result["creds_provided"]) == {"ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"}
+    state = c._load_state(rid)
+    # both entries present; second call didn't wipe the first
+    assert "ANTHROPIC_API_KEY" in state.creds_vault_ids
+    assert "OPENROUTER_API_KEY" in state.creds_vault_ids
+
+
+def test_promote_draft_threads_draft_vault_ids_into_provision(tmp_path):
+    """promote_draft must carry draft-stored vault_ids into _provision_and_launch so Stage 2/3
+    can retrieve the BYOK key — the promote path must NOT overwrite them with an empty dict."""
+    import software_factory.vault as _v
+    from unittest.mock import patch
+
+    launcher = FakeLauncher()
+    c = Console(str(tmp_path), launch=launcher,
+                new_id=lambda: "project-00000001", extract=lambda p: "# x")
+    rid = c.create_draft(owner="op@tenexity.ai")
+
+    # Store a BYOK key via the draft-creds endpoint
+    with patch.object(_v, "vault_store", return_value="vault-uuid-111"):
+        c.store_draft_creds(rid, {"ANTHROPIC_API_KEY": "sk-secret"})
+
+    # promote_draft must not call vault_store again (no re-encryption) but must keep the entry
+    with patch.object(_v, "vault_store", return_value=None) as mock_vault:
+        c.promote_draft(rid)
+
+    state = c._load_state(rid)
+    assert state.creds_vault_ids.get("ANTHROPIC_API_KEY") == "vault-uuid-111"
+    assert "ANTHROPIC_API_KEY" in state.creds_provided
+
+
+def test_store_draft_creds_survives_vault_unavailable(tmp_path):
+    """If Vault is down, store_draft_creds still records the key name so the user sees it
+    registered; the UUID is absent (gracefully degraded)."""
+    import software_factory.vault as _v
+    from unittest.mock import patch
+
+    launcher = FakeLauncher()
+    c = Console(str(tmp_path), launch=launcher,
+                new_id=lambda: "project-00000001", extract=lambda p: "# x")
+    rid = c.create_draft(owner="op@tenexity.ai")
+
+    def failing_vault(name, value):
+        raise RuntimeError("Vault unreachable")
+
+    with patch.object(_v, "vault_store", side_effect=failing_vault):
+        result = c.store_draft_creds(rid, {"ANTHROPIC_API_KEY": "sk-test"})
+
+    assert "ANTHROPIC_API_KEY" in result["creds_provided"]
+    state = c._load_state(rid)
+    # name present; UUID absent (Vault failed)
+    assert "ANTHROPIC_API_KEY" in state.creds_provided

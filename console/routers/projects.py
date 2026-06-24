@@ -13,7 +13,7 @@ import console.state as state
 from console.deps import require_authed, authorize_project
 from console.schemas import (ProjectCreateIn, DraftCreateIn, ProjectPatchIn, MaterialScopeIn, OrgDocIn,
                              ContinueIn, DepsIn, Stage3In, BudgetIn, RetryIn, DraftPatchIn, AttachIn,
-                             PromoteIn)
+                             PromoteIn, CredsIn)
 
 router = APIRouter()
 
@@ -316,6 +316,14 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
     return {"attached": state.console.attach_to_draft(pid, body.files or [])}
+
+
+@router.post("/api/projects/{pid}/creds")
+def store_draft_creds(pid: str, body: CredsIn, v: tuple = Depends(authorize_project)):
+    """Store BYOK credentials in Vault against a draft. Returns cred names, never values."""
+    if not state.console.is_draft(pid):
+        raise HTTPException(status_code=409, detail="not a draft (already promoted)")
+    return state.console.store_draft_creds(pid, body.credentials)
 
 
 @router.post("/api/projects/{pid}/promote")
