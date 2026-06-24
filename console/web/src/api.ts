@@ -273,6 +273,7 @@ export const api = {
   events: (id: string) => get<{ events: ProjectEvent[] }>(`/api/projects/${id}/events`),
   artifact: (id: string, path: string) =>
     get<Artifact>(`/api/projects/${id}/artifact?path=${encodeURIComponent(path)}`),
+  getArtifact: (id: string | number) => get<Record<string, any>>(`/api/artifacts/${id}`),
   // Project view (§2.5) — Overview rollup + Documents. Backend landing via #13; degrade to empty.
   overview: (id: string) => get<ProjectOverview>(`/api/projects/${id}/overview`),
   documents: (id: string) => get<ProjectDocuments>(`/api/projects/${id}/documents`),
