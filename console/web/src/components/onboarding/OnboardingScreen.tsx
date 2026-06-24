@@ -250,10 +250,12 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const docsInputRef = useRef<HTMLInputElement | null>(null);
   const orgSavedRef = useRef(false);   // fresh: org POSTed once, then PATCH
   const orgBusyRef = useRef(false);
+  const draftCreatingRef = useRef(false);  // guard against concurrent createDraft calls
+  const engineProviderRef = useRef(engine.provider);
+  useEffect(() => { engineProviderRef.current = engine.provider; }, [engine.provider]);
 
-  // mount: resolve org path + get the draft. RESUME (existing draft) adopts that pid and rehydrates
-  // the form from GET /draft + /documents — NO new POST /api/drafts (which would orphan a duplicate).
-  // Fresh start mints the one eager draft as before.
+  // mount: resolve org path. RESUME adopts existing pid and rehydrates — NO new POST /api/drafts.
+  // Fresh start defers POST /api/drafts until the user types a project name (see below).
   useEffect(() => {
     api.getOrg().then(({ org: o }) => {
       setOnFile(o);
@@ -272,10 +274,18 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
         setMats({ video: vids, docs: others });
         setP((x) => ({ ...x, video: vids.length > 0, docs: others.length > 0 }));
       }).catch(() => {});
-    } else {
-      api.createDraft({ runtime: engine.provider }).then(({ project_id }) => setDraftId(project_id)).catch(() => {});
     }
   }, [resumeProjectId]);
+
+  // Deferred draft creation: only POST /api/drafts when the user has typed a non-empty project name.
+  // Navigating away without a name creates zero orphan rows.
+  useEffect(() => {
+    if (resumeProjectId || draftId || draftCreatingRef.current || !p.name.trim()) return;
+    draftCreatingRef.current = true;
+    api.createDraft({ runtime: engineProviderRef.current })
+      .then(({ project_id }) => setDraftId(project_id))
+      .catch(() => { draftCreatingRef.current = false; });
+  }, [resumeProjectId, draftId, p.name]);
 
   // DEBOUNCED project write-through. Fire-and-forget — the response is intentionally ignored so it
   // can never overwrite what the user is typing (the focus-loss trap).
