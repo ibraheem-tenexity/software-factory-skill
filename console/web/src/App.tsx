@@ -11,6 +11,10 @@ function readInitialProject(): string | null {
   return new URLSearchParams(location.search).get("run");
 }
 
+function readInitialView(): "project" | "factory" {
+  return new URLSearchParams(location.search).get("view") === "factory" ? "factory" : "project";
+}
+
 export function App() {
   const [projectId, setProjectId] = useState<string | null>(readInitialProject());
   const [showProjects, setShowProjects] = useState<boolean>(!readInitialProject());
@@ -23,13 +27,20 @@ export function App() {
   const [showOrg, setShowOrg] = useState<boolean>(false);
   // Open-run peer view (§2.5): 'project' = ProjectView (Overview/Documents tabs); 'factory' = the
   // Factory Console. The "Factory console" peer-tab flips this; FactoryConsole's back returns here.
-  const [openView, setOpenView] = useState<"project" | "factory">("project");
+  const [openView, setOpenView] = useState<"project" | "factory">(readInitialView());
 
   const syncUrl = (run: string | null) => {
     const p = new URLSearchParams();
     if (run) p.set("run", run);
     history.replaceState(null, "", "?" + p.toString());
   };
+
+  // Sync openView → ?view= without clobbering ?run=
+  useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    if (openView === "factory") p.set("view", "factory"); else p.delete("view");
+    history.replaceState(null, "", "?" + p.toString());
+  }, [openView]);
 
   const openProject = (id: string) => { setProjectId(id); setShowProjects(false); setShowOnboarding(false); setOpenView("project"); syncUrl(id); };
   const backToProjects = () => { setProjectId(null); setShowProjects(true); syncUrl(null); };

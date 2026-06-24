@@ -26,14 +26,24 @@ const TABS: { id: Tab | "factory"; label: string }[] = [
   { id: "documents", label: "Documents" },
 ];
 
+function setParam(key: string, value: string | null) {
+  const p = new URLSearchParams(location.search);
+  if (value === null) p.delete(key); else p.set(key, value);
+  history.replaceState(null, "", "?" + p.toString());
+}
+
 export function ProjectView({ projectId, onBack, onOpenFactory, onResume }: { projectId: string; onBack: () => void; onOpenFactory: () => void; onResume?: () => void }) {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(() => {
+    const t = new URLSearchParams(location.search).get("tab");
+    return (t === "documents" ? "documents" : "overview") as Tab;
+  });
   const [status, setStatus] = useState<(ProjectSummary & Record<string, any>) | null>(null);
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
 
-  useEffect(() => { setTab("overview"); }, [projectId]);
+  useEffect(() => { setTab("overview"); setParam("tab", null); }, [projectId]);
+  useEffect(() => { setParam("tab", tab === "overview" ? null : tab); }, [tab]);
   useEffect(() => {
     api.status(projectId).then(setStatus).catch(() => setStatus(null));
   }, [projectId]);
