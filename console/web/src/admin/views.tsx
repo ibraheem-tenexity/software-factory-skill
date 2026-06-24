@@ -59,6 +59,32 @@ function InitSquare({ t }: { t: string }) {
   );
 }
 
+function UserAvatar({ name, size = 20 }: { name: string; size?: number }) {
+  const letters = name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
+  return (
+    <span
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 9999,
+        flexShrink: 0,
+        display: "grid",
+        placeItems: "center",
+        background: T.brandSoft,
+        color: T.brandDeep,
+        font: `600 ${size <= 20 ? 8 : 10}px/1 ${T.mono}`,
+      }}
+    >
+      {letters || "?"}
+    </span>
+  );
+}
+
 function PhasePill({ phase }: { phase: string }) {
   const tone = PHASE_TONE[phase] || "neutral";
   const colors: Record<string, [string, string]> = {
@@ -381,6 +407,7 @@ export function AdminProjectsView({ query, onOpenProject }: { query: string; onO
   const [factoryFilter, setFactoryFilter] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState("");
   const [modeFilter, setModeFilter] = React.useState("");
+  const [ownerFilter, setOwnerFilter] = React.useState("");
   const { data } = useAdminFetch(() => api.adminProjects("all"));
   const allProjects = React.useMemo(() => data?.projects ?? [], [data]);
 
@@ -397,6 +424,10 @@ export function AdminProjectsView({ query, onOpenProject }: { query: string; onO
     [allProjects]
   );
   const modeOptions = ["All modes", "Real", "Demo/FAKE"];
+  const ownerOptions = React.useMemo(
+    () => ["All users", ...Array.from(new Set(allProjects.map((p) => p.owner || p.created_by).filter((v): v is string => Boolean(v)))).sort()],
+    [allProjects]
+  );
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -414,11 +445,12 @@ export function AdminProjectsView({ query, onOpenProject }: { query: string; onO
       if (clientFilter && p.client !== clientFilter) return false;
       if (factoryFilter && p.factory !== factoryFilter) return false;
       if (statusFilter && p.phase !== statusFilter) return false;
+      if (ownerFilter && (p.owner || p.created_by || "") !== ownerFilter) return false;
       if (modeFilter === "Real" && p.is_demo) return false;
       if (modeFilter === "Demo/FAKE" && !p.is_demo) return false;
       return true;
     });
-  }, [allProjects, query, clientFilter, factoryFilter, statusFilter, modeFilter]);
+  }, [allProjects, query, clientFilter, factoryFilter, statusFilter, ownerFilter, modeFilter]);
 
   return (
     <>
@@ -447,6 +479,7 @@ export function AdminProjectsView({ query, onOpenProject }: { query: string; onO
         <FilterSelect label="All organizations" options={clientOptions} value={clientFilter} onChange={setClientFilter} />
         <FilterSelect label="All factories" options={factoryOptions} value={factoryFilter} onChange={setFactoryFilter} />
         <FilterSelect label="All statuses" options={statusOptions} value={statusFilter} onChange={setStatusFilter} w={130} />
+        <FilterSelect label="All users" options={ownerOptions} value={ownerFilter} onChange={setOwnerFilter} w={150} />
         <FilterSelect label="All modes" options={modeOptions} value={modeFilter} onChange={setModeFilter} w={130} />
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -471,7 +504,7 @@ export function AdminProjectsView({ query, onOpenProject }: { query: string; onO
           <ColHead>Factory</ColHead>
           <ColHead>Phase</ColHead>
           <ColHead>Tasks</ColHead>
-          <ColHead>Created by</ColHead>
+          <ColHead>Owner</ColHead>
           <ColHead style={{ textAlign: "right" }}>Created</ColHead>
           <ColHead style={{ textAlign: "right" }}>Last activity</ColHead>
         </div>
@@ -534,15 +567,25 @@ export function AdminProjectsView({ query, onOpenProject }: { query: string; onO
             </Mono>
             <span
               style={{
-                font: `400 12.5px/1.3 ${T.sans}`,
-                color: T.secondary,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                minWidth: 0,
               }}
-              title={p.created_by}
+              title={p.owner || p.created_by}
             >
-              {p.created_by || "—"}
+              {(p.owner || p.created_by) ? <UserAvatar name={p.owner || p.created_by!} /> : null}
+              <span
+                style={{
+                  font: `400 12.5px/1.3 ${T.sans}`,
+                  color: T.secondary,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {p.owner || p.created_by || "—"}
+              </span>
             </span>
             <Mono style={{ textAlign: "right", fontSize: 11 }}>{fmtRel(p.created_at)}</Mono>
             <Mono style={{ textAlign: "right", fontSize: 11 }}>{fmtRel(p.updated)}</Mono>
