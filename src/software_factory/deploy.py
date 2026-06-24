@@ -24,7 +24,13 @@ class RunResult:
 
 
 def _real_runner(args: list[str]) -> RunResult:
-    proc = subprocess.run(args, capture_output=True, text=True)
+    # Override RAILWAY_PROJECT_ID in the subprocess env when SF_RUNAPP_RAILWAY_PROJECT_IDS
+    # is configured: Railway forcibly injects RAILWAY_PROJECT_ID as the console's own project
+    # id into every service it runs, so the env var cannot be set via the dashboard and
+    # must be overridden explicitly in the CLI subprocess.
+    target = env.runapp_railway_project_id()
+    run_env = {**os.environ, "RAILWAY_PROJECT_ID": target} if target else None
+    proc = subprocess.run(args, capture_output=True, text=True, env=run_env)
     return RunResult(stdout=proc.stdout, returncode=proc.returncode)
 
 
@@ -54,11 +60,14 @@ def deploy(target: str, dir: str, run: Callable[[list[str]], RunResult] = _real_
         # `vercel deploy --prod` prints the deployment URL on stdout.
         return _parse_url(run(["vercel", "deploy", "--cwd", dir, "--prod", "--yes"]).stdout)
     # railway: `up` ships the dir, then `domain` ensures + prints the public domain.
-    project_id = os.environ.get("RAILWAY_PROJECT_ID")
+    # Use SF_RUNAPP_RAILWAY_PROJECT_IDS as the authoritative target: RAILWAY_PROJECT_ID is
+    # Railway-reserved and forced to the console's own project on prod, so it can't be
+    # overridden via the dashboard and must not be used as the deployment target.
+    project_id = env.runapp_railway_project_id() or os.environ.get("RAILWAY_PROJECT_ID")
     if not env.railway_project_allowed(project_id):
         raise RuntimeError(
-            f"RAILWAY_PROJECT_ID={project_id!r} is not allowed for run-app deployment. "
-            f"Set SF_RUNAPP_RAILWAY_PROJECT_IDS (comma-separated) or unset RAILWAY_PROJECT_ID."
+            f"railway project {project_id!r} is not allowed for run-app deployment. "
+            f"Set SF_RUNAPP_RAILWAY_PROJECT_IDS to the target project UUID."
         )
     run(["railway", "up", "--ci", dir])
     return _parse_url(run(["railway", "domain"]).stdout)

@@ -5,8 +5,9 @@ the FACTORY provisions a per-project Railway Postgres and writes its connection 
 stage-3 workspace as `context/deploy-db.json`; the agent reads that file and wires the built app
 to it (and sets it on the app's own service at deploy).
 
-Railway auth (RAILWAY_TOKEN / RAILWAY_PROJECT_ID) is read from the environment by the CLI — never
-passed on the command line — exactly like deploy.py. The runner is injectable so the parse logic
+Railway auth (RAILWAY_TOKEN) is read from the environment by the CLI — never passed on the command
+line. The target project is derived from SF_RUNAPP_RAILWAY_PROJECT_IDS (not RAILWAY_PROJECT_ID,
+which Railway forces to the console's own project on prod). The runner is injectable so the parse logic
 is unit-tested offline; the exact `railway` incantation is the one place that needs a live smoke
 check.
 """
@@ -72,10 +73,13 @@ def provision(project_id: str, context_dir: str,
     IDEMPOTENT: the serviceId is persisted the MOMENT `add` succeeds (before the variables read), so a
     retry REUSES that service (no second `add` → no orphan); a fully-provisioned file is a no-op. Raises
     RuntimeError on failure (the caller records a blocker + counts the attempt against the retry cap)."""
-    railway_project_id = os.environ.get("RAILWAY_PROJECT_ID")
+    # Use SF_RUNAPP_RAILWAY_PROJECT_IDS as the authoritative target: RAILWAY_PROJECT_ID is
+    # Railway-reserved and forced to the console's own project on prod, so it can't be
+    # overridden via the dashboard and must not be used as the DB provision target.
+    railway_project_id = env.runapp_railway_project_id() or os.environ.get("RAILWAY_PROJECT_ID")
     if not env.railway_project_allowed(railway_project_id):
         raise RuntimeError(
-            f"RAILWAY_PROJECT_ID={railway_project_id!r} is not allowed for run-app DB provisioning")
+            f"railway project {railway_project_id!r} is not allowed for run-app DB provisioning")
 
     info_path = os.path.join(context_dir, DEPLOY_DB_FILE)
     info: dict = {}

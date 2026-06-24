@@ -75,6 +75,22 @@ def stage_env_baseline(provided: dict | None = None) -> dict:
     return base
 
 
+def runapp_railway_project_id() -> str | None:
+    """The single Railway project ID for run-app provision/deploy/teardown.
+
+    Derived from SF_RUNAPP_RAILWAY_PROJECT_IDS (must be exactly one entry configured).
+    Returns None when the env is absent or has multiple entries.
+
+    Use this instead of os.environ["RAILWAY_PROJECT_ID"]: Railway forcibly injects
+    RAILWAY_PROJECT_ID as the CONSOLE's own project into every service it runs, so that
+    var cannot be overridden at the dashboard level and must never be used as the provision
+    target.
+    """
+    if len(_RUNAPP_RAILWAY_PROJECT_IDS) == 1:
+        return next(iter(_RUNAPP_RAILWAY_PROJECT_IDS))
+    return None
+
+
 def railway_project_allowed(project_id: str | None) -> bool:
     """True when a run app may target the given Railway project.
 
