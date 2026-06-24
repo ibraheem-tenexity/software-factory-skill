@@ -1,7 +1,7 @@
 """crash/pause recovery: immutable per-node checkpoint table
 
-Revision ID: 0005_checkpoints
-Revises: 0004_user_mgmt
+Revision ID: 0006_checkpoints
+Revises: 0005_sow
 Create Date: 2026-06-24
 
 ADDITIVE / idempotent ONLY.  Adds one new table (`checkpoint`) with a unique index.
@@ -10,15 +10,15 @@ is the safest possible migration: CREATE TABLE IF NOT EXISTS + CREATE UNIQUE IND
 NOT EXISTS.  Stamped-prod upgrade is a pure schema addition; no backfill, no ALTER.
 
 REHEARSAL PROTOCOL:
-  1. uv run alembic upgrade 0005_checkpoints  (on the stamped test DB)
+  1. uv run alembic upgrade 0006_checkpoints  (on the stamped test DB at 0005_sow)
   2. Assert `checkpoint` table exists with the unique index.
   3. Assert projectstate / phases rows are unchanged.
   4. Deploy to prod only after rehearsal passes.
 """
 from alembic import op
 
-revision = "0005_checkpoints"
-down_revision = "0004_user_mgmt"
+revision = "0006_checkpoints"
+down_revision = "0005_sow"
 branch_labels = None
 depends_on = None
 
@@ -40,5 +40,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Downgrade drops the table (safe — no FK references it yet).
     op.execute("DROP TABLE IF EXISTS checkpoint")

@@ -287,9 +287,10 @@ def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
     assert any(e["data"]["source"] == "orchestrator" for e in g["edges"])
 
 
-def test_auto_resume_relaunches_a_dead_incomplete_stage(tmp_path):
-    # SPEC §3 zero-touch: a stage that died mid-flight (OOM/crash — process gone, its gate not
-    # passed) is auto-resumed by the host. A human noticing the stall is an intervention.
+def test_auto_resume_sets_crashed_on_dead_incomplete_stage(tmp_path):
+    # Crash/pause recovery (#15): a stage that dies mid-flight (OOM/crash) is marked
+    # phase='crashed' instead of being auto-resumed. The operator-driven Recovery bar
+    # drives the resume (no double-resume race with the poller).
     class FakeProc:
         def __init__(self): self.exit_code = None
         def poll(self): return self.exit_code
@@ -301,12 +302,17 @@ def test_auto_resume_relaunches_a_dead_incomplete_stage(tmp_path):
     rid = c.start_project(ProjectRequest(description="x"))
     st = c._load_state(rid)
     st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True; st.stage = 3
+    st.phase = "build"
     st.save()
     proc.exit_code = None
-    assert c.auto_resume_dead_stage(rid) is False    # process alive -> not dead, no resume
+    assert c.auto_resume_dead_stage(rid) is False    # process alive -> not dead, no action
     proc.exit_code = -9                              # killed mid-stage-3, no verification recorded
-    assert c.auto_resume_dead_stage(rid) is True     # host resumes stage 3 itself
-    assert "Stage 3" in argvs[-1][2]
+    result = c.auto_resume_dead_stage(rid)
+    assert result is False                           # no auto-relaunch — operator must resume
+    st2 = c._load_state(rid)
+    assert st2.phase == "crashed"
+    assert st2.crashed_at_node == "build"
+    assert argvs == [argvs[0]]                       # only the original start_project launch
 
 
 def test_auto_resume_does_not_fire_at_the_deps_gate_or_when_budget_blocked(tmp_path):
@@ -1151,6 +1157,7 @@ def test_model_defaults_unchanged_when_nothing_picked(tmp_path):
 def test_stage3_uses_the_chosen_impl_model_and_mandates_it_for_subagents(tmp_path):
     # The stage-3 SKILL contract pins sonnet for subagents; an explicit operator pick must
     # override that in-prompt, or the orchestrator would fight its own contract.
+    # Uses retry_stage (the operator resume path) to trigger Stage 3 with the impl_model.
     class FakeProc:
         def __init__(self): self.exit_code = None
         def poll(self): return self.exit_code
@@ -1162,9 +1169,10 @@ def test_stage3_uses_the_chosen_impl_model_and_mandates_it_for_subagents(tmp_pat
     rid = c.start_project(ProjectRequest(description="x", impl_model="claude-opus-4-8"))
     st = c._load_state(rid)
     st.stage1_done = True; st.stage2_done = True; st.deps_satisfied = True; st.stage = 3
+    st.phase = "build"  # crashed mid-build
     st.save()
-    proc.exit_code = -9
-    assert c.auto_resume_dead_stage(rid) is True
+    proc.exit_code = 0   # process finished
+    assert c.retry_stage(rid, 3) == rid
     argv = argvs[-1]
     assert _argv_model(argv) == "claude-opus-4-8"
     prompt = argv[2]
