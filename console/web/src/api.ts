@@ -147,6 +147,8 @@ export type AdminProjectRow = {
   updated?: number | string;
   is_demo: boolean;
   owner?: string;
+  created_by?: string;
+  created_at?: number | string;
 };
 
 export type AdminAgent = {

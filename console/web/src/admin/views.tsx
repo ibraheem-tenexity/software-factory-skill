@@ -502,7 +502,7 @@ export function AdminProjectsView({ query }: { query: string }) {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "minmax(0,1.5fr) minmax(0,1.1fr) 130px 92px 64px 48px 56px 110px",
+              gridTemplateColumns: "minmax(0,1.5fr) minmax(0,1.1fr) 130px 92px 64px minmax(0,1fr) 110px 110px",
             gap: 12,
             padding: "11px 18px",
             borderBottom: `1px solid ${T.borderSubtle}`,
@@ -514,8 +514,8 @@ export function AdminProjectsView({ query }: { query: string }) {
           <ColHead>Factory</ColHead>
           <ColHead>Phase</ColHead>
           <ColHead>Tasks</ColHead>
-          <ColHead>F</ColHead>
-          <ColHead>Auto</ColHead>
+          <ColHead>Created by</ColHead>
+          <ColHead style={{ textAlign: "right" }}>Created</ColHead>
           <ColHead style={{ textAlign: "right" }}>Last activity</ColHead>
         </div>
         {filtered.map((p, i) => (
@@ -525,7 +525,7 @@ export function AdminProjectsView({ query }: { query: string }) {
               background: T.raised,
               borderTop: i ? `1px solid ${T.borderSubtle}` : "none",
               display: "grid",
-              gridTemplateColumns: "minmax(0,1.5fr) minmax(0,1.1fr) 130px 92px 64px 48px 56px 110px",
+          gridTemplateColumns: "minmax(0,1.5fr) minmax(0,1.1fr) 130px 92px 64px minmax(0,1fr) 110px 110px",
               gap: 12,
               padding: "13px 18px",
               alignItems: "center",
@@ -573,8 +573,19 @@ export function AdminProjectsView({ query }: { query: string }) {
             <Mono style={{ color: T.fg, fontSize: 12 }}>
               {p.tasks_done ?? 0}/{p.tasks_total ?? 0}
             </Mono>
-            <Mono style={{ color: T.fg, fontSize: 12 }}>—</Mono>
-            <Mono style={{ color: T.fg, fontSize: 12 }}>—</Mono>
+            <span
+              style={{
+                font: `400 12.5px/1.3 ${T.sans}`,
+                color: T.secondary,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+              title={p.created_by}
+            >
+              {p.created_by || "—"}
+            </span>
+            <Mono style={{ textAlign: "right", fontSize: 11 }}>{fmtRel(p.created_at)}</Mono>
             <Mono style={{ textAlign: "right", fontSize: 11 }}>{fmtRel(p.updated)}</Mono>
           </div>
         ))}

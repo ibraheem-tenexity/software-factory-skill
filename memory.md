@@ -166,6 +166,13 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/admin/users.tsx.
 3. Per operator: staff = /api/me role admin + is_internal; UI hides action for non-staff; role is "Admin" with a separate Tenexity/staff badge; drawer toggle handles both grant and revoke; backend enforces last-staff/self-demote 409.
 4. Summary: pushed fix commit; tsc + build green; still holding merge for qsvigmth backend deploy.
+
+# Tenexity OS agent Update at Time: 23:06:2026:17:45:00.000
+1. Added `created_by` + `created_at` to the OS master projects list and opened PR.
+2. `src/software_factory/tenexity_os.py` (project_rows), `console/web/src/api.ts` (AdminProjectRow), `console/web/src/admin/views.tsx` (AdminProjectsView columns).
+3. Replaced the placeholder F/Auto columns with Created by/Created; backend fields already live from #53.
+4. Summary: tsc + build green; admin agent tests pass (4 real orchestrators, no fake callsigns). OS portal still has Placeholder Factories/Settings and gated sign-in methods/Symphony.
+
 # Tenexity OS agent Update at Time: 23:06:2026:18:30:00.000
 1. Wired OS portal no-op controls in PR: removed + New project and Configure repo; added real client-side filter pills (clients/factories/statuses/modes).
 2. `console/web/src/admin/views.tsx` — new `FilterSelect` component; `AdminProjectsView` derives options from loaded projects; `AdminAgents` no longer shows Configure repo.
