@@ -12,7 +12,7 @@ Flat schema: one set of tables, every per-project table keyed by `project_id`. `
 from __future__ import annotations
 
 from sqlalchemy import (Boolean, CheckConstraint, Column, DateTime, Float, ForeignKey,
-                        Integer, MetaData, Table, Text, func, text)
+                        Integer, MetaData, Table, Text, UniqueConstraint, func, text)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 metadata = MetaData()
@@ -282,9 +282,19 @@ sow = Table(
     ),
 )
 
+checkpoint = Table(
+    "checkpoint", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("project_id", Text, nullable=False),
+    Column("node", Text, nullable=False),          # pipeline node name or "ticket:<id>"
+    Column("output", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("stamped_at", Float, nullable=False),
+    UniqueConstraint("project_id", "node", name="uq_checkpoint_project_node"),
+)
+
 # Groupings: the flat per-project tables, the global directory tables, and everything (Alembic + tests).
 PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
-FLAT_TABLES = PROJECTDB + (tickets, agents)
+FLAT_TABLES = PROJECTDB + (tickets, agents, checkpoint)
 GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
                  agent_prompts, mcp_tools, agent_registry, sow)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES

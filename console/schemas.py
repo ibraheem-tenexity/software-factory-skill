@@ -111,6 +111,14 @@ class RetryIn(BaseModel):
     creds: dict | None = None
 
 
+class RetryNodeIn(BaseModel):
+    node: str
+
+
+class RewindIn(BaseModel):
+    node: str
+
+
 class ProjectCreateIn(BaseModel):
     description: str = ""
     context: str = ""

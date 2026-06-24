@@ -27,6 +27,18 @@ _TRIES = 3
 _ID_TABLES = ("tickets", "phases", "artifacts", "blockers", "verifications", "deployments", "blobs")
 
 
+def execute(sql: str, params: tuple = ()) -> list:
+    """One-shot statement against DATABASE_URL — used by the checkpoint store which is not
+    scoped to a per-project path. Opens a fresh connection, runs the statement in a single
+    transaction, closes the connection. Returns rows (list of dicts) or empty list."""
+    conn = PgConn(_pg_connect(os.environ["DATABASE_URL"]))
+    try:
+        cur = conn.execute(sql, params)
+        return cur.fetchall() if cur else []
+    finally:
+        conn.close()
+
+
 def connect(path: str):
     os.makedirs(path or ".", exist_ok=True)  # project.log/chat.jsonl live here
     return PgConn(_pg_connect(os.environ["DATABASE_URL"]))

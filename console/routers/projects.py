@@ -13,8 +13,8 @@ from software_factory.deps import extract_env_creds
 import console.state as state
 from console.deps import require_authed, authorize_project, _can_see
 from console.schemas import (ProjectCreateIn, DraftCreateIn, ProjectPatchIn, MaterialScopeIn, OrgDocIn,
-                             ContinueIn, DepsIn, Stage3In, BudgetIn, RetryIn, DraftPatchIn, AttachIn,
-                             PromoteIn, CredsIn)
+                             ContinueIn, DepsIn, Stage3In, BudgetIn, RetryIn, RetryNodeIn, RewindIn,
+                             DraftPatchIn, AttachIn, PromoteIn, CredsIn)
 
 router = APIRouter()
 
@@ -313,6 +313,40 @@ def project_retry(pid: str, body: RetryIn, v: tuple = Depends(authorize_project)
     if result:
         return {"project_id": result, "retried_stage": int(body.stage)}
     raise HTTPException(status_code=409, detail="cannot retry: invalid stage or prior stage not done")
+
+
+@router.post("/api/projects/{pid}/pause")
+def project_pause(pid: str, v: tuple = Depends(authorize_project)):
+    """Kill the live stage process and hold the run at phase='paused'. The Recovery bar
+    resumes via /resume. Idempotent — pausing an already-paused run is a no-op."""
+    return state.console.pause_project(pid)
+
+
+@router.post("/api/projects/{pid}/resume")
+def project_resume(pid: str, v: tuple = Depends(authorize_project)):
+    """Resume a paused or crashed run from the last recorded node. Clears the pause/crash
+    markers and relaunches the appropriate stage."""
+    result = state.console.resume_project(pid)
+    if result:
+        return {"project_id": result, "resumed": True}
+    raise HTTPException(status_code=409, detail="cannot resume: project is not paused or crashed")
+
+
+@router.post("/api/projects/{pid}/retry-node")
+def project_retry_node(pid: str, body: RetryNodeIn, v: tuple = Depends(authorize_project)):
+    """Invalidate the checkpoint at `node` and all downstream nodes, then resume from there.
+    Upstream completed nodes are preserved — the stage skips them."""
+    result = state.console.retry_node(pid, body.node)
+    if result:
+        return {"project_id": result, "retried_from": body.node}
+    raise HTTPException(status_code=409, detail=f"cannot retry node '{body.node}'")
+
+
+@router.post("/api/projects/{pid}/rewind")
+def project_rewind(pid: str, body: RewindIn, v: tuple = Depends(authorize_project)):
+    """Invalidate checkpoints at `node` and downstream, kill the running process, and set
+    phase='paused'. Does NOT auto-resume — call /resume when ready."""
+    return state.console.rewind_to_node(pid, body.node)
 
 
 @router.post("/api/projects/{pid}/release")

@@ -67,19 +67,24 @@ def fold_once(events_path: str, emitted: int, registry: AgentRegistry, project_i
 
 def run_swarm_waves(base: str, project_id: str, ws: str, model: str, budget_usd: float,
                     max_concurrent: int = 2, spawn=subprocess.Popen, poll_s: float = 10.0,
-                    settle_grace_s: float = 120.0, out=sys.stdout) -> float:
+                    settle_grace_s: float = 120.0, out=sys.stdout,
+                    skip_ticket_ids: set[str] | None = None) -> float:
     """Run every open wave as a swarm. Returns total swarm spend. Never raises on a
-    failed wave — the monolithic agent after exec is the recovery path."""
+    failed wave — the monolithic agent after exec is the recovery path.
+    skip_ticket_ids: set of str ticket IDs already checkpointed (resume path skips them)."""
     project_db = base   # per-project dir (storage is Postgres)
     store = TicketStore(project_db)
     registry = AgentRegistry(project_db)
     remaining = budget_usd
     spent_total = 0.0
+    _skip = {str(tid) for tid in (skip_ticket_ids or ())}
 
     for wave in store.open_waves():
         if remaining < 0.50:  # not enough left to do real work; let the agent triage
             break
         tickets = store.open_tickets(wave)
+        if _skip:
+            tickets = [t for t in tickets if str(t.id) not in _skip]
         if not tickets:
             continue
         cfg = swarm_config_for_tickets(
