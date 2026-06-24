@@ -56,12 +56,23 @@ function MetricCard({ label, value, hint, accent }: { label: string; value: stri
   );
 }
 
-function AgentDots({ agents }: { agents: string[] }) {
-  if (!agents.length) return <span style={{ font: `400 11.5px/1 ${T.sans}`, color: T.tertiary }}>—</span>;
+function emailToName(email: string): string {
+  const local = email.split("@")[0] || email;
+  return local.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function AgentDots({ agents, owner }: { agents: string[]; owner?: string }) {
+  const hasAgents = agents.length > 0;
+  if (!owner && !hasAgents) return <span style={{ font: `400 11.5px/1 ${T.sans}`, color: T.tertiary }}>—</span>;
   return (
     <div style={{ display: "flex", alignItems: "center" }}>
+      {owner && (
+        <span title={owner} style={{ border: `1.5px solid ${T.raised}`, borderRadius: "50%" }}>
+          <Avatar name={emailToName(owner)} size={20} tone="neutral" />
+        </span>
+      )}
       {agents.map((a, i) => (
-        <span key={a + i} style={{ marginLeft: i ? -6 : 0, border: `1.5px solid ${T.raised}`, borderRadius: "50%" }}>
+        <span key={a + i} style={{ marginLeft: (owner || i) ? -6 : 0, border: `1.5px solid ${T.raised}`, borderRadius: "50%" }}>
           <Avatar name={a} size={20} />
         </span>
       ))}
@@ -113,7 +124,7 @@ function ProjectRow({ r, onClick, first, onRename, onArchive }:
           </span>
         )}
       </div>
-      <div><AgentDots agents={r.agents || []} /></div>
+      <div><AgentDots agents={r.agents || []} owner={r.owner} /></div>
       <div style={{ font: `400 11.5px/1.3 ${T.sans}`, color: T.tertiary }}>{relTime(r.updated)}<div style={{ font: `400 11px/1 ${T.mono}`, color: T.tertiary, marginTop: 3 }}>{money(r.spent_usd)}</div></div>
       <div style={{ position: "relative" }} onClick={stop}>
         <button onClick={() => setMenu((v) => !v)} title="Project actions" style={{ display: "grid", placeItems: "center", width: 28, height: 28, borderRadius: 6, border: "none", background: "transparent", cursor: "pointer", color: T.tertiary }}><Icon name="dots" size={16} color={T.tertiary} /></button>
@@ -149,6 +160,7 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
   const [memberCount, setMemberCount] = useState<number | null>(null);
 
   const [loading, setLoading] = useState(true);
+  const [ownerFilter, setOwnerFilter] = useState<string>(""); // "" = all
   const loadProjects = () => api.projects().then((d) => setProjects(d.projects || [])).catch(() => setProjects([]));
   useEffect(() => {
     setLoading(true);
@@ -170,8 +182,13 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
   };
 
   const isAdmin = me?.role === "admin";
-  const active = projects.filter((r) => statusOf(r).key !== "deployed");
-  const shipped = projects.filter((r) => statusOf(r).key === "deployed");
+
+  // Unique owners for the filter chips — sorted alphabetically.
+  const owners = Array.from(new Set(projects.map((r) => r.owner).filter(Boolean) as string[])).sort();
+  const visibleProjects = ownerFilter ? projects.filter((r) => r.owner === ownerFilter) : projects;
+
+  const active = visibleProjects.filter((r) => statusOf(r).key !== "deployed");
+  const shipped = visibleProjects.filter((r) => statusOf(r).key === "deployed");
   const building = active.filter((r) => statusOf(r).key === "building");
   const researching = active.filter((r) => statusOf(r).key === "researching");
   const withAgents = active.filter((r) => (r.agents?.length || 0) > 0).length;
@@ -252,6 +269,25 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
                 ))}
               </div>
             </button>
+          )}
+
+          {/* owner filter — only shown when there are multiple owners */}
+          {owners.length > 1 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              {[{ email: "", label: "All team members" }, ...owners.map((o) => ({ email: o, label: emailToName(o) }))].map(({ email, label }) => {
+                const on = ownerFilter === email;
+                return (
+                  <button key={email} onClick={() => setOwnerFilter(email)}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 99,
+                      border: `1px solid ${on ? T.brand : T.borderSubtle}`, background: on ? T.brandSoft : T.raised,
+                      cursor: "pointer", font: `${on ? 600 : 500} 12px/1 ${T.sans}`,
+                      color: on ? T.brandDeep : T.secondary }}>
+                    {email && <Avatar name={label} size={16} tone="neutral" />}
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           )}
 
           {/* in progress */}
