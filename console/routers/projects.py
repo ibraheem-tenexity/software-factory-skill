@@ -60,6 +60,8 @@ def create_draft(body: DraftCreateIn, v: tuple = Depends(require_authed)):
     """Mint a durable draft run at the START of onboarding (the form is the sole eager creator on
     mount). Returns its canonical run-<8hex> id; the form passes it into every subsequent
     PATCH/attach/promote and into /api/chat so the rail and the form share ONE draft."""
+    if not (body.project_name or "").strip():
+        raise HTTPException(status_code=400, detail="project_name is required")
     project_id = state.console.create_draft(owner=v[0] or "", name=body.project_name,
                                   runtime=body.runtime, planning_model=body.planning_model,
                                   impl_model=body.impl_model, model=body.model)

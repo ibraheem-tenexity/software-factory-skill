@@ -256,6 +256,17 @@ def test_artifact_viewer_404_in_legacy_mode(auth_client):
     assert r.status_code == 404
 
 
+def test_create_draft_rejects_empty_name(client):
+    assert client.post("/api/drafts", json={}).status_code == 400
+    assert client.post("/api/drafts", json={"project_name": ""}).status_code == 400
+    assert client.post("/api/drafts", json={"project_name": "   "}).status_code == 400
+
+
+def test_create_draft_requires_real_name(client):
+    r = client.post("/api/drafts", json={"project_name": "Quote-to-Epicor"})
+    assert r.status_code == 200 and r.json()["project_id"].startswith("project-")
+
+
 def test_create_draft_then_patch_composes_description(client):
     # Option C onboarding: form eagerly creates a draft, then write-throughs project fields.
     rid = client.post("/api/drafts", json={"project_name": "Quote-to-Epicor"}).json()["project_id"]
@@ -287,7 +298,7 @@ def test_get_draft_404_on_unknown_pid(client):
 
 
 def test_attach_to_draft_endpoint(client):
-    rid = client.post("/api/drafts", json={}).json()["project_id"]
+    rid = client.post("/api/drafts", json={"project_name": "Attach Test"}).json()["project_id"]
     r = client.post(f"/api/projects/{rid}/attach", json={"files": []})
     assert r.status_code == 200 and r.json() == {"attached": []}
 
@@ -303,7 +314,7 @@ def test_draft_writethrough_404_on_unknown_pid(client):
 def test_promote_endpoint_wires_to_console(client, app_mod, monkeypatch):
     # The handoff button calls POST /promote → console.promote_draft. Stub promote to avoid a real
     # Stage-1 launch; assert the endpoint shape.
-    rid = client.post("/api/drafts", json={}).json()["project_id"]
+    rid = client.post("/api/drafts", json={"project_name": "Promote Test"}).json()["project_id"]
     monkeypatch.setattr(app_mod.console, "promote_draft",
                         lambda r, description="", target="railway": r)
     res = client.post(f"/api/projects/{rid}/promote", json={"target": "railway"})
