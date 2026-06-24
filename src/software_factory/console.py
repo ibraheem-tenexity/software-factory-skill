@@ -23,7 +23,7 @@ from typing import Any, Callable
 # the pg registry's write guard (dbshim._ensure) stays strict 8-hex.
 PROJECT_ID_RE = re.compile(r"project-[A-Za-z0-9-]+")
 
-from . import artifacts, deploy_db, env as _env, gates, streamlog
+from . import artifacts, deploy_db, env as _env, gates, streamlog, vault as _vault
 from .agents import AgentRegistry
 from .evidence import build_evidence, verify_evidence
 from .input_pipeline import persist_and_compose
@@ -633,6 +633,13 @@ class Console:
             return None
 
         state = self._load_state(project_id)
+        vault_ids = getattr(state, "creds_vault_ids", {}) or {}
+        if vault_ids:
+            try:
+                decrypted = _vault.vault_retrieve_many(vault_ids)
+                env = {**decrypted, **env}  # vault base; caller env (extra_creds) wins
+            except Exception:
+                pass  # Vault unavailable — caller env used as-is
         runtime = state.runtime or "claude"
         # The stage RUNNER (`claude -p` / `opencode run`) is itself an LLM agent and needs its OWN
         # provider key to authenticate. stage_env_baseline scrubs the console's env down to a tiny
@@ -832,12 +839,21 @@ class Console:
 
         state = self._load_state(project_id)
         env = {k: v for k, v in (req.credentials or {}).items() if v}
+        vault_ids = {}
+        for key_name, value in env.items():
+            try:
+                uid = _vault.vault_store(f"byok-{project_id}-{key_name}", value)
+                if uid:
+                    vault_ids[key_name] = uid
+            except Exception:
+                pass  # Vault unavailable — key still reaches Stage 1 via env; Stage 2/3 need Vault
         state.skill = "software-factory"
         state.skill_version = SKILL_VERSION
         state.description = req.description
         state.name = req.name or state.name or ""
         state.deploy_target = req.target
         state.creds_provided = sorted(env.keys())
+        state.creds_vault_ids = vault_ids
         state.stage = 1
         # Pin the agent runtime for the whole run (all stages + retries) at start.
         # Per-request choice (the UI's Claude/Kimi picker) wins over the SF_RUNTIME env default.
@@ -1106,8 +1122,7 @@ class Console:
         if self._stage_process_alive(project_id):
             return None   # SPEC §1: never two stage orchestrators for one run
         req = ProjectRequest(description=state.description or "", target=state.deploy_target or "railway")
-        env = {k: v for k, v in os.environ.items()
-               if k in (state.creds_provided or [])}
+        env: dict = {}  # BYOK values retrieved from Vault inside _launch_stage
         prompt = make_prompt_stage2(req, project_id, self._projects_dir, runtime=state.runtime)
         result = self._launch_stage(project_id, 2, prompt, env)
         return project_id if result is not None else None
@@ -1276,8 +1291,7 @@ class Console:
         if self._stage_process_alive(project_id):
             return None   # SPEC §1: never two stage orchestrators for one run
         req = ProjectRequest(description=state.description or "", target=state.deploy_target or "railway")
-        env = {k: v for k, v in os.environ.items()
-               if k in (state.creds_provided or [])}
+        env: dict = {}  # BYOK values retrieved from Vault inside _launch_stage
         if extra_creds:
             env.update(extra_creds)
         prompt = make_prompt_stage3(req, project_id, self._projects_dir, dispositions=state.deps_disposition,
@@ -1312,7 +1326,7 @@ class Console:
         state.save()
 
         req = ProjectRequest(description=state.description or "", target=state.deploy_target or "railway")
-        env = {k: v for k, v in os.environ.items() if k in (state.creds_provided or [])}
+        env: dict = {}  # BYOK values retrieved from Vault inside _launch_stage
         if extra_creds:
             env.update(extra_creds)
         if stage == 3:
@@ -1531,6 +1545,15 @@ class Console:
         state = self._load_state(project_id)
         state.archived = bool(archived)
         state.save()
+        if archived:
+            vault_ids = getattr(state, "creds_vault_ids", {}) or {}
+            if vault_ids:
+                try:
+                    _vault.vault_delete_many(list(vault_ids.values()))
+                    state.creds_vault_ids = {}
+                    state.save()
+                except Exception:
+                    pass  # best-effort: archive write must never fail due to Vault hiccup
         return state.archived
 
     def rename_project(self, project_id: str, name: str | None = None,

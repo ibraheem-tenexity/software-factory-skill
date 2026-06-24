@@ -1330,3 +1330,170 @@ def test_runner_key_is_byok_first_then_platform(tmp_path, monkeypatch):
     c.start_project(ProjectRequest(description="byok app", target="railway",
                                    credentials={"ANTHROPIC_API_KEY": "sk-ant-BYOK"}))
     assert launcher.env.get("ANTHROPIC_API_KEY") == "sk-ant-BYOK"   # BYOK wins, platform doesn't clobber
+
+
+# ── BYOK Vault storage ────────────────────────────────────────────────────────
+
+import software_factory.console as _console_mod
+
+
+def _stub_vault(monkeypatch, store_uuid="vault-uuid-test"):
+    """Patch vault functions so tests never hit a real Supabase Vault."""
+    stored = {}
+
+    def _fake_store(name, secret):
+        stored[name] = secret
+        return store_uuid
+
+    def _fake_retrieve(vault_ids):
+        # Return a fabricated plaintext based on what was "stored"
+        return {k: f"decrypted-{v}" for k, v in vault_ids.items()}
+
+    deleted = []
+
+    def _fake_delete(uuids):
+        deleted.extend(uuids)
+
+    monkeypatch.setattr(_console_mod._vault, "vault_store", _fake_store)
+    monkeypatch.setattr(_console_mod._vault, "vault_retrieve_many", _fake_retrieve)
+    monkeypatch.setattr(_console_mod._vault, "vault_delete_many", _fake_delete)
+    return stored, deleted
+
+
+def test_byok_credentials_stored_in_vault_on_provision(tmp_path, monkeypatch):
+    # On project creation with BYOK credentials, each value must be encrypted in Vault and
+    # the UUID persisted in state.creds_vault_ids — plaintext never touches disk.
+    monkeypatch.delenv("SF_RUNTIME", raising=False)
+    stored, _ = _stub_vault(monkeypatch, store_uuid="vault-uuid-tok")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    pid = c.start_project(ProjectRequest(
+        description="deploy app", credentials={"RAILWAY_TOKEN": "tok_live"}))
+    state = c.status(pid)
+    assert state["creds_provided"] == ["RAILWAY_TOKEN"]  # name persisted
+    # Vault was called with the plaintext
+    assert any("tok_live" in str(v) for v in stored.values())
+    # The vault UUID is in state (load directly to verify)
+    from software_factory.console import project_paths
+    from software_factory.projectstate import ProjectState
+    from software_factory.db import ProjectStore
+    st = ProjectState.load(pid, ProjectStore(project_paths(str(tmp_path), pid)["db"]))
+    assert st.creds_vault_ids.get("RAILWAY_TOKEN") == "vault-uuid-tok"
+
+
+def test_launch_stage_injects_vault_decrypted_keys(tmp_path, monkeypatch):
+    # _launch_stage must retrieve stored BYOK values from Vault and inject them into the
+    # stage runner's env. For Stage 1 the env already carries the plaintext (from _provision),
+    # so vault_retrieve_many is called but the caller env wins in the merge (correct precedence).
+    # Stage 2 tests (below) verify the Vault-only path where env starts empty.
+    monkeypatch.delenv("SF_RUNTIME", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-platform")
+    vault_retrieve_calls = []
+
+    def _capturing_retrieve(vault_ids):
+        vault_retrieve_calls.append(dict(vault_ids))
+        return {"RAILWAY_TOKEN": "decrypted-value"}
+
+    _, _ = _stub_vault(monkeypatch)
+    monkeypatch.setattr(_console_mod._vault, "vault_retrieve_many", _capturing_retrieve)
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    pid = c.start_project(ProjectRequest(
+        description="app", credentials={"RAILWAY_TOKEN": "tok_live"}))
+    # vault_retrieve_many must have been called during _launch_stage
+    assert vault_retrieve_calls, "vault_retrieve_many was never called"
+    # The key must be in the runner env (Stage 1: caller env value wins the merge)
+    assert "RAILWAY_TOKEN" in launcher.env
+
+
+def test_stage2_uses_vault_not_os_environ_for_byok_keys(tmp_path, monkeypatch):
+    # Stage 2 launch must pull BYOK values from Vault, not from os.environ.
+    # This fixes the brittle path where Stage 2 fell back to the console's OS env.
+    monkeypatch.delenv("SF_RUNTIME", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-platform")
+    monkeypatch.delenv("RAILWAY_TOKEN", raising=False)  # NOT in console's env
+    _stub_vault(monkeypatch)
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    pid = c.start_project(ProjectRequest(
+        description="app", credentials={"RAILWAY_TOKEN": "tok_live"}))
+    # Manually wire stage1 done + trigger stage2
+    from software_factory.projectstate import ProjectState
+    from software_factory.db import ProjectStore
+    from software_factory.console import project_paths
+    from software_factory.tickets import TicketStore
+    from software_factory import artifacts
+    import os, shutil
+    paths = project_paths(str(tmp_path), pid)
+    st = ProjectState.load(pid, ProjectStore(paths["db"]))
+    st.stage1_done = True
+    st.save()
+    # Create artifacts so detect_stage2_done has something to find
+    ws = os.path.join(str(tmp_path), pid, "workspace", "stage2")
+    os.makedirs(ws, exist_ok=True)
+    for f in ["PRD.md", "architecture.md", "architecture.svg"]:
+        open(os.path.join(ws, f), "w").write("# stub")
+    TicketStore(paths["tickets_db"]).create_ticket(
+        title="T", acceptance="AC", dod="DOD", wave=1, description="D")
+    st.stage2_done = True
+    st.save()
+    launcher2 = FakeLauncher()
+    c._launch = launcher2
+    c.start_stage2(pid)
+    # Vault-retrieved key must reach the runner
+    assert "RAILWAY_TOKEN" in launcher2.env
+    assert launcher2.env["RAILWAY_TOKEN"].startswith("decrypted-")
+
+
+def test_set_archived_deletes_vault_secrets(tmp_path, monkeypatch):
+    # Archiving a project must delete its Vault secrets (encrypted key lifecycle matches run lifecycle).
+    monkeypatch.delenv("SF_RUNTIME", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-platform")
+    _, deleted = _stub_vault(monkeypatch, store_uuid="vault-uuid-del")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    pid = c.start_project(ProjectRequest(
+        description="app", credentials={"RAILWAY_TOKEN": "tok_live"}))
+    c.set_archived(pid, True)
+    # The vault UUID that was stored must have been queued for deletion
+    assert "vault-uuid-del" in deleted
+
+
+def test_extra_creds_override_vault_stored_values(tmp_path, monkeypatch):
+    # When the same key exists in both Vault and extra_creds (Stage 3 gate path),
+    # the per-run extra_creds value must win (higher specificity).
+    monkeypatch.delenv("SF_RUNTIME", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-platform")
+    _stub_vault(monkeypatch, store_uuid="vault-uuid-x")
+
+    override_val = "tok_from_gate"
+
+    def _fake_retrieve_returns_other(vault_ids):
+        return {"RAILWAY_TOKEN": "tok_from_vault"}
+
+    monkeypatch.setattr(_console_mod._vault, "vault_retrieve_many", _fake_retrieve_returns_other)
+
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    pid = c.start_project(ProjectRequest(
+        description="app", credentials={"RAILWAY_TOKEN": "tok_live"}))
+
+    # Wire to stage3 launch: set all prereqs
+    from software_factory.projectstate import ProjectState
+    from software_factory.db import ProjectStore
+    from software_factory.console import project_paths
+    from software_factory.tickets import TicketStore
+    import os
+    paths = project_paths(str(tmp_path), pid)
+    st = ProjectState.load(pid, ProjectStore(paths["db"]))
+    st.stage1_done = True
+    st.stage2_done = True
+    st.deps_satisfied = True
+    st.save()
+    TicketStore(paths["tickets_db"]).create_ticket(
+        title="T", acceptance="AC", dod="DOD", wave=1, description="D")
+    launcher3 = FakeLauncher()
+    c._launch = launcher3
+    c.start_stage3(pid, extra_creds={"RAILWAY_TOKEN": override_val})
+    # The explicitly-supplied gate value must win over the vault-retrieved one
+    assert launcher3.env.get("RAILWAY_TOKEN") == override_val
