@@ -240,3 +240,26 @@ class ClientPatchIn(BaseModel):
     website: str | None = None
     plan: str | None = None
     monthly_budget_cap: float | None = None
+
+
+class SowIn(BaseModel):
+    title: str
+    org: str | None = None
+    project: str | None = None
+    value: str | None = None
+    file: str | None = None
+    version: int = 1
+    status: str = "Draft"
+    body: str | None = None
+
+
+class SowPatchIn(BaseModel):
+    title: str | None = None
+    org: str | None = None
+    project: str | None = None
+    value: str | None = None
+    file: str | None = None
+    version: int | None = None
+    status: str | None = None
+    body: str | None = None
+

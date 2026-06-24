@@ -25,6 +25,7 @@ from software_factory.users import UserStore  # noqa: E402
 from software_factory.blobs import BlobStore  # noqa: E402
 from software_factory.agent_prompts import PromptStore  # noqa: E402
 from software_factory.registries import ToolStore, AgentRegistryStore  # noqa: E402
+from software_factory.sow import SowStore  # noqa: E402
 
 from console.throttle import LoginThrottle  # noqa: E402
 
@@ -41,6 +42,7 @@ blobs = None
 prompts = None
 tool_store = None
 agent_store = None
+sow_store = None
 _has_chat_key = False
 _chat_runner = None
 _sse_clients: dict[str, list] = {}
@@ -52,7 +54,7 @@ login_throttle = None
 def reset():
     """(Re)instantiate the long-lived singletons from the current environment. Called at import and
     by app.py on every reload — matches the monolith's reload-re-instantiates-stores behavior."""
-    global PROJECTS_DIR, console, users, blobs, prompts, tool_store, agent_store
+    global PROJECTS_DIR, console, users, blobs, prompts, tool_store, agent_store, sow_store
     global _has_chat_key, _chat_runner, _sse_clients, _sse_lock, _project_stages, login_throttle
 
     PROJECTS_DIR = os.environ.get("SF_PROJECTS_DIR", os.path.join(HERE, "..", ".projects"))
@@ -65,6 +67,7 @@ def reset():
     prompts = PromptStore()       # editable agent prompts (§3.4) — stored/served, not yet applied
     tool_store = ToolStore()      # tools/MCP registry (§3.5) — real datastore (seeded), CRUD-able
     agent_store = AgentRegistryStore()   # agent identity registry (§3.4)
+    sow_store = SowStore()               # statement-of-work CRUD
     # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
     _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
     _chat_runner = ChatAgentRunner(console, users) if _has_chat_key else None

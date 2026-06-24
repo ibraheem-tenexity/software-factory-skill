@@ -10,7 +10,7 @@ from software_factory.users import TENEXITY_ORG_ID
 import console.state as state
 from console.deps import require_staff
 from console.schemas import (DemoIn, PromptIn, InviteIn, AccessPatchIn, AgentIn, AgentPatchIn,
-                             ToolIn, ToolPatchIn, ClientIn, ClientPatchIn)
+                             ToolIn, ToolPatchIn, ClientIn, ClientPatchIn, SowIn, SowPatchIn)
 
 router = APIRouter()
 
@@ -363,3 +363,33 @@ def admin_access_revoke(email: str, v: tuple = Depends(require_staff)):
     # user's current cookie on its next request. The bootstrap admin is guarded inside disable().
     state.users.disable((email or "").strip().lower())
     return _access_rows()
+
+
+# ── SOW (Statement of Work) CRUD ──────────────────────────────────────────────────────────────────
+@router.get("/api/admin/sow")
+def admin_sow_list(v: tuple = Depends(require_staff)):
+    return {"sows": state.sow_store.list_all()}
+
+
+@router.post("/api/admin/sow")
+def admin_sow_create(body: SowIn, v: tuple = Depends(require_staff)):
+    try:
+        row = state.sow_store.create(
+            body.title,
+            org=body.org, project=body.project, value=body.value,
+            file=body.file, version=body.version, status=body.status, body=body.body,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return row
+
+
+@router.patch("/api/admin/sow/{sow_id}")
+def admin_sow_update(sow_id: int, body: SowPatchIn, v: tuple = Depends(require_staff)):
+    if not state.sow_store.get(sow_id):
+        raise HTTPException(status_code=404, detail="sow not found")
+    try:
+        row = state.sow_store.update(sow_id, body.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return row

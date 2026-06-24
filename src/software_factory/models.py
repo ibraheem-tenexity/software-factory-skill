@@ -263,9 +263,28 @@ agent_registry = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
 )
 
+sow = Table(
+    "sow", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("title", Text, nullable=False),
+    Column("org", Text),
+    Column("project", Text),
+    Column("value", Text),
+    Column("file", Text),
+    Column("version", Integer, nullable=False, server_default="1"),
+    Column("status", Text, nullable=False, server_default="Draft"),
+    Column("body", Text),
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
+    CheckConstraint(
+        "status in ('Template','Draft','In review','Sent','Signed')",
+        name="sow_status_check",
+    ),
+)
+
 # Groupings: the flat per-project tables, the global directory tables, and everything (Alembic + tests).
 PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
 FLAT_TABLES = PROJECTDB + (tickets, agents)
 GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
-                 agent_prompts, mcp_tools, agent_registry)
+                 agent_prompts, mcp_tools, agent_registry, sow)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES
