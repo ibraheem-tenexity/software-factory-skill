@@ -51,6 +51,7 @@ _PERSISTED = {
     "creds_vault_ids",
     "paused_at_node", "crashed_at_node",
     "relaunched_from",
+    "log_url",
 }
 
 
@@ -111,6 +112,7 @@ class ProjectState:
     created_by: str = ""
     created_at: float = 0.0
     relaunched_from: str = ""  # source project_id if this run was minted via /relaunch
+    log_url: Optional[str] = None  # Supabase Storage URL of the latest uploaded project.log snapshot
     _store: Optional[Store] = field(default=None, repr=False, compare=False)
 
     @classmethod
