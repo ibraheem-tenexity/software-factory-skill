@@ -418,3 +418,42 @@ def test_agents_sync_does_not_touch_custom_agents(staff_mod, staff_client, monke
     staff_client.post("/api/admin/agents/sync")
     # custom agent must still exist after sync
     assert staff_mod.agent_store.get("CUSTOM3") is not None
+
+
+# ── POST /api/admin/access/{email}/resend ────────────────────────────────────────────────────────
+def test_resend_returns_link_for_invited_user(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    staff_client.post("/api/admin/access", json={
+        "email": "pending@acme.com", "access_type": "org", "org_name": "Acme Co"})
+    r = staff_client.post("/api/admin/access/pending@acme.com/resend")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["email"] == "pending@acme.com"
+    assert body["status"] == "invited"
+    assert "link" in body   # platform sign-in URL
+
+
+def test_resend_forbidden_for_non_staff(member_mod, member_client, monkeypatch):
+    _login(member_mod, member_client, monkeypatch)
+    assert member_client.post("/api/admin/access/any@acme.com/resend").status_code == 403
+
+
+def test_resend_404_for_unknown_user(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    assert staff_client.post("/api/admin/access/nobody@ghost.com/resend").status_code == 404
+
+
+def test_resend_409_for_active_user(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    # op@tenexity.ai is already active (logged in above)
+    assert staff_client.post("/api/admin/access/op@tenexity.ai/resend").status_code == 409
+
+
+def test_resend_link_includes_sf_app_url(staff_mod, staff_client, monkeypatch):
+    monkeypatch.setenv("SF_APP_URL", "https://app.tenexity.ai")
+    _login(staff_mod, staff_client, monkeypatch)
+    staff_client.post("/api/admin/access", json={
+        "email": "link@acme.com", "access_type": "org", "org_name": "Acme"})
+    r = staff_client.post("/api/admin/access/link@acme.com/resend")
+    assert r.status_code == 200
+    assert r.json()["link"] == "https://app.tenexity.ai/"
