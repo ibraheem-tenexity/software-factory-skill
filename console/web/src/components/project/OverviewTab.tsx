@@ -2,7 +2,7 @@
 // dotted canvas (design orgproject.jsx → ProjectDashboard Overview). Driven by tjyb5gmy's locked
 // endpoints (PR #13): GET /api/projects/{id}/overview (brief/build/services/agents/org + counts) and
 // GET /api/projects/{id}/documents (the materials + produced LISTS). Every panel degrades to an
-// empty/“—” state until the data is live.
+// empty/"—" state until the data is live.
 import { useEffect, useRef, useState } from "react";
 import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact } from "../../api";
 import { openArtifact } from "../factory/Artifacts";
@@ -75,8 +75,8 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div style={{ font: `400 12px/1.4 ${T.sans}`, color: T.tertiary }}>{children}</div>;
 }
 
-export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResume }:
-  { projectId: string; onOpenFactory: () => void; onOpenDocuments?: () => void; onResume?: () => void }) {
+export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResume, onDiscard }:
+  { projectId: string; onOpenFactory: () => void; onOpenDocuments?: () => void; onResume?: () => void; onDiscard?: () => void }) {
   const [ov, setOv] = useState<ProjectOverview | null>(null);
   const [docs, setDocs] = useState<ProjectDocuments | null>(null);
   const [loading, setLoading] = useState(true);
@@ -131,7 +131,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
 
   if (loading) {
     return <div style={{ flex: 1, display: "grid", placeItems: "center", background: T.bg }}>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, font: `500 13px/1 ${T.sans}`, color: T.tertiary }}><Icon name="layers" size={14} color={T.tertiary} /> Loading project…</span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, font: `500 13px/1 ${T.sans}`, color: T.tertiary }}><Icon name="layers" size={14} color={T.tertiary} /> Loading project...</span>
     </div>;
   }
 
@@ -146,9 +146,12 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
               <span style={{ width: 13, height: 13, background: T.warning, transform: "rotate(45deg)", borderRadius: 2, flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ font: `700 15px/1.2 ${T.display}`, letterSpacing: "-0.01em", color: T.fg }}>Finish setup to start building</div>
-                <p style={{ margin: "4px 0 0", font: `400 12.5px/1.5 ${T.sans}`, color: T.secondary }}>This project is still a draft — the factory hasn’t started. Complete the brief and scope, then hand off to kick off the pipeline.</p>
+                <p style={{ margin: "4px 0 0", font: `400 12.5px/1.5 ${T.sans}`, color: T.secondary }}>This project is still a draft — the factory hasn't started. Complete the brief and scope, then hand off to kick off the pipeline.</p>
               </div>
-              {onResume && <Btn variant="primary" onClick={onResume}>Complete setup &amp; start building <Icon name="arrowRight" size={14} color="#fff" /></Btn>}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+                {onResume && <Btn variant="primary" onClick={onResume}>Complete setup &amp; start building <Icon name="arrowRight" size={14} color="#fff" /></Btn>}
+                {onDiscard && <button onClick={onDiscard} style={{ background: "none", border: "none", cursor: "pointer", font: `500 12px/1 ${"'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif"}`, color: T.danger, padding: "4px 0" }}>Discard draft</button>}
+              </div>
             </section>
           )}
 
@@ -207,7 +210,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
             {isDraft ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <span style={{ font: `700 24px/1.1 ${T.display}`, letterSpacing: "-0.01em", color: T.tertiary }}>Not started</span>
-                <p style={{ margin: 0, font: `400 12px/1.5 ${T.sans}`, color: T.secondary }}>The factory hasn’t run yet. Finish setup and hand off — agents, tickets, and spend appear once the build starts.</p>
+                <p style={{ margin: 0, font: `400 12px/1.5 ${T.sans}`, color: T.secondary }}>The factory hasn't run yet. Finish setup and hand off — agents, tickets, and spend appear once the build starts.</p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 9, padding: "11px 0", borderTop: `1px solid ${T.borderSubtle}`, borderBottom: `1px solid ${T.borderSubtle}` }}>
                   {([
                     ["Project brief", !!(brief.goal || brief.description)],
@@ -262,7 +265,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                   </div>
                 ))}
               </div>
-            ) : <Empty>{isDraft ? "No services connected yet — you’ll link them during setup." : "No services connected yet."}</Empty>}
+            ) : <Empty>{isDraft ? "No services connected yet — you'll link them during setup." : "No services connected yet."}</Empty>}
           </Panel>
 
           {/* agents on this project */}
@@ -299,7 +302,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
                 {produced.map((d, i) => <FileRow key={d.title + i} label={d.title} kind={d.kind} sub={d.agent} onOpen={d.id ? () => openArtifact(d.id!) : d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
               </div>
-            ) : <Empty>{isDraft ? "The factory produces PRDs, architecture, designs, and tickets here once the build starts." : "The factory hasn’t produced documents yet."}</Empty>}
+            ) : <Empty>{isDraft ? "The factory produces PRDs, architecture, designs, and tickets here once the build starts." : "The factory hasn't produced documents yet."}</Empty>}
           </Panel>
 
           {/* inherited org context */}
