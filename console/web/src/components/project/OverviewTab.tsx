@@ -83,6 +83,8 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
   const [editing, setEditing] = useState(false);
   const [goalDraft, setGoalDraft] = useState("");
   const [scopeDraft, setScopeDraft] = useState("");
+  const [capEditing, setCapEditing] = useState(false);
+  const [capInput, setCapInput] = useState("");
   const addInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadDocs = () => api.documents(projectId).then(setDocs).catch(() => setDocs(null));
@@ -234,10 +236,33 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                 {([
                   ["Tickets done", build.tickets_total != null ? `${build.tickets_done ?? 0} / ${build.tickets_total}` : "—"],
                   ["Agents working", build.agents_working != null ? String(build.agents_working) : "—"],
-                  ["Spend", build.budget_ceiling != null ? `${money(build.spent_usd)} / ${money(build.budget_ceiling)}` : money(build.spent_usd)],
+                  ["Spend", money(build.spent_usd)],
                 ] as [string, string][]).map(([k, v]) => (
                   <div key={k} style={{ display: "flex", justifyContent: "space-between" }}><span style={{ font: `400 12.5px/1 ${T.sans}`, color: T.secondary }}>{k}</span><span style={{ font: `500 12.5px/1 ${T.mono}`, color: T.fg }}>{v}</span></div>
                 ))}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ font: `400 12.5px/1 ${T.sans}`, color: T.secondary }}>Budget cap</span>
+                  {capEditing ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ font: `500 12px/1 ${T.mono}`, color: T.secondary }}>$</span>
+                      <input value={capInput} onChange={(e) => setCapInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { const n = parseFloat(capInput); if (!isNaN(n) && n > 0) { api.putBudget(projectId, n).then(loadOverview).catch(() => undefined); } setCapEditing(false); } if (e.key === "Escape") setCapEditing(false); }}
+                        style={{ width: 58, font: `500 12.5px/1 ${T.mono}`, color: T.fg, background: T.bg, border: `1px solid ${T.borderDefault}`, borderRadius: 4, padding: "2px 5px", outline: "none" }} autoFocus />
+                      <button onClick={() => { const n = parseFloat(capInput); if (!isNaN(n) && n > 0) { api.putBudget(projectId, n).then(loadOverview).catch(() => undefined); } setCapEditing(false); }}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: T.success, font: `600 11px/1 ${T.sans}`, padding: "0 2px" }}>Save</button>
+                      <button onClick={() => setCapEditing(false)}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: T.tertiary, font: `500 11px/1 ${T.sans}`, padding: "0 2px" }}>Cancel</button>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ font: `500 12.5px/1 ${T.mono}`, color: T.fg }}>{build.budget_ceiling != null ? money(build.budget_ceiling) : "—"}</span>
+                      <button onClick={() => { setCapInput(build.budget_ceiling != null ? String(build.budget_ceiling) : ""); setCapEditing(true); }}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: T.tertiary, padding: 0, lineHeight: 1, display: "inline-flex" }} title="Edit budget cap">
+                        <Icon name="pencil" size={11} color={T.tertiary} />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               <Btn variant="primary" size="sm" full onClick={onOpenFactory}>Open factory console <Icon name="arrowRight" size={13} color="#fff" /></Btn>
             </div>
