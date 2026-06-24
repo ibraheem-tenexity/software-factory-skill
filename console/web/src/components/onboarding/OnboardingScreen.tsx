@@ -208,7 +208,7 @@ function fmtBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: (projectId: string) => void; resumeProjectId?: string | null }) {
+export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onComplete: (projectId: string) => void; onBack?: () => void; resumeProjectId?: string | null }) {
   const [mode, setMode] = useState<"loading" | "fresh" | "returning">("loading");
   const [onFile, setOnFile] = useState<Org | null>(null);
   const [editOrg, setEditOrg] = useState(false);
@@ -595,7 +595,10 @@ export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: 
                     : <>Company context reused — <b style={{ color: T.fg }}>{projChecks.filter((c) => c.done).length}/{projChecks.length}</b> project questions answered</>}
               </span>
             </div>
-            <Btn variant="primary" onClick={handoff} disabled={!ready || submitting || !draftId} title={ready ? "Hand off to the build factory" : (fresh ? "Set up your company & project to continue" : "Answer the project questions to continue")} style={ready ? { background: T.success } : undefined}>{submitting ? "Handing off…" : "Hand off to factory"} <Icon name="arrowRight" size={14} color="#fff" /></Btn>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {onBack && <Btn variant="ghost" onClick={onBack}>Save & finish later</Btn>}
+              <Btn variant="primary" onClick={handoff} disabled={!ready || submitting || !draftId} title={ready ? "Hand off to the build factory" : (fresh ? "Set up your company & project to continue" : "Answer the project questions to continue")} style={ready ? { background: T.success } : undefined}>{submitting ? "Handing off…" : "Hand off to factory"} <Icon name="arrowRight" size={14} color="#fff" /></Btn>
+            </div>
           </div>
         </div>
 
