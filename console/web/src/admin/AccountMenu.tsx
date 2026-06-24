@@ -38,7 +38,7 @@ const LogoutIcon = ({ size = 14 }: { size?: number }) => (
   </svg>
 );
 
-export function AccountMenu() {
+export function AccountMenu({ onAccountSettings }: { onAccountSettings?: () => void }) {
   const [open, setOpen] = React.useState(false);
   const [signingOut, setSigningOut] = React.useState(false);
   const ref = React.useRef<HTMLSpanElement>(null);
@@ -178,6 +178,13 @@ export function AccountMenu() {
             </span>
           </div>
           <div style={{ height: 1, background: T.borderSubtle, margin: "2px 0 4px" }} />
+          {onAccountSettings &&
+            item(
+              "Account settings",
+              T.fg,
+              onAccountSettings,
+              <Icon name="settings" size={14} color={T.secondary} />
+            )}
           {item(
             "Switch to console",
             T.fg,

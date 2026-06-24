@@ -286,57 +286,14 @@ export function AdminClients({
   return (
     <>
       <PageTitle
-        title="Clients"
+        title="Organizations"
         sub="Customers and their portfolios of factory projects."
         actions={
-          <>
-            <AdminBtn>{String.fromCharCode(8644)} Import from Asana</AdminBtn>
-            <AdminBtn primary onClick={onNew}>
-              + New client
-            </AdminBtn>
-          </>
+          <AdminBtn primary onClick={onNew}>
+            + New organization
+          </AdminBtn>
         }
       />
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "12px 16px",
-          borderRadius: T.rLg,
-          border: `1px solid ${T.warning}55`,
-          background: `${T.warningSoft}66`,
-          marginBottom: 20,
-        }}
-      >
-        <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.warning }} />
-        <span style={{ font: `600 12px/1.3 ${T.sans}`, color: T.fg }}>
-          Asana · <span style={{ color: T.warning, fontFamily: T.mono }}>ERROR</span>
-        </span>
-        <span
-          style={{
-            flex: 1,
-            font: `400 11.5px/1.3 ${T.mono}`,
-            color: T.tertiary,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          Asana 401: Not Authorized — reconnect to resume portfolio sync.
-        </span>
-        <button
-          style={{
-            font: `600 11px/1 ${T.mono}`,
-            color: T.brandDeep,
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
-          CONNECT →
-        </button>
-      </div>
       <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden", background: T.raised }}>
         <div
           style={{
@@ -348,7 +305,7 @@ export function AdminClients({
             background: T.sunken,
           }}
         >
-          <ColHead>Client</ColHead>
+          <ColHead>Organization</ColHead>
           <ColHead>Active projects</ColHead>
           <ColHead>In-flight tickets</ColHead>
           <ColHead>Total spend</ColHead>
@@ -428,7 +385,7 @@ export function AdminProjectsView({ query }: { query: string }) {
   const allProjects = React.useMemo(() => data?.projects ?? [], [data]);
 
   const clientOptions = React.useMemo(
-    () => ["All clients", ...Array.from(new Set(allProjects.map((p) => p.client).filter(Boolean))).sort()],
+    () => ["All organizations", ...Array.from(new Set(allProjects.map((p) => p.client).filter(Boolean))).sort()],
     [allProjects]
   );
   const factoryOptions = React.useMemo(
@@ -467,7 +424,7 @@ export function AdminProjectsView({ query }: { query: string }) {
     <>
       <PageTitle
         title="Projects"
-        sub="Every project across every client and factory pipeline."
+        sub="Every project across every organization and factory pipeline."
       />
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
         <div
@@ -485,9 +442,9 @@ export function AdminProjectsView({ query }: { query: string }) {
           }}
         >
           <Icon name="search" size={14} color={T.tertiary} />
-          <span style={{ font: `400 12.5px/1 ${T.sans}`, color: T.tertiary }}>Search name, client, factory…</span>
+          <span style={{ font: `400 12.5px/1 ${T.sans}`, color: T.tertiary }}>Search name, organization, factory…</span>
         </div>
-        <FilterSelect label="All clients" options={clientOptions} value={clientFilter} onChange={setClientFilter} />
+        <FilterSelect label="All organizations" options={clientOptions} value={clientFilter} onChange={setClientFilter} />
         <FilterSelect label="All factories" options={factoryOptions} value={factoryFilter} onChange={setFactoryFilter} />
         <FilterSelect label="All statuses" options={statusOptions} value={statusFilter} onChange={setStatusFilter} w={130} />
         <FilterSelect label="All modes" options={modeOptions} value={modeFilter} onChange={setModeFilter} w={130} />
@@ -510,7 +467,7 @@ export function AdminProjectsView({ query }: { query: string }) {
           }}
         >
           <ColHead>Project</ColHead>
-          <ColHead>Client</ColHead>
+          <ColHead>Organization</ColHead>
           <ColHead>Factory</ColHead>
           <ColHead>Phase</ColHead>
           <ColHead>Tasks</ColHead>
