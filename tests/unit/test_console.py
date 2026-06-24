@@ -346,6 +346,19 @@ def test_mark_stage_crashed_and_resume_project_restarts_stage(tmp_path):
     assert "Stage 3" in argvs[-1][2]                          # Stage 3 relaunched
 
 
+def test_status_exposes_paused_at_node_and_crashed_at_node(tmp_path):
+    # Regression: Recovery bar gates on status.paused_at_node / status.crashed_at_node;
+    # both must appear in the status() dict (even as empty string when not set).
+    c = Console(str(tmp_path), launch=lambda *a, **k: type("P", (), {"poll": lambda s: None})(),
+                new_id=lambda: "project-rc01")
+    rid = c.create_draft(owner="op@test.com")
+    st = c.status(rid)
+    assert "paused_at_node" in st
+    assert "crashed_at_node" in st
+    assert st["paused_at_node"] == ""
+    assert st["crashed_at_node"] == ""
+
+
 def test_auto_resume_does_not_fire_at_the_deps_gate_or_when_budget_blocked(tmp_path):
     # A run waiting at the deps gate (stage complete) or stopped for budget is NOT a dead stage.
     class FakeProc:
