@@ -193,9 +193,9 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                   ) : null}
                 </>
               )}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, paddingTop: 4 }}>
-                {([["Owner", brief.owner], ["Created", fmtDate(brief.created)], ["Phase", brief.phase]] as [string, string | undefined][]).map(([k, v]) => (
-                  <div key={k}><CategoryLabel style={{ display: "block", marginBottom: 4 }}>{k}</CategoryLabel><span style={{ font: `500 12.5px/1.3 ${T.sans}`, color: T.fg }}>{v || "—"}</span></div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, paddingTop: 4 }}>
+                {([["Created by", brief.created_by || brief.owner], ["Created", fmtDate(brief.created)], ["Owner", brief.owner], ["Phase", brief.phase]] as [string, string | undefined][]).map(([k, v]) => (
+                  <div key={k}><CategoryLabel style={{ display: "block", marginBottom: 4 }}>{k}</CategoryLabel><span style={{ font: `500 12.5px/1.3 ${T.sans}`, color: T.fg, wordBreak: "break-all" }}>{v || "—"}</span></div>
                 ))}
               </div>
             </div>

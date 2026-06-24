@@ -101,6 +101,7 @@ function ProjectRow({ r, onClick, first, onRename, onArchive }:
               <StatusPill tone={st.tone} dot={live}>{st.label}</StatusPill>
             </div>
             <p style={{ margin: "5px 0 0", font: `400 12.5px/1.4 ${T.sans}`, color: T.secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.description || "—"}</p>
+            {r.created_by && <p style={{ margin: "3px 0 0", font: `400 11px/1 ${T.mono}`, color: T.tertiary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Created by {r.created_by}{r.created_at ? ` · ${new Date(r.created_at * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}</p>}
           </>
         )}
       </div>
