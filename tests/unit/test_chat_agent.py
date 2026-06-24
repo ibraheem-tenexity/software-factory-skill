@@ -49,13 +49,14 @@ def mock_users():
 
 
 class TestMakeTools:
-    def test_tools_are_the_locked_13(self, mock_console):
+    def test_tools_are_the_14_concierge_tools(self, mock_console):
         names = {t.name for t in make_tools(mock_console)}
         assert names == {
             "get_company_profile", "set_company_profile", "set_connected_systems",
             "set_project_basics", "set_project_scope", "attach_project_materials",
             "request_materials", "get_intake_state", "validate_intake_complete",
-            "hand_off_to_factory", "check_status", "request_dep_input", "get_result",
+            "hand_off_to_factory", "check_status", "restart_pipeline",
+            "request_dep_input", "get_result",
         }
         # retired tools are gone
         assert "record_brief_section" not in names and "start_pipeline" not in names
@@ -143,6 +144,38 @@ class TestMakeTools:
         parsed = json.loads(result)
         assert parsed["type"] == "dep_request"
         assert "RAILWAY_TOKEN" in parsed["dep_names"]
+
+    def test_restart_pipeline_calls_retry_stage_and_returns_status(self, mock_console):
+        mock_console.retry_stage = MagicMock(return_value="project-test123")
+        tools = make_tools(mock_console)
+        restart = next(t for t in tools if t.name == "restart_pipeline")
+        result = asyncio.get_event_loop().run_until_complete(
+            restart.on_invoke_tool(None, json.dumps({"project_id": "project-test123"}))
+        )
+        mock_console.retry_stage.assert_called_once_with("project-test123", 1)
+        parsed = json.loads(result)
+        assert parsed["restarted"] is True
+        assert parsed["stage"] == 1
+
+    def test_restart_pipeline_returns_error_when_retry_stage_blocked(self, mock_console):
+        mock_console.retry_stage = MagicMock(return_value=None)
+        tools = make_tools(mock_console)
+        restart = next(t for t in tools if t.name == "restart_pipeline")
+        result = asyncio.get_event_loop().run_until_complete(
+            restart.on_invoke_tool(None, json.dumps({"project_id": "project-test123"}))
+        )
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    def test_restart_pipeline_forbidden_for_non_owner(self, mock_console):
+        mock_console.project_owner = MagicMock(return_value="other@example.com")
+        tools = make_tools(mock_console, viewer=lambda: ("user@example.com", "member"))
+        restart = next(t for t in tools if t.name == "restart_pipeline")
+        result = asyncio.get_event_loop().run_until_complete(
+            restart.on_invoke_tool(None, json.dumps({"project_id": "project-test123"}))
+        )
+        parsed = json.loads(result)
+        assert parsed["error"] == "forbidden"
 
 
 class TestChatToolOwnership:
