@@ -168,6 +168,98 @@ export function AdminFilter({ children, w = 150 }: { children: React.ReactNode; 
   );
 }
 
+function FilterSelect({
+  label,
+  options,
+  value,
+  onChange,
+  w = 150,
+}: {
+  label: string;
+  options: string[];
+  value: string;
+  onChange: (v: string) => void;
+  w?: number;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    function close(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, []);
+  const display = value || label;
+  return (
+    <div ref={ref} style={{ position: "relative", width: w, flexShrink: 0 }}>
+      <div
+        onClick={() => setOpen((s) => !s)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 7,
+          height: 36,
+          padding: "0 11px",
+          width: w,
+          justifyContent: "space-between",
+          borderRadius: T.rMd,
+          border: `1px solid ${value ? T.brand : T.borderDefault}`,
+          background: value ? T.brandSoft : T.raised,
+          font: `500 12px/1 ${T.sans}`,
+          color: value ? T.brandDeep : T.secondary,
+          cursor: "pointer",
+        }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{display}</span>
+        <Icon name="chevronDown" size={13} color={value ? T.brandDeep : T.tertiary} />
+      </div>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            marginTop: 4,
+            maxHeight: 240,
+            overflow: "auto",
+            zIndex: 10,
+            background: T.raised,
+            border: `1px solid ${T.borderDefault}`,
+            borderRadius: T.rMd,
+            boxShadow: T.shadowMd,
+          }}
+        >
+          {options.map((o) => (
+            <button
+              key={o}
+              onClick={() => {
+                onChange(o === label ? "" : o);
+                setOpen(false);
+              }}
+              style={{
+                display: "block",
+                width: "100%",
+                textAlign: "left",
+                padding: "8px 11px",
+                border: "none",
+                borderBottom: `1px solid ${T.borderSubtle}`,
+                background: "transparent",
+                cursor: "pointer",
+                font: `400 12.5px/1 ${T.sans}`,
+                color: o === display ? T.brandDeep : T.fg,
+              }}
+            >
+              {o}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AdminClients({
   query,
   onNew,
@@ -328,29 +420,54 @@ export function AdminClients({
 }
 
 export function AdminProjectsView({ query }: { query: string }) {
-  const [type, setType] = React.useState<"ALL PROJECTS" | "REAL" | "DEMO/FAKE">("REAL");
-  const mode: "all" | "real" | "demo" =
-    type === "ALL PROJECTS" ? "all" : type === "REAL" ? "real" : "demo";
-  const { data } = useAdminFetch(() => api.adminProjects(mode));
+  const [clientFilter, setClientFilter] = React.useState("");
+  const [factoryFilter, setFactoryFilter] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState("");
+  const [modeFilter, setModeFilter] = React.useState("");
+  const { data } = useAdminFetch(() => api.adminProjects("all"));
+  const allProjects = React.useMemo(() => data?.projects ?? [], [data]);
+
+  const clientOptions = React.useMemo(
+    () => ["All clients", ...Array.from(new Set(allProjects.map((p) => p.client).filter(Boolean))).sort()],
+    [allProjects]
+  );
+  const factoryOptions = React.useMemo(
+    () => ["All factories", ...Array.from(new Set(allProjects.map((p) => p.factory).filter(Boolean))).sort()],
+    [allProjects]
+  );
+  const statusOptions = React.useMemo(
+    () => ["All statuses", ...Array.from(new Set(allProjects.map((p) => p.phase).filter(Boolean))).sort()],
+    [allProjects]
+  );
+  const modeOptions = ["All modes", "Real", "Demo/FAKE"];
+
   const filtered = React.useMemo(() => {
-    const list = data?.projects ?? [];
     const q = query.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.client.toLowerCase().includes(q) ||
-        p.factory.toLowerCase().includes(q) ||
-        p.phase.toLowerCase().includes(q)
-    );
-  }, [data, query]);
-  const total = (data?.projects ?? []).length;
+    return allProjects.filter((p) => {
+      if (
+        q &&
+        !(
+          p.name.toLowerCase().includes(q) ||
+          p.client.toLowerCase().includes(q) ||
+          p.factory.toLowerCase().includes(q) ||
+          p.phase.toLowerCase().includes(q)
+        )
+      )
+        return false;
+      if (clientFilter && p.client !== clientFilter) return false;
+      if (factoryFilter && p.factory !== factoryFilter) return false;
+      if (statusFilter && p.phase !== statusFilter) return false;
+      if (modeFilter === "Real" && p.is_demo) return false;
+      if (modeFilter === "Demo/FAKE" && !p.is_demo) return false;
+      return true;
+    });
+  }, [allProjects, query, clientFilter, factoryFilter, statusFilter, modeFilter]);
+
   return (
     <>
       <PageTitle
         title="Projects"
         sub="Every project across every client and factory pipeline."
-        actions={<AdminBtn primary>+ New project</AdminBtn>}
       />
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
         <div
@@ -370,45 +487,15 @@ export function AdminProjectsView({ query }: { query: string }) {
           <Icon name="search" size={14} color={T.tertiary} />
           <span style={{ font: `400 12.5px/1 ${T.sans}`, color: T.tertiary }}>Search name, client, factory…</span>
         </div>
-        <AdminFilter>All clients</AdminFilter>
-        <AdminFilter>All factories</AdminFilter>
-        <AdminFilter w={130}>All statuses</AdminFilter>
-        <AdminFilter w={130}>All modes</AdminFilter>
+        <FilterSelect label="All clients" options={clientOptions} value={clientFilter} onChange={setClientFilter} />
+        <FilterSelect label="All factories" options={factoryOptions} value={factoryFilter} onChange={setFactoryFilter} />
+        <FilterSelect label="All statuses" options={statusOptions} value={statusFilter} onChange={setStatusFilter} w={130} />
+        <FilterSelect label="All modes" options={modeOptions} value={modeFilter} onChange={setModeFilter} w={130} />
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <ColHead>Project type</ColHead>
-          <div
-            style={{
-              display: "inline-flex",
-              padding: 2,
-              borderRadius: T.rMd,
-              background: T.sunken,
-              border: `1px solid ${T.borderSubtle}`,
-            }}
-          >
-            {["ALL PROJECTS", "REAL", "DEMO/FAKE"].map((t) => (
-              <button
-                key={t}
-                onClick={() => setType(t as typeof type)}
-                style={{
-                  font: `600 10.5px/1 ${T.mono}`,
-                  letterSpacing: "0.05em",
-                  padding: "6px 9px",
-                  borderRadius: 5,
-                  cursor: "pointer",
-                  border: "none",
-                  background: type === t ? T.fg : "transparent",
-                  color: type === t ? "#fff" : T.tertiary,
-                }}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-        </div>
+        <ColHead>Active filters</ColHead>
         <Mono>
-          {filtered.length} of {total}
+          {filtered.length} of {allProjects.length}
         </Mono>
       </div>
       <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden", background: T.raised }}>
@@ -651,12 +738,9 @@ export function AdminAgents({
         title="Agent Roster"
         sub="Active autonomous workforce. Click a card to monitor or edit its prompt."
         actions={
-          <>
-            <AdminBtn>{String.fromCharCode(8997)} Configure repo</AdminBtn>
-            <AdminBtn primary onClick={onNew}>
-              + New agent
-            </AdminBtn>
-          </>
+          <AdminBtn primary onClick={onNew}>
+            + New agent
+          </AdminBtn>
         }
       />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>

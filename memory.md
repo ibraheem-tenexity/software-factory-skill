@@ -166,3 +166,8 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/admin/users.tsx.
 3. Per operator: staff = /api/me role admin + is_internal; UI hides action for non-staff; role is "Admin" with a separate Tenexity/staff badge; drawer toggle handles both grant and revoke; backend enforces last-staff/self-demote 409.
 4. Summary: pushed fix commit; tsc + build green; still holding merge for qsvigmth backend deploy.
+# Tenexity OS agent Update at Time: 23:06:2026:18:30:00.000
+1. Wired OS portal no-op controls in PR: removed + New project and Configure repo; added real client-side filter pills (clients/factories/statuses/modes).
+2. `console/web/src/admin/views.tsx` — new `FilterSelect` component; `AdminProjectsView` derives options from loaded projects; `AdminAgents` no longer shows Configure repo.
+3. Sync registry button left untouched — no backend sync endpoint exists; stopped and escalated to l2a7ngax/qsvigmth per instruction.
+4. Summary: tsc + build green. Honest "coming soon" cards (Factories/Settings/Symphony, Microsoft/SSO) unchanged.
