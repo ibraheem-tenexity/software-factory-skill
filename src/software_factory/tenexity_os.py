@@ -35,8 +35,8 @@ def _stage_model(stage: int) -> str:
     default) — data provenance, not a hardcoded literal. Lazy import avoids a tenexity_os↔console cycle;
     empty string if no real source."""
     try:
-        from .console import _STAGE_MODEL
-        return os.environ.get("SF_MODEL") or _STAGE_MODEL.get(stage, "") or ""
+        from .constants import STAGE_MODEL
+        return os.environ.get("SF_MODEL") or STAGE_MODEL.get(stage, "") or ""
     except Exception:
         return ""
 

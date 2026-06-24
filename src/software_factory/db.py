@@ -14,15 +14,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
 
 from . import dbshim
 import sys
 import time
 from typing import Optional
 
-# Canonical factory run-id shape (the strict registry form dbshim._ensure uses).
-_PROJECT_ID_RE = re.compile(r"project-[0-9a-f]{8,}")
+from .constants import PROJECT_ID_STRICT_RE as _PROJECT_ID_RE
 
 
 def db_path(projects_dir: str, project_id: str) -> str:

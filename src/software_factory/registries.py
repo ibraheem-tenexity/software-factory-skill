@@ -58,8 +58,8 @@ def _real_agent_model(agent: dict) -> str:
     try:
         stage = agent.get("stage") or 0
         if stage >= 1:
-            from .console import _STAGE_MODEL
-            return os.environ.get("SF_MODEL") or _STAGE_MODEL.get(stage, "") or ""
+            from .constants import STAGE_MODEL
+            return os.environ.get("SF_MODEL") or STAGE_MODEL.get(stage, "") or ""
         if agent["callsign"] == "CONCIERGE":
             from .chat_agent import chat_model_label
             return chat_model_label()
