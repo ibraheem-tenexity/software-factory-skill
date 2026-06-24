@@ -48,6 +48,7 @@ _PERSISTED = {
     "budget_ceiling", "held", "owner",
     "brief", "interview_coverage", "scope", "is_demo", "archived",
     "created_by", "created_at",
+    "creds_vault_ids",
 }
 
 
@@ -65,6 +66,7 @@ class ProjectState:
     name: str = ""  # operator-chosen project name (display label; project_id stays the key)
     deploy_target: Optional[str] = None
     creds_provided: list = field(default_factory=list)  # cred NAMES only, never values
+    creds_vault_ids: dict = field(default_factory=dict)  # {name: vault_uuid} — never plaintext
     stage: int = 1
     stage1_done: bool = False
     stage2_done: bool = False

@@ -85,3 +85,15 @@ def test_project_name_persists_across_reload(tmp_path):
     s.name = "Acme CRM"
     s.save()
     assert ProjectState.load("project-n", store(tmp_path)).name == "Acme CRM"
+
+
+def test_creds_vault_ids_persist_for_byok_vault_storage(tmp_path):
+    # Vault UUIDs (the only persistent form of a BYOK key — never the plaintext) must survive
+    # a reload so _launch_stage can retrieve them on Stages 2 + 3 and retries.
+    st = store(tmp_path)
+    s = ProjectState.load("project-vault", st)
+    assert s.creds_vault_ids == {}  # default: no vault entries
+    s.creds_vault_ids = {"RAILWAY_TOKEN": "vault-uuid-abc123"}
+    s.save()
+    resumed = ProjectState.load("project-vault", store(tmp_path))
+    assert resumed.creds_vault_ids == {"RAILWAY_TOKEN": "vault-uuid-abc123"}
