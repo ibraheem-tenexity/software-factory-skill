@@ -6,6 +6,7 @@ import type { AdminAgent, AdminClient, AdminTool } from "../api";
 import { useAdminFetch } from "./hooks";
 import { UsersManagement } from "./users";
 import { AccountMenu } from "./AccountMenu";
+import { AdminProjectDashboard } from "./AdminProjectDashboard";
 import { AdminClients, AdminProjectsView, AdminAgents, AdminTools, AdminOverview, AdminFactories, AdminSettings, AdminSymphony, AdminBtn } from "./views";
 import { AgentPromptPanel, ClientModal, AgentModal, ToolModal, ConfirmDelete } from "./modals";
 
@@ -54,6 +55,8 @@ export function AdminPortal() {
   const [toolModal, setToolModal] = React.useState<AdminTool | null | "new">(null);
   const [deleteTarget, setDeleteTarget] = React.useState<{ kind: "client" | "agent" | "tool"; item: AdminClient | AdminAgent | AdminTool } | null>(null);
   const [query, setQuery] = React.useState("");
+  const [selectedProject, setSelectedProject] = React.useState<string | null>(null);
+  const [returnView, setReturnView] = React.useState<string>("projects");
   const [agentVersion, setAgentVersion] = React.useState(0);
   const [clientVersion, setClientVersion] = React.useState(0);
   const [toolVersion, setToolVersion] = React.useState(0);
@@ -279,13 +282,20 @@ export function AdminPortal() {
             </div>
           </div>
           {/* content */}
-          <div style={{ flex: 1, overflow: "auto", padding: "20px 26px 36px" }}>
-            {view === "overview" && <AdminOverview onNav={setView} query={query} />}
-            {view === "organizations" && (
-              <AdminClients query={query} onNew={() => setClientModal("new")} onEdit={(c) => setClientModal(c)} onDelete={(c) => setDeleteTarget({ kind: "client", item: c })} />
-            )}
-            {view === "users" && <UsersManagement />}
-            {(view === "projects" || view === "newproject") && <AdminProjectsView query={query} />}
+          <div style={{ flex: 1, overflow: "auto", ...(selectedProject ? {} : { padding: "20px 26px 36px" }) }}>
+            {selectedProject ? (
+              <AdminProjectDashboard
+                projectId={selectedProject}
+                onBack={() => { setSelectedProject(null); setView(returnView); }}
+              />
+            ) : (
+              <>
+                {view === "overview" && <AdminOverview onNav={setView} query={query} onOpenProject={(id) => { setReturnView("overview"); setSelectedProject(id); }} />}
+                {view === "organizations" && (
+                  <AdminClients query={query} onNew={() => setClientModal("new")} onEdit={(c) => setClientModal(c)} onDelete={(c) => setDeleteTarget({ kind: "client", item: c })} />
+                )}
+                {view === "users" && <UsersManagement />}
+                {(view === "projects" || view === "newproject") && <AdminProjectsView query={query} onOpenProject={(id) => { setReturnView(view); setSelectedProject(id); }} />}
             {view === "agents" && (
               <AdminAgents
                 key={agentVersion}
@@ -310,6 +320,8 @@ export function AdminPortal() {
             {view === "factories" && <AdminFactories />}
             {view === "symphony" && <AdminSymphony />}
             {view === "settings" && <AdminSettings />}
+              </>
+            )}
           </div>
         </div>
         {agent && <AgentPromptPanel agent={agent} onClose={() => setAgent(null)} onSaved={() => setAgentVersion((v) => v + 1)} />}
