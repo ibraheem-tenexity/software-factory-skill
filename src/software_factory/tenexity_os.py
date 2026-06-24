@@ -1,7 +1,7 @@
 """Tenexity OS admin portal (PRD §3) — cross-tenant aggregates + pure assemblers.
 
 Three layers, kept apart for testability:
-  • CONSTANTS — the curated agent ROSTER (the 12 callsigns) + the real TOOLS registry.
+  • CONSTANTS — the stage-skill roster (STAGE-1/2/3 + CONCIERGE) + the real TOOLS registry.
   • cross-run SQL — direct reads over the flat Postgres tables (`public.agents`, `public.tickets`)
     that no per-run accessor exposes (today's burn, per-role rollups, in-flight ticket counts).
   • pure assemblers — shape already-fetched data into the §3 section payloads (unit-testable, no DB).
@@ -11,15 +11,6 @@ from __future__ import annotations
 import os
 
 from . import dbshim
-
-# Rollup-matching aliases (by callsign) — the pipeline's functional role names (architect/designer/…)
-# that map onto a roster callsign. Identity itself lives in the agent_registry table (registries.py).
-_ROLE_ALIASES = {
-    "ATLAS": ["atlas"], "HORIZON": ["pm", "product"], "CHROMA": ["designer", "design"],
-    "SIREN": ["marketing"], "TENDER": ["proposal"], "FORGE": ["devops", "deploy"],
-    "GARRISON": ["ops"], "MATRIX": ["data"], "LEDGER": ["edi"], "CONDUIT": ["erp"],
-    "CARGO": ["wms", "warehouse"], "PROFIT": ["pricing"],
-}
 
 
 # ── stage skills (PRD §3.4, Part 1) ───────────────────────────────────────────────────────────────
@@ -255,13 +246,12 @@ def agent_roster(registry: list, rollups: list, prompts: dict) -> list:
                 "prompt_version": pv["version"] if pv else 0}
 
     for e in registry:
-        cs = e["callsign"]
         roll = None
-        for key in [(e.get("role") or "").lower(), *(_ROLE_ALIASES.get(cs, []))]:
-            if key in by_role and key not in used:
-                roll, _ = by_role[key], used.add(key)
-                break
-        out.append(card(e["name"], cs, e.get("role"), e.get("model"), e.get("cost_tier"),
+        key = (e.get("role") or "").lower()
+        if key and key in by_role and key not in used:
+            roll = by_role[key]
+            used.add(key)
+        out.append(card(e["name"], e["callsign"], e.get("role"), e.get("model"), e.get("cost_tier"),
                         e.get("descr"), roll))
     # live roles not claimed by any roster entry → their own cards
     for role, roll in by_role.items():
