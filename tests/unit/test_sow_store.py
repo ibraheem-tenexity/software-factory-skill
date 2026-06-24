@@ -1,4 +1,4 @@
-"""SowStore unit tests — validation logic, no live DB needed."""
+"""SowStore unit tests — validation logic + real-DB round-trip."""
 import os
 import pytest
 from unittest.mock import patch
@@ -8,6 +8,29 @@ from software_factory.sow import SowStore, SOW_STATUSES
 
 def test_sow_statuses_are_correct():
     assert set(SOW_STATUSES) == {"Template", "Draft", "In review", "Sent", "Signed"}
+
+
+def test_create_and_readback_return_real_values():
+    """Real-DB round-trip: create() → list_all() → get() must return REAL values, not col names.
+
+    This is the regression test for the zip(cols, dict_row) bug where every value == its column
+    name (e.g. {"id": "id", "title": "title"}) because iterating a dict_row gives its keys.
+    """
+    store = SowStore()
+    row = store.create("Acme SOW Q3", org="Acme", status="Draft",
+                       body="## Scope\nBuild a thing.")
+    assert row["title"] == "Acme SOW Q3", f"create() returned {row!r}"
+    assert row["org"] == "Acme"
+    assert row["status"] == "Draft"
+    assert isinstance(row["id"], int)
+
+    rows = store.list_all()
+    assert any(r["title"] == "Acme SOW Q3" for r in rows), \
+        f"list_all() row titles: {[r['title'] for r in rows]}"
+
+    fetched = store.get(row["id"])
+    assert fetched["title"] == "Acme SOW Q3", f"get() returned {fetched!r}"
+    assert fetched["body"] == "## Scope\nBuild a thing."
 
 
 def test_create_raises_on_invalid_status(monkeypatch, tmp_path):
