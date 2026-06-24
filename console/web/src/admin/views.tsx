@@ -376,7 +376,7 @@ export function AdminClients({
   );
 }
 
-export function AdminProjectsView({ query }: { query: string }) {
+export function AdminProjectsView({ query, onOpenProject }: { query: string; onOpenProject?: (id: string) => void }) {
   const [clientFilter, setClientFilter] = React.useState("");
   const [factoryFilter, setFactoryFilter] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState("");
@@ -478,6 +478,7 @@ export function AdminProjectsView({ query }: { query: string }) {
         {filtered.map((p, i) => (
           <div
             key={p.project_id}
+            onClick={() => onOpenProject?.(p.project_id)}
             style={{
               background: T.raised,
               borderTop: i ? `1px solid ${T.borderSubtle}` : "none",
@@ -486,6 +487,7 @@ export function AdminProjectsView({ query }: { query: string }) {
               gap: 12,
               padding: "13px 18px",
               alignItems: "center",
+              cursor: onOpenProject ? "pointer" : "default",
             }}
           >
             <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -937,7 +939,7 @@ export function AdminTools({
   );
 }
 
-export function AdminOverview({ onNav, query }: { onNav: (id: string) => void; query: string }) {
+export function AdminOverview({ onNav, query, onOpenProject }: { onNav: (id: string) => void; query: string; onOpenProject?: (id: string) => void }) {
   const { data } = useAdminFetch(() => api.adminOverview());
   const pulse = data?.pulse ?? {};
   const active = pulse.agents_active ?? 0;
@@ -1011,7 +1013,8 @@ export function AdminOverview({ onNav, query }: { onNav: (id: string) => void; q
           {filteredProjects.slice(0, 6).map((p, i) => (
             <div
               key={p.project_id}
-              style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderTop: i ? `1px solid ${T.borderSubtle}` : "none" }}
+              onClick={() => onOpenProject?.(p.project_id)}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderTop: i ? `1px solid ${T.borderSubtle}` : "none", cursor: onOpenProject ? "pointer" : "default" }}
             >
               <span
                 style={{
