@@ -111,8 +111,9 @@ function ScopeOfWork({ options, value, onChange, onAddOption }:
 
 // ── Build engine picker (the "Build engine" card). MODULE-SCOPE — never define inside render
 //    (that remounts inputs on each keystroke → focus loss). provider=claude|opencode;
-//    model=kimi|glm; keySource=tenexity|byok. Backend persists only `runtime` today (claude|opencode);
-//    GLM + BYOK are gated "coming soon" until #38 wires them (no selectable-but-noop options). ──
+//    model=kimi|glm; keySource=tenexity|byok. Backend persists `runtime` + maps `model` to the
+//    full id (kimi→moonshot, glm→z-ai/glm-5.2). BYOK stays gated "coming soon" until #38 wires
+//    secure key storage (no selectable-but-noop options). ──
 export type EngineValue = { provider: "claude" | "opencode"; model: "kimi" | "glm"; keySource: "tenexity" | "byok"; key: string };
 
 const ENGINES = [
@@ -161,15 +162,13 @@ function EnginePicker({ value, onChange }:
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {OC_MODELS.map((m) => {
               const on = value.model === m.id;
-              const soon = m.id === "glm";   // GLM 5.2 not wired backend-side (#38) — gated, not a noop.
               return (
-                <button key={m.id} disabled={soon} onClick={() => !soon && set({ model: m.id as "kimi" | "glm" })}
-                  style={{ font: `500 13px/1 ${T.sans}`, padding: "8px 13px", borderRadius: 9999, cursor: soon ? "not-allowed" : "pointer",
+                <button key={m.id} onClick={() => set({ model: m.id as "kimi" | "glm" })}
+                  style={{ font: `500 13px/1 ${T.sans}`, padding: "8px 13px", borderRadius: 9999, cursor: "pointer",
                     border: `1px solid ${on ? T.brand : T.borderSubtle}`, background: on ? T.brandSoft : T.sunken,
-                    color: on ? T.brandDeep : soon ? T.tertiary : T.secondary, opacity: soon ? 0.6 : 1,
+                    color: on ? T.brandDeep : T.secondary,
                     display: "inline-flex", alignItems: "center", gap: 5 }}>
                   {m.name} <span style={{ font: `400 11px/1 ${T.sans}`, color: T.tertiary }}>· {m.vendor}</span>
-                  {soon && <span style={{ font: `700 8px/1 ${T.mono}`, color: T.tertiary, background: T.raised, padding: "2px 4px", borderRadius: 3 }}>SOON</span>}
                 </button>
               );
             })}
@@ -233,8 +232,8 @@ export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: 
   // project answers (shared)
   const [p, setP] = useState<{ name: string; goal: string; scope: string[]; video: boolean; docs: boolean }>(
     { name: "", goal: "", scope: [], video: false, docs: false });
-  // Build engine (Claude | OpenCode+Kimi/GLM). Default = Claude on Tenexity's key. GLM + BYOK are
-  // gated "coming soon" in the picker until #38 wires them; only the two live paths persist runtime.
+  // Build engine (Claude | OpenCode+Kimi/GLM). Default = Claude on Tenexity's key. BYOK is gated
+  // "coming soon" in the picker until #38 wires secure key storage; Kimi + GLM are both selectable.
   const [engine, setEngine] = useState<EngineValue>({ provider: "claude", model: "kimi", keySource: "tenexity", key: "" });
   // Real uploaded filenames per material slot (drives the Dropzone list — no dummy data).
   const [mats, setMats] = useState<{ video: { name: string; size?: string }[]; docs: { name: string; size?: string }[] }>({ video: [], docs: [] });
