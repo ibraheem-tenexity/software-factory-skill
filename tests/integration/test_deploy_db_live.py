@@ -28,7 +28,8 @@ pytestmark = pytest.mark.live
 
 def _railway_authed() -> bool:
     try:
-        return subprocess.run(["railway", "whoami"], capture_output=True).returncode == 0
+        # `railway whoami` fails for project-scoped tokens; `status` works for both.
+        return subprocess.run(["railway", "status"], capture_output=True).returncode == 0
     except FileNotFoundError:
         return False
 
