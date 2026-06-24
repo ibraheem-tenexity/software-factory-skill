@@ -332,6 +332,31 @@ def admin_access_update(email: str, body: AccessPatchIn, v: tuple = Depends(requ
     return _access_rows()
 
 
+@router.post("/api/admin/access/{email}/resend")
+def admin_access_resend(email: str, v: tuple = Depends(require_staff)):
+    """Return (or re-surface) the platform sign-in URL for an invited user.
+
+    The factory's invite flow is allow-list-based: an invited email signs in via Google OAuth
+    and the status flips to active automatically. There is no one-time token — the sign-in URL
+    IS the invite link. Staff copy this URL from the drawer and share it with the invitee.
+
+    Returns: {email, status: "invited", link: <sign-in URL>}
+    403 for non-staff (require_staff gate).
+    404 if the user is unknown.
+    409 if the user is not in "invited" status (already active/disabled — nothing to resend).
+    """
+    import os as _os
+    em = (email or "").strip().lower()
+    u = state.users.get_user(em)
+    if not u:
+        raise HTTPException(status_code=404, detail="unknown user")
+    if (u.get("status") or "active") != "invited":
+        raise HTTPException(status_code=409,
+                            detail=f"user is '{u.get('status', 'active')}' — only invited users can be resent")
+    base = (_os.environ.get("SF_APP_URL") or "").rstrip("/")
+    return {"email": em, "status": "invited", "link": f"{base}/" if base else "/"}
+
+
 @router.delete("/api/admin/access/{email}")
 def admin_access_revoke(email: str, v: tuple = Depends(require_staff)):
     # Revoke = disable + bump token_version (spec lifecycle): blocks new sign-ins AND invalidates the
