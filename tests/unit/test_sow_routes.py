@@ -120,3 +120,22 @@ def test_sow_create_invalid_status(staff_mod, staff_client, monkeypatch):
     m.create.side_effect = ValueError("invalid status 'Bogus'")
     r = staff_client.post("/api/admin/sow", json={"title": "X", "status": "Bogus"})
     assert r.status_code == 422
+
+
+def test_sow_get_returns_row(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    _mock_sow(staff_mod, monkeypatch)
+    j = staff_client.get("/api/admin/sow/1").json()
+    assert j["id"] == 1 and j["title"] == "Acme SOW Q3"
+
+
+def test_sow_get_404_for_unknown(staff_mod, staff_client, monkeypatch):
+    _login(staff_mod, staff_client, monkeypatch)
+    m = _mock_sow(staff_mod, monkeypatch)
+    m.get.return_value = None
+    assert staff_client.get("/api/admin/sow/999").status_code == 404
+
+
+def test_sow_get_requires_staff(member_mod, member_client, monkeypatch):
+    _login(member_mod, member_client, monkeypatch)
+    assert member_client.get("/api/admin/sow/1").status_code == 403
