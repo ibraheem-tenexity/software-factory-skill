@@ -170,7 +170,7 @@ function useUsersAndClients() {
   }, [usersQ, clientsQ]);
   const users = usersQ.data?.users ?? [];
   const clients = clientsQ.data?.clients ?? [];
-  return { users, clients, refresh };
+  return { users, clients, loading: usersQ.loading, refresh };
 }
 
 function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
@@ -810,7 +810,7 @@ function RowMenu({ user, sessionStaff, onAct }: { user: AdminAccessUser; session
 }
 
 export function UsersManagement() {
-  const { users, clients, refresh } = useUsersAndClients();
+  const { users, clients, loading: usersLoading, refresh } = useUsersAndClients();
   const [add, setAdd] = React.useState(false);
   const [drawer, setDrawer] = React.useState<AdminAccessUser | null>(null);
   const [me, setMe] = React.useState<Me | null>(null);
@@ -1054,7 +1054,7 @@ export function UsersManagement() {
             <RowMenu user={u} sessionStaff={sessionStaff} onAct={act} />
           </div>
         ))}
-        {filtered.length === 0 && (
+        {!usersLoading && filtered.length === 0 && (
           <div style={{ padding: "44px 18px", textAlign: "center" }}>
             <Mono style={{ fontSize: 12, color: T.tertiary }}>No users match these filters.</Mono>
           </div>
