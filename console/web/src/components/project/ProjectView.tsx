@@ -2,7 +2,7 @@
 // (design orgproject.jsx → ProjectDashboard). Overview + Documents render inline (my components);
 // the "Factory console" tab is a NAV CALLBACK into the existing console (onOpenFactory) — it is NOT
 // rendered inline, so this stays fully decoupled from the factory components.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ProjectSummary } from "../../api";
 import { T, Icon, Btn, StatusPill, Wordmark, TextInput } from "../onboarding/design";
 import { AccountMenu } from "../AccountMenu";
@@ -42,7 +42,14 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume }: { pr
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
 
-  useEffect(() => { setTab("overview"); setParam("tab", null); }, [projectId]);
+  // Reset tab only on genuine project *change* (not initial mount) so URL-seeded tab survives render.
+  const prevProjectRef = useRef(projectId);
+  useEffect(() => {
+    if (prevProjectRef.current === projectId) return;
+    prevProjectRef.current = projectId;
+    setTab("overview");
+    setParam("tab", null);
+  }, [projectId]);
   useEffect(() => { setParam("tab", tab === "overview" ? null : tab); }, [tab]);
   useEffect(() => {
     api.status(projectId).then(setStatus).catch(() => setStatus(null));
