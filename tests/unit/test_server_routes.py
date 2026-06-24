@@ -230,6 +230,32 @@ def test_legacy_mode_still_serves_server_login_to_unauthed(auth_client):
     assert "accounts.google.com" in r.text
 
 
+def test_artifact_viewer_served_to_authed_user_in_react_mode(auth_mod, auth_client, monkeypatch):
+    from software_factory import auth as a
+    monkeypatch.setattr(a, "verify_google_id_token",
+                        lambda tok: {"sub": "sub-op", "email": "op@tenexity.ai",
+                                     "email_verified": True})
+    auth_client.post("/api/auth/google", json={"credential": "t"})
+    monkeypatch.setattr(auth_mod.state, "_react_enabled", lambda: True)
+    monkeypatch.setattr(auth_mod.state, "_artifact_viewer_html",
+                        lambda: b"<artifact-viewer-spa>")
+    r = auth_client.get("/ArtifactViewer.html")
+    assert r.status_code == 200
+    assert b"artifact-viewer-spa" in r.content
+
+
+def test_artifact_viewer_redirects_unauthenticated_in_react_mode(auth_mod, auth_client, monkeypatch):
+    monkeypatch.setattr(auth_mod.state, "_react_enabled", lambda: True)
+    r = auth_client.get("/ArtifactViewer.html", follow_redirects=False)
+    assert r.status_code == 303
+
+
+def test_artifact_viewer_404_in_legacy_mode(auth_client):
+    # React mode OFF (default) — the built SPA doesn't exist, must not try to serve it.
+    r = auth_client.get("/ArtifactViewer.html")
+    assert r.status_code == 404
+
+
 def test_create_draft_then_patch_composes_description(client):
     # Option C onboarding: form eagerly creates a draft, then write-throughs project fields.
     rid = client.post("/api/drafts", json={"project_name": "Quote-to-Epicor"}).json()["project_id"]

@@ -24,6 +24,18 @@ def root(v: tuple = Depends(viewer)):
     return HTMLResponse(state._index_html())
 
 
+@router.get("/ArtifactViewer.html", response_class=HTMLResponse)
+@router.get("/artifactviewer.html", response_class=HTMLResponse)
+def artifact_viewer(v: tuple = Depends(viewer)):
+    # Standalone artifact viewer SPA entry (React mode only). Auth-gated: unauthenticated callers
+    # bounce to sign-in. Any authed user may open it (ownership is enforced by GET /api/artifacts/{id}).
+    if not state._react_enabled():
+        raise HTTPException(status_code=404, detail="not found")
+    if not v[2]:
+        return RedirectResponse("/", status_code=303)
+    return HTMLResponse(state._artifact_viewer_html())
+
+
 @router.get("/admin", response_class=HTMLResponse)
 @router.get("/admin.html", response_class=HTMLResponse)
 def admin_portal(v: tuple = Depends(viewer)):
