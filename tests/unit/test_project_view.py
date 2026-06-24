@@ -63,6 +63,20 @@ def test_documents_uploaded_name_from_storage_key_and_kind():
     assert d["produced"][0]["title"] == "Architecture" and d["produced"][0]["kind"] == "plan"
 
 
+def test_documents_produced_items_carry_artifact_id():
+    # The artifact viewer opens by stable integer id — produced items MUST include it.
+    artifacts = [{"id": 7, "title": "Arch", "path": "arch.md", "kind": "plan",
+                  "agent": "architect", "ts": 1718000500.0}]
+    d = pv.documents([], artifacts)
+    assert d["produced"][0]["id"] == 7
+
+
+def test_documents_produced_id_is_none_when_missing():
+    artifacts = [{"title": "Arch", "path": "arch.md", "kind": "plan", "agent": "a", "ts": 1.0}]
+    d = pv.documents([], artifacts)
+    assert d["produced"][0]["id"] is None
+
+
 def test_brief_block_pulls_goal_scope_from_project_and_owner_from_status():
     project = {"name": "Quote-to-Epicor", "goal": "automate quoting",
                "scope": ["Quoting / RFQ", "Pricing"], "description": "composed"}

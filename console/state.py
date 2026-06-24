@@ -120,6 +120,11 @@ def _admin_html() -> bytes:
         return f.read()
 
 
+def _artifact_viewer_html() -> bytes:
+    with open(os.path.join(_REACT_DIST, "ArtifactViewer.html"), "rb") as f:
+        return f.read()
+
+
 def _login_html() -> str:
     with open(os.path.join(HERE, "login.html")) as f:
         return f.read().replace("{{CLIENT_ID}}", auth.client_id())
