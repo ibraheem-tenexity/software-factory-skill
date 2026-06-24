@@ -332,5 +332,7 @@ def project_rows(runs, o2o, ticket_counts, mode="all"):
             "tasks_done": tc.get("done", 0), "tasks_total": tc.get("total", 0),
             "spent_usd": round(r.get("spent_usd") or 0.0, 2), "updated": r.get("updated"),
             "is_demo": demo, "owner": r.get("owner") or "",
+            "created_by": r.get("created_by") or r.get("owner") or "",
+            "created_at": r.get("created_at"),
         })
     return out
