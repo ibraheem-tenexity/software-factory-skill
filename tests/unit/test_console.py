@@ -1536,9 +1536,10 @@ def test_set_archived_reaps_captured_db_when_armed(tmp_path, monkeypatch):
     st = c._load_state(pid); st.deploy_db_service_id = "svc-arch"; st.save()
     torn = []
     monkeypatch.setattr(console_mod.deploy_db, "teardown",
-                        lambda service_id, run=None: (torn.append(service_id),
+                        lambda service_id, volume_id="", run=None: (torn.append(service_id),
                             {"service_id": service_id, "deleted": True, "already_gone": False,
-                             "ok": True, "detail": ""})[1])
+                             "ok": True, "detail": "", "volume_deleted": False,
+                             "volume_already_gone": True})[1])
     assert c.set_archived(pid, True) is True
     assert torn == ["svc-arch"]                                     # archived under B → reap the captured DB
 

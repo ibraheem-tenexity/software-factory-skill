@@ -146,9 +146,10 @@ def test_teardown_deletes_captured_service_with_full_env_scope(monkeypatch):
     res = deploy_db.teardown("svc-123", run=run)
     assert res["ok"] and res["deleted"] and not res["already_gone"]
     # `service delete` (NOT `railway delete`, which removes the whole project); -e is the project's
-    # real env; the volume cascades so there is NO separate volume command.
+    # real env; no volume_id passed so no separate volume command issued.
     assert run.calls == [["railway", "service", "delete", "-s", "svc-123",
                           "-p", "8ecbd1b2", "-e", "software-factory-as-skill", "-y"]]
+    assert res["volume_already_gone"] is True and res["volume_deleted"] is False
 
 
 def test_teardown_falls_back_to_railway_project_id_when_runapp_not_configured(monkeypatch):
@@ -256,11 +257,13 @@ def test_reap_reason_ephemeral_policy_reaps_any_terminal():
 
 def test_reap_disarmed_is_dry_run_and_deletes_nothing(monkeypatch):
     monkeypatch.delenv("SF_DEPLOY_DB_TEARDOWN", raising=False)        # off
-    run = _delete_runner([])                                         # must call NOTHING
+    _empty_vols = json.dumps({"volumes": []})
+    run = _delete_runner([(_empty_vols, 0)])                         # only the volume list probe
     recs = [_rec(project_id="p1", service_id="s1", archived=True),
             _rec(project_id="p2", service_id="s2", phase="done", has_verified_deploy=True)]
     report = deploy_db.reap(recs, run=run, log=lambda m: None)
-    assert run.calls == []                                           # DRY-RUN: deletes nothing
+    delete_calls = [c for c in run.calls if "delete" in c]
+    assert delete_calls == []                                        # DRY-RUN: no deletes
     assert report["armed"] is False and report["mode"] == "off"
     assert {w["service_id"] for w in report["would_reap"]} == {"s1"}  # archived → would reap under B
     assert {k["service_id"] for k in report["kept"]} == {"s2"}       # live done → kept
@@ -274,9 +277,11 @@ def test_reap_armed_persistent_deletes_only_eligible_and_keeps_demos(monkeypatch
             _rec(project_id="p2", service_id="s2", phase="stopped"),                  # reap (no deploy)
             _rec(project_id="p3", service_id="s3", phase="done", has_verified_deploy=True),  # KEEP demo
             _rec(project_id="p4", service_id="")]                                     # never provisioned → skip
-    run = _delete_runner([("deleted", 0), ("deleted", 0)])           # exactly two deletes
+    _empty_vols = json.dumps({"volumes": []})
+    run = _delete_runner([("deleted", 0), ("deleted", 0), (_empty_vols, 0)])  # 2 service deletes + vol list
     report = deploy_db.reap(recs, run=run, log=lambda m: None)
-    deleted_ids = sorted(c[c.index("-s") + 1] for c in run.calls)
+    svc_delete_calls = [c for c in run.calls if "service" in c and "delete" in c]
+    deleted_ids = sorted(c[c.index("-s") + 1] for c in svc_delete_calls)
     assert deleted_ids == ["s1", "s2"]                              # demo s3 untouched; empty s4 skipped
     assert {r["service_id"] for r in report["reaped"]} == {"s1", "s2"}
     assert {k["service_id"] for k in report["kept"]} == {"s3"}
@@ -284,8 +289,103 @@ def test_reap_armed_persistent_deletes_only_eligible_and_keeps_demos(monkeypatch
 
 def test_reap_dry_run_override_forces_preview_even_when_armed(monkeypatch):
     monkeypatch.setenv("SF_DEPLOY_DB_TEARDOWN", "ephemeral")          # armed
-    run = _delete_runner([])
+    _empty_vols = json.dumps({"volumes": []})
+    run = _delete_runner([(_empty_vols, 0)])                         # only the volume list probe
     report = deploy_db.reap([_rec(service_id="s1", archived=True)], run=run,
                             log=lambda m: None, dry_run=True)
-    assert run.calls == []                                           # forced preview deletes nothing
+    delete_calls = [c for c in run.calls if "delete" in c]
+    assert delete_calls == []                                        # forced preview: no deletes
     assert {w["service_id"] for w in report["would_reap"]} == {"s1"}
+
+
+# ---------------------------------------------------------------------------------------
+# Volume teardown tests — live-verified (2026-06-24): `railway service delete` does NOT
+# cascade volumes. These tests verify the explicit volume delete path.
+# ---------------------------------------------------------------------------------------
+
+def test_teardown_also_deletes_volume_after_service(monkeypatch):
+    from software_factory import env as _env
+    monkeypatch.setattr(_env, "runapp_railway_project_id", lambda: "8ecbd1b2")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_ID", raising=False)
+    run = _delete_runner([("Service deleted", 0), ("Volume deleted", 0)])
+    res = deploy_db.teardown("svc-123", volume_id="vol-456", run=run)
+    assert res["ok"] and res["deleted"] and res["volume_deleted"]
+    assert not res["volume_already_gone"]
+    assert run.calls[0][:4] == ["railway", "service", "delete", "-s"]
+    assert run.calls[1] == ["railway", "volume", "delete", "--volume", "vol-456", "--yes"]
+
+
+def test_teardown_volume_idempotent_when_already_gone(monkeypatch):
+    from software_factory import env as _env
+    monkeypatch.setattr(_env, "runapp_railway_project_id", lambda: "8ecbd1b2")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_ID", raising=False)
+    run = _delete_runner([("Service deleted", 0),
+                          RunResult(stdout="", returncode=1, stderr="volume does not exist")])
+    res = deploy_db.teardown("svc-123", volume_id="vol-456", run=run)
+    assert res["ok"] and res["volume_already_gone"] and not res["volume_deleted"]
+
+
+def test_parse_detached_volumes_returns_ids_with_no_service_name():
+    vol_json = json.dumps({"volumes": [
+        {"id": "vol-orphan1", "serviceName": None, "deletedAt": None},
+        {"id": "vol-orphan2", "serviceName": "", "deletedAt": None},
+        {"id": "vol-attached", "serviceName": "Postgres-XYZ", "deletedAt": None},
+        {"id": "vol-deleted", "serviceName": None, "deletedAt": "2024-01-01"},
+    ]})
+    ids = deploy_db._parse_detached_volumes(vol_json)
+    assert set(ids) == {"vol-orphan1", "vol-orphan2"}
+
+
+def test_sweep_detached_volumes_dry_run_logs_without_deleting():
+    vol_json = json.dumps({"volumes": [
+        {"id": "vol-1", "serviceName": None, "deletedAt": None},
+        {"id": "vol-2", "serviceName": None, "deletedAt": None},
+    ]})
+    run = _delete_runner([(vol_json, 0)])  # only the list call
+    msgs = []
+    report = deploy_db.sweep_detached_volumes(run=run, log=msgs.append, dry_run=True)
+    assert set(report["would_sweep"]) == {"vol-1", "vol-2"}
+    assert report["swept"] == [] and report["failed"] == []
+    assert run.calls == [["railway", "volume", "list", "--json"]]  # no delete calls
+
+
+def test_sweep_detached_volumes_armed_deletes_orphans():
+    vol_json = json.dumps({"volumes": [
+        {"id": "vol-orphan", "serviceName": None, "deletedAt": None},
+        {"id": "vol-attached", "serviceName": "Postgres-RNK8", "deletedAt": None},
+    ]})
+    run = _delete_runner([(vol_json, 0), ("Volume deleted", 0)])
+    report = deploy_db.sweep_detached_volumes(run=run, log=lambda m: None, dry_run=False)
+    assert report["swept"] == ["vol-orphan"]
+    assert report["would_sweep"] == [] and report["failed"] == []
+    assert run.calls[1] == ["railway", "volume", "delete", "--volume", "vol-orphan", "--yes"]
+
+
+def test_reap_includes_detached_volume_sweep_in_report(monkeypatch):
+    monkeypatch.setenv("SF_DEPLOY_DB_TEARDOWN", "persistent")
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", "softwarefactory")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    vol_json = json.dumps({"volumes": [
+        {"id": "vol-orphan", "serviceName": None, "deletedAt": None},
+    ]})
+    # 1 service delete + 1 volume list + 1 volume delete
+    run = _delete_runner([("deleted", 0), (vol_json, 0), ("Volume deleted", 0)])
+    recs = [_rec(project_id="p1", service_id="s1", archived=True)]
+    report = deploy_db.reap(recs, run=run, log=lambda m: None)
+    assert report["detached_volumes"]["swept"] == ["vol-orphan"]
+
+
+def test_provision_captures_volume_id(tmp_path, monkeypatch):
+    monkeypatch.delenv("RAILWAY_PROJECT_ID", raising=False)
+    vol_list = json.dumps({"volumes": [
+        {"id": "vol-abc", "serviceName": "Postgres-RNK8", "deletedAt": None},
+        {"id": "vol-other", "serviceName": "OtherService", "deletedAt": None},
+    ]})
+    run = _runner([_ADD, _VARS, vol_list])
+    info = deploy_db.provision("project-abcd1234", str(tmp_path), run=run)
+    assert info.get("volume_id") == "vol-abc"
+    assert run.calls[2] == ["railway", "volume", "list", "--json"]
+    saved = json.load(open(os.path.join(str(tmp_path), deploy_db.DEPLOY_DB_FILE)))
+    assert saved.get("volume_id") == "vol-abc"

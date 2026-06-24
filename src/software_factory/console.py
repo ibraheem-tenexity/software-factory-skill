@@ -701,7 +701,9 @@ class Console:
                     # it even after this run's context dir (which also holds it) is gone.
                     if info.get("service_id"):
                         state.deploy_db_service_id = info["service_id"]
-                        state.save()
+                    if info.get("volume_id"):
+                        state.deploy_db_volume_id = info["volume_id"]
+                    state.save()
                     db.record_artifact("Deploy DB", "context/" + deploy_db.DEPLOY_DB_FILE,
                                        kind="deploy-db")
                 except Exception as e:
@@ -1603,6 +1605,7 @@ class Console:
                 archived=bool(getattr(st, "archived", False)),
                 phase=getattr(st, "phase", "") or "",
                 has_verified_deploy=bool(getattr(st, "deploy_url", None)),
+                volume_id=getattr(st, "deploy_db_volume_id", "") or "",
             )
             return deploy_db.reap([rec], log=lambda m: print(m, file=sys.stderr))
         except Exception as e:
@@ -1630,6 +1633,7 @@ class Console:
                 archived=bool(getattr(st, "archived", False)),
                 phase=getattr(st, "phase", "") or "",
                 has_verified_deploy=bool(getattr(st, "deploy_url", None)),
+                volume_id=getattr(st, "deploy_db_volume_id", "") or "",
             ))
         return deploy_db.reap(records, log=lambda m: print(m, file=sys.stderr), dry_run=dry_run)
 
