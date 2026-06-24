@@ -144,10 +144,28 @@ def _health() -> dict:
     return {"ok": ok, "pg": pg, "disk_free_mb": free_mb}
 
 
+def _reaper_tick(tick: int, interval: int, console) -> dict | None:
+    """Run the deploy-DB reaper if both gates are open: interval knob (ibraheem's activation) and
+    the teardown arm (SF_DEPLOY_DB_TEARDOWN). Returns the report dict or None when skipped."""
+    from software_factory import deploy_db
+    if interval <= 0 or tick <= 0 or tick % interval != 0:
+        return None
+    if deploy_db.teardown_mode() == "off":
+        return None  # disarmed: silent skip — avoid log spam until ibraheem arms the policy
+    report = console.reap_deploy_dbs(dry_run=False)
+    reaped = len(report.get("reaped") or [])
+    would = len(report.get("would_reap") or [])
+    kept = len(report.get("kept") or [])
+    print(f"[reaper] sweep done: reaped={reaped} would_reap={would} kept={kept} "
+          f"mode={report.get('mode')}", flush=True)
+    return report
+
+
 def _poll_transitions():
     """Background thread: auto-advance stages, enforce the per-project budget, narrate progress."""
     console = state.console
     tick = 0
+    _reaper_interval = int(os.environ.get("SF_REAPER_INTERVAL_TICKS", "0") or "0")
     while True:
         time.sleep(3)
         tick += 1
@@ -162,6 +180,10 @@ def _poll_transitions():
                     _health_bad_since[0] = None
             except Exception:
                 pass
+        try:
+            _reaper_tick(tick, _reaper_interval, console)
+        except Exception:
+            pass
         try:
             for project_info in console.list_projects():
                 pid = project_info.get("id") or project_info.get("project_id", "")
