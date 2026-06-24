@@ -9,7 +9,12 @@ import { useEffect, useState } from "react";
 import { T, Icon } from "../onboarding/design";
 import { api, Graph, GraphNode } from "../../api";
 
-export type ArtifactRef = { label: string; path: string; url: string | null; status?: string };
+export type ArtifactRef = { label: string; path: string; url: string | null; status?: string; id?: number };
+
+// Open the standalone artifact viewer in a new tab by artifact id.
+export function openArtifact(id: number | string) {
+  window.open(`/ArtifactViewer.html?doc=${id}`, "_blank");
+}
 
 export function artifactsFromGraph(graph: Graph): ArtifactRef[] {
   return graph.nodes
