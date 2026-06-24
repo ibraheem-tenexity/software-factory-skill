@@ -50,6 +50,19 @@ def _parse_added_service(text: str) -> tuple[str | None, str | None]:
         return None, None
 
 
+def _parse_volume_id(text: str, service_name: str) -> str:
+    """Find the volumeId for the named service in `railway volume list --json` output.
+    railway service delete does NOT cascade volumes — they must be deleted separately."""
+    try:
+        d = json.loads(text)
+        for v in (d.get("volumes") or []):
+            if v.get("serviceName") == service_name and not v.get("deletedAt"):
+                return str(v.get("id", ""))
+    except Exception:
+        pass
+    return ""
+
+
 def _parse_database_url(text: str) -> str | None:
     try:
         d = json.loads(text)
@@ -110,6 +123,17 @@ def provision(project_id: str, context_dir: str,
         raise RuntimeError(f"could not obtain a Postgres DATABASE_URL for service {svc_id}")
     info = {"DATABASE_URL": url, "provider": "railway-postgres",
             "service": svc_name, "service_id": svc_id, "project_id": project_id}
+    # Capture the volume ID while the service is still attached (serviceName is set on the volume).
+    # This MUST be done before service deletion — after deletion the volume becomes detached
+    # (serviceName=null) and is indistinguishable from other orphaned volumes.
+    # Best-effort: if the list fails we proceed without volume_id (teardown skips volume delete).
+    try:
+        vol_out = run(["railway", "volume", "list", "--json"]).stdout or "{}"
+        volume_id = _parse_volume_id(vol_out, svc_name or "")
+        if volume_id:
+            info["volume_id"] = volume_id
+    except Exception:
+        pass
     write_file(context_dir, info)
     return info
 
@@ -136,7 +160,8 @@ def write_file(context_dir: str, info: dict) -> str:
 #   • `service delete` (NOT `railway delete`, which removes the whole PROJECT).
 #   • -e MUST be the service's real environment or the CLI silently "not found"s — so we read it
 #     from RAILWAY_ENVIRONMENT (factory DBs live in the console's own env), never hardcode it.
-#   • Deleting the service CASCADES its volume — no separate volume delete needed.
+#   • Deleting the service does NOT cascade its volume (live-verified 2026-06-24 — 20 orphaned
+#     volumes survived service deletion). Volumes MUST be deleted explicitly after the service.
 #   • A re-attempt of an already-gone service returns "not found" → we treat that as success.
 #
 # POLICY GATE (single env SF_DEPLOY_DB_TEARDOWN): unset/off (default) = DISARMED — teardown and the
@@ -167,11 +192,11 @@ def _railway_environment() -> str:
             or "production")
 
 
-def teardown(service_id: str, run: Callable[[list[str]], RunResult] = _real_runner) -> dict:
-    """Delete the EXACT captured Railway Postgres service (its volume cascades). Idempotent: a
-    'not found' result means the service is already gone → success. Refuses a missing service_id so
-    we never guess a name or fall back to the linked (console) service. Returns
-    {service_id, deleted, already_gone, ok, detail} — never raises on a CLI failure (the caller logs)."""
+def teardown(service_id: str, volume_id: str = "",
+             run: Callable[[list[str]], RunResult] = _real_runner) -> dict:
+    """Delete the EXACT captured Railway Postgres service AND its volume. Idempotent. Refuses a
+    missing service_id. Returns {service_id, deleted, already_gone, ok, volume_deleted,
+    volume_already_gone, detail} — never raises on CLI failure (caller logs)."""
     sid = (service_id or "").strip()
     if not sid:
         raise ValueError("teardown requires a captured service_id (never a name guess)")
@@ -184,16 +209,40 @@ def teardown(service_id: str, run: Callable[[list[str]], RunResult] = _real_runn
     args += ["-e", _railway_environment(), "-y"]
     res = run(args)
     out = res.stdout or ""
-    combined = (out + "\n" + (getattr(res, "stderr", "") or ""))   # railway may put 'not found' on stderr
+    combined = (out + "\n" + (getattr(res, "stderr", "") or ""))
     _gone = combined.lower()
     if any(p in _gone for p in ("not found", "no services found", "does not exist", "no service")):
-        return {"service_id": sid, "deleted": False, "already_gone": True, "ok": True,
-                "detail": "already gone"}
-    if res.returncode == 0:
-        return {"service_id": sid, "deleted": True, "already_gone": False, "ok": True,
-                "detail": out[:200]}
-    return {"service_id": sid, "deleted": False, "already_gone": False, "ok": False,
-            "detail": (combined.strip()[:200]) or f"exit {res.returncode}"}
+        result: dict = {"service_id": sid, "deleted": False, "already_gone": True, "ok": True,
+                        "detail": "already gone"}
+    elif res.returncode == 0:
+        result = {"service_id": sid, "deleted": True, "already_gone": False, "ok": True,
+                  "detail": out[:200]}
+    else:
+        return {"service_id": sid, "deleted": False, "already_gone": False, "ok": False,
+                "detail": (combined.strip()[:200]) or f"exit {res.returncode}",
+                "volume_deleted": False, "volume_already_gone": not bool(volume_id)}
+
+    # Explicit volume delete: railway service delete does NOT cascade volumes.
+    vid = (volume_id or "").strip()
+    if not vid:
+        result["volume_deleted"] = False
+        result["volume_already_gone"] = True   # no volume to track — treat as clean
+        return result
+    vol_res = run(["railway", "volume", "delete", "--volume", vid, "--yes"])
+    vol_out = (vol_res.stdout or "") + "\n" + (getattr(vol_res, "stderr", "") or "")
+    _vgone = vol_out.lower()
+    if any(p in _vgone for p in ("not found", "does not exist", "no volume")):
+        result["volume_deleted"] = False
+        result["volume_already_gone"] = True
+    elif vol_res.returncode == 0:
+        result["volume_deleted"] = True
+        result["volume_already_gone"] = False
+    else:
+        # Volume delete failed — service is gone but volume leaked; log, don't fail
+        result["volume_deleted"] = False
+        result["volume_already_gone"] = False
+        result["detail"] += f" | volume-delete-failed: {vol_out.strip()[:100]}"
+    return result
 
 
 @dataclass
@@ -205,6 +254,7 @@ class ReapRecord:
     archived: bool = False
     phase: str = ""
     has_verified_deploy: bool = False
+    volume_id: str = ""  # deploy_db_volume_id from ProjectState — must be deleted explicitly
 
 
 def _reap_reason(rec: ReapRecord, policy: str) -> str | None:
@@ -221,21 +271,65 @@ def _reap_reason(rec: ReapRecord, policy: str) -> str | None:
     return None                                            # done / live demo / still-active → keep
 
 
+def _parse_detached_volumes(text: str) -> list[str]:
+    """Return volume IDs that are detached (no serviceName, not deleted) from `railway volume list --json`.
+    These are orphans stranded by half-failed provisions — `service delete` skipped them."""
+    try:
+        d = json.loads(text)
+        return [str(v["id"]) for v in (d.get("volumes") or [])
+                if not v.get("serviceName") and not v.get("deletedAt") and v.get("id")]
+    except Exception:
+        return []
+
+
+def sweep_detached_volumes(run: Callable[[list[str]], RunResult] = _real_runner,
+                           log: Callable[[str], None] | None = None,
+                           dry_run: bool = False) -> dict:
+    """List volumes in the runapp project and delete any that have no attached service.
+    These are orphans from half-failed provisions — `service delete` does not cascade them.
+    Returns {swept, would_sweep, failed} volume ID lists."""
+    log = log or (lambda m: None)
+    report: dict = {"swept": [], "would_sweep": [], "failed": []}
+    try:
+        vol_out = run(["railway", "volume", "list", "--json"]).stdout or "{}"
+    except Exception as e:
+        log(f"[deploy-db reaper] detached-volume sweep: volume list failed: {e}")
+        return report
+    orphan_ids = _parse_detached_volumes(vol_out)
+    for vid in orphan_ids:
+        if dry_run:
+            report["would_sweep"].append(vid)
+            log(f"[deploy-db reaper] DRY-RUN would sweep detached volume {vid}")
+            continue
+        del_res = run(["railway", "volume", "delete", "--volume", vid, "--yes"])
+        del_out = (del_res.stdout or "") + "\n" + (getattr(del_res, "stderr", "") or "")
+        if del_res.returncode == 0 or any(p in del_out.lower()
+                                          for p in ("not found", "does not exist", "no volume")):
+            report["swept"].append(vid)
+            log(f"[deploy-db reaper] swept detached volume {vid}")
+        else:
+            report["failed"].append({"volume_id": vid, "detail": del_out.strip()[:100]})
+            log(f"[deploy-db reaper] FAILED to sweep detached volume {vid}: {del_out.strip()[:100]}")
+    return report
+
+
 def reap(records: Iterable[ReapRecord],
          run: Callable[[list[str]], RunResult] = _real_runner,
          log: Callable[[str], None] | None = None,
          dry_run: bool = False) -> dict:
-    """Sweep: tear down the deploy-DB of every reap-eligible run under the configured policy.
-    DISARMED (SF_DEPLOY_DB_TEARDOWN unset/off) or dry_run=True → log what WOULD be reaped, delete
-    nothing. Records with no service_id (never provisioned a DB) are skipped. Returns a structured
-    report {mode, armed, policy, reaped, would_reap, kept, failed} — every persisted DB is accounted
-    for in exactly one bucket (no silent drops)."""
+    """Sweep: tear down the deploy-DB of every reap-eligible run under the configured policy, then
+    sweep any detached (orphaned) volumes left by half-failed provisions. DISARMED
+    (SF_DEPLOY_DB_TEARDOWN unset/off) or dry_run=True → log what WOULD be reaped, delete nothing.
+    Records with no service_id (never provisioned a DB) are skipped. Returns a structured report
+    {mode, armed, policy, reaped, would_reap, kept, failed, detached_volumes} — every persisted DB
+    and orphaned volume is accounted for."""
     log = log or (lambda m: None)
     mode = teardown_mode()
     armed = mode != "off" and not dry_run
     policy = "ephemeral" if mode == "ephemeral" else "persistent"   # disarmed previews the recommended B
     report: dict = {"mode": mode, "armed": armed, "policy": policy,
-                    "reaped": [], "would_reap": [], "kept": [], "failed": []}
+                    "reaped": [], "would_reap": [], "kept": [], "failed": [],
+                    "detached_volumes": {}}
     for rec in records:
         if not (rec.service_id or "").strip():
             continue                                       # never provisioned a DB — nothing to reap
@@ -250,7 +344,7 @@ def reap(records: Iterable[ReapRecord],
             log(f"[deploy-db reaper] DRY-RUN would tear down {rec.service_id} "
                 f"(project {rec.project_id}, reason={reason}) — set {_TEARDOWN_ENV}=persistent|ephemeral to arm")
             continue
-        res = teardown(rec.service_id, run=run)
+        res = teardown(rec.service_id, volume_id=rec.volume_id, run=run)
         if res["ok"]:
             report["reaped"].append({**base, "reason": reason,
                                      "deleted": res["deleted"], "already_gone": res["already_gone"]})
@@ -260,4 +354,8 @@ def reap(records: Iterable[ReapRecord],
             report["failed"].append({**base, "reason": reason, "detail": res["detail"]})
             log(f"[deploy-db reaper] FAILED to tear down {rec.service_id} "
                 f"(project {rec.project_id}): {res['detail']}")
+    # Belt-and-suspenders: sweep any detached/orphaned volumes regardless of whether any services
+    # were reaped this pass. Catches volumes stranded by half-failed provisions (#51 reduces new
+    # stranding but can't eliminate it for provisions that die after volume creation).
+    report["detached_volumes"] = sweep_detached_volumes(run=run, log=log, dry_run=not armed)
     return report
