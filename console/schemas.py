@@ -33,6 +33,8 @@ class OrgPatchIn(BaseModel):
     location: str | None = None
     website: str | None = None
     connected_systems: list | None = None
+    plan: str | None = None
+    monthly_budget_cap: float | None = None
 
 
 class OrgDocIn(BaseModel):
@@ -223,23 +225,6 @@ class ToolPatchIn(BaseModel):
     scope: str | None = None
     auth: str | None = None
     status: str | None = None
-
-
-class OrgIn(BaseModel):
-    name: str = ""
-    industry: str | None = None
-    website: str | None = None
-
-
-class OrgPatchIn(BaseModel):
-    name: str | None = None
-    industry: str | None = None
-    headcount: str | None = None
-    revenue: str | None = None
-    location: str | None = None
-    website: str | None = None
-    plan: str | None = None
-    monthly_budget_cap: float | None = None
 
 
 class SowIn(BaseModel):
