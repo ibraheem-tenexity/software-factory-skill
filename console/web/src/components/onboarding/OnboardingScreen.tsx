@@ -461,7 +461,10 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: T.bg, fontFamily: T.sans }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 24px", background: T.raised, borderBottom: `1px solid ${T.borderSubtle}`, flexShrink: 0 }}>
-        <Wordmark />
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {onBack && <Btn variant="ghost" size="sm" onClick={onBack}><Icon name="arrowLeft" size={14} /> Projects</Btn>}
+          <Wordmark />
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {!fresh && company && <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Avatar name={company} size={24} tone="neutral" /><span style={{ font: `500 12.5px/1.2 ${T.sans}`, color: T.secondary }}>{company}</span></div>}
         </div>
