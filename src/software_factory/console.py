@@ -715,6 +715,16 @@ class Console:
                     db.record_artifact("Deploy DB", "context/" + deploy_db.DEPLOY_DB_FILE,
                                        kind="deploy-db")
                 except Exception as e:
+                    # Salvage the serviceId if provision() wrote it to disk before failing.
+                    # Without this the reaper can't teardown services created-but-not-URL-fetched.
+                    try:
+                        with open(info_path) as _pf:
+                            _partial = json.load(_pf)
+                        if _partial.get("service_id") and not state.deploy_db_service_id:
+                            state.deploy_db_service_id = _partial["service_id"]
+                            state.save()
+                    except Exception:
+                        pass
                     db.add_blocker(f"deploy-db provisioning failed: {e}", blocks="deploy-db")
                     return None
         mcp_path = os.path.join(ws, ".mcp.json")

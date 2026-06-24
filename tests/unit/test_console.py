@@ -1528,6 +1528,36 @@ def test_launch_stage_persists_captured_deploy_db_service_id(tmp_path, monkeypat
     assert c._load_state(project_id).deploy_db_service_id == "svc-xyz"
 
 
+def test_launch_stage_salvages_service_id_when_provision_raises_after_disk_write(tmp_path, monkeypatch):
+    """If provision() writes the serviceId to disk but then raises (e.g. variables read failed),
+    _launch_stage must still persist the serviceId to Supabase so the reaper can find it."""
+    import json, os
+    from software_factory import console as console_mod, deploy_db as dd
+
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="needs a db", target="railway"))
+    st = c._load_state(pid)
+    st.stage = 3; st.deps_required = ["DATABASE_URL"]; st.deps_satisfied = True; st.save()
+
+    def fake_prepare(*a, **k):
+        ws = os.path.join(str(tmp_path), pid, "workspace")
+        ctx = os.path.join(ws, "context")
+        os.makedirs(ctx, exist_ok=True)
+        return ws
+    monkeypatch.setattr(console_mod, "prepare_workspace", fake_prepare)
+    monkeypatch.setattr(console_mod, "check_mcp", lambda path: [])
+
+    def provision_writes_id_then_raises(project_id, context_dir):
+        dd.write_file(context_dir, {"service_id": "svc-salvage", "service": "Postgres-SL",
+                                    "provider": "railway-postgres", "project_id": project_id})
+        raise RuntimeError("variables read timed out")
+    monkeypatch.setattr(console_mod.deploy_db, "provision", provision_writes_id_then_raises)
+
+    c._launch_stage(pid, 3, "prompt", {})
+    # The serviceId was on disk — the salvage path must persist it to state for the reaper.
+    assert c._load_state(pid).deploy_db_service_id == "svc-salvage"
+
+
 def test_set_archived_reaps_captured_db_when_armed(tmp_path, monkeypatch):
     from software_factory import console as console_mod
     monkeypatch.setenv("SF_DEPLOY_DB_TEARDOWN", "persistent")        # armed, policy B
