@@ -839,6 +839,9 @@ class Console:
 
         state = self._load_state(project_id)
         env = {k: v for k, v in (req.credentials or {}).items() if v}
+        # Preserve vault entries from a prior store_draft_creds call (draft BYOK path). Keys
+        # in req.credentials overwrite same-named draft entries; unmatched draft entries survive.
+        existing_vault_ids = dict(getattr(state, "creds_vault_ids", {}) or {})
         vault_ids = {}
         for key_name, value in env.items():
             try:
@@ -852,8 +855,9 @@ class Console:
         state.description = req.description
         state.name = req.name or state.name or ""
         state.deploy_target = req.target
-        state.creds_provided = sorted(env.keys())
-        state.creds_vault_ids = vault_ids
+        merged_vault_ids = {**existing_vault_ids, **vault_ids}
+        state.creds_vault_ids = merged_vault_ids
+        state.creds_provided = sorted({*existing_vault_ids, *env})
         state.stage = 1
         # Pin the agent runtime for the whole run (all stages + retries) at start.
         # Per-request choice (the UI's Claude/Kimi picker) wins over the SF_RUNTIME env default.
@@ -996,6 +1000,29 @@ class Console:
         state.save()
         return {"name": state.name, "goal": brief.get("goals", ""), "scope": list(state.scope or []),
                 "description": state.description or "", "brief": brief, "coverage": _cov(brief)}
+
+    def store_draft_creds(self, project_id: str, credentials: dict) -> dict:
+        """Vault-store BYOK credentials against a draft and record the vault UUIDs in state.
+
+        Called by POST /api/projects/{pid}/creds during onboarding. Only names are persisted in
+        state; plaintext values never touch the DB. Returns {"creds_provided": [...names...]}."""
+        state = self._load_state(project_id)
+        existing = dict(getattr(state, "creds_vault_ids", {}) or {})
+        new_ids = {}
+        for key_name, value in (credentials or {}).items():
+            if not value:
+                continue
+            try:
+                uid = _vault.vault_store(f"byok-{project_id}-{key_name}", value)
+                if uid:
+                    new_ids[key_name] = uid
+            except Exception:
+                pass  # Vault unavailable — still record the name so the user sees it registered
+        merged = {**existing, **new_ids}
+        state.creds_vault_ids = merged
+        state.creds_provided = sorted({*merged, *(k for k in credentials if credentials[k])})
+        state.save()
+        return {"creds_provided": state.creds_provided}
 
     def promote_draft(self, project_id: str, description: str = "",
                       interview_md: str | None = None, target: str = "railway") -> str:

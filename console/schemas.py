@@ -145,6 +145,10 @@ class DraftPatchIn(BaseModel):
     model: str | None = None     # opencode model alias: "kimi"|"glm"
 
 
+class CredsIn(BaseModel):
+    credentials: dict = {}   # {key_name: secret_value}; value never stored in DB — vault-only
+
+
 class AttachIn(BaseModel):
     files: list = []
 
