@@ -36,12 +36,23 @@ function phaseTone(phase?: string): "success" | "warning" | "danger" | "neutral"
   return "neutral";
 }
 
+function setParam(key: string, value: string | null) {
+  const p = new URLSearchParams(location.search);
+  if (value === null) p.delete(key); else p.set(key, value);
+  history.replaceState(null, "", "?" + p.toString());
+}
+
 export function FactoryConsole({ projectId, onBack }: { projectId: string; onBack: () => void }) {
   const [status, setStatus] = useState<Status>({} as Status);
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [view, setView] = useState<View>("kanban");
+  const [view, setView] = useState<View>(() => {
+    const v = new URLSearchParams(location.search).get("fview");
+    return (["tree", "map"].includes(v || "") ? v : "kanban") as View;
+  });
   const [doc, setDoc] = useState<Doc>(null);
+
+  useEffect(() => { setParam("fview", view === "kanban" ? null : view); }, [view]);
 
   useEffect(() => {
     let live = true;
