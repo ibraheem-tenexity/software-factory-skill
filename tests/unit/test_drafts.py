@@ -268,6 +268,50 @@ def test_promote_draft_threads_draft_vault_ids_into_provision(tmp_path):
     assert "ANTHROPIC_API_KEY" in state.creds_provided
 
 
+# ── budget-cap draft path ─────────────────────────────────────────────────────────────────────
+
+def test_create_draft_with_budget_sets_budget_ceiling(tmp_path):
+    c = _console(tmp_path, FakeLauncher())
+    rid = c.create_draft(owner="op@tenexity.ai", budget=75.0)
+    state = c._load_state(rid)
+    assert state.budget_ceiling == 75.0
+
+
+def test_promote_draft_carries_budget_ceiling(tmp_path):
+    launcher = FakeLauncher()
+    c = _console(tmp_path, launcher)
+    rid = c.create_draft(owner="op@tenexity.ai", name="Cargo", runtime="claude", budget=99.0)
+    c.update_draft_brief(rid, {
+        "goals": "A prototype.",
+        "success_metrics": "Indistinguishable from the hand-built demo.",
+        "definition_of_done": "Deployed.",
+        "constraints": "Web only.",
+    })
+    c.set_draft_project(rid, name="Cargo", goal="A prototype.", scope=["web"])
+    c.promote_draft(rid)
+    # budget_ceiling must survive the promote; _provision_and_launch must not zero it
+    state = c._load_state(rid)
+    assert state.budget_ceiling == 99.0
+
+
+def test_patch_draft_budget_updates_ceiling_and_supports_lowering(tmp_path):
+    c = _console(tmp_path, FakeLauncher())
+    rid = c.create_draft(owner="op@tenexity.ai", budget=100.0)
+    # raise
+    c.raise_budget(rid, 200.0)
+    assert c._load_state(rid).budget_ceiling == 200.0
+    # lower (must also work)
+    c.raise_budget(rid, 50.0)
+    assert c._load_state(rid).budget_ceiling == 50.0
+
+
+def test_status_exposes_budget_ceiling(tmp_path):
+    c = _console(tmp_path, FakeLauncher())
+    rid = c.create_draft(owner="op@tenexity.ai", budget=42.0)
+    st = c.status(rid)
+    assert st["budget_ceiling"] == 42.0
+
+
 def test_store_draft_creds_survives_vault_unavailable(tmp_path):
     """If Vault is down, store_draft_creds still records the key name so the user sees it
     registered; the UUID is absent (gracefully degraded)."""

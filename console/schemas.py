@@ -135,6 +135,7 @@ class DraftCreateIn(BaseModel):
     planning_model: str = ""
     impl_model: str = ""
     model: str = ""   # opencode model alias: "kimi"|"glm"
+    budget: float | None = None  # per-project spend ceiling ($); None → SF_COST_CEILING default
 
 
 class DraftPatchIn(BaseModel):
@@ -143,6 +144,7 @@ class DraftPatchIn(BaseModel):
     scope: list | None = None
     runtime: str | None = None   # "claude"|"opencode" — lets the Build-engine card update the draft's runtime after the eager create
     model: str | None = None     # opencode model alias: "kimi"|"glm"
+    budget: float | None = None  # update the spend ceiling
 
 
 class CredsIn(BaseModel):

@@ -611,8 +611,8 @@ class Console:
         return self.retry_stage(project_id, stage) is not None
 
     def raise_budget(self, project_id: str, ceiling: float) -> dict:
-        """SPEC §4 recovery: persist a higher per-project ceiling and clear the budget blocker(s);
-        the operator then resumes via /retry against the preserved workspace."""
+        """Persist a new per-project spend ceiling (raise or lower) and clear any budget blocker.
+        Lowering is allowed — caller is responsible for policy checks if desired."""
         state = self._load_state(project_id)
         state.budget_ceiling = float(ceiling)
         state.save()
@@ -919,7 +919,8 @@ class Console:
 
     # ---- Durable drafts: an interview before a run exists -------------------------------
     def create_draft(self, owner: str = "", name: str = "", runtime: str = "",
-                     planning_model: str = "", impl_model: str = "", model: str = "") -> str:
+                     planning_model: str = "", impl_model: str = "", model: str = "",
+                     budget: float | None = None) -> str:
         """Mint a CANONICAL run-<8hex> id at the START of the onboarding interview and persist a
         draft ProjectState (phase='draft', held, NO artifact recorded → is_pipeline_project False, so the
         poller/ghost-resume guard ignore it until promotion). Using a canonical id up front means
@@ -943,6 +944,8 @@ class Console:
         state.planning_model = planning_model if planning_model in PLANNING_MODELS else ""
         state.impl_model = impl_model if impl_model in IMPL_MODELS else ""
         state.opencode_model = model if model in _OPENCODE_MODEL_IDS else ""
+        if budget is not None and float(budget) > 0:
+            state.budget_ceiling = float(budget)
         state.brief = {}
         state.interview_coverage = {}
         state.save()
