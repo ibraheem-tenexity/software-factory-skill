@@ -10,7 +10,7 @@ from software_factory.users import TENEXITY_ORG_ID
 import console.state as state
 from console.deps import require_staff
 from console.schemas import (DemoIn, PromptIn, InviteIn, AccessPatchIn, AgentIn, AgentPatchIn,
-                             ToolIn, ToolPatchIn, ClientIn, ClientPatchIn, SowIn, SowPatchIn)
+                             ToolIn, ToolPatchIn, OrgIn, OrgPatchIn, SowIn, SowPatchIn)
 
 router = APIRouter()
 
@@ -218,7 +218,7 @@ def admin_tool_delete(tool_id: int, v: tuple = Depends(require_staff)):
 
 # Clients / tenants (admin-scoped org CRUD) -------------------------------------------------------
 @router.post("/api/admin/clients")
-def admin_client_create(body: ClientIn, v: tuple = Depends(require_staff)):
+def admin_client_create(body: OrgIn, v: tuple = Depends(require_staff)):
     if not (body.name or "").strip():
         raise HTTPException(status_code=400, detail="name required")
     oid = state.users.create_org(body.name, industry=body.industry, website=body.website, by=v[0] or "")
@@ -226,7 +226,7 @@ def admin_client_create(body: ClientIn, v: tuple = Depends(require_staff)):
 
 
 @router.patch("/api/admin/clients/{org_id}")
-def admin_client_update(org_id: str, body: ClientPatchIn, v: tuple = Depends(require_staff)):
+def admin_client_update(org_id: str, body: OrgPatchIn, v: tuple = Depends(require_staff)):
     if not state.users.get_org(org_id):
         raise HTTPException(status_code=404, detail="unknown org")
     fields = {k: val for k, val in body.model_dump().items() if val is not None}

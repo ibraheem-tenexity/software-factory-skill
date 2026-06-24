@@ -127,8 +127,8 @@ class ProjectCreateIn(BaseModel):
     railway_project_id: str = ""
 
 
-# Option C onboarding (draft model): the form eagerly creates a draft on mount, write-throughs the
-# project fields, attaches materials, and promotes at handoff. See docs/plans/fastapi-db-replacement.md.
+# Option C onboarding (draft model): the form defers draft creation until the user types a name,
+# then write-throughs project fields, attaches materials, and promotes at handoff. See docs/plans/fastapi-db-replacement.md.
 class DraftCreateIn(BaseModel):
     project_name: str = ""
     runtime: str = ""
@@ -225,13 +225,13 @@ class ToolPatchIn(BaseModel):
     status: str | None = None
 
 
-class ClientIn(BaseModel):
+class OrgIn(BaseModel):
     name: str = ""
     industry: str | None = None
     website: str | None = None
 
 
-class ClientPatchIn(BaseModel):
+class OrgPatchIn(BaseModel):
     name: str | None = None
     industry: str | None = None
     headcount: str | None = None
