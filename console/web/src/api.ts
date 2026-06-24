@@ -320,9 +320,12 @@ export const api = {
     send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "PATCH", body),
   adminDeleteAccess: (email: string) => send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "DELETE"),
   // ── Onboarding draft model (docs/plans/concierge-onboarding-api.md) ──
-  // runtime ("claude"|"opencode") is the only field the backend persists today (DraftCreateIn.runtime
-  // → projectstate.runtime → promote). model/keySource/key are sent forward-ready — ignored by the
-  // backend until #38 wires GLM + BYOK key storage. keySource stays "tenexity" while BYOK is gated.
+  // runtime ("claude"|"opencode") + model ("kimi"|"glm") are persisted by the backend (DraftCreateIn
+  // → projectstate). BYOK keys: when keySource="byok", the FE POSTs the runtime-specific runner key
+  // (ANTHROPIC_API_KEY for claude, OPENROUTER_API_KEY for opencode) to /creds, which Vault-stores it
+  // and records creds_vault_ids on the draft; promote threads those into the runner env (BYOK wins
+  // over the platform key). keySource/key on createDraft/patchDraft are passthrough (ignored by
+  // Pydantic); the real BYOK path is submitCreds.
   createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string }) =>
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),
   patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string }) =>
@@ -331,6 +334,10 @@ export const api = {
   // when RESUMING an existing draft instead of minting a new one.
   getDraft: (id: string) =>
     get<{ name: string; goal: string; scope: string[]; description: string; brief: Record<string, string>; coverage: Record<string, boolean> }>(`/api/projects/${id}/draft`),
+  // BYOK key submission (qsvigmth's draft-BYOK PR). Vault-stores each credential; records UUIDs in
+  // state.creds_vault_ids; promote threads them into the runner env. Returns names only, never values.
+  submitCreds: (id: string, credentials: Record<string, string>) =>
+    send<{ creds_provided: string[] }>(`/api/projects/${id}/creds`, "POST", { credentials }),
   attach: (id: string, files: { name: string; content_b64: string }[]) =>
     send<{ attached: string[] }>(`/api/projects/${id}/attach`, "POST", { files }),
   promote: (id: string, body?: { description?: string; target?: string }) =>

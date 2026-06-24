@@ -112,8 +112,8 @@ function ScopeOfWork({ options, value, onChange, onAddOption }:
 // ── Build engine picker (the "Build engine" card). MODULE-SCOPE — never define inside render
 //    (that remounts inputs on each keystroke → focus loss). provider=claude|opencode;
 //    model=kimi|glm; keySource=tenexity|byok. Backend persists `runtime` + maps `model` to the
-//    full id (kimi→moonshot, glm→z-ai/glm-5.2). BYOK stays gated "coming soon" until #38 wires
-//    secure key storage (no selectable-but-noop options). ──
+//    full id (kimi→moonshot, glm→z-ai/glm-5.2). BYOK key POSTs to /creds (Vault-stored) and the
+//    runtime-specific runner key (ANTHROPIC_API_KEY / OPENROUTER_API_KEY) wins over the platform key. ──
 export type EngineValue = { provider: "claude" | "opencode"; model: "kimi" | "glm"; keySource: "tenexity" | "byok"; key: string };
 
 const ENGINES = [
@@ -179,7 +179,7 @@ function EnginePicker({ value, onChange }:
       <Field label="API key">
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <Segmented value={value.keySource} onChange={chooseKeySource}
-            options={[{ id: "tenexity", label: "Use Tenexity's key" }, { id: "byok", label: "Bring your own key", disabled: true }]} />
+            options={[{ id: "tenexity", label: "Use Tenexity's key" }, { id: "byok", label: "Bring your own key" }]} />
           {value.keySource === "tenexity"
             ? <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 11px", background: T.brandSoft + "66", border: `1px solid ${T.brand}33`, borderRadius: T.rMd }}>
               <Sparkle size={12} color={T.brandDeep} />
@@ -232,8 +232,9 @@ export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: 
   // project answers (shared)
   const [p, setP] = useState<{ name: string; goal: string; scope: string[]; video: boolean; docs: boolean }>(
     { name: "", goal: "", scope: [], video: false, docs: false });
-  // Build engine (Claude | OpenCode+Kimi/GLM). Default = Claude on Tenexity's key. BYOK is gated
-  // "coming soon" in the picker until #38 wires secure key storage; Kimi + GLM are both selectable.
+  // Build engine (Claude | OpenCode+Kimi/GLM). Default = Claude on Tenexity's key. BYOK is live:
+  // a user-entered key POSTs to /creds (Vault-stored); promote threads it into the runner env, BYOK
+  // wins over the platform key. The key NAME is runtime-specific (ANTHROPIC_API_KEY / OPENROUTER_API_KEY).
   const [engine, setEngine] = useState<EngineValue>({ provider: "claude", model: "kimi", keySource: "tenexity", key: "" });
   // Real uploaded filenames per material slot (drives the Dropzone list — no dummy data).
   const [mats, setMats] = useState<{ video: { name: string; size?: string }[]; docs: { name: string; size?: string }[] }>({ video: [], docs: [] });
@@ -287,10 +288,10 @@ export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: 
     return () => clearTimeout(t);
   }, [draftId, p.name, p.goal, p.scope]);
 
-  // DEBOUNCED build-engine write-through: runtime (claude|opencode) is the only field the backend
-  // persists today; model/keySource/key ride along forward-ready (ignored by Pydantic until #38).
-  // Without this the eager create's runtime (default claude) is the value used at promote, silently
-  // dropping an OpenCode selection.
+  // DEBOUNCED build-engine write-through: runtime (claude|opencode) + model (kimi|glm) persist on
+  // the draft (DraftCreateIn/DraftPatchIn). keySource/key are passthrough (ignored by Pydantic) —
+  // the real BYOK path is submitCreds below. Without this the eager create's runtime (default
+  // claude) is the value used at promote, silently dropping an OpenCode selection.
   useEffect(() => {
     if (!draftId) return;
     const t = setTimeout(() => {
@@ -298,6 +299,25 @@ export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: 
     }, 500);
     return () => clearTimeout(t);
   }, [draftId, engine.provider, engine.model, engine.keySource, engine.key]);
+
+  // BYOK key submission: when the user brings their own key, POST it to /creds (Vault-stored; promote
+  // threads creds_vault_ids into the runner env, BYOK wins over the platform key). The key NAME is
+  // runtime-specific (ANTHROPIC_API_KEY for claude, OPENROUTER_API_KEY for opencode) — the runner-key
+  // _launch_stage resolves. Debounced so a paste + edit doesn't fire per keystroke; the response is
+  // ignored (never surfaces the key back). Only fires when keySource is byok AND a non-empty key exists.
+  const byokBusyRef = useRef(false);
+  useEffect(() => {
+    if (!draftId || engine.keySource !== "byok" || !engine.key.trim()) return;
+    const keyName = engine.provider === "claude" ? "ANTHROPIC_API_KEY" : "OPENROUTER_API_KEY";
+    const t = setTimeout(() => {
+      if (byokBusyRef.current) return;
+      byokBusyRef.current = true;
+      api.submitCreds(draftId, { [keyName]: engine.key.trim() })
+        .catch(() => {/* transient — retried on next change / flushed at handoff */})
+        .finally(() => { byokBusyRef.current = false; });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [draftId, engine.keySource, engine.provider, engine.key]);
 
   // fresh company write-through: POST once (create + link), PATCH thereafter. Guarded against dup.
   const saveCompanyFresh = useCallback(async () => {
@@ -385,6 +405,10 @@ export function OnboardingScreen({ onComplete, resumeProjectId }: { onComplete: 
       if (fresh) await saveCompanyFresh();                                    // flush company
       await api.patchDraft(draftId, { name: p.name, goal: p.goal, scope: p.scope }).catch(() => {}); // flush project
       await api.patchDraft(draftId, { runtime: engine.provider, model: engine.model, keySource: engine.keySource, key: engine.key }).catch(() => {}); // flush engine
+      if (engine.keySource === "byok" && engine.key.trim()) {                 // flush BYOK key → Vault
+        const keyName = engine.provider === "claude" ? "ANTHROPIC_API_KEY" : "OPENROUTER_API_KEY";
+        await api.submitCreds(draftId, { [keyName]: engine.key.trim() }).catch(() => {});
+      }
       const { project_id } = await api.promote(draftId, { target: "railway" });
       onComplete(project_id);
     } catch (e: any) {
