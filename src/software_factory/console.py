@@ -1396,6 +1396,11 @@ class Console:
             return hit[1]
         val = streamlog.cost_usd(self._full_log(project_id))
         self._cost_cache[project_id] = (key, val)
+        if val:
+            state = self._load_state(project_id)
+            if val != (state.spent_usd or 0):
+                state.spent_usd = val
+                state.save()
         return val
 
     def _full_log(self, project_id: str) -> str:
