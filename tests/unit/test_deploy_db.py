@@ -181,6 +181,18 @@ def test_teardown_detects_already_gone_when_not_found_is_on_stderr(monkeypatch):
     assert res["ok"] and res["already_gone"] and not res["deleted"]
 
 
+def test_teardown_idempotent_no_services_found_stderr(monkeypatch):
+    # Live rehearsal (zji9befj) caught: re-deleting a gone service prints
+    # "No services found in environment 'production'" on stderr with rc=1.
+    # Must map to already_gone=True, ok=True — not a failure.
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", "p")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    run = _delete_runner([RunResult(stdout="", returncode=1,
+                                   stderr="No services found in environment 'production'")])
+    res = deploy_db.teardown("svc-reherase", run=run)
+    assert res["ok"] and res["already_gone"] and not res["deleted"]
+
+
 def test_teardown_refuses_empty_service_id_without_any_cli_call():
     run = _delete_runner([])
     for bad in ("", "   ", None):

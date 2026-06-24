@@ -185,9 +185,10 @@ def teardown(service_id: str, run: Callable[[list[str]], RunResult] = _real_runn
     res = run(args)
     out = res.stdout or ""
     combined = (out + "\n" + (getattr(res, "stderr", "") or ""))   # railway may put 'not found' on stderr
-    if "not found" in combined.lower():
+    _gone = combined.lower()
+    if any(p in _gone for p in ("not found", "no services found", "does not exist", "no service")):
         return {"service_id": sid, "deleted": False, "already_gone": True, "ok": True,
-                "detail": "not found (already gone)"}
+                "detail": "already gone"}
     if res.returncode == 0:
         return {"service_id": sid, "deleted": True, "already_gone": False, "ok": True,
                 "detail": out[:200]}
