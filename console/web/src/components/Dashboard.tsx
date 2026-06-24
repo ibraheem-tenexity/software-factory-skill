@@ -46,6 +46,10 @@ function money(v?: number): string {
   return v ? `$${v.toFixed(2)}` : "—";
 }
 
+function draftLabel(projectId: string): string {
+  return `Draft Project ${projectId.replace("project-", "").slice(0, 8)}`;
+}
+
 function MetricCard({ label, value, hint, accent }: { label: string; value: string; hint?: string; accent?: boolean }) {
   return (
     <div style={{ background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, padding: "14px 16px", boxShadow: T.shadowXs }}>
@@ -108,7 +112,7 @@ function ProjectRow({ r, onClick, first, onRename, onArchive }:
         ) : (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-              <span style={{ font: `600 14.5px/1.2 ${T.sans}`, color: r.name ? T.fg : T.tertiary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name || "Untitled project"}</span>
+              <span style={{ font: `600 14.5px/1.2 ${T.sans}`, color: r.name ? T.fg : T.tertiary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name || draftLabel(r.project_id)}</span>
               <StatusPill tone={st.tone} dot={live}>{st.label}</StatusPill>
             </div>
             <p style={{ margin: "5px 0 0", font: `400 12.5px/1.4 ${T.sans}`, color: T.secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.description || "—"}</p>
@@ -133,7 +137,7 @@ function ProjectRow({ r, onClick, first, onRename, onArchive }:
             <div onClick={() => setMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 9 }} />
             <div style={{ position: "absolute", right: 0, top: 30, zIndex: 10, background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rMd, boxShadow: T.shadowMd, overflow: "hidden", minWidth: 150 }}>
               <button onClick={() => { setMenu(false); setName(r.name || ""); setRenaming(true); }} style={rowMenuItem}>Rename</button>
-              <button onClick={() => { setMenu(false); if (confirm(`Archive “${r.name || “Untitled project”}”? It’ll be hidden from your projects.`)) onArchive(r.project_id); }} style={{ ...rowMenuItem, color: T.danger }}>Archive</button>
+              <button onClick={() => { setMenu(false); if (confirm(`Archive "${r.name || draftLabel(r.project_id)}"? It'll be hidden from your projects.`)) onArchive(r.project_id); }} style={{ ...rowMenuItem, color: T.danger }}>Archive</button>
             </div>
           </>
         )}
@@ -244,7 +248,7 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
             <MetricCard label="Active projects" value={String(active.length)} hint={`${withAgents} with agents working now`} accent />
             <MetricCard label="In build" value={String(building.length)} hint={`${researching.length} researching`} />
-            <MetricCard label="Deployed" value={String(shipped.length)} hint={shipped[0] ? (shipped[0].name || "Untitled project") + " · live" : "none yet"} />
+            <MetricCard label="Deployed" value={String(shipped.length)} hint={shipped[0] ? (shipped[0].name || draftLabel(shipped[0].project_id)) + " · live" : "none yet"} />
             <MetricCard label="Spend to date" value={money(totalSpend) === "—" ? "$0.00" : money(totalSpend)} hint={org?.monthly_budget_cap != null ? `of $${org.monthly_budget_cap} cap` : `across ${projects.length} project${projects.length === 1 ? "" : "s"}`} />
           </div>
 
