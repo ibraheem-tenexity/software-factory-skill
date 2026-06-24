@@ -309,7 +309,7 @@ class Console:
         self,
         projects_dir: str,
         launch: Callable[..., Any] = _default_launch,
-        new_id: Callable[[], str] = lambda: "project-" + uuid.uuid4().hex[:8],
+        new_id: Callable[[], str] = lambda: "project-" + uuid.uuid4().hex[:16],
         extract: Callable[[str], str] = extract_to_markdown,
     ):
         self._projects_dir = projects_dir
