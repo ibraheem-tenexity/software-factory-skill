@@ -100,6 +100,14 @@ export function Gate() {
 
   useEffect(resolve, []);
 
+  // Any in-app API call that gets 401 (expired session) fires sf:auth-expired.
+  // Re-running resolve() re-checks /api/me → if still 401 → setState("login").
+  useEffect(() => {
+    const onExpired = () => resolve();
+    window.addEventListener("sf:auth-expired", onExpired);
+    return () => window.removeEventListener("sf:auth-expired", onExpired);
+  }, []);
+
   if (state === "loading") return <div style={{ height: "100vh", background: "#FAFAFA" }} />;
   if (state === "login") return <LoginScreen clientId={clientId} onAuthed={resolve} />;
   return <App />;

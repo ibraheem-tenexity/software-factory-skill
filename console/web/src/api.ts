@@ -239,9 +239,13 @@ export type AdminSow = {
   updated_at?: string | number | null;
 };
 
+function checkAuth(r: Response): void {
+  if (r.status === 401) window.dispatchEvent(new CustomEvent("sf:auth-expired"));
+}
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(path, { credentials: "include" });
-  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  if (!r.ok) { checkAuth(r); throw new Error(`${path} → ${r.status}`); }
   return r.json() as Promise<T>;
 }
 
@@ -252,7 +256,7 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
     headers: { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  if (!r.ok) { checkAuth(r); throw new Error(`${path} → ${r.status}`); }
   return r.json() as Promise<T>;
 }
 
