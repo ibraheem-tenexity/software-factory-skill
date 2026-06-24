@@ -17,6 +17,7 @@ import { BuildBoard } from "./BuildBoard";
 import { TreeView, MapView } from "./NodeMap";
 import { Concierge } from "./Concierge";
 import { DocViewer, artifactsFromGraph, ArtifactRef, openArtifact } from "./Artifacts";
+import { RecoveryBar } from "./RecoveryBar";
 
 type Status = ProjectSummary & Record<string, any>;
 type View = "kanban" | "tree" | "map";
@@ -31,7 +32,8 @@ const VIEW_TITLE: Record<View, string> = { kanban: "Build board", tree: "Process
 
 function phaseTone(phase?: string): "success" | "warning" | "danger" | "neutral" {
   if (phase === "done") return "success";
-  if (phase === "stopped") return "danger";
+  if (phase === "stopped" || phase === "crashed") return "danger";
+  if (phase === "paused") return "warning";
   if (phase) return "warning";   // an in-flight phase (design renders the build phase amber)
   return "neutral";
 }
@@ -85,8 +87,13 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
   const delivered = status.done || allTicketsDone;
   const liveUrl = liveArt?.url || status.deploy_url;
 
+  // Recovery: paused/crashed runs show the RecoveryBar + halted rail state
+  const halted = status.phase === "paused" || status.phase === "crashed";
+  const haltedNode: string | undefined = status.paused_at_node || status.crashed_at_node;
+  const doneNodes = Object.entries(phaseStates).filter(([, s]) => s === "done").map(([id]) => id);
+
   // manual kill-switch — only while a live run is in flight (a stage/poller to halt)
-  const running = !!status.phase && !status.deploy_url && !status.done && !["done", "draft", "stopped"].includes(status.phase);
+  const running = !!status.phase && !status.deploy_url && !status.done && !["done", "draft", "stopped", "paused", "crashed"].includes(status.phase);
   const stopRun = async () => {
     if (!confirm("Stop all work on this project? Running agents will be halted.")) return;
     try { const s = await api.stopProject(projectId); setStatus(s as Status); } catch { /* run-control endpoint ships in qsvigmth's PR */ }
@@ -123,7 +130,10 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
         )}
         {status.phase && (
           <StatusPill tone={phaseTone(status.phase)}>
-            {status.phase === "done" || status.phase === "stopped" ? status.phase : `phase ${status.phase} · stage ${status.stage || ""}`}
+            {status.phase === "done" || status.phase === "stopped" ? status.phase
+            : status.phase === "paused" || status.phase === "crashed"
+              ? `${status.phase}${haltedNode ? ` at ${haltedNode}` : ""}`
+              : `phase ${status.phase} · stage ${status.stage || ""}`}
           </StatusPill>
         )}
         <span style={{ font: `500 12px/1 ${T.mono}`, color: overCap ? T.danger : T.secondary }}>
@@ -146,7 +156,15 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
         </div>
 
         <main style={{ overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
-          <StageRail graph={graph} phaseStates={phaseStates} depsSatisfied={!!status.deps_satisfied} atDeps={showDeps} />
+          <StageRail graph={graph} phaseStates={phaseStates} depsSatisfied={!!status.deps_satisfied} atDeps={showDeps}
+            haltedNode={halted ? haltedNode : undefined}
+            onRewind={halted && haltedNode ? (node) => api.rewindTo(projectId, node).then((s) => setStatus(s as Status)).catch(() => {}) : undefined} />
+
+          {halted && haltedNode && (
+            <RecoveryBar projectId={projectId} phase={status.phase as "paused" | "crashed"}
+              haltedNode={haltedNode} doneNodes={doneNodes}
+              onUpdate={(s) => setStatus(s as Status)} />
+          )}
 
           {showDeps && <WaitForDeps projectId={projectId} onResolved={() => api.status(projectId).then(setStatus).catch(() => {})} />}
 
