@@ -29,8 +29,7 @@ def _rows(sql: str, params=()):
     conn = _conn()
     with conn.cursor() as cur:
         cur.execute(sql, params)
-        cols = [d[0] for d in cur.description]
-        return [dict(zip(cols, row)) for row in cur.fetchall()]
+        return [dict(r) for r in cur.fetchall()]
 
 
 def _row(sql: str, params=()):
