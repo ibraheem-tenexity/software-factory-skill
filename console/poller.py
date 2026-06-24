@@ -208,6 +208,12 @@ def _poll_transitions():
                             _narrate(pid, "resume-%d" % _auto_resumed[pid],
                                      "⚠️ Stage process died mid-flight — auto-resumed "
                                      f"(attempt {_auto_resumed[pid]}/{_AUTO_RESUME_MAX}).")
+                    elif not st.get("done") and _auto_resumed.get(pid, 0) >= _AUTO_RESUME_MAX:
+                        # Auto-resume cap exhausted — land in 'crashed' for Recovery-bar resume.
+                        if console.mark_stage_crashed(pid):
+                            _narrate(pid, "crashed-final",
+                                     f"⛔ Stage crashed after {_AUTO_RESUME_MAX} auto-resume "
+                                     "attempts — paused for operator (use Resume to continue).")
                     _narrate_project(pid, st)
                 except Exception:
                     pass

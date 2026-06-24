@@ -49,6 +49,7 @@ _PERSISTED = {
     "brief", "interview_coverage", "scope", "is_demo", "archived",
     "created_by", "created_at",
     "creds_vault_ids",
+    "paused_at_node", "crashed_at_node",
 }
 
 
@@ -84,6 +85,10 @@ class ProjectState:
     deploy_db_attempts: int = 0  # provision-attempt counter — hard cap so a failure can't spawn unbounded DBs
     deploy_db_service_id: str = ""  # captured Railway Postgres serviceId — the durable teardown handle
     deploy_db_volume_id: str = ""   # captured Railway volume ID — must be deleted explicitly (service delete does NOT cascade)
+    # Crash/pause recovery — set by the console when it halts a stage.
+    # Operator-driven recovery (Recovery bar) resumes from these; auto-resume is suppressed.
+    paused_at_node: str = ""   # pipeline node where pause was requested
+    crashed_at_node: str = ""  # pipeline node where an unexpected process exit was detected
     held: bool = False  # gated hold: created but NOT launched until released (survives restarts)
     owner: str = ""  # email of the creating user; members see only their own runs (admins see all)
     # Structured onboarding brief (see brief.BRIEF_SECTIONS) + per-section covered flags. Accumulated

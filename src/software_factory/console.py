@@ -23,7 +23,7 @@ from typing import Any, Callable
 # the pg registry's write guard (dbshim._ensure) stays strict 8-hex.
 PROJECT_ID_RE = re.compile(r"project-[A-Za-z0-9-]+")
 
-from . import artifacts, deploy_db, env as _env, gates, streamlog, vault as _vault
+from . import artifacts, checkpoint as ckpt, deploy_db, env as _env, gates, streamlog, vault as _vault
 from .agents import AgentRegistry
 from .evidence import build_evidence, verify_evidence
 from .input_pipeline import persist_and_compose
@@ -591,16 +591,22 @@ class Console:
         the deps gate (stage complete, waiting by design) or on a budget stop (operator's call).
         Never resurrects a GHOST: a project store with no recorded artifacts (e.g. created by a mere
         status query after state loss) has no brief to build from — resuming it burns spend on
-        an empty prompt (the run-b594a5f4/run-0eb69fdd double-ghost scar)."""
+        an empty prompt (the run-b594a5f4/run-0eb69fdd double-ghost scar).
+
+        CRASH/PAUSE RECONCILIATION: this method relaunches within the poller's _AUTO_RESUME_MAX
+        cap (transient crashes self-heal). Runs already in 'paused' or 'crashed' (operator-
+        controlled or already-exhausted) are skipped. When the poller exhausts its retry count
+        it calls mark_stage_crashed() to land the run in a resumable 'crashed' state for the
+        Recovery bar."""
         if not self.is_pipeline_project(project_id):
             return False
         state = self._load_state(project_id)
-        if state.phase in ("done", "stopped") or not self.stage_finished(project_id):
-            return False   # terminal/canceled runs are never resurrected
+        if state.phase in ("done", "stopped", "paused", "crashed") or not self.stage_finished(project_id):
+            return False   # terminal or operator-controlled — never auto-resume
         stage = state.stage
         db = ProjectStore(self._paths(project_id)["db"])
         if any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers()):
-            return False
+            return False   # budget stop is intentional — operator resumes via /budget + /retry
         incomplete = (
             (stage == 1 and not state.stage1_done)
             or (stage == 2 and not state.stage2_done)
@@ -609,6 +615,111 @@ class Console:
         if not incomplete:
             return False
         return self.retry_stage(project_id, stage) is not None
+
+    def mark_stage_crashed(self, project_id: str) -> bool:
+        """Called by the poller after _AUTO_RESUME_MAX auto-resume attempts are exhausted.
+        If the stage is still dead+incomplete, marks phase='crashed' so the Recovery bar
+        shows the operator a resumable crashed state. Returns True if marked, False if
+        the run is terminal or already recovered (no-op)."""
+        if not self.is_pipeline_project(project_id):
+            return False
+        state = self._load_state(project_id)
+        if state.phase in ("done", "stopped", "paused", "crashed"):
+            return False   # already terminal or operator-controlled
+        if not self.stage_finished(project_id):
+            return False   # stage is still alive — don't mark crashed prematurely
+        stage = state.stage
+        db = ProjectStore(self._paths(project_id)["db"])
+        incomplete = (
+            (stage == 1 and not state.stage1_done)
+            or (stage == 2 and not state.stage2_done)
+            or (stage == 3 and not db.has_passing_verification())
+        )
+        if not incomplete:
+            return False
+        state.crashed_at_node = state.phase
+        state.phase = "crashed"
+        state.save()
+        return True
+
+    def pause_project(self, project_id: str) -> dict:
+        """Operator 'pause': kill the live stage process and set phase='paused'.
+        Unlike 'stop', pause is RESUMABLE — the run stays active and the Recovery bar
+        allows the operator to resume, retry a node, or rewind. Returns current state."""
+        state = self._load_state(project_id)
+        if state.phase in ("done", "stopped"):
+            return {"project_id": project_id, "phase": state.phase, "paused": False,
+                    "detail": "run is already terminal"}
+        node = state.phase
+        self._kill_stage_process(project_id)
+        state = self._load_state(project_id)  # reload after kill (stop_project may have saved)
+        if state.phase not in ("done", "stopped"):  # don't overwrite a concurrent terminal
+            state.paused_at_node = node
+            state.phase = "paused"
+            state.save()
+        return {"project_id": project_id, "phase": "paused", "paused_at_node": node, "paused": True}
+
+    def resume_project(self, project_id: str) -> str | None:
+        """Resume a paused or crashed run from where it left off.
+        Determines the right stage from the recorded at-node and calls retry_stage.
+        Clears the paused/crashed markers on success. Returns project_id or None."""
+        state = self._load_state(project_id)
+        if state.phase not in ("paused", "crashed"):
+            return None
+        resume_node = state.paused_at_node or state.crashed_at_node or ""
+        stage = state.stage
+        if stage == 3:
+            self._reset_stuck_tickets(project_id)
+        state.paused_at_node = ""
+        state.crashed_at_node = ""
+        state.phase = resume_node or "provision"
+        state.save()
+        return self.retry_stage(project_id, stage)
+
+    def retry_node(self, project_id: str, node: str) -> str | None:
+        """Invalidate checkpoints at `node` and downstream, then resume the stage.
+        Upstream checkpoints are preserved — the stage skips those nodes.
+        Returns project_id or None."""
+        deleted = ckpt.delete_from(project_id, node)
+        state = self._load_state(project_id)
+        if node in STAGE_1 or node == "stage:1":
+            stage = 1
+            state.stage1_done = False
+            state.stage2_done = False
+        elif node in STAGE_2 or node == "stage:2":
+            stage = 2
+            state.stage2_done = False
+        else:
+            stage = 3
+        if stage == 3:
+            self._reset_stuck_tickets(project_id)
+        state.paused_at_node = ""
+        state.crashed_at_node = ""
+        state.phase = node
+        state.save()
+        return self.retry_stage(project_id, stage)
+
+    def rewind_to_node(self, project_id: str, node: str) -> dict:
+        """Invalidate checkpoints at `node` and downstream, then set phase='paused'.
+        Does NOT auto-resume — the operator decides when to resume via /resume."""
+        self._kill_stage_process(project_id)
+        deleted = ckpt.delete_from(project_id, node)
+        state = self._load_state(project_id)
+        if node in STAGE_1 or node == "stage:1":
+            state.stage1_done = False
+            state.stage2_done = False
+        elif node in STAGE_2 or node == "stage:2":
+            state.stage2_done = False
+        state.paused_at_node = node
+        state.phase = "paused"
+        state.save()
+        return {"project_id": project_id, "rewound_to": node,
+                "deleted_checkpoints": deleted, "phase": "paused"}
+
+    def _reset_stuck_tickets(self, project_id: str) -> None:
+        """Reset 'in_progress' tickets to 'open' so a resumed swarm re-dispatches them."""
+        ts = TicketStore(self._paths(project_id)["db"])
+        ts.reset_in_progress_tickets()
 
     def raise_budget(self, project_id: str, ceiling: float) -> dict:
         """SPEC §4 recovery: persist a higher per-project ceiling and clear the budget blocker(s);
@@ -1161,6 +1272,7 @@ class Console:
                     state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
                     state.spent_usd = self._cost(project_id) or state.spent_usd
                     state.save()
+                    ckpt.write(project_id, "stage:1")
                     # SPEC §5: the stage is over — close any agent rows it forgot to finish.
                     AgentRegistry(self._paths(project_id)["agents_db"]).finalize_orphans(project_id, stage_ok=True)
                     return True
@@ -1213,6 +1325,7 @@ class Console:
                 state.deps_required = [t["name"] for t in tokens]
                 break
         state.save()
+        ckpt.write(project_id, "stage:2")
         AgentRegistry(self._paths(project_id)["agents_db"]).finalize_orphans(project_id, stage_ok=True)
         return True
 
@@ -1250,6 +1363,7 @@ class Console:
         # and so verify_evidence's spent_usd comparison has a real basis.
         state.spent_usd = max(state.spent_usd or 0, self._cost(project_id))
         state.save()
+        ckpt.write(project_id, "stage:3")
         AgentRegistry(paths["agents_db"]).finalize_orphans(project_id, stage_ok=True)
         return True
 

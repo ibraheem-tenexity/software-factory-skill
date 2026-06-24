@@ -210,6 +210,17 @@ class TicketStore:
         ).fetchall()
         return [Ticket(**dict(r)) for r in rows]
 
+    def reset_in_progress_tickets(self) -> int:
+        """Reset all 'in_progress' tickets back to 'open', clearing the agent assignment.
+        Called on resume/retry so a crashed swarm re-dispatches orphaned in-flight tickets."""
+        cur = self._conn.execute(
+            "UPDATE tickets SET status = 'open', agent = NULL "
+            "WHERE project_id = ? AND status = 'in_progress'",
+            (self._project_id,),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
     def all_approved(self) -> bool:
         """True when at least one ticket exists and every ticket is `approved` — the
         QA-complete gate for Stage 3 (set by the QA agent's qa_approve calls)."""
