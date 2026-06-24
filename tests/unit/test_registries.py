@@ -33,3 +33,22 @@ def test_agent_store_ensures_real_agents_and_purges_fakes():
     assert s.update("NOVA", {"model": "m2"})["model"] == "m2"
     s.delete("NOVA")
     assert s.get("NOVA") is None
+
+
+def test_sync_real_agents_upserts_stale_row_and_returns_canonical_4():
+    s = AgentRegistryStore()
+    # Drift a canonical row's name via direct update
+    s.update("STAGE-1", {"name": "STALE"})
+    assert s.get("STAGE-1")["name"] == "STALE"
+    # sync_real_agents must restore it (ON CONFLICT DO UPDATE, not DO NOTHING)
+    rows = s.sync_real_agents()
+    callsigns = {r["callsign"] for r in rows}
+    assert callsigns == {"STAGE-1", "STAGE-2", "STAGE-3", "CONCIERGE"}
+    assert s.get("STAGE-1")["name"] == "Stage 1 · Research"
+
+
+def test_sync_real_agents_does_not_touch_custom_rows():
+    s = AgentRegistryStore()
+    s.create("CUSTOM-X", "Custom", role="custom")
+    s.sync_real_agents()
+    assert s.get("CUSTOM-X") is not None   # custom row survives sync

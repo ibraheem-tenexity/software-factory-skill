@@ -70,6 +70,20 @@ def admin_agents(v: tuple = Depends(require_staff)):
     return {"agents": [r for r in roster if r["callsign"] not in live_cs] + live}
 
 
+@router.post("/api/admin/agents/sync")
+def admin_agents_sync(v: tuple = Depends(require_staff)):
+    """Re-run canonical agent-registry reconciliation on demand (backs the OS dashboard Sync button).
+
+    Upserts the 4 structural agents (STAGE-1/2/3 + CONCIERGE) with their authoritative definitions
+    (name, role, current model from live config, cost_tier, descr). Purges legacy fake callsigns.
+    Custom agents are never touched. Idempotent — calling twice is a no-op delta.
+
+    Returns: {synced: N, agents: [{callsign, name, role, model, cost_tier, descr}, ...]}
+    """
+    agents = state.agent_store.sync_real_agents()
+    return {"synced": len(agents), "agents": agents}
+
+
 @router.get("/api/admin/agents/{callsign}")
 def admin_agent(callsign: str, runtime: str = "claude", v: tuple = Depends(require_staff)):
     # Stage orchestrators serve the REAL SKILL.md and the concierge serves its live CONCIERGE_INSTRUCTIONS
