@@ -14,6 +14,8 @@ export type ProjectSummary = {
   held?: boolean;
   agents?: string[];      // distinct agent roles on the run (avatar stack)
   updated?: number;       // last-activity epoch (seconds)
+  created_by?: string;    // immutable creator email (set-once; backfilled from owner for legacy projects)
+  created_at?: number;    // epoch seconds of project creation
 };
 
 export type TicketStatus =
@@ -73,7 +75,7 @@ export type Artifact = { path: string; content?: string; error?: string };
 export type ProjectMaterial = { id?: string; name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number; scope?: "project" | "org" };
 export type ProjectArtifact = { title: string; path?: string; kind?: string; agent?: string; ts?: number };
 export type ProjectOverview = {
-  brief?: { name?: string; description?: string; goal?: string; scope?: string[]; owner?: string; phase?: string; stage?: number; created?: number | string; runtime?: string };
+  brief?: { name?: string; description?: string; goal?: string; scope?: string[]; owner?: string; phase?: string; stage?: number; created?: number | string; runtime?: string; created_by?: string };
   build?: { pct?: number; tickets_done?: number; tickets_total?: number; agents_working?: number; spent_usd?: number; budget_ceiling?: number; done?: boolean; deploy_url?: string };
   services?: { label: string; kind?: string; status?: string; detail?: string; url?: string }[];
   agents?: { role: string; model?: string; status?: string; task?: string; cost_usd?: number }[];

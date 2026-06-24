@@ -95,4 +95,5 @@ def brief_block(project: dict, status: dict, created) -> dict:
         "stage": status.get("stage") or 0,
         "created": created,
         "runtime": project.get("runtime") or "claude",
+        "created_by": project.get("created_by") or status.get("owner") or "",
     }
