@@ -18,8 +18,82 @@ import os
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
+import urllib.error
+import urllib.request
+
 from . import env
 from .deploy import RunResult, _real_runner
+
+# ===========================================================================================
+# RAILWAY GRAPHQL API — thin helpers for service-delete and variables-read.
+#
+# Using the GraphQL API instead of the CLI for these two ops eliminates link-drift: the CLI
+# reads ~/.railway/config.json for project/environment context; another process running
+# `railway link` can silently redirect subsequent CLI calls. GraphQL uses a bearer token
+# directly — no ambient link state, no CLI env resolution.
+#
+# Auth: RAILWAY_TOKEN (Railway injects this into every service it runs). For teardown the
+# token just needs access to the target service by ID (no project/env required in the
+# GraphQL mutation). For variables the token plus explicit projectId + environmentId
+# (SF_RUNAPP_RAILWAY_ENVIRONMENT_IDS) are required.
+# ===========================================================================================
+
+_RAILWAY_GRAPHQL_URL = "https://backboard.railway.app/graphql/v2"
+
+
+def _graphql(query: str, variables: dict, token: str) -> dict:
+    """POST a Railway GraphQL request. Returns the parsed JSON body. Raises on HTTP error."""
+    payload = json.dumps({"query": query, "variables": variables}).encode()
+    req = urllib.request.Request(
+        _RAILWAY_GRAPHQL_URL,
+        data=payload,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())
+
+
+def _graphql_service_delete(service_id: str, token: str) -> dict:
+    """Delete a Railway service via GraphQL. Needs only the service ID — no project/env linking.
+    Returns {service_id, deleted, already_gone, ok, detail}. Never raises."""
+    try:
+        resp = _graphql(
+            "mutation ServiceDelete($id: String!) { serviceDelete(id: $id) }",
+            {"id": service_id},
+            token,
+        )
+    except Exception as exc:
+        return {"service_id": service_id, "deleted": False, "already_gone": False,
+                "ok": False, "detail": f"graphql error: {exc}"[:200]}
+    errors = resp.get("errors") or []
+    err_text = " ".join(str(e) for e in errors).lower()
+    if any(p in err_text for p in ("not found", "does not exist", "no service")):
+        return {"service_id": service_id, "deleted": False, "already_gone": True,
+                "ok": True, "detail": "already gone"}
+    if errors:
+        return {"service_id": service_id, "deleted": False, "already_gone": False,
+                "ok": False, "detail": str(errors)[:200]}
+    return {"service_id": service_id, "deleted": True, "already_gone": False,
+            "ok": True, "detail": "deleted via graphql"}
+
+
+def _graphql_get_database_url(service_id: str, project_id: str,
+                              environment_id: str, token: str) -> str | None:
+    """Fetch DATABASE_URL for a Railway service via GraphQL variables query.
+    Returns the URL string or None on any error / missing variable."""
+    try:
+        resp = _graphql(
+            """query Variables($projectId: String!, $serviceId: String!, $environmentId: String!) {
+                 variables(projectId: $projectId, serviceId: $serviceId, environmentId: $environmentId)
+               }""",
+            {"projectId": project_id, "serviceId": service_id, "environmentId": environment_id},
+            token,
+        )
+    except Exception:
+        return None
+    data = (resp.get("data") or {}).get("variables") or {}
+    url = data.get("DATABASE_URL") or data.get("DATABASE_PUBLIC_URL")
+    return url.rstrip("/") if url else None
 
 DEPLOY_DB_FILE = "deploy-db.json"
 
@@ -134,10 +208,18 @@ def provision(project_id: str, context_dir: str,
 
     # Railway provisions Postgres asynchronously: DATABASE_URL may not appear on the first
     # variables read. Poll until it does (up to ~30s) before giving up.
+    # GraphQL path: when RAILWAY_TOKEN + SF_RUNAPP_RAILWAY_ENVIRONMENT_IDS are both set,
+    # query via GraphQL (no link-drift). Otherwise fall back to the CLI.
+    _token = os.environ.get("RAILWAY_TOKEN", "")
+    _env_id = env.runapp_railway_environment_id()
+    _use_graphql = bool(_token and railway_project_id and _env_id)
     url = None
     for attempt in range(_PROVISION_URL_POLL_ATTEMPTS):
-        var_out = run(["railway", "variables", "--service", svc_id, "--json"]).stdout
-        url = _parse_database_url(var_out)
+        if _use_graphql:
+            url = _graphql_get_database_url(svc_id, railway_project_id, _env_id, _token)
+        else:
+            var_out = run(["railway", "variables", "--service", svc_id, "--json"]).stdout
+            url = _parse_database_url(var_out)
         if url:
             break
         if attempt < _PROVISION_URL_POLL_ATTEMPTS - 1:
@@ -220,31 +302,38 @@ def teardown(service_id: str, volume_id: str = "",
              run: Callable[[list[str]], RunResult] = _real_runner) -> dict:
     """Delete the EXACT captured Railway Postgres service AND its volume. Idempotent. Refuses a
     missing service_id. Returns {service_id, deleted, already_gone, ok, volume_deleted,
-    volume_already_gone, detail} — never raises on CLI failure (caller logs)."""
+    volume_already_gone, detail} — never raises on CLI failure (caller logs).
+
+    Service delete uses the GraphQL API when RAILWAY_TOKEN is set (no link-drift, no -e env
+    resolution). Falls back to the CLI when no token is available (local dev without Railway)."""
     sid = (service_id or "").strip()
     if not sid:
         raise ValueError("teardown requires a captured service_id (never a name guess)")
-    args = ["railway", "service", "delete", "-s", sid]
-    # Prefer SF_RUNAPP_RAILWAY_PROJECT_IDS (the authoritative run-app target) over
-    # RAILWAY_PROJECT_ID (Railway-reserved, forced to the console's own project on prod).
-    project = env.runapp_railway_project_id() or os.environ.get("RAILWAY_PROJECT_ID")
-    if project:
-        args += ["-p", project]
-    args += ["-e", _railway_environment(), "-y"]
-    res = run(args)
-    out = res.stdout or ""
-    combined = (out + "\n" + (getattr(res, "stderr", "") or ""))
-    _gone = combined.lower()
-    if any(p in _gone for p in ("not found", "no services found", "does not exist", "no service")):
-        result: dict = {"service_id": sid, "deleted": False, "already_gone": True, "ok": True,
-                        "detail": "already gone"}
-    elif res.returncode == 0:
-        result = {"service_id": sid, "deleted": True, "already_gone": False, "ok": True,
-                  "detail": out[:200]}
+    token = os.environ.get("RAILWAY_TOKEN", "")
+    if token:
+        # GraphQL path: bearer-token auth, no ambient link state, no -e environment resolution.
+        result = _graphql_service_delete(sid, token)
     else:
-        return {"service_id": sid, "deleted": False, "already_gone": False, "ok": False,
-                "detail": (combined.strip()[:200]) or f"exit {res.returncode}",
-                "volume_deleted": False, "volume_already_gone": not bool(volume_id)}
+        # CLI fallback for local dev (no RAILWAY_TOKEN injected outside Railway containers).
+        args = ["railway", "service", "delete", "-s", sid]
+        project = env.runapp_railway_project_id() or os.environ.get("RAILWAY_PROJECT_ID")
+        if project:
+            args += ["-p", project]
+        args += ["-e", _railway_environment(), "-y"]
+        res = run(args)
+        out = res.stdout or ""
+        combined = (out + "\n" + (getattr(res, "stderr", "") or ""))
+        _gone = combined.lower()
+        if any(p in _gone for p in ("not found", "no services found", "does not exist", "no service")):
+            result = {"service_id": sid, "deleted": False, "already_gone": True, "ok": True,
+                      "detail": "already gone"}
+        elif res.returncode == 0:
+            result = {"service_id": sid, "deleted": True, "already_gone": False, "ok": True,
+                      "detail": out[:200]}
+        else:
+            return {"service_id": sid, "deleted": False, "already_gone": False, "ok": False,
+                    "detail": (combined.strip()[:200]) or f"exit {res.returncode}",
+                    "volume_deleted": False, "volume_already_gone": not bool(volume_id)}
 
     # Explicit volume delete: railway service delete does NOT cascade volumes.
     vid = (volume_id or "").strip()

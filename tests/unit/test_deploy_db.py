@@ -441,3 +441,237 @@ def test_provision_captures_volume_id(tmp_path, monkeypatch):
     assert run.calls[2] == ["railway", "volume", "list", "--json"]
     saved = json.load(open(os.path.join(str(tmp_path), deploy_db.DEPLOY_DB_FILE)))
     assert saved.get("volume_id") == "vol-abc"
+
+
+# =======================================================================================
+# GraphQL API path — teardown (serviceDelete) + variables-read (DATABASE_URL query).
+#
+# Both ops use `RAILWAY_TOKEN` for bearer-auth. No ambient CLI link state.
+# Tests mock urllib.request.urlopen to avoid real HTTP calls.
+# =======================================================================================
+
+import io
+import urllib.request
+
+
+def _mock_urlopen(body: dict | None = None, exc: Exception | None = None):
+    """Return a context-manager mock for urllib.request.urlopen.
+
+    Pass `body` for a successful response (JSON-serialised) or `exc` to simulate an error.
+    """
+    if exc is not None:
+        def _raise(*a, **kw):
+            raise exc
+        return _raise
+
+    encoded = json.dumps(body or {}).encode()
+
+    class _FakeResp:
+        def read(self):
+            return encoded
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+
+    def _open(*a, **kw):
+        return _FakeResp()
+    return _open
+
+
+# ---------------------------------------------------------------------------------------
+# _graphql_service_delete — the low-level GraphQL helper
+# ---------------------------------------------------------------------------------------
+
+def test_graphql_service_delete_success(monkeypatch):
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        _mock_urlopen({"data": {"serviceDelete": True}}))
+    res = deploy_db._graphql_service_delete("svc-gql-1", "tok-abc")
+    assert res["ok"] and res["deleted"] and not res["already_gone"]
+    assert res["service_id"] == "svc-gql-1"
+
+
+def test_graphql_service_delete_not_found_is_idempotent(monkeypatch):
+    body = {"errors": [{"message": "Service not found"}]}
+    monkeypatch.setattr(urllib.request, "urlopen", _mock_urlopen(body))
+    res = deploy_db._graphql_service_delete("svc-gone", "tok-abc")
+    assert res["ok"] and res["already_gone"] and not res["deleted"]
+
+
+def test_graphql_service_delete_real_failure(monkeypatch):
+    body = {"errors": [{"message": "Unauthorized"}]}
+    monkeypatch.setattr(urllib.request, "urlopen", _mock_urlopen(body))
+    res = deploy_db._graphql_service_delete("svc-x", "tok-bad")
+    assert not res["ok"] and not res["deleted"] and not res["already_gone"]
+    assert "Unauthorized" in res["detail"]
+
+
+def test_graphql_service_delete_network_error_returns_failure(monkeypatch):
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        _mock_urlopen(exc=OSError("connection refused")))
+    res = deploy_db._graphql_service_delete("svc-x", "tok-abc")
+    assert not res["ok"] and not res["deleted"]
+    assert "graphql error" in res["detail"]
+
+
+# ---------------------------------------------------------------------------------------
+# _graphql_get_database_url — the variables-read helper
+# ---------------------------------------------------------------------------------------
+
+def test_graphql_get_database_url_success(monkeypatch):
+    url = "postgresql://u:p@host:5432/db"
+    body = {"data": {"variables": {"DATABASE_URL": url, "PGHOST": "host"}}}
+    monkeypatch.setattr(urllib.request, "urlopen", _mock_urlopen(body))
+    result = deploy_db._graphql_get_database_url("svc-1", "proj-1", "env-1", "tok")
+    assert result == url
+
+
+def test_graphql_get_database_url_falls_back_to_public_url(monkeypatch):
+    url = "postgresql://u:p@host:5432/db"
+    body = {"data": {"variables": {"DATABASE_PUBLIC_URL": url}}}
+    monkeypatch.setattr(urllib.request, "urlopen", _mock_urlopen(body))
+    result = deploy_db._graphql_get_database_url("svc-1", "proj-1", "env-1", "tok")
+    assert result == url
+
+
+def test_graphql_get_database_url_returns_none_when_missing(monkeypatch):
+    body = {"data": {"variables": {"PGHOST": "host"}}}
+    monkeypatch.setattr(urllib.request, "urlopen", _mock_urlopen(body))
+    result = deploy_db._graphql_get_database_url("svc-1", "proj-1", "env-1", "tok")
+    assert result is None
+
+
+def test_graphql_get_database_url_returns_none_on_network_error(monkeypatch):
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        _mock_urlopen(exc=OSError("timeout")))
+    result = deploy_db._graphql_get_database_url("svc-1", "proj-1", "env-1", "tok")
+    assert result is None
+
+
+# ---------------------------------------------------------------------------------------
+# teardown() — GraphQL path when RAILWAY_TOKEN is set
+# ---------------------------------------------------------------------------------------
+
+def test_teardown_uses_graphql_when_railway_token_set(monkeypatch):
+    """With RAILWAY_TOKEN set, teardown() uses GraphQL — the CLI `run` function is never called."""
+    monkeypatch.setenv("RAILWAY_TOKEN", "tok-prod")
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        _mock_urlopen({"data": {"serviceDelete": True}}))
+    run = _delete_runner([])         # must stay empty — GraphQL path, not CLI
+    res = deploy_db.teardown("svc-graphql", run=run)
+    assert res["ok"] and res["deleted"] and res["service_id"] == "svc-graphql"
+    assert run.calls == []           # no CLI calls
+
+
+def test_teardown_graphql_idempotent_when_not_found(monkeypatch):
+    monkeypatch.setenv("RAILWAY_TOKEN", "tok-prod")
+    body = {"errors": [{"message": "Service not found"}]}
+    monkeypatch.setattr(urllib.request, "urlopen", _mock_urlopen(body))
+    run = _delete_runner([])
+    res = deploy_db.teardown("svc-gone", run=run)
+    assert res["ok"] and res["already_gone"] and not res["deleted"]
+    assert run.calls == []
+
+
+def test_teardown_graphql_and_cli_volume_delete(monkeypatch):
+    """Service delete via GraphQL; volume delete still uses the CLI (out of scope)."""
+    monkeypatch.setenv("RAILWAY_TOKEN", "tok-prod")
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        _mock_urlopen({"data": {"serviceDelete": True}}))
+    run = _delete_runner([("Volume deleted", 0)])
+    res = deploy_db.teardown("svc-g", volume_id="vol-v", run=run)
+    assert res["ok"] and res["deleted"] and res["volume_deleted"]
+    assert run.calls == [["railway", "volume", "delete", "--volume", "vol-v", "--yes"]]
+
+
+def test_teardown_cli_fallback_when_no_railway_token(monkeypatch):
+    """Without RAILWAY_TOKEN (dev environment), teardown() falls back to the CLI."""
+    monkeypatch.delenv("RAILWAY_TOKEN", raising=False)
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", "proj-dev")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    run = _delete_runner([("Service deleted", 0)])
+    res = deploy_db.teardown("svc-cli", run=run)
+    assert res["ok"] and res["deleted"]
+    assert any("service" in c and "delete" in c for c in run.calls)
+
+
+# ---------------------------------------------------------------------------------------
+# provision() — variables read via GraphQL when RAILWAY_TOKEN + env_id are both set
+# ---------------------------------------------------------------------------------------
+
+def test_provision_variables_read_via_graphql_when_token_and_env_id_set(tmp_path, monkeypatch):
+    """provision() uses GraphQL for the DATABASE_URL poll when RAILWAY_TOKEN and
+    SF_RUNAPP_RAILWAY_ENVIRONMENT_IDS are both configured (the prod path)."""
+    monkeypatch.setenv("RAILWAY_TOKEN", "tok-prod")
+    from software_factory import env as _env
+    monkeypatch.setattr(_env, "runapp_railway_project_id", lambda: "proj-sfp")
+    monkeypatch.setattr(_env, "runapp_railway_environment_id", lambda: "env-prod-sfp")
+    monkeypatch.delenv("RAILWAY_PROJECT_ID", raising=False)
+
+    url = "postgresql://u:p@host:5432/db"
+    gql_body = {"data": {"variables": {"DATABASE_URL": url}}}
+    vol_json = json.dumps({"volumes": []})
+    monkeypatch.setattr(urllib.request, "urlopen", _mock_urlopen(gql_body))
+
+    # run is called for: railway add, railway volume list. NOT for variables (GraphQL handles it).
+    run = _runner([_ADD, vol_json])
+    info = deploy_db.provision("project-abcd1234", str(tmp_path), run=run)
+    assert info["DATABASE_URL"] == url
+    assert info["service_id"] == "svc-123"
+    # Exactly 2 CLI calls: add + volume list. No "railway variables" call.
+    assert len(run.calls) == 2
+    assert run.calls[0] == ["railway", "add", "--database", "postgres", "--json"]
+    assert run.calls[1] == ["railway", "volume", "list", "--json"]
+
+
+def test_provision_variables_read_falls_back_to_cli_when_no_env_id(tmp_path, monkeypatch):
+    """Without SF_RUNAPP_RAILWAY_ENVIRONMENT_IDS, provision() uses CLI `railway variables`."""
+    monkeypatch.setenv("RAILWAY_TOKEN", "tok-prod")
+    from software_factory import env as _env
+    monkeypatch.setattr(_env, "runapp_railway_project_id", lambda: "proj-sfp")
+    monkeypatch.setattr(_env, "runapp_railway_environment_id", lambda: None)  # not set
+    monkeypatch.delenv("RAILWAY_PROJECT_ID", raising=False)
+
+    vol_json = json.dumps({"volumes": []})
+    run = _runner([_ADD, _VARS, vol_json])
+    info = deploy_db.provision("project-abcd1234", str(tmp_path), run=run)
+    assert info["DATABASE_URL"] == "postgresql://u:p@h:5432/railway"
+    # 3 CLI calls: add + variables (CLI fallback) + volume list
+    assert run.calls[1] == ["railway", "variables", "--service", "svc-123", "--json"]
+
+
+def test_provision_variables_read_falls_back_to_cli_when_no_token(tmp_path, monkeypatch):
+    """Without RAILWAY_TOKEN (dev), provision() uses CLI `railway variables`."""
+    monkeypatch.delenv("RAILWAY_TOKEN", raising=False)
+    monkeypatch.delenv("RAILWAY_PROJECT_ID", raising=False)
+    from software_factory import env as _env
+    monkeypatch.setattr(_env, "runapp_railway_environment_id", lambda: "env-prod-sfp")
+
+    vol_json = json.dumps({"volumes": []})
+    run = _runner([_ADD, _VARS, vol_json])
+    info = deploy_db.provision("project-abcd1234", str(tmp_path), run=run)
+    assert info["DATABASE_URL"] == "postgresql://u:p@h:5432/railway"
+    assert run.calls[1] == ["railway", "variables", "--service", "svc-123", "--json"]
+
+
+# ---------------------------------------------------------------------------------------
+# env.runapp_railway_environment_id()
+# ---------------------------------------------------------------------------------------
+
+def test_runapp_railway_environment_id_returns_single_id(monkeypatch):
+    from software_factory import env as _env
+    monkeypatch.setattr(_env, "_RUNAPP_RAILWAY_ENVIRONMENT_IDS",
+                        {"3c8117be-4cb0-41b0-a4ff-0bc9eb8e90eb"})
+    assert _env.runapp_railway_environment_id() == "3c8117be-4cb0-41b0-a4ff-0bc9eb8e90eb"
+
+
+def test_runapp_railway_environment_id_returns_none_when_unset(monkeypatch):
+    from software_factory import env as _env
+    monkeypatch.setattr(_env, "_RUNAPP_RAILWAY_ENVIRONMENT_IDS", set())
+    assert _env.runapp_railway_environment_id() is None
+
+
+def test_runapp_railway_environment_id_returns_none_when_multiple(monkeypatch):
+    from software_factory import env as _env
+    monkeypatch.setattr(_env, "_RUNAPP_RAILWAY_ENVIRONMENT_IDS", {"env-1", "env-2"})
+    assert _env.runapp_railway_environment_id() is None

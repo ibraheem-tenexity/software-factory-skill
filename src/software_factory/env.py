@@ -26,6 +26,15 @@ _CONSOLE_RAILWAY_PROJECT_IDS: set[str] = set(
     (os.environ.get("SF_CONSOLE_RAILWAY_PROJECT_IDS") or "softwarefactory").split(",")
 )
 
+# The Railway environment ID where run-app DBs are provisioned (production env of
+# software-factory-projects). Used for GraphQL variables queries which require an environmentId.
+# Example: SF_RUNAPP_RAILWAY_ENVIRONMENT_IDS=3c8117be-4cb0-41b0-a4ff-0bc9eb8e90eb
+_RUNAPP_RAILWAY_ENVIRONMENT_IDS: set[str] = set(
+    (os.environ.get("SF_RUNAPP_RAILWAY_ENVIRONMENT_IDS") or "").split(",")
+    if os.environ.get("SF_RUNAPP_RAILWAY_ENVIRONMENT_IDS")
+    else []
+)
+
 # Variables a stage child must be able to see even when we scrub the console's full
 # environment. Keep this list tiny and well-known.
 _STAGE_ESSENTIAL = {
@@ -98,6 +107,20 @@ def runapp_railway_project_id() -> str | None:
     """
     if len(_RUNAPP_RAILWAY_PROJECT_IDS) == 1:
         return next(iter(_RUNAPP_RAILWAY_PROJECT_IDS))
+    return None
+
+
+def runapp_railway_environment_id() -> str | None:
+    """The Railway environment ID where run-app DBs are provisioned.
+
+    Derived from SF_RUNAPP_RAILWAY_ENVIRONMENT_IDS (must be exactly one entry configured).
+    Returns None when unset or when multiple entries are configured.
+
+    Required for GraphQL variables queries (which need an environmentId) but not for
+    the CLI fallback path, so absence is safe — provision falls back to the CLI.
+    """
+    if len(_RUNAPP_RAILWAY_ENVIRONMENT_IDS) == 1:
+        return next(iter(_RUNAPP_RAILWAY_ENVIRONMENT_IDS))
     return None
 
 
