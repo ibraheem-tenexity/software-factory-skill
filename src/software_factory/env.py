@@ -68,8 +68,18 @@ def stage_env_baseline(provided: dict | None = None) -> dict:
     Stops workspace agents from inheriting the console's SF_DB, DATABASE_URL,
     RAILWAY_TOKEN, ANTHROPIC_API_KEY, etc. unless the run explicitly declared them as
     credentials (which are passed in ``provided``).
+
+    The factory state-DB URL is forwarded under the dedicated ``SF_STATE_DB_URL`` name so
+    ``python3 -m software_factory.db`` (called inside the stage to record run-state) can
+    connect without ``DATABASE_URL`` appearing in the stage env.  Using a non-standard name
+    prevents deployment tools from accidentally forwarding the factory DB URL to the customer
+    app's Railway service variables.
     """
     base = {k: v for k, v in os.environ.items() if k in _STAGE_ESSENTIAL}
+    # Forward the factory state-DB URL under a dedicated name (not DATABASE_URL).
+    state_db = os.environ.get("SF_STATE_DB_URL") or os.environ.get("DATABASE_URL")
+    if state_db:
+        base["SF_STATE_DB_URL"] = state_db
     if provided:
         base.update(provided)
     return base

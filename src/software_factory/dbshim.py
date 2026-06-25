@@ -1,7 +1,10 @@
 """The Postgres connection seam the run stores use.
 
 `connect(path)` returns a `PgConn` over psycopg3
-against `DATABASE_URL` (the Supabase transaction pooler on 6543 in prod; a local Postgres in dev/test).
+against the factory state DB (Supabase transaction pooler on 6543 in prod; a local Postgres in dev/test).
+The URL is read from ``SF_STATE_DB_URL`` (preferred) or ``DATABASE_URL`` (fallback).  Stage subprocesses
+receive ``SF_STATE_DB_URL`` from ``stage_env_baseline`` but NOT ``DATABASE_URL``, so the CLI can write
+run-state without the factory DB URL leaking into the customer app's environment.
 The `path` only names the run directory (project.log/chat.jsonl still live on the volume) and the run id
 the stores scope by; no per-project schema or database file is created.
 
@@ -27,11 +30,17 @@ _TRIES = 3
 _ID_TABLES = ("tickets", "phases", "artifacts", "blockers", "verifications", "deployments", "blobs")
 
 
+def _db_url() -> str:
+    # SF_STATE_DB_URL is the dedicated factory-state URL injected by stage_env_baseline;
+    # DATABASE_URL is the legacy name used outside stage contexts.
+    return os.environ.get("SF_STATE_DB_URL") or os.environ["DATABASE_URL"]
+
+
 def execute(sql: str, params: tuple = ()) -> list:
-    """One-shot statement against DATABASE_URL — used by the checkpoint store which is not
+    """One-shot statement against the factory state DB — used by the checkpoint store which is not
     scoped to a per-project path. Opens a fresh connection, runs the statement in a single
     transaction, closes the connection. Returns rows (list of dicts) or empty list."""
-    conn = PgConn(_pg_connect(os.environ["DATABASE_URL"]))
+    conn = PgConn(_pg_connect(_db_url()))
     try:
         cur = conn.execute(sql, params)
         return cur.fetchall() if cur else []
@@ -41,7 +50,7 @@ def execute(sql: str, params: tuple = ()) -> list:
 
 def connect(path: str):
     os.makedirs(path or ".", exist_ok=True)  # project.log/chat.jsonl live here
-    return PgConn(_pg_connect(os.environ["DATABASE_URL"]))
+    return PgConn(_pg_connect(_db_url()))
 
 
 def _pg_connect(url: str):
@@ -60,7 +69,7 @@ def registry_projects() -> list:
     (projectstate carries no timestamp; the console falls back to volume mtime for sorting). [] on any
     pg error so the run listing keeps working even if the DB is briefly unreachable."""
     try:
-        conn = _pg_connect(os.environ["DATABASE_URL"])
+        conn = _pg_connect(_db_url())
         try:
             with conn.transaction():
                 cur = conn.cursor()
@@ -75,7 +84,7 @@ def registry_projects() -> list:
 def project_in_registry(project_id: str) -> bool:
     """True if this project_id has a row in the projectstate table. False on miss or any pg error."""
     try:
-        conn = _pg_connect(os.environ["DATABASE_URL"])
+        conn = _pg_connect(_db_url())
         try:
             with conn.transaction():
                 cur = conn.cursor()
