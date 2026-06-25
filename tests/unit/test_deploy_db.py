@@ -114,6 +114,27 @@ def test_provision_raises_when_url_never_appears_after_all_polls(tmp_path, monke
     assert len(vars_calls) == n         # polled exactly _PROVISION_URL_POLL_ATTEMPTS times
 
 
+def test_provision_links_project_when_no_token_and_project_id_configured(tmp_path, monkeypatch):
+    """In dev (no RAILWAY_TOKEN), links CLI to the configured project ID before `railway add`."""
+    from software_factory import env as _env
+    monkeypatch.delenv("RAILWAY_TOKEN", raising=False)
+    monkeypatch.setattr(_env, "runapp_railway_project_id", lambda: "proj-dev-123")
+    _LINK_OK = ""
+    run = _runner([_LINK_OK, _ADD, _VARS])
+    deploy_db.provision("proj-dev-123", str(tmp_path), run=run)
+    assert run.calls[0] == ["railway", "link", "-p", "proj-dev-123"]
+    assert run.calls[1] == ["railway", "add", "--database", "postgres", "--json"]
+
+
+def test_provision_skips_link_in_prod_when_railway_token_is_set(tmp_path, monkeypatch):
+    """In prod, RAILWAY_TOKEN is project-scoped; no link call should be made."""
+    monkeypatch.setenv("RAILWAY_TOKEN", "tok-xyz")
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", "proj-prod-456")
+    run = _runner([_ADD, _VARS])
+    deploy_db.provision("proj-prod-456", str(tmp_path), run=run)
+    assert run.calls[0] == ["railway", "add", "--database", "postgres", "--json"]
+
+
 def test_provision_raises_when_add_returns_no_service_id(tmp_path, monkeypatch):
     monkeypatch.delenv("RAILWAY_PROJECT_ID", raising=False)
     run = _runner([json.dumps({"error": "nope"}), _VARS])
