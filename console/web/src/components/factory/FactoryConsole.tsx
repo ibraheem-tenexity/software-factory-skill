@@ -18,6 +18,7 @@ import { TreeView, MapView } from "./NodeMap";
 import { Concierge } from "./Concierge";
 import { DocViewer, artifactsFromGraph, ArtifactRef, openArtifact } from "./Artifacts";
 import { RecoveryBar } from "./RecoveryBar";
+import { KanbanCardSkel, MessageSkel } from "../skeleton";
 
 type Status = ProjectSummary & Record<string, any>;
 type View = "kanban" | "tree" | "map";
@@ -53,13 +54,14 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
     return (["tree", "map"].includes(v || "") ? v : "kanban") as View;
   });
   const [doc, setDoc] = useState<Doc>(null);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => { setParam("fview", view === "kanban" ? null : view); }, [view]);
 
   useEffect(() => {
     let live = true;
     const tick = () => {
-      api.status(projectId).then((s) => live && setStatus(s)).catch(() => {});
+      api.status(projectId).then((s) => { if (live) { setStatus(s); setLoaded(true); } }).catch(() => {});
       api.tickets(projectId).then((d) => live && setTickets(d.tickets || [])).catch(() => {});
       api.graph(projectId).then((g) => live && setGraph(g)).catch(() => {});
     };
@@ -150,8 +152,14 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
       {/* ── body: Concierge rail + main column ── */}
       <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "340px 1fr", gap: 0 }}>
         <div style={{ borderRight: `1px solid ${T.borderSubtle}`, padding: 16, overflowY: "auto", background: T.raised }}>
-          <Concierge projectId={projectId} projectName={status.name || ""} artifacts={artifacts}
-            onOpenArtifact={(a) => a.id ? openArtifact(a.id) : setDoc({ label: a.label, path: a.path })} isBuilding={running} />
+          {!loaded ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {[0, 1, 2].map((i) => <MessageSkel key={i} />)}
+            </div>
+          ) : (
+            <Concierge projectId={projectId} projectName={status.name || ""} artifacts={artifacts}
+              onOpenArtifact={(a) => a.id ? openArtifact(a.id) : setDoc({ label: a.label, path: a.path })} isBuilding={running} />
+          )}
         </div>
 
         <main style={{ overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -188,7 +196,17 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
             </div>
           </div>
 
-          {view === "kanban" && <BuildBoard tickets={tickets}
+          {view === "kanban" && !loaded && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, alignItems: "start" }}>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <KanbanCardSkel dark />
+                  <KanbanCardSkel dark />
+                </div>
+              ))}
+            </div>
+          )}
+          {view === "kanban" && loaded && <BuildBoard tickets={tickets}
             onOpenTicket={(t) => setDoc({ label: `#${t.id} ${t.title}`, content: t.description || "(no description)" })} />}
           {view === "tree" && <TreeView graph={graph} onOpenArtifact={(path, label) => setDoc({ label, path })} />}
           {view === "map" && <MapView graph={graph} />}
