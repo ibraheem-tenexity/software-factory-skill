@@ -183,3 +183,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. `console/web/src/api.ts` (adminSyncAgents), `console/web/src/admin/views.tsx` (AdminTools loading/toast/error), `console/web/src/admin/AdminPortal.tsx` (agent table refetch callback).
 3. PR opened as #69 follow-up; held for qsvigmth endpoint deploy before merge.
 4. Summary: tsc + build green; no silent no-op; surfaces synced count or error.
+
+# Codex Update at Time: 24:06:2026:12:36:18.380
+1. Implemented TTL-cached concierge prompt resolution from `agent_prompts.CONCIERGE` plus a read-only latency benchmark.
+2. `src/software_factory/chat_agent.py`, `scripts/benchmark_prompt_fetch.py`, `tests/unit/test_chat_agent.py`, `docs/ARCHITECTURE.md`.
+3. Prompt edits should drive new concierge sessions without adding a DB hit to each chat turn; DB failures keep the last good prompt or fallback constant.
+4. Summary: created worktree `../software-factory-skill-prompt-fetch` on `feature/prompt-fetch-latency`; focused chat tests passed; full non-live suite passed.
