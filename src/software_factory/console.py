@@ -717,6 +717,15 @@ class Console:
 
     def _launch_stage(self, project_id: str, stage: int, prompt: str, env: dict) -> Any:
         """Prepare workspace, health-check MCP, and launch a claude -p process for a stage."""
+        # §1 double-orchestrator guard: refuse if an orchestrator is already alive for this run.
+        # start_stage2/3 and retry_stage check _stage_process_alive before calling here, but
+        # _provision_and_launch and release_project do not — and even for the callers, there is a
+        # TOCTOU window between their check and the _procs[project_id] write below. Checking here
+        # closes both gaps: the un-guarded callers are covered and TOCTOU window shrinks to the
+        # launch() call itself (a tight native Popen, not an LLM round-trip).
+        if self._stage_process_alive(project_id):
+            return None
+
         paths = self._paths(project_id)
 
         # Mechanical PER-RUN cost ceiling: the in-prompt budget is advisory-only and stages don't
