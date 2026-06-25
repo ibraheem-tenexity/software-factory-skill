@@ -3,6 +3,7 @@
 // (brand #1A7BFF, Hanken Grotesk / Georgia / JetBrains Mono, single-bubble conversation).
 // JSX→TSX: window globals replaced with ES module exports; props typed; styles kept verbatim.
 import React from "react";
+import { Spinner } from "../skeleton";
 
 export const T = {
   bg: "#FAFAFA", raised: "#FFFFFF", sunken: "#F4F4F5", ink: "#060709",
@@ -242,10 +243,11 @@ export function IndustryTile({ item, selected, onClick, compact }:
 
 export function Dropzone({ kind, filled, onToggle, compact, files = [] }:
   { kind: "video" | "docs"; filled?: boolean; onToggle?: () => void; compact?: boolean;
-    files?: { name: string; size?: string }[] }) {
+    files?: { name: string; size?: string; uploading?: boolean }[] }) {
   const isVideo = kind === "video";
   // The list reflects what the user ACTUALLY uploaded (passed in by the caller) — no dummy data.
   const has = files.length > 0 || !!filled;
+  const reduceMotion = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <button onClick={onToggle} style={{ width: "100%", boxSizing: "border-box", cursor: "pointer",
@@ -270,10 +272,16 @@ export function Dropzone({ kind, filled, onToggle, compact, files = [] }:
                 <Icon name={isVideo ? "video" : "file"} size={14} color={T.tertiary} />
               </span>
               <span style={{ flex: 1, minWidth: 0, font: `500 13px/1.2 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</span>
-              {f.size && <span style={{ font: `400 12px/1 ${T.mono}`, color: T.tertiary }}>{f.size}</span>}
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, font: `400 12px/1 ${T.sans}`, color: T.success }}>
-                <Icon name="check" size={13} color={T.success} /> Uploaded
-              </span>
+              {f.size && !f.uploading && <span style={{ font: `400 12px/1 ${T.mono}`, color: T.tertiary }}>{f.size}</span>}
+              {f.uploading ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, font: `400 12px/1 ${T.sans}`, color: T.tertiary }}>
+                  {!reduceMotion && <Spinner size={13} color={T.tertiary} />}Uploading…
+                </span>
+              ) : (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, font: `400 12px/1 ${T.sans}`, color: T.success }}>
+                  <Icon name="check" size={13} color={T.success} /> Uploaded
+                </span>
+              )}
             </div>
           ))}
         </div>
