@@ -281,7 +281,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const budgetRef = useRef<number | null>(null);
   useEffect(() => { budgetRef.current = budget; }, [budget]);
   // Real uploaded filenames per material slot (drives the Dropzone list — no dummy data).
-  const [mats, setMats] = useState<{ video: { name: string; size?: string }[]; docs: { name: string; size?: string }[] }>({ video: [], docs: [] });
+  const [mats, setMats] = useState<{ video: { name: string; size?: string; uploading?: boolean }[]; docs: { name: string; size?: string; uploading?: boolean }[] }>({ video: [], docs: [] });
   const setProj = (k: string, v: any) => setP((x) => ({ ...x, [k]: v }));
 
   // concierge rail chat (shares draftId)
@@ -447,14 +447,22 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const attachFiles = async (list: FileList | null, kind: "video" | "docs") => {
     if (!draftId || !list || !list.length) return;
     const picked = Array.from(list);
+    // Show uploading tokens immediately so the user sees in-flight feedback.
+    const optimistic = picked.map((f) => ({ name: f.name, size: fmtBytes(f.size), uploading: true }));
+    setMats((m) => ({ ...m, [kind]: kind === "video" ? optimistic.slice(-1) : [...m[kind], ...optimistic] }));
+    const inFlight = new Set(picked.map((f) => f.name));
     try {
       const files = await Promise.all(picked.map(async (file) => ({ name: file.name, content_b64: await fileToB64(file) })));
       await api.attach(draftId, files);
       setProj(kind, true);
-      // record the REAL filenames so the Dropzone lists what was actually uploaded (video = replace)
+      // Replace only this batch’s uploading tokens with confirmed entries.
       const added = picked.map((f) => ({ name: f.name, size: fmtBytes(f.size) }));
-      setMats((m) => ({ ...m, [kind]: kind === "video" ? added.slice(-1) : [...m[kind], ...added] }));
-    } catch (e: any) { setError(`Couldn’t attach files: ${String(e?.message || e)}`); }
+      setMats((m) => ({ ...m, [kind]: kind === "video" ? added.slice(-1) : [...m[kind].filter((f) => !(f.uploading && inFlight.has(f.name))), ...added] }));
+    } catch (e: any) {
+      // Remove only this batch’s optimistic tokens on failure.
+      setMats((m) => ({ ...m, [kind]: m[kind].filter((f) => !(f.uploading && inFlight.has(f.name))) }));
+      setError(`Couldn’t attach files: ${String(e?.message || e)}`);
+    }
   };
 
   const handoff = async () => {
