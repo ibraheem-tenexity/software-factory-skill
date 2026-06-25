@@ -32,7 +32,7 @@ function setParam(key: string, value: string | null) {
   history.replaceState(null, "", "?" + p.toString());
 }
 
-export function ProjectView({ projectId, onBack, onOpenFactory, onResume }: { projectId: string; onBack: () => void; onOpenFactory: () => void; onResume?: () => void }) {
+export function ProjectView({ projectId, onBack, onOpenFactory, onResume, onOpen }: { projectId: string; onBack: () => void; onOpenFactory: () => void; onResume?: () => void; onOpen?: (id: string) => void }) {
   const [tab, setTab] = useState<Tab>(() => {
     const t = new URLSearchParams(location.search).get("tab");
     return (t === "documents" ? "documents" : "overview") as Tab;
@@ -66,6 +66,13 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume }: { pr
     setRenaming(false);
   };
   const isDraft = status?.phase === "draft";
+  const canRelaunch = status?.phase === "stopped" || status?.phase === "done";
+  const doRelaunch = async () => {
+    try {
+      const r = await api.relaunachProject(projectId);
+      if (onOpen) onOpen(r.project_id); else onBack();
+    } catch { /* noop */ }
+  };
   const doArchive = async () => {
     const msg = isDraft
       ? `Discard "${name}"? This draft will be permanently deleted.`
@@ -97,6 +104,11 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume }: { pr
             )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {canRelaunch && (
+              <button onClick={doRelaunch} title="Relaunch this project from scratch" style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 28, padding: "0 9px", borderRadius: T.rMd, cursor: "pointer", border: `1px solid ${T.borderDefault}`, background: T.raised, color: T.secondary, font: `600 10.5px/1 ${T.mono}` }}>
+                <Icon name="play" size={10} color={T.secondary} /> Restart
+              </button>
+            )}
             <div style={{ position: "relative" }}>
               <button onClick={() => setMenu((v) => !v)} title="Project actions" style={{ display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: "50%", border: `1px solid ${T.borderSubtle}`, background: T.raised, cursor: "pointer", color: T.secondary }}><Icon name="dots" size={16} color={T.secondary} /></button>
               {menu && (

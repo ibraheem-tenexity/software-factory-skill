@@ -74,7 +74,7 @@ export function App() {
     return <FactoryConsole projectId={projectId} onBack={() => setOpenView("project")} />;
   }
   return <ProjectView projectId={projectId} onBack={backToProjects} onOpenFactory={() => setOpenView("factory")}
-    onResume={() => { setResumeProjectId(projectId); setShowProjects(false); setShowOnboarding(true); }} />;
+    onResume={() => { setResumeProjectId(projectId); setShowProjects(false); setShowOnboarding(true); }} onOpen={openProject} />;
 }
 
 // ── Auth gate (Option B) ───────────────────────────────────────────────────────────────────
