@@ -94,6 +94,9 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
 
   // manual kill-switch — only while a live run is in flight (a stage/poller to halt)
   const running = !!status.phase && !status.deploy_url && !status.done && !["done", "draft", "stopped", "paused", "crashed"].includes(status.phase);
+  const pauseRun = async () => {
+    try { const s = await api.pauseProject(projectId); setStatus(s as Status); } catch { /* noop */ }
+  };
   const stopRun = async () => {
     if (!confirm("Stop all work on this project? Running agents will be halted.")) return;
     try { const s = await api.stopProject(projectId); setStatus(s as Status); } catch { /* run-control endpoint ships in qsvigmth's PR */ }
@@ -140,10 +143,19 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
           spent <b style={{ color: overCap ? T.danger : T.fg }}>${spent.toFixed(2)}</b>{cap > 0 && ` / $${cap.toFixed(0)} cap`}
         </span>
         {running && (
-          <button onClick={stopRun} title="Stop all work on this project"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, padding: "0 12px", borderRadius: T.rMd, cursor: "pointer", border: `1px solid ${T.danger}`, background: "transparent", color: T.danger, font: `600 12.5px/1 ${T.sans}` }}>
-            <span style={{ width: 9, height: 9, borderRadius: 2, background: T.danger, flexShrink: 0 }} /> Stop all progress
-          </button>
+          <>
+            <button onClick={pauseRun} title="Pause this run — can be resumed"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, padding: "0 12px", borderRadius: T.rMd, cursor: "pointer", border: `1px solid ${T.warning}`, background: "transparent", color: T.warning, font: `600 12.5px/1 ${T.sans}` }}>
+              <span style={{ display: "inline-flex", gap: 2.5, flexShrink: 0 }}>
+                <span style={{ width: 3, height: 9, borderRadius: 1, background: "currentColor" }} />
+                <span style={{ width: 3, height: 9, borderRadius: 1, background: "currentColor" }} />
+              </span> Pause
+            </button>
+            <button onClick={stopRun} title="Stop all work on this project"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, padding: "0 12px", borderRadius: T.rMd, cursor: "pointer", border: `1px solid ${T.danger}`, background: "transparent", color: T.danger, font: `600 12.5px/1 ${T.sans}` }}>
+              <span style={{ width: 9, height: 9, borderRadius: 2, background: T.danger, flexShrink: 0 }} /> Stop all progress
+            </button>
+          </>
         )}
         <AccountMenu size={26} />
       </header>
