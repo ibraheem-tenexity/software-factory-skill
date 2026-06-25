@@ -66,7 +66,7 @@ def url(scope_id: str, key: str) -> str:
         body = json.dumps({"expiresIn": _ttl()}).encode()
         req = urllib.request.Request(
             endpoint, data=body, method="POST",
-            headers={"Authorization": f"Bearer {os.environ['SUPABASE_SERVICE_KEY']}",
+            headers={"apikey": os.environ["SUPABASE_SERVICE_KEY"],
                      "Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=30) as r:
             signed_path = json.loads(r.read())["signedURL"]
@@ -85,7 +85,7 @@ def put(scope_id: str, key: str, data) -> str:
         endpoint = f"{base}/storage/v1/object/{bucket}/{obj}"
         req = urllib.request.Request(
             endpoint, data=raw, method="POST",
-            headers={"Authorization": f"Bearer {os.environ['SUPABASE_SERVICE_KEY']}",
+            headers={"apikey": os.environ["SUPABASE_SERVICE_KEY"],
                      "Content-Type": content_type, "x-upsert": "true"})
         with urllib.request.urlopen(req, timeout=30):
             pass
@@ -104,7 +104,7 @@ def get(scope_id: str, key: str) -> bytes:
         bucket = os.environ["SF_STORAGE_BUCKET"]
         endpoint = f"{base}/storage/v1/object/{bucket}/{obj}"
         req = urllib.request.Request(
-            endpoint, headers={"Authorization": f"Bearer {os.environ['SUPABASE_SERVICE_KEY']}"})
+            endpoint, headers={"apikey": os.environ["SUPABASE_SERVICE_KEY"]})
         with urllib.request.urlopen(req, timeout=30) as r:
             return r.read()
     with open(os.path.join(_local_root(), obj), "rb") as f:
