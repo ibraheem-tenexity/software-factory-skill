@@ -208,6 +208,47 @@ function fmtBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const BUDGET_PRESETS = [30, 60, 120, 250];
+
+function BudgetPicker({ value, onChange }: { value: number | null; onChange: (v: number | null) => void }) {
+  const [custom, setCustom] = React.useState(false);
+  const [customVal, setCustomVal] = React.useState("");
+  const isPreset = value != null && BUDGET_PRESETS.includes(value);
+  const isCustom = custom || (value != null && !BUDGET_PRESETS.includes(value));
+  const selectPreset = (n: number) => { setCustom(false); setCustomVal(""); onChange(n); };
+  const openCustom = () => { setCustom(true); setCustomVal(value != null && !BUDGET_PRESETS.includes(value) ? String(value) : ""); if (!isCustom) onChange(null); };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {BUDGET_PRESETS.map((n) => {
+          const on = isPreset && value === n && !isCustom;
+          return (
+            <button key={n} onClick={() => selectPreset(n)}
+              style={{ padding: "7px 14px", borderRadius: 9999, border: `1.5px solid ${on ? T.brand : T.borderDefault}`, background: on ? T.brandSoft : T.raised, color: on ? T.brandDeep : T.fg, font: `${on ? 600 : 500} 13px/1 ${T.sans}`, cursor: "pointer" }}>
+              ${n}
+            </button>
+          );
+        })}
+        <button onClick={openCustom}
+          style={{ padding: "7px 14px", borderRadius: 9999, border: `1.5px solid ${isCustom ? T.brand : T.borderDefault}`, background: isCustom ? T.brandSoft : T.raised, color: isCustom ? T.brandDeep : T.fg, font: `${isCustom ? 600 : 500} 13px/1 ${T.sans}`, cursor: "pointer" }}>
+          Custom
+        </button>
+      </div>
+      {isCustom && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ font: `500 14px/1 ${T.mono}`, color: T.secondary }}>$</span>
+          <input value={customVal} onChange={(e) => { setCustomVal(e.target.value); const n = parseFloat(e.target.value); onChange(!isNaN(n) && n > 0 ? n : null); }}
+            placeholder="e.g. 200" type="number" min={1}
+            style={{ width: 120, font: `500 13px/1 ${T.mono}`, color: T.fg, background: T.bg, border: `1.5px solid ${T.borderDefault}`, borderRadius: T.rMd, padding: "8px 10px", outline: "none" }} autoFocus />
+        </div>
+      )}
+      <p style={{ margin: 0, font: `400 11.5px/1.4 ${T.sans}`, color: T.tertiary }}>
+        {value != null ? `Factory stops and notifies you when spend reaches $${value}.` : "No cap - the factory runs to completion (billed at actual cost)."}
+      </p>
+    </div>
+  );
+}
+
 export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onComplete: (projectId: string) => void; onBack?: () => void; resumeProjectId?: string | null }) {
   const [mode, setMode] = useState<"loading" | "fresh" | "returning">("loading");
   const [onFile, setOnFile] = useState<Org | null>(null);
@@ -236,6 +277,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   // a user-entered key POSTs to /creds (Vault-stored); promote threads it into the runner env, BYOK
   // wins over the platform key. The key NAME is runtime-specific (ANTHROPIC_API_KEY / OPENROUTER_API_KEY).
   const [engine, setEngine] = useState<EngineValue>({ provider: "claude", model: "kimi", keySource: "tenexity", key: "" });
+  const [budget, setBudget] = useState<number | null>(null);
+  const budgetRef = useRef<number | null>(null);
+  useEffect(() => { budgetRef.current = budget; }, [budget]);
   // Real uploaded filenames per material slot (drives the Dropzone list — no dummy data).
   const [mats, setMats] = useState<{ video: { name: string; size?: string }[]; docs: { name: string; size?: string }[] }>({ video: [], docs: [] });
   const setProj = (k: string, v: any) => setP((x) => ({ ...x, [k]: v }));
@@ -282,7 +326,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   useEffect(() => {
     if (resumeProjectId || draftId || draftCreatingRef.current || !p.name.trim()) return;
     draftCreatingRef.current = true;
-    api.createDraft({ runtime: engineProviderRef.current, project_name: p.name })
+    api.createDraft({ runtime: engineProviderRef.current, project_name: p.name, budget: budgetRef.current ?? undefined })
       .then(({ project_id }) => setDraftId(project_id))
       .catch(() => { draftCreatingRef.current = false; });
   }, [resumeProjectId, draftId, p.name]);
@@ -309,6 +353,12 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     }, 500);
     return () => clearTimeout(t);
   }, [draftId, engine.provider, engine.model, engine.keySource, engine.key]);
+
+  // Budget write-through: persist the selected ceiling on the draft whenever it changes.
+  useEffect(() => {
+    if (!draftId || budget == null) return;
+    api.patchDraft(draftId, { budget }).catch(() => {});
+  }, [draftId, budget]);
 
   // BYOK key submission: when the user brings their own key, POST it to /creds (Vault-stored; promote
   // threads creds_vault_ids into the runner env, BYOK wins over the platform key). The key NAME is
@@ -415,6 +465,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       if (fresh) await saveCompanyFresh();                                    // flush company
       await api.patchDraft(draftId, { name: p.name, goal: p.goal, scope: p.scope }).catch(() => {}); // flush project
       await api.patchDraft(draftId, { runtime: engine.provider, model: engine.model, keySource: engine.keySource, key: engine.key }).catch(() => {}); // flush engine
+      if (budget != null) await api.patchDraft(draftId, { budget }).catch(() => {});  // flush budget cap
       if (engine.keySource === "byok" && engine.key.trim()) {                 // flush BYOK key → Vault
         const keyName = engine.provider === "claude" ? "ANTHROPIC_API_KEY" : "OPENROUTER_API_KEY";
         await api.submitCreds(draftId, { [keyName]: engine.key.trim() }).catch(() => {});
@@ -528,6 +579,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                   <Card cat="Your first project" title="Build engine" desc="Choose the coding agent that builds this project. The factory, console, and output look the same either way.">
                     <EnginePicker value={engine} onChange={setEngine} />
                   </Card>
+                  <Card cat="Your first project" title="Budget cap" desc="Stop and notify you when spend reaches this amount. Leave unset to run to completion.">
+                    <BudgetPicker value={budget} onChange={setBudget} />
+                  </Card>
                   <Card cat="Your first project" title="Project materials" desc="A walkthrough recording is the highest-signal input you can give.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                       <Field label="Walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} /></Field>
@@ -585,6 +639,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                   </Card>
                   <Card cat="This project" title="Build engine" desc="Choose the coding agent that builds this project. The factory, console, and output look the same either way.">
                     <EnginePicker value={engine} onChange={setEngine} />
+                  </Card>
+                  <Card cat="This project" title="Budget cap" desc="Stop and notify you when spend reaches this amount. Leave unset to run to completion.">
+                    <BudgetPicker value={budget} onChange={setBudget} />
                   </Card>
                   <Card cat="This project" title="Project materials" desc="We already have your line card & pricing on file — only add what's specific to this project.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

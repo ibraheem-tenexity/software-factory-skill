@@ -355,9 +355,9 @@ export const api = {
   // and records creds_vault_ids on the draft; promote threads those into the runner env (BYOK wins
   // over the platform key). keySource/key on createDraft/patchDraft are passthrough (ignored by
   // Pydantic); the real BYOK path is submitCreds.
-  createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string }) =>
+  createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number }) =>
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),
-  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string }) =>
+  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number }) =>
     send<{ name: string; goal: string; scope: string[]; description: string; brief: Record<string, string>; coverage: Record<string, boolean> }>(`/api/projects/${id}/draft`, "PATCH", body),
   // Read counterpart to PATCH /draft (qsvigmth's run-control PR #48) — rehydrates the intake form
   // when RESUMING an existing draft instead of minting a new one.
