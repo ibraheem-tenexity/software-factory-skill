@@ -393,6 +393,8 @@ export const api = {
   orgDocDelete: (docId: string) => send<{ ok?: boolean }>(`/api/org/docs/${docId}`, "DELETE"),
   orgDocPatch: (docId: string, body: { name?: string; tag?: string }) =>
     send<{ doc?: OrgDoc }>(`/api/org/docs/${docId}`, "PATCH", body),
+  putBudget: (id: string, ceiling: number) =>
+    send<Record<string, any>>(`/api/projects/${id}/budget`, "POST", { ceiling }),
 };
 
 export const BRIEF_SECTIONS: { key: string; label: string }[] = [

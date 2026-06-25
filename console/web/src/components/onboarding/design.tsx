@@ -65,6 +65,7 @@ const PATHS: Record<string, string> = {
   flask: "M9 2v6l-5 9a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-5-9V2 M7 2h10 M6.5 14h11",
   database: "M12 2c4.42 0 8 1.34 8 3s-3.58 3-8 3-8-1.34-8-3 3.58-3 8-3z M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5 M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6",
   zap: "M13 2L3 14h9l-1 8 10-12h-9l1-8z",
+  pencil: "M12 20h9 M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z",
 };
 
 export function Icon({ name, size = 16, color = "currentColor", strokeWidth = 2, style }:
