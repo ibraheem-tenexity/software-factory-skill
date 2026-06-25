@@ -49,7 +49,7 @@ def parse_required_tokens(text: str) -> list[dict]:
     in_section = False
     for line in (text or "").splitlines():
         stripped = line.strip()
-        if re.match(r"^#{1,3}\s+(required\s+tokens|dependencies)", stripped, re.I):
+        if re.match(r"^#{1,3}\s+(\d+\.\s+)?(required\s+tokens|dependencies)", stripped, re.I):
             in_section = True
             continue
         if in_section:
