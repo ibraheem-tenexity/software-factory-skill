@@ -31,8 +31,8 @@ function eventText(e: ProjectEvent): string {
   }
 }
 
-export function Concierge({ projectId, artifacts, onOpenArtifact, isBuilding }:
-  { projectId: string; artifacts: ArtifactRef[]; onOpenArtifact: (a: ArtifactRef) => void; isBuilding?: boolean }) {
+export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, isBuilding }:
+  { projectId: string; projectName?: string; artifacts: ArtifactRef[]; onOpenArtifact: (a: ArtifactRef) => void; isBuilding?: boolean }) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [events, setEvents] = useState<ProjectEvent[]>([]);
   const [draft, setDraft] = useState("");
@@ -60,7 +60,7 @@ export function Concierge({ projectId, artifacts, onOpenArtifact, isBuilding }:
     setMessages((m) => [...m, { role: "user", content: text, ts: Date.now() / 1000 }]);
     setDraft("");
     try {
-      const r = await api.chat({ project_id: projectId, message: text });
+      const r = await api.chat({ project_id: projectId, project_name: projectName || "", message: text });
       const reply = (r.messages || []) as ChatMsg[];
       setMessages((m) => [...m, ...reply]);
     } catch { /* leave the optimistic user line; surface nothing destructive */ }
