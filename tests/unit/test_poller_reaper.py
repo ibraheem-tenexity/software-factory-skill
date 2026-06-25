@@ -122,3 +122,63 @@ def test_dry_run_false_passed_to_reap(console, monkeypatch):
     monkeypatch.setenv("SF_DEPLOY_DB_TEARDOWN", "persistent")
     _reaper_tick(tick=100, interval=100, console=console)
     console.reap_deploy_dbs.assert_called_once_with(dry_run=False)
+
+
+# ===========================================================================
+# _github_reaper_tick — GitHub repo reaper scheduled inside _poll_transitions
+# Two gates: SF_GITHUB_REAPER_INTERVAL_TICKS > 0 AND SF_GITHUB_REPO_REAPER=on
+# ===========================================================================
+
+from console.poller import _github_reaper_tick
+
+
+@pytest.fixture
+def gh_console():
+    c = MagicMock()
+    c.reap_github_repos.return_value = {
+        "mode": "on",
+        "armed": True,
+        "reaped": [{"project_id": "project-abcd1234", "repo": "org/app-abcd1234"}],
+        "would_reap": [],
+        "kept": [],
+        "failed": [],
+        "unknown_repos": [],
+    }
+    return c
+
+
+def test_github_reaper_disabled_when_interval_zero(gh_console, monkeypatch):
+    monkeypatch.setenv("SF_GITHUB_REPO_REAPER", "on")
+    result = _github_reaper_tick(tick=7200, interval=0, console=gh_console)
+    assert result is None
+    gh_console.reap_github_repos.assert_not_called()
+
+
+def test_github_reaper_does_not_fire_between_intervals(gh_console, monkeypatch):
+    monkeypatch.setenv("SF_GITHUB_REPO_REAPER", "on")
+    for tick in [1, 99, 101, 199]:
+        result = _github_reaper_tick(tick=tick, interval=100, console=gh_console)
+        assert result is None
+    gh_console.reap_github_repos.assert_not_called()
+
+
+def test_github_reaper_fires_at_interval_boundary(gh_console, monkeypatch):
+    monkeypatch.setenv("SF_GITHUB_REPO_REAPER", "on")
+    monkeypatch.setenv("SF_GITHUB_ORG", "ibraheem-tenexity")
+    result = _github_reaper_tick(tick=100, interval=100, console=gh_console)
+    assert result is not None
+    gh_console.reap_github_repos.assert_called_once_with("ibraheem-tenexity", dry_run=False)
+
+
+def test_github_reaper_silent_skip_when_disarmed(gh_console, monkeypatch):
+    monkeypatch.delenv("SF_GITHUB_REPO_REAPER", raising=False)
+    result = _github_reaper_tick(tick=100, interval=100, console=gh_console)
+    assert result is None
+    gh_console.reap_github_repos.assert_not_called()
+
+
+def test_github_reaper_does_not_fire_on_tick_zero(gh_console, monkeypatch):
+    monkeypatch.setenv("SF_GITHUB_REPO_REAPER", "on")
+    result = _github_reaper_tick(tick=0, interval=10, console=gh_console)
+    assert result is None
+    gh_console.reap_github_repos.assert_not_called()
