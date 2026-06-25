@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, Org, Member, OrgDoc, OrgUsage, Me } from "../api";
 import { T, Icon, Sparkle, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, Field, TextInput } from "./onboarding/design";
 import { AccountMenu } from "./AccountMenu";
-import { ListRowSkel } from "./skeleton";
+import { ListRowSkel, FileTileSkel, MetricCardSkel } from "./skeleton";
 
 type Section = "profile" | "knowledge" | "systems" | "team" | "billing";
 
@@ -113,7 +113,9 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const [docs, setDocs] = useState<OrgDoc[]>([]);
+  const [docsLoading, setDocsLoading] = useState(true);
   const [usage, setUsage] = useState<OrgUsage | null>(null);
+  const [usageLoading, setUsageLoading] = useState(true);
   const [notice, setNotice] = useState("");
 
   // profile edit
@@ -133,8 +135,8 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
   const docsInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadMembers = () => api.orgMembers().then((d) => { setMembers(d.members || []); setMembersLoading(false); }).catch(() => { setMembers([]); setMembersLoading(false); });
-  const loadUsage = () => api.orgUsage().then(setUsage).catch(() => setUsage(null));
-  const loadDocs = () => api.orgDocs().then((d) => setDocs(d.docs || [])).catch(() => setDocs([]));
+  const loadUsage = () => api.orgUsage().then((u) => { setUsage(u); setUsageLoading(false); }).catch(() => { setUsage(null); setUsageLoading(false); });
+  const loadDocs = () => { setDocsLoading(true); api.orgDocs().then((d) => setDocs(d.docs || [])).catch(() => setDocs([])).finally(() => setDocsLoading(false)); };
 
   // KB: real upload (FileReader→base64→POST /api/org/docs) + delete.
   const uploadDocs = async (list: FileList | null) => {
@@ -312,7 +314,11 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
                 <input ref={docsInputRef} type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.md,image/*" style={{ display: "none" }} onChange={(e) => { uploadDocs(e.target.files); e.target.value = ""; }} />
                 <SecHead title="Knowledge base" desc="Org-scoped documents the factory can draw on for any project."
                   action={<Btn variant="primary" size="sm" onClick={() => docsInputRef.current?.click()}><Icon name="upload" size={14} color="#fff" /> Upload</Btn>} />
-                {docs.length ? (
+                {docsLoading ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+                    {Array.from({ length: 3 }, (_, i) => <FileTileSkel key={i} />)}
+                  </div>
+                ) : docs.length ? (
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
                     {docs.map((d) => <FileTile key={d.id} d={d} onDelete={() => deleteDoc(d.id)} onSave={(name, tag) => renameDoc(d.id, name, tag)} />)}
                   </div>
@@ -408,9 +414,15 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
                   </div>
                 )}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
-                  <MetricCard label="Plan" value={usage?.plan || "—"} hint={usage?.monthly_budget_cap != null ? `${money(usage.monthly_budget_cap)} / mo cap` : "billing not yet configured"} accent />
-                  <MetricCard label="Spent this month" value={usage?.spent != null ? money(usage.spent) : "—"} hint={usage?.monthly_budget_cap ? `${Math.round(((usage.spent || 0) / usage.monthly_budget_cap) * 100)}% of cap` : ""} />
-                  <MetricCard label="Active projects" value={usage?.active_projects != null ? String(usage.active_projects) : "—"} hint={usage?.total_projects != null ? `${usage.total_projects} total` : ""} />
+                  {usageLoading ? (
+                    <><MetricCardSkel /><MetricCardSkel /><MetricCardSkel /></>
+                  ) : (
+                    <>
+                      <MetricCard label="Plan" value={usage?.plan || "—"} hint={usage?.monthly_budget_cap != null ? `${money(usage.monthly_budget_cap)} / mo cap` : "billing not yet configured"} accent />
+                      <MetricCard label="Spent this month" value={usage?.spent != null ? money(usage.spent) : "—"} hint={usage?.monthly_budget_cap ? `${Math.round(((usage.spent || 0) / usage.monthly_budget_cap) * 100)}% of cap` : ""} />
+                      <MetricCard label="Active projects" value={usage?.active_projects != null ? String(usage.active_projects) : "—"} hint={usage?.total_projects != null ? `${usage.total_projects} total` : ""} />
+                    </>
+                  )}
                 </div>
                 <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden", background: T.raised, boxShadow: T.shadowXs }}>
                   <div style={{ padding: "10px 16px", borderBottom: `1px solid ${T.borderSubtle}`, background: T.sunken }}><CategoryLabel>Spend by project</CategoryLabel></div>
