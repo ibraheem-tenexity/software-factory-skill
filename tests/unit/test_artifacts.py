@@ -174,3 +174,34 @@ def test_parse_required_tokens_dependencies_heading():
     tokens = artifacts.parse_required_tokens(text)
     assert len(tokens) == 1
     assert tokens[0]["name"] == "STRIPE_SECRET_KEY"
+
+
+def test_parse_required_tokens_numbered_heading():
+    # Stage-2 PRDs often number sections: "## 10. Required Tokens". The leading
+    # "10. " must not block section detection (E2E pilot: DATABASE_URL missed → no DB provisioned).
+    text = (
+        "## 10. Required Tokens\n\n"
+        "- `DATABASE_URL` — Postgres connection string\n"
+        "- `RAILWAY_TOKEN` — deploy token\n\n"
+        "## 11. Data Model\n"
+        "NOT_A_TOKEN_KEY after section ends\n"
+    )
+    names = [t["name"] for t in artifacts.parse_required_tokens(text)]
+    assert "DATABASE_URL" in names
+    assert "RAILWAY_TOKEN" in names
+    assert "NOT_A_TOKEN_KEY" not in names  # section ended at ## 11.
+
+
+def test_parse_required_tokens_unnumbered_still_works():
+    # Regression: unnumbered headings must keep working after the numbered-heading fix.
+    text = "## Required Tokens\n- DATABASE_URL\n## Next\n"
+    names = [t["name"] for t in artifacts.parse_required_tokens(text)]
+    assert "DATABASE_URL" in names
+
+
+def test_parse_required_tokens_numbered_dependencies_heading():
+    # Also covers numbered "## 3. Dependencies" variant.
+    text = "## 3. Dependencies\n- STRIPE_SECRET_KEY for payments\n## 4. Next\n"
+    tokens = artifacts.parse_required_tokens(text)
+    assert len(tokens) == 1
+    assert tokens[0]["name"] == "STRIPE_SECRET_KEY"
