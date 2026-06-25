@@ -5,6 +5,7 @@
 import React, { useEffect, useState } from "react";
 import { api, ProjectSummary, Org, Me } from "../api";
 import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, TextInput } from "./onboarding/design";
+import { MetricCardSkel, ProjectRowSkel } from "./skeleton";
 import { AccountMenu } from "./AccountMenu";
 
 type StatusKey = "deployed" | "needs-input" | "draft" | "researching" | "building";
@@ -249,10 +250,12 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
 
           {/* pulse strip — computed from real projects */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-            <MetricCard label="Active projects" value={String(active.length)} hint={`${withAgents} with agents working now`} accent />
-            <MetricCard label="In build" value={String(building.length)} hint={`${researching.length} researching`} />
-            <MetricCard label="Deployed" value={String(shipped.length)} hint={shipped[0] ? (shipped[0].name || draftLabel(shipped[0].project_id)) + " · live" : "none yet"} />
-            <MetricCard label="Spend to date" value={money(totalSpend) === "—" ? "$0.00" : money(totalSpend)} hint={org?.monthly_budget_cap != null ? `of $${org.monthly_budget_cap} cap` : `across ${projects.length} project${projects.length === 1 ? "" : "s"}`} />
+            {loading ? (<><MetricCardSkel /><MetricCardSkel /><MetricCardSkel /><MetricCardSkel /></>) : (<>
+              <MetricCard label="Active projects" value={String(active.length)} hint={`${withAgents} with agents working now`} accent />
+              <MetricCard label="In build" value={String(building.length)} hint={`${researching.length} researching`} />
+              <MetricCard label="Deployed" value={String(shipped.length)} hint={shipped[0] ? (shipped[0].name || draftLabel(shipped[0].project_id)) + " · live" : "none yet"} />
+              <MetricCard label="Spend to date" value={money(totalSpend) === "—" ? "$0.00" : money(totalSpend)} hint={org?.monthly_budget_cap != null ? `of $${org.monthly_budget_cap} cap` : `across ${projects.length} project${projects.length === 1 ? "" : "s"}`} />
+            </>)}
           </div>
 
           {/* org admin preview — ADMINS ONLY; non-admins see nothing (the list moves up). */}
@@ -300,10 +303,16 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
           {/* in progress */}
           <div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-              <CategoryLabel>In progress · {active.length}</CategoryLabel>
+              <CategoryLabel>In progress{loading ? "" : ` · ${active.length}`}</CategoryLabel>
               <span style={{ font: `400 11.5px/1 ${T.sans}`, color: T.tertiary }}>Sorted by last activity</span>
             </div>
-            <ProjectList projects={active} onOpen={onOpen} onRename={renameProject} onArchive={archiveProject} empty={loading ? "Loading projects..." : 'No projects in progress. Start one with "New project".'} />
+            {loading ? (
+              <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden" }}>
+                {[0, 1, 2].map((i) => <ProjectRowSkel key={i} first={i === 0} />)}
+              </div>
+            ) : (
+              <ProjectList projects={active} onOpen={onOpen} onRename={renameProject} onArchive={archiveProject} empty='No projects in progress. Start one with "New project".' />
+            )}
           </div>
 
           {/* deployed */}

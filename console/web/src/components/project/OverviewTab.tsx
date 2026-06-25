@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact } from "../../api";
 import { openArtifact } from "../factory/Artifacts";
 import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, TextInput, TextArea } from "../onboarding/design";
+import { PanelBodySkel } from "../skeleton";
 
 const fileToB64 = (file: File): Promise<string> => new Promise((resolve) => {
   const r = new FileReader();
@@ -132,9 +133,20 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
   };
 
   if (loading) {
-    return <div style={{ flex: 1, display: "grid", placeItems: "center", background: T.bg }}>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, font: `500 13px/1 ${T.sans}`, color: T.tertiary }}><Icon name="layers" size={14} color={T.tertiary} /> Loading project...</span>
-    </div>;
+    return (
+      <div style={{ flex: 1, overflow: "auto", backgroundImage: `radial-gradient(circle, ${T.borderSubtle} 1px, transparent 1px)`, backgroundSize: "22px 22px" }}>
+        <div style={{ padding: "22px 24px 36px" }}>
+          <div style={{ maxWidth: 1080, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, alignItems: "start" }}>
+            {[{ span: 2, rows: 5 }, { span: 1, rows: 3 }, { span: 1, rows: 3 }, { span: 1, rows: 3 }, { span: 1, rows: 3 }].map(({ span, rows }, i) => (
+              <section key={i} style={{ gridColumn: `span ${span}`, background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rXl, overflow: "hidden" }}>
+                <div style={{ padding: "12px 16px", borderBottom: `1px solid ${T.borderSubtle}` }}><PanelBodySkel rows={1} /></div>
+                <div style={{ padding: 16 }}><PanelBodySkel rows={rows} /></div>
+              </section>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

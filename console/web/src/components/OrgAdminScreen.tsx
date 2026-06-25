@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, Org, Member, OrgDoc, OrgUsage, Me } from "../api";
 import { T, Icon, Sparkle, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, Field, TextInput } from "./onboarding/design";
 import { AccountMenu } from "./AccountMenu";
+import { ListRowSkel } from "./skeleton";
 
 type Section = "profile" | "knowledge" | "systems" | "team" | "billing";
 
@@ -110,6 +111,7 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
   const [org, setOrg] = useState<Org | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  const [membersLoading, setMembersLoading] = useState(true);
   const [docs, setDocs] = useState<OrgDoc[]>([]);
   const [usage, setUsage] = useState<OrgUsage | null>(null);
   const [notice, setNotice] = useState("");
@@ -130,7 +132,7 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
 
   const docsInputRef = useRef<HTMLInputElement | null>(null);
 
-  const loadMembers = () => api.orgMembers().then((d) => setMembers(d.members || [])).catch(() => setMembers([]));
+  const loadMembers = () => api.orgMembers().then((d) => { setMembers(d.members || []); setMembersLoading(false); }).catch(() => { setMembers([]); setMembersLoading(false); });
   const loadUsage = () => api.orgUsage().then(setUsage).catch(() => setUsage(null));
   const loadDocs = () => api.orgDocs().then((d) => setDocs(d.docs || [])).catch(() => setDocs([]));
 
@@ -366,7 +368,7 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
                   </div>
                 )}
                 <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden", background: T.raised, boxShadow: T.shadowXs }}>
-                  {members.length === 0 && <div style={{ padding: "20px", textAlign: "center", font: `400 13px/1.4 ${T.sans}`, color: T.tertiary }}>No members yet — invite your team above.</div>}
+                  {membersLoading ? <div style={{ padding: "12px 16px" }}><ListRowSkel rows={3} /></div> : (members.length === 0 && <div style={{ padding: "20px", textAlign: "center", font: `400 13px/1.4 ${T.sans}`, color: T.tertiary }}>No members yet — invite your team above.</div>)}
                   {members.map((m, i) => {
                     const you = isYou(m);
                     return (

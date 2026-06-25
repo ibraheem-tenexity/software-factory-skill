@@ -2,20 +2,22 @@ import React from "react";
 
 export function useAdminFetch<T>(fn: () => Promise<T>) {
   const [data, setData] = React.useState<T | null>(null);
+  const [loading, setLoading] = React.useState(true);
   const [rev, setRev] = React.useState(0);
   const fnRef = React.useRef(fn);
   fnRef.current = fn;
   React.useEffect(() => {
     let active = true;
+    setLoading(true);
     fnRef
       .current()
-      .then((d) => active && setData(d))
-      .catch(() => active && setData(null));
+      .then((d) => { if (active) { setData(d); setLoading(false); } })
+      .catch(() => { if (active) { setData(null); setLoading(false); } });
     return () => {
       active = false;
     };
   }, [rev]);
-  return { data, refetch: () => setRev((r) => r + 1) };
+  return { data, loading, refetch: () => setRev((r) => r + 1) };
 }
 
 export function fmtRel(updated?: number | string): string {
