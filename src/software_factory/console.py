@@ -10,19 +10,22 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-# The factory's run-id shape — discovery (local dirs AND the pg registry) only trusts
-# ids that look like this; anything else under projects_dir is debris, not a run ("build-plan.md",
-# "tenexity-guestbook", a deploy URL…). Loose on the suffix (tests mint run-xyz style ids);
-# the pg registry's write guard (dbshim._ensure) stays strict 8-hex.
-PROJECT_ID_RE = re.compile(r"project-[A-Za-z0-9-]+")
-
+from .constants import (
+    PROJECT_ID_RE,
+    STAGE_1, STAGE_2, STAGE_3, PIPELINE,
+    STAGE_MODEL as _STAGE_MODEL,
+    DEPLOY_DB_MAX_ATTEMPTS as _DEPLOY_DB_MAX_ATTEMPTS,
+    OPENCODE_MODEL_IDS as _OPENCODE_MODEL_IDS,
+    OPENCODE_DEFAULT_ALIAS as _OPENCODE_DEFAULT_ALIAS,
+    PLANNING_MODELS, IMPL_MODELS,
+    RUNNER_KEYS as _RUNNER_KEYS,
+)
 from . import artifacts, checkpoint as ckpt, deploy_db, env as _env, gates, streamlog, vault as _vault
 from .agents import AgentRegistry
 from .evidence import build_evidence, verify_evidence
@@ -38,10 +41,6 @@ from .workspace_setup import prepare_workspace
 
 SKILL_VERSION = "0.0.1"
 
-STAGE_1 = ["extract", "provision", "research"]
-STAGE_2 = ["architect", "tickets"]
-STAGE_3 = ["build", "deploy", "test", "teardown"]
-PIPELINE = STAGE_1 + STAGE_2 + STAGE_3
 PIPELINE_LABELS = {"wait-for-deps": "wait for deps"}
 
 PHASE_AGENTS = {
@@ -60,24 +59,6 @@ for _p in STAGE_2:
     PHASE_STAGE[_p] = 2
 for _p in STAGE_3:
     PHASE_STAGE[_p] = 3
-
-# Per-stage model: research (1) & design (2) on Opus 4.8; build (3) on Sonnet (cheaper for
-# high-volume code edits). SF_MODEL env overrides all stages if set.
-_STAGE_MODEL = {1: "claude-opus-4-8", 2: "claude-opus-4-8", 3: "claude-sonnet-4-6"}
-# Hard cap on deploy-db provision attempts per run — a failure must never spawn unbounded orphan DBs.
-_DEPLOY_DB_MAX_ATTEMPTS = 2
-# opencode runtime: short alias → full OpenRouter model ID (all stages use the same model).
-_OPENCODE_MODEL_IDS = {
-    "kimi": "openrouter/moonshotai/kimi-k2.7-code",
-    "glm":  "z-ai/glm-5.2",
-}
-_OPENCODE_DEFAULT_ALIAS = "kimi"
-# Operator-pickable per-project models (claude runtime). The UI offers exactly these; anything
-# else is ignored at start_project so a bad request can never launch an unknown/unpriced model.
-PLANNING_MODELS = {"claude-opus-4-8", "claude-fable-5"}
-IMPL_MODELS = {"claude-sonnet-4-6", "claude-opus-4-8"}
-
-_RUNNER_KEYS = {"opencode": "OPENROUTER_API_KEY", "claude": "ANTHROPIC_API_KEY"}
 
 
 def _key_source(runtime: str, creds_provided: list) -> str:

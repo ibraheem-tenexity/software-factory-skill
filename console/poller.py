@@ -245,7 +245,7 @@ def _boot():
     # "build-plan.md/project store" on the volume — moved aside (never deleted), so discovery and
     # the boot backfill only ever see real runs.
     try:
-        from software_factory.console import PROJECT_ID_RE
+        from software_factory.constants import PROJECT_ID_RE
         qdir = os.path.join(state.PROJECTS_DIR, "_quarantine")
         for name in os.listdir(state.PROJECTS_DIR):
             p = os.path.join(state.PROJECTS_DIR, name)
