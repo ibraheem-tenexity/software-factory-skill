@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import time
 import uuid
@@ -1166,6 +1167,64 @@ class Console:
         state.held = False
         state.save()
         return self._provision_and_launch(project_id, req, brief=brief, interview_md=interview_md)
+
+    def relaunch_project(self, source_id: str, owner: str = "") -> str:
+        """Mint a fresh run from the same spec as a stopped/done project.
+
+        'Relaunch' is a NEW project_id — not un-stopping the old run. Stopped is terminal by design
+        to prevent double-orchestrator races; this sidesteps that by creating a sibling run seeded
+        from the source's spec. The source is left untouched (its spend/checkpoints stay intact).
+
+        Copies the source's input/ materials (already-converted markdown, not raw binaries) and
+        creds_vault_ids refs so the new run has identical context. Returns the new project_id.
+        """
+        source_state = self._load_state(source_id)
+        if source_state.phase not in ("stopped", "done"):
+            raise ValueError(
+                f"Only stopped or done projects can be relaunched (phase={source_state.phase!r})"
+            )
+        new_id = self._new_id()
+        new_paths = self._paths(new_id)
+        os.makedirs(new_paths["base"], exist_ok=True)
+
+        # Copy input/ materials: already-converted markdown (originals consumed on ingest), so no
+        # binary duplication. Independent copy — new run can't mutate the source's files.
+        src_input = self._paths(source_id)["input_dir"]
+        if os.path.isdir(src_input):
+            shutil.copytree(src_input, new_paths["input_dir"])
+
+        state = self._load_state(new_id)
+        state.description = source_state.description
+        state.brief = dict(source_state.brief or {})
+        state.interview_coverage = dict(source_state.interview_coverage or {})
+        state.scope = list(source_state.scope or [])
+        state.runtime = source_state.runtime or os.environ.get("SF_RUNTIME", "claude")
+        state.planning_model = source_state.planning_model
+        state.impl_model = source_state.impl_model
+        state.opencode_model = source_state.opencode_model
+        state.deploy_target = source_state.deploy_target or "railway"
+        state.budget_ceiling = source_state.budget_ceiling
+        state.creds_vault_ids = dict(source_state.creds_vault_ids or {})
+        state.creds_provided = list(source_state.creds_provided or [])
+        state.relaunched_from = source_id
+        effective_owner = (owner or source_state.owner or "").lower()
+        state.owner = effective_owner
+        state.created_by = effective_owner
+        state.created_at = time.time()
+        state.skill = "software-factory"
+        state.skill_version = SKILL_VERSION
+        state.save()
+
+        req = ProjectRequest(
+            description=state.description or "",
+            target=state.deploy_target or "railway",
+            runtime=state.runtime,
+            planning_model=state.planning_model,
+            impl_model=state.impl_model,
+            model=state.opencode_model,
+            owner=state.owner,
+        )
+        return self._provision_and_launch(new_id, req, brief=state.brief)
 
     def deployments(self, project_id: str) -> dict:
         """Per-deliverable deployments (a run ships 1..N apps; no single run-level deploy_url)."""
