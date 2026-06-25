@@ -14,8 +14,8 @@ type Tone = "success" | "warning" | "neutral" | "brand" | "info";
 // Derive the project status from real run state (never fabricated).
 function statusOf(r: ProjectSummary): { key: StatusKey; label: string; tone: Tone } {
   if (r.deploy_url || r.done || r.phase === "done") return { key: "deployed", label: "Deployed", tone: "success" };
-  if (r.budget_stopped || r.held) return { key: "needs-input", label: "Needs input", tone: "warning" };
   if (r.phase === "draft") return { key: "draft", label: "Draft", tone: "neutral" };
+  if (r.budget_stopped || r.held) return { key: "needs-input", label: "Needs input", tone: "warning" };
   if ((r.phase || "").toLowerCase().includes("research")) return { key: "researching", label: "Researching", tone: "brand" };
   return { key: "building", label: "Building", tone: "info" };
 }
@@ -199,7 +199,7 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
   const shipped = visibleProjects.filter((r) => statusOf(r).key === "deployed");
   const building = active.filter((r) => statusOf(r).key === "building");
   const researching = active.filter((r) => statusOf(r).key === "researching");
-  const withAgents = active.filter((r) => (r.agents?.length || 0) > 0).length;
+  const withAgents = active.filter((r) => { const k = statusOf(r).key; return (k === "building" || k === "researching") && (r.agents?.length || 0) > 0; }).length;
   const totalSpend = projects.reduce((s, r) => s + (r.spent_usd || 0), 0);
   const orgName = org?.name || "Your organization";
 
