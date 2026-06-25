@@ -118,7 +118,11 @@ def provision(project_id: str, context_dir: str,
 
     svc_id, svc_name = info.get("service_id"), info.get("service")
     if not svc_id:
-        tmp_out = run(["railway", "project", "link", "software-factory-projects"])
+        # In dev (no RAILWAY_TOKEN), link the CLI to the correct project before `railway add`
+        # since `add` has no -p/--project flag. In prod, RAILWAY_TOKEN is project-scoped so
+        # no link is needed. Guard on railway_project_id too: if unconfigured, skip silently.
+        if not os.environ.get("RAILWAY_TOKEN") and railway_project_id:
+            run(["railway", "link", "-p", railway_project_id])
         add_out = run(["railway", "add", "--database", "postgres", "--json"]).stdout
         svc_id, svc_name = _parse_added_service(add_out)
         if not svc_id:
