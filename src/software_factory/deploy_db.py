@@ -118,6 +118,7 @@ def provision(project_id: str, context_dir: str,
 
     svc_id, svc_name = info.get("service_id"), info.get("service")
     if not svc_id:
+        tmp_out = run(["railway", "project", "link", "software-factory-projects"])
         add_out = run(["railway", "add", "--database", "postgres", "--json"]).stdout
         svc_id, svc_name = _parse_added_service(add_out)
         if not svc_id:
