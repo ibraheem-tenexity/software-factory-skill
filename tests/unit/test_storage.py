@@ -1,6 +1,9 @@
 """Storage adapter + blobs manifest — exercised against the local-filesystem fallback
 (no Supabase creds), which is the dev/test path."""
+import io
+import json
 import pytest
+from unittest.mock import patch, MagicMock
 
 from software_factory import storage
 from software_factory.blobs import BlobStore
@@ -50,13 +53,54 @@ def test_listing(local):
     assert storage.listing("project-z") == ["a/1.txt", "b/2.txt"]
 
 
-def test_supabase_public_url_shape(monkeypatch):
+def _mock_sign_response(signed_path: str):
+    """Return a mock urlopen context manager that yields the sign endpoint response."""
+    body = json.dumps({"signedURL": signed_path}).encode()
+    cm = MagicMock()
+    cm.__enter__ = MagicMock(return_value=MagicMock(read=MagicMock(return_value=body)))
+    cm.__exit__ = MagicMock(return_value=False)
+    return cm
+
+
+def test_supabase_signed_url_shape(monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", "https://proj.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_KEY", "svc-key")
     monkeypatch.setenv("SF_STORAGE_BUCKET", "factory-run-blobs")
     assert storage.enabled() is True
-    assert storage.url("project-x", "qa/s.png") == (
-        "https://proj.supabase.co/storage/v1/object/public/factory-run-blobs/project-x/qa/s.png")
+    signed_path = "/object/sign/factory-run-blobs/project-x/qa/s.png?token=jwt123"
+    with patch("urllib.request.urlopen", return_value=_mock_sign_response(signed_path)) as mock_open:
+        result = storage.url("project-x", "qa/s.png")
+    assert result == "https://proj.supabase.co/storage/v1" + signed_path
+    # Verify the sign endpoint was called (not the old public URL)
+    req = mock_open.call_args[0][0]
+    assert "/object/sign/factory-run-blobs/project-x/qa/s.png" in req.full_url
+    assert req.method == "POST"
+
+
+def test_supabase_signed_url_uses_ttl(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://proj.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "svc-key")
+    monkeypatch.setenv("SF_STORAGE_BUCKET", "factory-run-blobs")
+    monkeypatch.setenv("SF_STORAGE_URL_TTL", "86400")
+    signed_path = "/object/sign/factory-run-blobs/project-x/f.txt?token=tok"
+    with patch("urllib.request.urlopen", return_value=_mock_sign_response(signed_path)) as mock_open:
+        storage.url("project-x", "f.txt")
+    req = mock_open.call_args[0][0]
+    body = json.loads(req.data)
+    assert body["expiresIn"] == 86400
+
+
+def test_supabase_signed_url_default_ttl(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://proj.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "svc-key")
+    monkeypatch.setenv("SF_STORAGE_BUCKET", "factory-run-blobs")
+    monkeypatch.delenv("SF_STORAGE_URL_TTL", raising=False)
+    signed_path = "/object/sign/factory-run-blobs/project-x/f.txt?token=tok"
+    with patch("urllib.request.urlopen", return_value=_mock_sign_response(signed_path)) as mock_open:
+        storage.url("project-x", "f.txt")
+    req = mock_open.call_args[0][0]
+    body = json.loads(req.data)
+    assert body["expiresIn"] == 315360000  # 10 years
 
 
 def test_sha256(local):

@@ -2,7 +2,7 @@
 
 The immediate need is durable QA screenshot URLs (a bug report bounced to a ticket's
 `description` links `![](<url>)` images that must outlive the workspace). The same adapter
-later carries inputs/logs/artifacts off the `/data` volume (ARCHITECTURE §6).
+also carries logs/artifacts off the `/data` volume (ARCHITECTURE §6).
 
 Two scopes share one bucket: run-scoped `<project_id>/<kind>/<file>` and org-scoped
 `org/<org_id>/<kind>/<file>`. Callers pass `scope_id` (e.g. "project-abc123" or "org/org-9f")
@@ -11,12 +11,17 @@ and a `key` (e.g. "qa/ticket-3-1718.png"); the object path is `<scope_id>/<key>`
 Env-gated, mirroring `notify`/`tracing`: with `SUPABASE_URL` + `SUPABASE_SERVICE_KEY`
 + `SF_STORAGE_BUCKET` set, uploads go to Supabase Storage via its REST API using the
 *project-scoped* service key (a console-side secret — agents never get an account-wide
-Supabase token). Without them it falls back to a local directory (`SF_BLOB_DIR`, default
-`./.blobs`), so dev and the hermetic test suite work with no credentials.
+Supabase token). The bucket is PRIVATE; url() mints a long-lived signed URL via the
+Supabase sign endpoint (POST /storage/v1/object/sign/{bucket}/{obj}) so objects are
+accessible in external tools (tickets, email) without requiring auth.
+TTL is configurable via SF_STORAGE_URL_TTL (default 315360000 s = 10 years).
+Without credentials it falls back to a local directory (`SF_BLOB_DIR`, default `./.blobs`),
+so dev and the hermetic test suite work with no credentials.
 """
 from __future__ import annotations
 
 import hashlib
+import json
 import mimetypes
 import os
 import urllib.request
@@ -36,6 +41,10 @@ def _local_root() -> str:
     return os.environ.get("SF_BLOB_DIR") or os.path.join(os.getcwd(), ".blobs")
 
 
+def _ttl() -> int:
+    return int(os.environ.get("SF_STORAGE_URL_TTL", "315360000") or "315360000")
+
+
 def _as_bytes(data) -> bytes:
     """`data` is raw bytes, or a filesystem path (str) to read."""
     if isinstance(data, (bytes, bytearray)):
@@ -45,13 +54,23 @@ def _as_bytes(data) -> bytes:
 
 
 def url(scope_id: str, key: str) -> str:
-    """The retrieval URL for an object (does not upload). Supabase public-object URL when
-    configured, else a file:// URL into the local fallback root."""
+    """Signed retrieval URL for an object in the private bucket (does not upload).
+    POSTs to the Supabase sign endpoint to mint a long-lived bearer-token URL
+    (TTL from SF_STORAGE_URL_TTL, default 10 years). Falls back to file:// when
+    storage is not configured."""
     obj = _object_path(scope_id, key)
     if enabled():
         base = os.environ["SUPABASE_URL"].rstrip("/")
         bucket = os.environ["SF_STORAGE_BUCKET"]
-        return f"{base}/storage/v1/object/public/{bucket}/{obj}"
+        endpoint = f"{base}/storage/v1/object/sign/{bucket}/{obj}"
+        body = json.dumps({"expiresIn": _ttl()}).encode()
+        req = urllib.request.Request(
+            endpoint, data=body, method="POST",
+            headers={"Authorization": f"Bearer {os.environ['SUPABASE_SERVICE_KEY']}",
+                     "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            signed_path = json.loads(r.read())["signedURL"]
+        return f"{base}/storage/v1{signed_path}"
     return "file://" + os.path.join(_local_root(), obj)
 
 
