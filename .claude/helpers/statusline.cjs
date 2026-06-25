@@ -1,20 +1,15 @@
 #!/usr/bin/env node
 /**
- * RuFlo V3 Statusline — delegation build (#2195)
+ * RuFlo V3 Statusline — local-only build (#136)
  *
- * Fix for ruvnet/ruflo#2195: the previous version re-implemented all data
- * readers locally using fragile file probes that missed AgentDB patterns,
- * the v3/docs/adr/ ADR directory, and the real vector count.
+ * Renders the statusline purely from local file probes (git state, model,
+ * cost/context from the stdin session JSON, ADR + test-file counts). The
+ * claude-flow-specific metrics (swarm, AgentDB, DDD/intelligence) are shown
+ * as zeros since claude-flow has been excised from .claude/ (#136).
  *
- * This version delegates to 'npx @claude-flow/cli hooks statusline --json'
- * as the single source of truth. That command queries AgentDB directly,
- * counts ADRs in both directories, and reports the real intelligence pct.
- *
- * ADR counting falls back to local file reads so the display still works
- * without network access (counts both v3/docs/adr/ and v3/implementation/adrs/).
- *
- * Cache: JSON result is cached in /tmp for 10s so rapid prompt triggers
- * (every keystroke in some shells) don't hammer the CLI on every call.
+ * History: a prior build delegated to the claude-flow CLI as the data source,
+ * which re-downloaded it from npm on every render; that delegation has been
+ * removed so the statusline no longer pulls claude-flow back.
  *
  * Usage: node statusline.cjs [--json] [--compact] [--dashboard]
  */
@@ -41,57 +36,16 @@ const CONFIG = {
 
 const CWD = process.cwd();
 
-// ─── Delegation cache ───────────────────────────────────────────
-// Cache the CLI JSON result for 10s so rapid prompt re-renders
-// (e.g. every keypress in some shells) don't re-invoke npx each time.
-const CACHE_FILE = path.join(os.tmpdir(), 'ruflo-statusline-cache-' + require('crypto').createHash('md5').update(CWD).digest('hex').slice(0, 8) + '.json');
-const CACHE_TTL_MS = 10000;
-
-function readCache() {
-  try {
-    if (fs.existsSync(CACHE_FILE)) {
-      const raw = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8'));
-      if (raw && raw._ts && (Date.now() - raw._ts) < CACHE_TTL_MS) {
-        return raw.data;
-      }
-    }
-  } catch { /* ignore */ }
-  return null;
-}
-
-function writeCache(data) {
-  try { fs.writeFileSync(CACHE_FILE, JSON.stringify({ _ts: Date.now(), data }), 'utf-8'); } catch { /* ignore */ }
-}
-
 /**
- * Single source of truth: delegate to the CLI hooks statusline --json command.
- * Falls back to a minimal static object on failure so the statusline still renders.
+ * Statusline data — built purely from local file probes.
  *
- * Fix for ruflo#2195: the previous local readers returned 0 for AgentDB patterns
- * (missed the .swarm/memory.db → AgentDB path), computed dddProgress wrong,
- * and only counted ADRs in v3/implementation/adrs/ (missed v3/docs/adr/).
+ * claude-flow excised (#136): this previously delegated to
+ * `npx --yes @claude-flow/cli@latest hooks statusline --json`, which
+ * re-downloaded claude-flow from npm on every render and defeated the
+ * excision. That delegation (and its /tmp result cache) is removed; the
+ * statusline now renders local-only via buildLocalFallback().
  */
 function getStatuslineData() {
-  const cached = readCache();
-  if (cached) return cached;
-
-  try {
-    const raw = execSync(
-      'npx --yes @claude-flow/cli@latest hooks statusline --json 2>/dev/null',
-      { encoding: 'utf-8', timeout: 8000, stdio: ['pipe', 'pipe', 'pipe'], cwd: CWD }
-    ).trim();
-    // The CLI may emit preamble lines before the JSON — find the first '{'.
-    const jsonStart = raw.indexOf('{');
-    if (jsonStart === -1) throw new Error('no JSON in CLI output');
-    const data = JSON.parse(raw.slice(jsonStart));
-    // Overlay real ADR count from both local directories (fast, no network).
-    data.adrs = getLocalADRCount();
-    writeCache(data);
-    return data;
-  } catch { /* CLI unavailable or timed out */ }
-
-  // Fallback: use local file probes only (will be less accurate, but non-zero
-  // when CLI is available and accurate when it's not).
   return buildLocalFallback();
 }
 
