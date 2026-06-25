@@ -74,14 +74,6 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume }: { pr
     try { await api.deleteProject(projectId); onBack(); } catch { /* not live yet */ }
   };
 
-  // Manual kill-switch — only meaningful while the project is actually running (a live stage /
-  // poller to halt); hidden for drafts, stopped, and shipped projects.
-  const running = !!status && !status.deploy_url && !status.done && !["done", "draft", "stopped"].includes(status.phase || "");
-  const doStop = async () => {
-    if (!confirm("Stop all work on this project? Running agents will be halted.")) return;
-    try { const s = await api.stopProject(projectId); setStatus(s); } catch { /* endpoint ships in qsvigmth's run-control PR */ }
-  };
-
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: T.bg, fontFamily: T.sans }}>
       {/* top bar + peer-tab strip */}
@@ -105,12 +97,6 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume }: { pr
             )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {running && (
-              <button onClick={doStop} title="Stop all work on this project"
-                style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, padding: "0 12px", borderRadius: T.rMd, cursor: "pointer", border: `1px solid ${T.danger}`, background: "transparent", color: T.danger, font: `600 12.5px/1 ${T.sans}` }}>
-                <span style={{ width: 9, height: 9, borderRadius: 2, background: T.danger, flexShrink: 0 }} /> Stop all progress
-              </button>
-            )}
             <div style={{ position: "relative" }}>
               <button onClick={() => setMenu((v) => !v)} title="Project actions" style={{ display: "grid", placeItems: "center", width: 30, height: 30, borderRadius: "50%", border: `1px solid ${T.borderSubtle}`, background: T.raised, cursor: "pointer", color: T.secondary }}><Icon name="dots" size={16} color={T.secondary} /></button>
               {menu && (
