@@ -545,6 +545,7 @@ class Console:
         if state.phase != "stopped":
             state.phase = "stopped"
             state.spent_usd = max(state.spent_usd or 0, self._cost(project_id))
+            self._upload_project_log(project_id, state)
             state.save()
             AgentRegistry(self._paths(project_id)["agents_db"]).finalize_orphans(project_id, stage_ok=False)
         return {"project_id": project_id, "phase": "stopped", "killed": killed}
@@ -1323,6 +1324,7 @@ class Console:
                     state.stage1_done = True
                     state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
                     state.spent_usd = self._cost(project_id) or state.spent_usd
+                    self._upload_project_log(project_id, state)
                     state.save()
                     ckpt.write(project_id, "stage:1")
                     # SPEC §5: the stage is over — close any agent rows it forgot to finish.
@@ -1369,6 +1371,7 @@ class Console:
         state.stage2_done = True
         state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
         state.spent_usd = self._cost(project_id) or state.spent_usd
+        self._upload_project_log(project_id, state)
         # Parse required tokens from architecture.md
         for root, _dirs, files in os.walk(base):
             if "architecture.md" in files:
@@ -1414,6 +1417,7 @@ class Console:
         # Persist the final spend into project store so cost survives log loss (SPEC §4 durability),
         # and so verify_evidence's spent_usd comparison has a real basis.
         state.spent_usd = max(state.spent_usd or 0, self._cost(project_id))
+        self._upload_project_log(project_id, state)
         state.save()
         ckpt.write(project_id, "stage:3")
         AgentRegistry(paths["agents_db"]).finalize_orphans(project_id, stage_ok=True)
@@ -1785,6 +1789,20 @@ class Console:
                     pass  # best-effort: archive write must never fail due to Vault hiccup
             self._maybe_teardown_deploy_db(project_id, state)
         return state.archived
+
+    def _upload_project_log(self, project_id: str, state: "ProjectState") -> None:
+        """Best-effort: upload project.log to Supabase Storage and stamp state.log_url.
+        No-op when storage is not configured. Never raises — a failed upload must never
+        block the lifecycle transition (stage done / stop) that triggered it."""
+        from software_factory import storage
+        log_path = os.path.join(self._paths(project_id)["base"], "project.log")
+        if not os.path.exists(log_path):
+            return
+        try:
+            state.log_url = storage.put(project_id, "logs/project.log", log_path)
+            print(f"[storage] uploaded project.log for {project_id}: {state.log_url}", flush=True)
+        except Exception as e:
+            print(f"[storage] log upload failed for {project_id}: {e}", flush=True)
 
     def _maybe_teardown_deploy_db(self, project_id: str, state: ProjectState | None = None) -> dict | None:
         """Reap THIS run's captured deploy-DB on a terminal/archive transition, per the configured
