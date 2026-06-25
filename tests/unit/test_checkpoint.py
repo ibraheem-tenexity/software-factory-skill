@@ -19,6 +19,15 @@ from software_factory.checkpoint import NODE_ORDER, completed_nodes, delete_from
 PID = "project-cp01"   # scoped to each test by _clean_db fixture
 
 
+@pytest.fixture(autouse=True)
+def _mock_check_mcp(monkeypatch):
+    # check_mcp spawns playwright/chromium subprocesses; accumulated instances across the full
+    # suite cause resource contention that makes later calls time out. Checkpoint tests verify
+    # recovery logic, not MCP health — mock it to always pass.
+    from software_factory import console as _console_mod
+    monkeypatch.setattr(_console_mod, "check_mcp", lambda path: [])
+
+
 # ────────────────────────────────────────────────────────────────────────────────
 # 1. Checkpoint immutability
 # ────────────────────────────────────────────────────────────────────────────────
