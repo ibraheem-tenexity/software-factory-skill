@@ -308,6 +308,21 @@ def project_stop(pid: str, v: tuple = Depends(authorize_project)):
     return state.console.stop_project(pid)
 
 
+@router.post("/api/projects/{pid}/relaunch")
+def project_relaunch(pid: str, v: tuple = Depends(authorize_project)):
+    """Mint a fresh run from the spec of a stopped or done project.
+
+    Creates a NEW project_id seeded from the source's description, brief, scope, runtime,
+    models, budget ceiling, creds_vault_ids, and input materials. Source run is untouched.
+    Returns the new project_id. 409 if the source is not stopped or done."""
+    email, _role, _ok = v
+    try:
+        new_id = state.console.relaunch_project(pid, owner=email)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"project_id": new_id, "relaunched_from": pid}
+
+
 @router.post("/api/projects/{pid}/retry")
 def project_retry(pid: str, body: RetryIn, v: tuple = Depends(authorize_project)):
     result = state.console.retry_stage(pid, int(body.stage), extra_creds=body.creds)

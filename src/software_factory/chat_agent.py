@@ -212,11 +212,21 @@ def make_tools(console: Console, users=None, attachments=lambda: [],
         if not _allowed(project_id):
             return json.dumps({"error": "forbidden"})
         st = console.status(project_id)
+        phase = st.get("phase") or ""
+        if phase in ("stopped", "done"):
+            # Stopped/done runs are terminal — relaunch as a fresh sibling run from the same spec.
+            try:
+                new_id = console.relaunch_project(project_id, owner=st.get("owner") or "")
+            except Exception as e:
+                return json.dumps({"error": "cannot relaunch", "reason": str(e), "status": st})
+            return json.dumps({"relaunched": True, "new_project_id": new_id,
+                               "relaunched_from": project_id,
+                               "status": console.status(new_id)})
         stage = st.get("stage") or 1
         result = console.retry_stage(project_id, stage)
         if result is None:
             return json.dumps({"error": "cannot restart", "reason":
-                               "run is stopped, already running, or prerequisites not met",
+                               "run is already running or prerequisites not met",
                                "status": st})
         return json.dumps({"restarted": True, "stage": stage, "status": console.status(project_id)})
 
@@ -286,8 +296,10 @@ def make_tools(console: Console, users=None, attachments=lambda: [],
               "Check current pipeline status — phase, stage, cost — after handoff.",
               {"project_id": _str}, ["project_id"], _check_status),
         _tool("restart_pipeline",
-              "Re-launch the current stage of a stopped or stalled run (resume/retry, not a "
-              "from-scratch wipe). Use when the user says the build crashed, stalled, or is stuck.",
+              "Restart a run. For paused/crashed runs: resumes the current stage in place. "
+              "For stopped/done runs: mints a fresh run from the same spec (new project_id, "
+              "full pipeline from stage 1). Use when the user says the build crashed, stalled, "
+              "stopped, or they want to run it again.",
               {"project_id": _str}, ["project_id"], _restart_pipeline),
         _tool("request_dep_input",
               "Signal the frontend to show secure input fields for dependency tokens. Use this instead "

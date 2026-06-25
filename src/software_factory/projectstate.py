@@ -50,6 +50,7 @@ _PERSISTED = {
     "created_by", "created_at",
     "creds_vault_ids",
     "paused_at_node", "crashed_at_node",
+    "relaunched_from",
 }
 
 
@@ -109,6 +110,7 @@ class ProjectState:
     # reassignable current owner). created_by = the email that created the project; created_at = epoch.
     created_by: str = ""
     created_at: float = 0.0
+    relaunched_from: str = ""  # source project_id if this run was minted via /relaunch
     _store: Optional[Store] = field(default=None, repr=False, compare=False)
 
     @classmethod
