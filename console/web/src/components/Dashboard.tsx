@@ -137,7 +137,10 @@ function ProjectRow({ r, onClick, first, onRename, onArchive }:
             <div onClick={() => setMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 9 }} />
             <div style={{ position: "absolute", right: 0, top: 30, zIndex: 10, background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rMd, boxShadow: T.shadowMd, overflow: "hidden", minWidth: 150 }}>
               <button onClick={() => { setMenu(false); setName(r.name || ""); setRenaming(true); }} style={rowMenuItem}>Rename</button>
-              <button onClick={() => { setMenu(false); if (confirm(`Archive "${r.name || draftLabel(r.project_id)}"? It'll be hidden from your projects.`)) onArchive(r.project_id); }} style={{ ...rowMenuItem, color: T.danger }}>Archive</button>
+              {st.key === "draft"
+                ? <button onClick={() => { setMenu(false); if (confirm(`Discard "${r.name || draftLabel(r.project_id)}"? This draft will be permanently deleted.`)) onArchive(r.project_id); }} style={{ ...rowMenuItem, color: T.danger }}>Discard draft</button>
+                : <button onClick={() => { setMenu(false); if (confirm(`Archive "${r.name || draftLabel(r.project_id)}"? It'll be hidden from your projects.`)) onArchive(r.project_id); }} style={{ ...rowMenuItem, color: T.danger }}>Archive</button>
+              }
             </div>
           </>
         )}
@@ -300,7 +303,7 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
               <CategoryLabel>In progress · {active.length}</CategoryLabel>
               <span style={{ font: `400 11.5px/1 ${T.sans}`, color: T.tertiary }}>Sorted by last activity</span>
             </div>
-            <ProjectList projects={active} onOpen={onOpen} onRename={renameProject} onArchive={archiveProject} empty={loading ? "Loading projects…" : "No projects in progress. Start one with “New project”."} />
+            <ProjectList projects={active} onOpen={onOpen} onRename={renameProject} onArchive={archiveProject} empty={loading ? "Loading projects..." : 'No projects in progress. Start one with "New project".'} />
           </div>
 
           {/* deployed */}

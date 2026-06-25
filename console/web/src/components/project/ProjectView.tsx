@@ -65,8 +65,12 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume }: { pr
     try { await api.patchProject(projectId, { name: n }); setStatus((s) => (s ? { ...s, name: n } : s)); } catch { /* not live yet */ }
     setRenaming(false);
   };
+  const isDraft = status?.phase === "draft";
   const doArchive = async () => {
-    if (!confirm(`Archive “${name}”? It’ll be hidden from your projects.`)) return;
+    const msg = isDraft
+      ? `Discard "${name}"? This draft will be permanently deleted.`
+      : `Archive "${name}"? It'll be hidden from your projects.`;
+    if (!confirm(msg)) return;
     try { await api.deleteProject(projectId); onBack(); } catch { /* not live yet */ }
   };
 
@@ -114,7 +118,7 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume }: { pr
                   <div onClick={() => setMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 9 }} />
                   <div style={{ position: "absolute", right: 0, top: 36, zIndex: 10, background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rMd, boxShadow: T.shadowMd, overflow: "hidden", minWidth: 150 }}>
                     <button onClick={() => { setMenu(false); setNameDraft(name); setRenaming(true); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "none", border: "none", cursor: "pointer", font: `500 12.5px/1 ${T.sans}`, color: T.fg }}>Rename project</button>
-                    <button onClick={() => { setMenu(false); doArchive(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "none", border: "none", cursor: "pointer", font: `500 12.5px/1 ${T.sans}`, color: T.danger }}>Archive project</button>
+                    <button onClick={() => { setMenu(false); doArchive(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "none", border: "none", cursor: "pointer", font: `500 12.5px/1 ${T.sans}`, color: T.danger }}>{isDraft ? "Discard draft" : "Archive project"}</button>
                   </div>
                 </>
               )}
@@ -138,7 +142,7 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume }: { pr
 
       {/* tab content (peer views; Factory console navigates out via onOpenFactory) */}
       {tab === "overview"
-        ? <OverviewTab projectId={projectId} onOpenFactory={onOpenFactory} onOpenDocuments={() => setTab("documents")} onResume={onResume} />
+        ? <OverviewTab projectId={projectId} onOpenFactory={onOpenFactory} onOpenDocuments={() => setTab("documents")} onResume={onResume} onDiscard={isDraft ? doArchive : undefined} />
         : <DocumentsTab projectId={projectId} />}
     </div>
   );
