@@ -161,11 +161,31 @@ def _reaper_tick(tick: int, interval: int, console) -> dict | None:
     return report
 
 
+def _github_reaper_tick(tick: int, interval: int, console) -> dict | None:
+    """Run the GitHub repo reaper if both gates are open: interval knob and SF_GITHUB_REPO_REAPER.
+    Returns the report dict or None when skipped. Silent skip when disarmed (avoids log spam)."""
+    from software_factory import github_repo_reaper
+    if interval <= 0 or tick <= 0 or tick % interval != 0:
+        return None
+    if github_repo_reaper.github_reaper_mode() == "off":
+        return None
+    org = os.environ.get("SF_GITHUB_ORG", "ibraheem-tenexity")
+    report = console.reap_github_repos(org, dry_run=False)
+    reaped = len(report.get("reaped") or [])
+    would = len(report.get("would_reap") or [])
+    kept = len(report.get("kept") or [])
+    unknown = len(report.get("unknown_repos") or [])
+    print(f"[github-reaper] sweep done: reaped={reaped} would_reap={would} kept={kept} "
+          f"unknown={unknown} mode={report.get('mode')}", flush=True)
+    return report
+
+
 def _poll_transitions():
     """Background thread: auto-advance stages, enforce the per-project budget, narrate progress."""
     console = state.console
     tick = 0
     _reaper_interval = int(os.environ.get("SF_REAPER_INTERVAL_TICKS", "0") or "0")
+    _gh_reaper_interval = int(os.environ.get("SF_GITHUB_REAPER_INTERVAL_TICKS", "0") or "0")
     while True:
         time.sleep(3)
         tick += 1
@@ -182,6 +202,10 @@ def _poll_transitions():
                 pass
         try:
             _reaper_tick(tick, _reaper_interval, console)
+        except Exception:
+            pass
+        try:
+            _github_reaper_tick(tick, _gh_reaper_interval, console)
         except Exception:
             pass
         try:
