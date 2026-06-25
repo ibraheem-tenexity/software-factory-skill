@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { api, ProjectDocuments, ProjectMaterial, ProjectArtifact } from "../../api";
 import { openArtifact } from "../factory/Artifacts";
 import { T, CategoryLabel, Btn, Icon } from "../onboarding/design";
+import { FileTileSkel } from "../skeleton";
 
 const FILE_KIND: Record<string, [string, string, string]> = {
   pdf: ["PDF", "#fbe3e3", "#c0392f"], xlsx: ["XLS", "#e4f8ef", "#1f8a5b"], csv: ["CSV", "#e4f8ef", "#1f8a5b"],
@@ -89,21 +90,34 @@ export function DocumentsTab({ projectId }: { projectId: string }) {
           <Btn variant="primary" size="sm" onClick={() => inputRef.current?.click()}><Icon name="upload" size={14} color="#fff" /> Upload material</Btn>
         </div>
         {err && <div style={{ font: `500 12px/1.4 ${T.sans}`, color: T.tertiary, marginBottom: 10 }}>{err}</div>}
-        {loading && <div style={{ font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary, marginBottom: 10 }}>Loading documents…</div>}
+        {loading && (
+          <>
+            <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Uploaded by you</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 22 }}>
+              {Array.from({ length: 4 }, (_, i) => <FileTileSkel key={i} />)}
+            </div>
+            <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Produced by the factory</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+              {Array.from({ length: 4 }, (_, i) => <FileTileSkel key={i} />)}
+            </div>
+          </>
+        )}
 
-        <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Uploaded by you</h3>
-        {uploaded.length ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 22 }}>
-            {uploaded.map((d, i) => <FileTile key={(d.id || d.name) + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} scope={d.scope} onScope={d.id ? (s) => setScope(d.id!, s) : undefined} />)}
-          </div>
-        ) : <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "20px", textAlign: "center", font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary, marginBottom: 22 }}>{loading ? "" : "Nothing uploaded for this project."}</div>}
+        {!loading && (<>
+          <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Uploaded by you</h3>
+          {uploaded.length ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 22 }}>
+              {uploaded.map((d, i) => <FileTile key={(d.id || d.name) + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} scope={d.scope} onScope={d.id ? (s) => setScope(d.id!, s) : undefined} />)}
+            </div>
+          ) : <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "20px", textAlign: "center", font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary, marginBottom: 22 }}>Nothing uploaded for this project.</div>}
 
-        <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Produced by the factory</h3>
-        {produced.length ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-            {produced.map((d, i) => <FileTile key={d.title + i} label={d.title} kind={d.kind} tag={d.agent} onOpen={d.id ? () => openArtifact(d.id!) : d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
-          </div>
-        ) : <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "20px", textAlign: "center", font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary }}>The factory hasn’t produced documents yet.</div>}
+          <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Produced by the factory</h3>
+          {produced.length ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+              {produced.map((d, i) => <FileTile key={d.title + i} label={d.title} kind={d.kind} tag={d.agent} onOpen={d.id ? () => openArtifact(d.id!) : d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
+            </div>
+          ) : <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "20px", textAlign: "center", font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary }}>The factory hasn’t produced documents yet.</div>}
+        </>)}
       </div>
     </div>
   );
