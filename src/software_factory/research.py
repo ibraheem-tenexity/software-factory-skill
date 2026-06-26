@@ -1,7 +1,7 @@
 """Company research — enrich a company profile via Exa (quick) or OpenRouter Fusion (deep)."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 
 
 @dataclass
