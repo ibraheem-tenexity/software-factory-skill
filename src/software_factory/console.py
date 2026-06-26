@@ -528,6 +528,96 @@ class Console:
     def _load_state(self, project_id: str) -> ProjectState:
         return ProjectState.load(project_id, ProjectStore(self._paths(project_id)["db"]))
 
+    def _load_states(self, project_ids: list[str]) -> dict[str, ProjectState]:
+        """Batch-load ProjectState objects for many runs in one DB round-trip.
+
+        Runs with no projectstate row get a default state, matching the behaviour of
+        ``ProjectState.load(..., empty data)``.
+        """
+        out: dict[str, ProjectState] = {}
+        if not project_ids:
+            return out
+        placeholders = ",".join("?" for _ in project_ids)
+        rows = dbshim.connect(self._projects_dir).execute(
+            f"SELECT project_id, data FROM projectstate WHERE project_id IN ({placeholders})",
+            tuple(project_ids),
+        ).fetchall()
+        for row in rows:
+            out[row["project_id"]] = ProjectState.from_data(
+                row["project_id"], json.loads(row["data"])
+            )
+        # Legacy / registry-only edge cases: produce default states without persisting.
+        for pid in project_ids:
+            if pid not in out:
+                out[pid] = ProjectState(pid, _store=None)
+        return out
+
+    def _phase_statuses(self, project_ids: list[str]) -> dict[str, dict[str, str]]:
+        """Latest phase name -> status for each of the given projects (one batch query)."""
+        out = {pid: {} for pid in project_ids}
+        if not project_ids:
+            return out
+        placeholders = ",".join("?" for _ in project_ids)
+        rows = dbshim.connect(self._projects_dir).execute(
+            f"SELECT project_id, name, status FROM phases WHERE project_id IN ({placeholders}) "
+            "ORDER BY ts, id",
+            tuple(project_ids),
+        ).fetchall()
+        for row in rows:
+            out[row["project_id"]][row["name"]] = row["status"]
+        return out
+
+    def _blockers_by_project(self, project_ids: list[str]) -> dict[str, list[dict]]:
+        """Return blockers grouped by project_id without N+1 DB calls."""
+        out = {pid: [] for pid in project_ids}
+        if not project_ids:
+            return out
+        placeholders = ",".join("?" for _ in project_ids)
+        rows = dbshim.connect(self._projects_dir).execute(
+            f"SELECT project_id, blocks, cleared FROM blockers WHERE project_id IN ({placeholders})",
+            tuple(project_ids),
+        ).fetchall()
+        for row in rows:
+            out[row["project_id"]].append(
+                {"blocks": row.get("blocks"), "cleared": row["cleared"]}
+            )
+        return out
+
+    def _agent_roles_by_project(self, project_ids: list[str]) -> dict[str, list[str]]:
+        """Distinct agent roles per project, preserving first-seen order, batched."""
+        out = {pid: [] for pid in project_ids}
+        if not project_ids:
+            return out
+        placeholders = ",".join("?" for _ in project_ids)
+        rows = dbshim.connect(self._projects_dir).execute(
+            f"SELECT project_id, role FROM agents WHERE project_id IN ({placeholders}) "
+            "ORDER BY started_at, agent_id",
+            tuple(project_ids),
+        ).fetchall()
+        seen = {pid: set() for pid in project_ids}
+        for row in rows:
+            pid, role = row["project_id"], row.get("role")
+            if role and role not in seen[pid]:
+                seen[pid].add(role)
+                out[pid].append(role)
+        return out
+
+    def _current_phase_from_state(self, state: ProjectState, phase_status: dict[str, str]) -> str:
+        """Compute the live phase for the dashboard without an extra DB call."""
+        if state.phase in ("done", "stopped"):
+            return state.phase
+        recorded = phase_status
+        implied: set[str] = set()
+        if state.stage2_done:
+            implied.add("tickets")
+        elif state.stage1_done:
+            implied.add("research")
+        idx = {n: i for i, n in enumerate(PIPELINE)}
+        active = [n for n in PIPELINE if n in recorded] + [n for n in implied]
+        if not active:
+            return state.phase
+        return max(active, key=lambda n: idx[n])
+
     def _project_spend(self, project_id: str) -> float:
         """THIS run's own spend (the per-project budget basis). Prior runs/projects do NOT count —
         each run/project is independently capped. Authoritative cost from the project.log, falling
@@ -1749,7 +1839,12 @@ class Console:
 
         include_archived=True keeps soft-deleted rows (the dashboard's Archived section); the
         default hides them (every existing caller relies on that). Every row carries an
-        `archived` flag so the caller can split active from archived."""
+        `archived` flag so the caller can split active from archived.
+
+        The dashboard list is intentionally read-only here: live spend is recomputed by the
+        poller and persisted to projectstate.spent_usd, so we do NOT reparse the project.log
+        on every listing.
+        """
         runs = []
         owner = owner.lower() if owner else None
         # Local dirs ∪ the pg registry (pg mode): a run can exist only in the registry —
@@ -1765,9 +1860,19 @@ class Console:
             if PROJECT_ID_RE.fullmatch(r["project_id"]):
                 created[r["project_id"]] = r.get("created") or 0
         names = local + [pid for pid in created if pid not in set(local)]
+        if not names:
+            return []
+
+        # Batch-load the three foreign projections used by every row so the loop is O(1)
+        # queries instead of O(runs).
+        states = self._load_states(names)
+        phase_statuses = self._phase_statuses(names)
+        blocker_rows = self._blockers_by_project(names)
+        agent_roles = self._agent_roles_by_project(names)
+
         for name in names:
-            st = self._load_state(name)
-            if getattr(st, "archived", False) and not include_archived:
+            st = states[name]
+            if st.archived and not include_archived:
                 continue   # soft-deleted — hidden unless the caller asked to include them
             if owner is not None and (st.owner or "").lower() != owner:
                 continue   # member view: skip runs they don't own (unowned '' never matches)
@@ -1776,14 +1881,8 @@ class Console:
             # confusion). An uncleared budget blocker = stopped, full stop.
             budget_stopped = any(
                 b.get("blocks") == "budget" and not b["cleared"]
-                for b in ProjectStore(self._paths(name)["db"]).blockers()
+                for b in blocker_rows[name]
             )
-            # Distinct agent roles on the run (first-seen order) — the dashboard's per-project
-            # avatar stack (PRD §2.2). Empty when nothing's been spawned yet.
-            roles: list[str] = []
-            for a in AgentRegistry(self._paths(name)["agents_db"]).agents_for(name):
-                if a.role and a.role not in roles:
-                    roles.append(a.role)
             # Last activity (epoch) for the dashboard's "updated" column; falls back to the
             # registry create time for a registry-only run with no local dir yet.
             try:
@@ -1792,11 +1891,11 @@ class Console:
                 updated = created.get(name, 0)
             runs.append({
                 "project_id": name,
-                "phase": self.current_phase(name),
+                "phase": self._current_phase_from_state(st, phase_statuses[name]),
                 "description": st.description,
                 "name": st.name,
                 "deploy_url": st.deploy_url,
-                "spent_usd": self._cost(name) or st.spent_usd,
+                "spent_usd": st.spent_usd or 0,
                 "stage": st.stage,
                 "budget_stopped": budget_stopped,
                 "held": st.held,
@@ -1804,7 +1903,7 @@ class Console:
                 # Immutable creator (falls back to current owner for not-yet-backfilled rows).
                 "created_by": getattr(st, "created_by", "") or st.owner,
                 "created_at": getattr(st, "created_at", 0.0) or None,
-                "agents": roles[:5],
+                "agents": agent_roles[name][:5],
                 "updated": updated,
                 "runtime": st.runtime,
                 "is_demo": bool(getattr(st, "is_demo", False)),

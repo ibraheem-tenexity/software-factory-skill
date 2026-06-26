@@ -116,6 +116,17 @@ class ProjectState:
     _store: Optional[Store] = field(default=None, repr=False, compare=False)
 
     @classmethod
+    def from_data(cls, project_id: str, data: dict) -> "ProjectState":
+        """Hydrate a ProjectState from a plain dict (used by batch loaders).
+
+        The returned instance has no backing ``_store``, so it is read-only: any code that
+        needs to save must go through ``ProjectState.load(store)`` instead.
+        """
+        known = {k: v for k, v in data.items() if k in _PERSISTED}
+        known["project_id"] = project_id
+        return cls(_store=None, **known)
+
+    @classmethod
     def load(cls, project_id: str, store: Store) -> "ProjectState":
         data = store.read(project_id) or {}
         known = {k: v for k, v in data.items() if k in _PERSISTED}
