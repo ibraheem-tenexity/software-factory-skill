@@ -129,6 +129,24 @@ def test_chat_threads_viewer_role_to_concierge(auth_mod, auth_client, monkeypatc
     assert captured.get("owner") == "op@tenexity.ai"
 
 
+def test_chat_timeout_returns_504(auth_mod, auth_client, monkeypatch):
+    # If handle_message stalls past the deadline the endpoint returns 504, not a hung connection.
+    import asyncio
+    _login(auth_mod, auth_client, monkeypatch)
+
+    class _StallingRunner:
+        async def handle_message(self, *a, **kw):
+            await asyncio.sleep(9999)
+
+    monkeypatch.setattr(auth_mod.state, "_chat_runner", _StallingRunner())
+    # Patch the timeout constant to 0.01 s so the test doesn't actually wait 120 s.
+    import console.routers.chat as _chat_mod
+    monkeypatch.setattr(_chat_mod, "_CHAT_TIMEOUT", 0.01)
+    r = auth_client.post("/api/chat", json={"message": "stall"})
+    assert r.status_code == 504
+    assert "timed out" in r.json()["detail"]
+
+
 def test_get_org_null_before_onboarding(auth_mod, auth_client, monkeypatch):
     # A freshly-logged-in user with no org on file → GET /api/org returns null (first-time path).
     _login(auth_mod, auth_client, monkeypatch)

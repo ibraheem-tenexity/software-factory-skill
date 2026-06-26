@@ -14,6 +14,9 @@ from console.schemas import ChatIn, DepsIn
 
 router = APIRouter()
 
+# Slightly longer than the 90 s FE abort (PR #153) so the client fires first; server is the backstop.
+_CHAT_TIMEOUT = 120
+
 
 @router.post("/api/chat")
 async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
@@ -46,11 +49,16 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
         user_msg.metadata["images"] = [i.get("name", "image") for i in body.images]
 
     try:
-        result_project_id, response_msgs = await state._chat_runner.handle_message(
-            project_id, body.message, body.files, body.images, runtime=body.runtime,
-            planning_model=body.planning_model, impl_model=body.impl_model,
-            project_name=body.project_name, gated=body.gated,
-            owner=v[0] or "", role=v[1] or "member")
+        result_project_id, response_msgs = await asyncio.wait_for(
+            state._chat_runner.handle_message(
+                project_id, body.message, body.files, body.images, runtime=body.runtime,
+                planning_model=body.planning_model, impl_model=body.impl_model,
+                project_name=body.project_name, gated=body.gated,
+                owner=v[0] or "", role=v[1] or "member"),
+            timeout=_CHAT_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="chat turn timed out — try again")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
