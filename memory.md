@@ -219,3 +219,21 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. GitHub issue #114 `feat(dashboard): discard-draft control...` is CLOSED/MERGED; branch `fix/114-cross-project-isolation` exists but has no commits and its name does not match the issue.
 3. Main has since advanced to 1cab932 (#158 logging refactor) after the deploy landed on cd18624.
 4. Summary: deploy lane is done; stopping to ask the operator/coordinator for the real next backend ticket — likely the previously mentioned Concierge-hang or a correctly-numbered cross-project isolation issue.
+
+# OpenCode agent (tqqqko1h) Update at Time: 26:06:2026:21:47:00.000
+1. Investigated the real cross-project isolation ticket after discovering #114 is a merged discard-draft UI PR; found docs/CONTEXT_EXPORT.md task #13 naming it as a pending "project_id-scope TicketStore/canvas queries" issue, with evidence `scratchpad/edutech2.log` and `edutech3.log` (logs absent in this checkout).
+2. `docs/CONTEXT_EXPORT.md`, `src/software_factory/{tickets.py,db.py}`, `console/routers/projects.py`, `console/deps.py`, GitHub issues/PRs via `gh` in `ibraheem-tenexity/software-factory-skill`.
+3. GitHub search for "isolation" and "cross project" returns only PR #85 (intentional, gated cross-project artifact fetch) and unrelated cross-tenant operator-portal work; no open or closed issue matches the described TicketStore/canvas leak. Current TicketStore/ProjectStore SQL is project_id-scoped.
+4. Summary: the cross-project isolation work appears unfiled or tracked outside GitHub. Propose creating a new issue/PR with a regression reproduction before changing code; waiting for operator confirmation and the missing log evidence.
+
+# OpenCode agent (tqqqko1h) Update at Time: 26:06:2026:22:32:00.000
+1. Picked up the GET /api/projects performance fix from coordinator xpyjn5m7: replaced per-project N+1 queries with batched set-based loads and added an opt-in application-side connection pool in dbshim.
+2. `src/software_factory/console.py` (`list_projects`, `_load_states`, `_phase_statuses`, `_blockers_by_project`, `_agent_roles_by_project`, `_current_phase_from_state`), `src/software_factory/dbshim.py` (`_ConnectionPool`, `_pooled_conn`), `src/software_factory/projectstate.py` (`from_data`).
+3. `list_projects` now does ~5 queries total (projectstate, phases, blockers, agents, registry) regardless of run count and no longer reparses project.log via `_cost`; it uses persisted `spent_usd`. The pool borrows connections per statement and is enabled automatically on Railway (default 10) or via `SF_DB_POOL_SIZE`, disabled in tests.
+4. Summary: branch `perf/list-projects-pool` in worktree `../fix-perf-list-projects`; syntax-checked. Need to run the real test suite once a database is available, then open a PR through the integrator.
+
+# OpenCode agent Update at Time: 26:06:2026:16:10:00.000
+1. Resolved the #155 live-log-flush merge conflict, merged it, and deployed the batch (#161 db pool + #154 phase-lag + #155 log flush) to factory-console.
+2. `console/poller.py` (kept log-flush block, dropped removed tracing `_tracer.tick`); main repo `29d6254`; worktree `../fix-perf-list-projects`.
+3. Deploy succeeded (Railway build `67b98090-5325-4eaf-8dfb-5f02e11b377a`); rebased `perf/list-projects-pool` onto updated main, stripped redundant dbshim pool code since #161 owns pooling, and rewrote PR #162 as a list-only change.
+4. Summary: full unit suite 872 passed / 2 pre-existing failures (`opencode_config()` `steps` kwarg drift); PR #162 titled/body updated and force-pushed to `3af53d2`; ready for integrator merge.
