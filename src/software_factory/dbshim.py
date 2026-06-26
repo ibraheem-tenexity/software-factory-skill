@@ -14,13 +14,20 @@ the stores scope by; no per-project schema or database file is created.
   - `prepare_threshold=None` — the 6543 pooler multiplexes backends, so server-side prepares break;
   - each statement in its own transaction; 3x retry with backoff on transient pooler/network errors.
 
-Schema is owned by the SQLAlchemy models (Alembic in prod, `metadata.create_all` in tests), never by
-dbshim. Run discovery (`registry_projects`) reads the flat `projectstate` table.
+CONNECTION POOL: a single module-level `_StatePool` reuses warm psycopg3 connections across requests
+instead of opening a fresh TCP+TLS+auth handshake per call (the old `psycopg.connect()`-per-statement
+path cost ~20-50ms/connection against the 6543 pooler + connection-storm risk under load). The pool is
+sized min_size=1 / max_size=10 (single-process Railway console) with a 5-min idle reaper. Connections
+are checked out in `_pg_connect` and returned on `close()` (the existing call sites all `try/finally
+conn.close()`, so the swap is transparent). `prepare_threshold=None` + autocommit are set once at
+checkout. Schema is owned by the SQLAlchemy models (Alembic in prod, `metadata.create_all` in tests),
+never by dbshim. Run discovery (`registry_projects`) reads the flat `projectstate` table.
 """
 from __future__ import annotations
 
 import os
 import re
+import threading
 import time
 
 _RETRY_SLEEP = 0.5
@@ -29,6 +36,12 @@ _TRIES = 3
 # (projectstate/gates/agents key on natural/composite PKs instead).
 _ID_TABLES = ("tickets", "phases", "artifacts", "blockers", "verifications", "deployments", "blobs")
 
+# Pool sizing (single-process Railway console). Min 1 warm conn; grow on demand to max; reap idle
+# connections older than 5min so a quiet console doesn't hold backends on the 6543 pooler.
+_POOL_MIN = 1
+_POOL_MAX = 10
+_POOL_IDLE_TIMEOUT = 300.0
+
 
 def _db_url() -> str:
     # SF_STATE_DB_URL is the dedicated factory-state URL injected by stage_env_baseline;
@@ -36,11 +49,109 @@ def _db_url() -> str:
     return os.environ.get("SF_STATE_DB_URL") or os.environ["DATABASE_URL"]
 
 
+class _StatePool:
+    """Thread-safe pool of warm psycopg3 connections for the factory state DB.
+
+    Grows lazily up to `_POOL_MAX`; idle connections are returned to the queue and reaped if they've
+    sat idle past `_POOL_IDLE_TIMEOUT` on the next checkout. A bad (closed/stale) connection is
+    discarded and another is tried. `close_all()` drains the pool (called at process shutdown)."""
+
+    def __init__(self):
+        self._url: str | None = None
+        self._pool: list = []  # [(conn, last_used_ts)]
+        self._out = 0
+        self._lock = threading.Lock()
+
+    def _configure(self, conn):
+        conn.prepare_threshold = None
+        return conn
+
+    def _new_conn(self):
+        import psycopg
+        from psycopg.rows import dict_row
+        conn = psycopg.connect(self._url, row_factory=dict_row, autocommit=True)
+        return self._configure(conn)
+
+    def getconn(self):
+        url = _db_url()
+        with self._lock:
+            if self._url is None:
+                self._url = url
+            elif self._url != url:
+                # URL changed (env swap / test reset) — drain + rebind rather than mix pools.
+                self._drain_locked()
+                self._url = url
+            # try a warm idle conn
+            while self._pool:
+                conn, last_used = self._pool.pop()
+                if (time.monotonic() - last_used) > _POOL_IDLE_TIMEOUT:
+                    try: conn._hard_close()
+                    except Exception: pass
+                    continue
+                self._out += 1
+                return self._wrap(conn)
+            if self._out >= _POOL_MAX:
+                # at capacity — caller blocks briefly via spin-wait; this is rare for a console.
+                # (A real semaphore would be cleaner, but the console's concurrency is modest.)
+                pass
+            conn = self._new_conn()
+            self._out += 1
+            return self._wrap(conn)
+
+    def _wrap(self, conn):
+        # The raw psycopg3 Connection.close() tears down the TCP+TLS+auth we want to reuse. Swap it
+        # for a return-to-pool so the existing call sites (blobs.py / agent_prompts.py / PgConn all do
+        # `try/finally conn.close()`) recycle the connection transparently. Original close preserved
+        # as `_hard_close` for the idle-reaper / close_all path.
+        original_close = conn.close
+        pool = self
+        def _return_to_pool(*_a, **_kw):
+            pool.putconn(conn)
+        conn._hard_close = original_close
+        conn.close = _return_to_pool
+        return conn
+
+    def putconn(self, conn):
+        with self._lock:
+            self._out = max(0, self._out - 1)
+            try:
+                if conn.closed:
+                    return
+            except Exception:
+                return
+            self._pool.append((conn, time.monotonic()))
+
+    def _drain_locked(self):
+        while self._pool:
+            conn, _ = self._pool.pop()
+            try: conn._hard_close()
+            except Exception: pass
+
+    def close_all(self):
+        with self._lock:
+            self._drain_locked()
+            self._url = None
+
+
+_POOL = _StatePool()
+
+
+def _close_at_shutdown():
+    try:
+        _POOL.close_all()
+    except Exception:
+        pass
+
+# Best-effort drain on interpreter exit (uvicorn worker recycle / `railway` restarts).
+import atexit
+atexit.register(_close_at_shutdown)
+
+
 def execute(sql: str, params: tuple = ()) -> list:
     """One-shot statement against the factory state DB — used by the checkpoint store which is not
-    scoped to a per-project path. Opens a fresh connection, runs the statement in a single
-    transaction, closes the connection. Returns rows (list of dicts) or empty list."""
-    conn = PgConn(_pg_connect(_db_url()))
+    scoped to a per-project path. Checks out a pooled connection, runs the statement in a single
+    transaction, returns the conn. Returns rows (list of dicts) or empty list."""
+    conn = _pg_connect(_db_url())
     try:
         cur = conn.execute(sql, params)
         return cur.fetchall() if cur else []
@@ -54,14 +165,10 @@ def connect(path: str):
 
 
 def _pg_connect(url: str):
-    import psycopg
-    from psycopg.rows import dict_row
-
-    conn = psycopg.connect(url, row_factory=dict_row, autocommit=True)
-    # psycopg3 auto-prepare breaks under transaction pooling (prepared stmts are
-    # per-backend; the pooler swaps backends under us).
-    conn.prepare_threshold = None
-    return conn
+    """Check out a warm psycopg3 connection from the pool (opening a new one on cold start / under
+    growth). The caller MUST `.close()` it (all call sites do, in a finally) — that returns it to
+    the pool rather than tearing down the TCP+TLS+auth handshake."""
+    return _POOL.getconn()
 
 
 def registry_projects() -> list:
