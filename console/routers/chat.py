@@ -1,5 +1,6 @@
 """Concierge chat: /api/chat (send), /api/chat/{pid}/history, /api/chat/{pid}/deps, SSE stream."""
 import asyncio
+import json
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,9 @@ from console.deps import require_authed, authorize_project, _can_see
 from console.schemas import ChatIn, DepsIn
 
 router = APIRouter()
+
+# Server-side backstop: FE 90 s AbortController fires first on real stalls; this is the fallback.
+_CHAT_TIMEOUT = 120
 
 
 @router.post("/api/chat")
@@ -45,25 +49,42 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
     if body.images:
         user_msg.metadata["images"] = [i.get("name", "image") for i in body.images]
 
-    try:
-        result_project_id, response_msgs = await state._chat_runner.handle_message(
-            project_id, body.message, body.files, body.images, runtime=body.runtime,
-            planning_model=body.planning_model, impl_model=body.impl_model,
-            project_name=body.project_name, gated=body.gated,
-            owner=v[0] or "", role=v[1] or "member")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    pid = project_id  # capture for closure
 
-    if not project_id:
-        project_id = result_project_id
-    if project_id:
-        store = ChatStore(state._chat_path(project_id))
-        store.append(user_msg)
-        for m in response_msgs:
-            store.append(m)
-        state._push_sse(project_id, response_msgs)
+    async def generate():
+        result: dict = {}
+        try:
+            async with asyncio.timeout(_CHAT_TIMEOUT):
+                async for line in state._chat_runner.handle_message_streamed(
+                    pid, body.message, body.files, body.images,
+                    runtime=body.runtime, planning_model=body.planning_model,
+                    impl_model=body.impl_model, project_name=body.project_name,
+                    gated=body.gated, owner=v[0] or "", role=v[1] or "member",
+                ):
+                    yield line
+                    try:
+                        evt = json.loads(line)
+                        if evt.get("type") == "done":
+                            result.update(evt)
+                    except Exception:
+                        pass
+        except asyncio.TimeoutError:
+            yield json.dumps({"type": "error", "detail": "chat turn timed out — try again"}) + "\n"
+        except Exception as e:
+            yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
 
-    return {"project_id": project_id, "messages": [m.to_dict() for m in response_msgs]}
+        # Persist to ChatStore + push SSE after stream completes.
+        final_pid = result.get("project_id") or pid
+        if final_pid and result.get("type") == "done":
+            store = ChatStore(state._chat_path(final_pid))
+            store.append(user_msg)
+            msgs = [ChatMessage.from_dict(m) for m in (result.get("messages") or [])]
+            for m in msgs:
+                store.append(m)
+            state._push_sse(final_pid, msgs)
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/api/chat/{pid}/history")
