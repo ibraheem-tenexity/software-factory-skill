@@ -38,10 +38,11 @@ _EXA = {"type": "http", "url": "https://mcp.exa.ai/mcp", "headers": {"x-api-key"
 # THE STAGE-3 AGENT (the `provision-db` verb wrapping deploy_db.py) and written to
 # context/deploy-db.json. Railway stays — the agent needs it to deploy the app
 # (create_service/deploy/generate_domain), not to make a DB.
+_OPEN_ROUTER = { "type":"http", "url": "https://mcp.openrouter.ai/mcp" }
 
 
 def mcp_config(stage: int) -> dict:
-    servers = {"playwright": _PLAYWRIGHT, "exa": _EXA}
+    servers = {"playwright": _PLAYWRIGHT, "exa": _EXA. "openrouter":_OPEN_ROUTER}
     if stage >= 3:
         servers["railway"] = _RAILWAY
     return {"mcpServers": servers}
