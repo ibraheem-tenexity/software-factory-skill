@@ -8,8 +8,9 @@ import { T, Icon, Btn, StatusPill, Wordmark, TextInput } from "../onboarding/des
 import { AccountMenu } from "../AccountMenu";
 import { OverviewTab } from "./OverviewTab";
 import { DocumentsTab } from "./DocumentsTab";
+import { LogTab } from "./LogTab";
 
-type Tab = "overview" | "documents";
+type Tab = "overview" | "documents" | "log";
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 
 function statusOf(s: ProjectSummary & Record<string, any>): { label: string; tone: Tone } {
@@ -23,6 +24,7 @@ function statusOf(s: ProjectSummary & Record<string, any>): { label: string; ton
 const TABS: { id: Tab | "factory"; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "factory", label: "Factory console" },
+  { id: "log", label: "Build log" },
   { id: "documents", label: "Documents" },
 ];
 
@@ -35,7 +37,7 @@ function setParam(key: string, value: string | null) {
 export function ProjectView({ projectId, onBack, onOpenFactory, onResume, onOpen }: { projectId: string; onBack: () => void; onOpenFactory: () => void; onResume?: () => void; onOpen?: (id: string) => void }) {
   const [tab, setTab] = useState<Tab>(() => {
     const t = new URLSearchParams(location.search).get("tab");
-    return (t === "documents" ? "documents" : "overview") as Tab;
+    return (t === "documents" || t === "log" ? t : "overview") as Tab;
   });
   const [status, setStatus] = useState<(ProjectSummary & Record<string, any>) | null>(null);
   const [menu, setMenu] = useState(false);
@@ -146,9 +148,9 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume, onOpen
       </div>
 
       {/* tab content (peer views; Factory console navigates out via onOpenFactory) */}
-      {tab === "overview"
-        ? <OverviewTab projectId={projectId} onOpenFactory={onOpenFactory} onOpenDocuments={() => setTab("documents")} onResume={onResume} onDiscard={isDraft ? doArchive : undefined} />
-        : <DocumentsTab projectId={projectId} />}
+      {tab === "overview" && <OverviewTab projectId={projectId} onOpenFactory={onOpenFactory} onOpenDocuments={() => setTab("documents")} onResume={onResume} onDiscard={isDraft ? doArchive : undefined} />}
+      {tab === "documents" && <DocumentsTab projectId={projectId} />}
+      {tab === "log" && <LogTab projectId={projectId} />}
     </div>
   );
 }

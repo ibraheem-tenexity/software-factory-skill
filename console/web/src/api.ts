@@ -279,6 +279,7 @@ export const api = {
   projects: (includeArchived = false) =>
     get<{ projects: ProjectSummary[] }>(`/api/projects${includeArchived ? "?include_archived=true" : ""}`),
   status: (id: string) => get<ProjectSummary & Record<string, any>>(`/api/projects/${id}`),
+  projectLog: (id: string) => get<{ log: string; capped: boolean; returned_bytes: number; total_bytes: number }>(`/api/projects/${id}/log`),
   graph: (id: string) => get<Graph>(`/api/projects/${id}/graph`),
   tickets: (id: string) => get<TicketsResponse>(`/api/projects/${id}/tickets`),
   brief: (id: string) => get<BriefResponse>(`/api/projects/${id}/brief`),
