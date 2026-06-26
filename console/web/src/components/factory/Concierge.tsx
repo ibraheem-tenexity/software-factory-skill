@@ -37,6 +37,7 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
   const [events, setEvents] = useState<ProjectEvent[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [steerErr, setSteerErr] = useState("");
   const [rail, setRail] = useState<Rail>("feed");
   const feedRef = useRef<HTMLDivElement>(null);
 
@@ -63,8 +64,10 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
       const r = await api.chat({ project_id: projectId, project_name: projectName || "", message: text });
       const reply = (r.messages || []) as ChatMsg[];
       setMessages((m) => [...m, ...reply]);
-    } catch { /* leave the optimistic user line; surface nothing destructive */ }
-    finally { setSending(false); }
+      setSteerErr("");
+    } catch (e: any) {
+      setSteerErr(String(e?.message || "Message failed — try again."));
+    } finally { setSending(false); }
   };
 
   return (
@@ -144,6 +147,9 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
         </div>
       )}
 
+      {steerErr && (
+        <span style={{ font: `500 11.5px/1.4 ${T.sans}`, color: T.secondary }}>{steerErr}</span>
+      )}
       <div>
         <Composer placeholder="Steer the build…" value={draft} onChange={setDraft} onSend={steer} loading={sending} />
       </div>

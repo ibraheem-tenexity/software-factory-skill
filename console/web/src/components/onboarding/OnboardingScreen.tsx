@@ -1,6 +1,7 @@
 // OnboardingScreen.tsx — Single-Page Intake + Docked Concierge (design optionC.jsx), on the
 // DRAFT MODEL (docs/plans/concierge-onboarding-api.md):
-//   - EAGER DRAFT on mount (POST /api/drafts) — the form + the Concierge rail share ONE draft id.
+//   - DEFERRED DRAFT: POST /api/drafts on first name keystroke OR first Concierge message — the form
+//     + the Concierge rail share ONE draft id.
 //   - DEBOUNCED write-through (PATCH /api/projects/{id}/draft {name,goal,scope}) — never per-keystroke,
 //     and the response NEVER overwrites local input state (that would re-introduce focus loss).
 //   - Server composes `description` from goal+scope (composeDescription DELETED from the FE).
@@ -541,11 +542,24 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
 
   const sendChat = async () => {
     const text = composer.trim();
-    if (!text || !draftId || chatBusy) return;
+    if (!text || chatBusy) return;
+    // Create the draft on first chat message if the user hasn't typed a project name yet —
+    // the concierge can gather that itself, so the form doesn't need to come first.
+    let pid = draftId;
+    if (!pid) {
+      try {
+        const { project_id } = await api.createDraft({ runtime: engineProviderRef.current });
+        setDraftId(project_id);
+        pid = project_id;
+      } catch {
+        setChatErr("Couldn't start a session — try again.");
+        return;
+      }
+    }
     setMsgs((m) => [...m, { role: "user", content: text }]);
     setComposer(""); setChatBusy(true); setChatErr("");
     try {
-      const r = await api.chat({ message: text, project_id: draftId });
+      const r = await api.chat({ message: text, project_id: pid });
       const replies = (r.messages || []).filter((x: any) => x && x.role !== "user").map((x: any) => ({ role: x.role || "assistant", content: x.content || "" }));
       setMsgs((m) => [...m, ...replies]);
       // bridge: reflect any company values the concierge wrote (project name/goal/scope have no GET yet)
