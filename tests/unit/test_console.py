@@ -914,13 +914,13 @@ def test_stage3_prompt_is_plan_first_orchestrator_only_with_playwright_gate(tmp_
 
 
 def test_per_stage_models_opus_for_1_and_2_sonnet_for_3(tmp_path):
-    # Stages 1 & 2 run on Opus 4.8; Stage 3 on Sonnet. Turns are bounded. cwd = the workspace.
+    # Stages 1 & 2 run on Opus 4.8; Stage 3 on Sonnet. cwd = the workspace.
     import os
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
     rid = c.start_project(ProjectRequest(description="guestbook"))           # Stage 1
     assert _model_of(launcher) == "claude-opus-4-8"
-    assert "--max-turns" in launcher.argv
+    assert "--max-turns" not in launcher.argv
     assert launcher.cwd == os.path.join(str(tmp_path), rid, "workspace")
 
     st = c._load_state(rid); st.stage1_done = True; st.save()
@@ -1264,70 +1264,6 @@ def test_status_carries_the_effective_budget_ceiling(tmp_path, monkeypatch):
     assert c.status(rid)["budget_ceiling"] == 30.0
     c.raise_budget(rid, 55)
     assert c.status(rid)["budget_ceiling"] == 55.0
-
-
-def _max_turns_of(launcher):
-    a = launcher.argv
-    return a[a.index("--max-turns") + 1]
-
-
-def test_max_turns_per_project_override_else_env_else_default(tmp_path, monkeypatch):
-    # _max_turns mirrors _budget_ceiling: the run's own override wins, else SF_MAX_TURNS, else 200.
-    launcher = FakeLauncher()
-    c = console(tmp_path, launcher)
-    rid = c.start_project(ProjectRequest(description="app"))
-    # no override, no env -> default 200
-    monkeypatch.delenv("SF_MAX_TURNS", raising=False)
-    assert c._max_turns(rid) == 200
-    # env present, still no override -> env
-    monkeypatch.setenv("SF_MAX_TURNS", "150")
-    assert c._max_turns(rid) == 150
-    # per-project override wins over env
-    c.set_max_turns(rid, 333)
-    assert c._max_turns(rid) == 333
-
-
-def test_set_max_turns_persists_and_validates_positive(tmp_path):
-    c = console(tmp_path, FakeLauncher())
-    rid = c.start_project(ProjectRequest(description="app"))
-    out = c.set_max_turns(rid, 420)
-    assert out == {"project_id": rid, "max_turns": 420}
-    assert c._load_state(rid).max_turns == 420
-    for bad in (0, -5):
-        try:
-            c.set_max_turns(rid, bad)
-            assert False, "expected ValueError"
-        except ValueError:
-            pass
-
-
-def test_claude_launch_passes_per_project_max_turns(tmp_path, monkeypatch):
-    # The per-project override (not the env) reaches the claude --max-turns flag at stage launch.
-    monkeypatch.setenv("SF_MAX_TURNS", "200")
-    launcher = FakeLauncher()
-    c = console(tmp_path, launcher)
-    rid = c.start_project(ProjectRequest(description="app"))
-    assert _max_turns_of(launcher) == "200"            # env default at first launch
-    c.set_max_turns(rid, 90)
-    st = c._load_state(rid); st.stage1_done = True; st.save()
-    c.start_stage2(rid)                                # relaunch reads the override
-    assert _max_turns_of(launcher) == "90"
-
-
-def test_status_carries_the_effective_max_turns(tmp_path, monkeypatch):
-    monkeypatch.setenv("SF_MAX_TURNS", "200")
-    launcher = FakeLauncher()
-    c = console(tmp_path, launcher)
-    rid = c.start_project(ProjectRequest(description="app"))
-    assert c.status(rid)["max_turns"] == 200
-    c.set_max_turns(rid, 275)
-    assert c.status(rid)["max_turns"] == 275
-
-
-def test_start_project_accepts_max_turns_at_creation(tmp_path):
-    c = console(tmp_path, FakeLauncher())
-    rid = c.start_project(ProjectRequest(description="app", max_turns=512))
-    assert c._load_state(rid).max_turns == 512
 
 
 def test_demo_credentials_surface_from_the_recorded_artifact(tmp_path):

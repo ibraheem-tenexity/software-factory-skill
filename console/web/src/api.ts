@@ -16,7 +16,6 @@ export type ProjectSummary = {
   updated?: number;       // last-activity epoch (seconds)
   created_by?: string;    // immutable creator email (set-once; backfilled from owner for legacy projects)
   created_at?: number;    // epoch seconds of project creation
-  max_turns?: number;     // per-stage turn cap (resolved per-project value)
   archived?: boolean;     // soft-deleted — rendered in the dashboard's Archived section
 };
 
@@ -78,7 +77,7 @@ export type ProjectMaterial = { id?: string; name: string; kind?: string; size_b
 export type ProjectArtifact = { id?: number; title: string; path?: string; kind?: string; agent?: string; ts?: number };
 export type ProjectOverview = {
   brief?: { name?: string; description?: string; goal?: string; scope?: string[]; owner?: string; phase?: string; stage?: number; created?: number | string; runtime?: string; created_by?: string };
-  build?: { pct?: number; tickets_done?: number; tickets_total?: number; agents_working?: number; spent_usd?: number; budget_ceiling?: number; max_turns?: number; done?: boolean; deploy_url?: string };
+  build?: { pct?: number; tickets_done?: number; tickets_total?: number; agents_working?: number; spent_usd?: number; budget_ceiling?: number; done?: boolean; deploy_url?: string };
   services?: { label: string; kind?: string; status?: string; detail?: string; url?: string }[];
   agents?: { role: string; model?: string; status?: string; task?: string; cost_usd?: number }[];
   org?: { name?: string; industry?: string; connected_systems?: string[] } | null;
@@ -358,9 +357,9 @@ export const api = {
   // and records creds_vault_ids on the draft; promote threads those into the runner env (BYOK wins
   // over the platform key). keySource/key on createDraft/patchDraft are passthrough (ignored by
   // Pydantic); the real BYOK path is submitCreds.
-  createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number; max_turns?: number }) =>
+  createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number }) =>
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),
-  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number; max_turns?: number }) =>
+  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number }) =>
     send<{ name: string; goal: string; scope: string[]; description: string; brief: Record<string, string>; coverage: Record<string, boolean> }>(`/api/projects/${id}/draft`, "PATCH", body),
   // Read counterpart to PATCH /draft (qsvigmth's run-control PR #48) — rehydrates the intake form
   // when RESUMING an existing draft instead of minting a new one.
@@ -402,8 +401,6 @@ export const api = {
     send<{ doc?: OrgDoc }>(`/api/org/docs/${docId}`, "PATCH", body),
   putBudget: (id: string, ceiling: number) =>
     send<Record<string, any>>(`/api/projects/${id}/budget`, "POST", { ceiling }),
-  setProjectTurns: (id: string, turns: number) =>
-    send<Record<string, any>>(`/api/projects/${id}/turns`, "POST", { turns }),
 };
 
 export const BRIEF_SECTIONS: { key: string; label: string }[] = [
