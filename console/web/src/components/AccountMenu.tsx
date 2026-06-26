@@ -9,7 +9,8 @@
 // graceful-degrade until the backend ships them (name→email fallback, staff item hidden, logout
 // redirects regardless).
 import React, { useEffect, useRef, useState } from "react";
-import { api, Me } from "../api";
+import { api } from "../api";
+import { useMe } from "./MeContext";
 import { T, Icon, Avatar } from "./onboarding/design";
 
 const LogoutIcon = () => (
@@ -29,10 +30,9 @@ function MenuItem({ label, color, icon, onClick }: { label: string; color: strin
 
 export function AccountMenu({ size = 28 }: { size?: number }) {
   const [open, setOpen] = useState(false);
-  const [me, setMe] = useState<Me | null>(null);
+  const me = useMe();
   const ref = useRef<HTMLSpanElement | null>(null);
 
-  useEffect(() => { api.me().then(setMe).catch(() => setMe(null)); }, []);
   useEffect(() => {
     if (!open) return;
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };

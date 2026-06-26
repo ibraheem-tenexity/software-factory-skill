@@ -5,7 +5,8 @@
 // Usage & billing via /api/org/usage (+ PATCH /api/org/billing). Every section degrades to an empty
 // state until its backend lands, so the screen ships independently.
 import { useEffect, useRef, useState } from "react";
-import { api, Org, Member, OrgDoc, OrgUsage, Me } from "../api";
+import { api, Org, Member, OrgDoc, OrgUsage } from "../api";
+import { useMe } from "./MeContext";
 import { T, Icon, Sparkle, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, Field, TextInput } from "./onboarding/design";
 import { AccountMenu } from "./AccountMenu";
 import { ListRowSkel, FileTileSkel, MetricCardSkel } from "./skeleton";
@@ -109,7 +110,7 @@ function FileTile({ d, onDelete, onSave }: { d: OrgDoc; onDelete?: () => void; o
 export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
   const [sec, setSec] = useState<Section>("profile");
   const [org, setOrg] = useState<Org | null>(null);
-  const [me, setMe] = useState<Me | null>(null);
+  const me = useMe();
   const [members, setMembers] = useState<Member[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const [docs, setDocs] = useState<OrgDoc[]>([]);
@@ -173,7 +174,6 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     api.getOrg().then((d) => setOrg(d.org)).catch(() => setOrg(null));
-    api.me().then(setMe).catch(() => setMe(null));
     loadMembers();
     loadDocs();
     loadUsage();
