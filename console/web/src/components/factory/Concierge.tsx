@@ -37,7 +37,7 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
   const [events, setEvents] = useState<ProjectEvent[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [steerErr, setSteerErr] = useState("");
+  const [sendErr, setSendErr] = useState("");
   const [rail, setRail] = useState<Rail>("feed");
   const feedRef = useRef<HTMLDivElement>(null);
 
@@ -58,16 +58,51 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
+    setSendErr("");
     setMessages((m) => [...m, { role: "user", content: text, ts: Date.now() / 1000 }]);
     setDraft("");
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90_000);
     try {
-      const r = await api.chat({ project_id: projectId, project_name: projectName || "", message: text });
-      const reply = (r.messages || []) as ChatMsg[];
-      setMessages((m) => [...m, ...reply]);
-      setSteerErr("");
+      const resp = await api.chatStream(
+        { project_id: projectId, project_name: projectName || "", message: text },
+        ctrl.signal,
+      );
+      const reader = resp.body!.getReader();
+      const decoder = new TextDecoder();
+      // Optimistic assistant bubble — filled incrementally by delta events
+      setMessages((m) => [...m, { role: "assistant", content: "", ts: Date.now() / 1000 }]);
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop()!;
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const evt = JSON.parse(line);
+          if (evt.type === "delta") {
+            setMessages((m) => {
+              const copy = [...m];
+              copy[copy.length - 1] = { ...copy[copy.length - 1], content: copy[copy.length - 1].content + evt.content };
+              return copy;
+            });
+          } else if (evt.type === "done") {
+            setMessages((m) => [...m.slice(0, -1), ...(evt.messages || []) as ChatMsg[]]);
+          } else if (evt.type === "error") {
+            setSendErr(evt.detail || "Message failed — try again.");
+          }
+        }
+      }
     } catch (e: any) {
-      setSteerErr(String(e?.message || "Message failed — try again."));
-    } finally { setSending(false); }
+      setSendErr(ctrl.signal.aborted ? "Response timed out — try again." : String(e?.message || "Message failed — try again."));
+      // Remove the optimistic bubble on error
+      setMessages((m) => m[m.length - 1]?.role === "assistant" && m[m.length - 1]?.content === "" ? m.slice(0, -1) : m);
+    } finally {
+      clearTimeout(timer);
+      setSending(false);
+    }
   };
 
   return (
@@ -147,9 +182,7 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
         </div>
       )}
 
-      {steerErr && (
-        <span style={{ font: `500 11.5px/1.4 ${T.sans}`, color: T.secondary }}>{steerErr}</span>
-      )}
+      {sendErr && <span style={{ font: `400 11.5px/1.4 ${T.sans}`, color: T.danger }}>{sendErr}</span>}
       <div>
         <Composer placeholder="Steer the build…" value={draft} onChange={setDraft} onSend={steer} loading={sending} />
       </div>

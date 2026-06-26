@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api } from "./api";
+import { api, Me } from "./api";
+import { MeProvider } from "./components/MeContext";
 import { Dashboard } from "./components/Dashboard";
 import { OrgAdminScreen } from "./components/OrgAdminScreen";
 import { OnboardingScreen } from "./components/onboarding/OnboardingScreen";
@@ -87,13 +88,14 @@ type GateState = "loading" | "login" | "app";
 export function Gate() {
   const [state, setState] = useState<GateState>("loading");
   const [clientId, setClientId] = useState("");
+  const [me, setMe] = useState<Me | null>(null);
 
   const resolve = () => {
     api.authConfig()
       .then((cfg) => {
         if (!cfg.enabled) { setState("app"); return; }   // auth off ⇒ open console (no login)
         setClientId(cfg.client_id);
-        api.me().then(() => setState("app")).catch(() => setState("login"));  // 401 ⇒ login
+        api.me().then((data) => { setMe(data); setState("app"); }).catch(() => setState("login"));  // 401 ⇒ login
       })
       .catch(() => setState("app"));   // config unreachable ⇒ fail open, don't lock the user out
   };
@@ -110,5 +112,5 @@ export function Gate() {
 
   if (state === "loading") return <div style={{ height: "100vh", background: "#FAFAFA" }} />;
   if (state === "login") return <LoginScreen clientId={clientId} onAuthed={resolve} />;
-  return <App />;
+  return <MeProvider initial={me}><App /></MeProvider>;
 }

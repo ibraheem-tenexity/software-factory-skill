@@ -3,7 +3,8 @@
 // by REAL run-registry data (/api/projects, owner-scoped) + /api/me + /api/org. Fields the prototype
 // mocked are derived from real data where it exists and degrade honestly where it doesn't.
 import React, { useEffect, useState } from "react";
-import { api, phaseIsStale, ProjectSummary, Org, Me } from "../api";
+import { api, phaseIsStale, ProjectSummary, Org } from "../api";
+import { useMe } from "./MeContext";
 import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, TextInput } from "./onboarding/design";
 import { MetricCardSkel, ProjectRowSkel } from "./skeleton";
 import { AccountMenu } from "./AccountMenu";
@@ -233,7 +234,7 @@ function ProjectList({ projects, onOpen, handlers, empty }:
 
 export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => void; onNew: () => void; onOrg: () => void }) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [me, setMe] = useState<Me | null>(null);
+  const me = useMe();
   const [org, setOrg] = useState<Org | null>(null);
   const [docCount, setDocCount] = useState<number | null>(null);
   const [memberCount, setMemberCount] = useState<number | null>(null);
@@ -246,7 +247,6 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
   useEffect(() => {
     setLoading(true);
     loadProjects().finally(() => setLoading(false));
-    api.me().then(setMe).catch(() => setMe(null));
     api.getOrg().then((d) => setOrg(d.org)).catch(() => setOrg(null));
     // counts for the org-preview card (Knowledge base · Team) — real org endpoints, degrade to —
     api.orgDocs().then((d) => setDocCount(d.docs?.length ?? 0)).catch(() => setDocCount(null));

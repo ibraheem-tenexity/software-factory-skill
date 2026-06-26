@@ -250,12 +250,13 @@ async function get<T>(path: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
+async function send<T>(path: string, method: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const r = await fetch(path, {
     method,
     credentials: "include",
     headers: { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   });
   if (!r.ok) { checkAuth(r); throw new Error(`${path} → ${r.status}`); }
   return r.json() as Promise<T>;
@@ -283,8 +284,19 @@ export const api = {
   tickets: (id: string) => get<TicketsResponse>(`/api/projects/${id}/tickets`),
   brief: (id: string) => get<BriefResponse>(`/api/projects/${id}/brief`),
   putBrief: (id: string, brief: Brief) => send<BriefResponse>(`/api/projects/${id}/brief`, "PUT", brief),
-  chat: (body: Record<string, unknown>) =>
-    send<{ project_id: string; messages: any[] }>("/api/chat", "POST", body),
+  chat: (body: Record<string, unknown>, signal?: AbortSignal) =>
+    send<{ project_id: string; messages: any[] }>("/api/chat", "POST", body, signal),
+  chatStream: async (body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> => {
+    const r = await fetch("/api/chat", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!r.ok) { checkAuth(r); throw new Error(`/api/chat → ${r.status}`); }
+    return r;
+  },
   chatHistory: (id: string) => get<{ messages: any[] }>(`/api/chat/${id}/history`),
   deployments: (id: string) => get<DeploymentsResponse>(`/api/projects/${id}/deployments`),
   deps: (id: string) => get<DepsResponse>(`/api/projects/${id}/deps`),
