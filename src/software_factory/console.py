@@ -855,10 +855,8 @@ class Console:
             override = row["prompt"] if row else None
         except Exception:
             override = None
-        max_turns = self._max_turns(project_id)  # per-project override else SF_MAX_TURNS (default 200)
         ws = prepare_workspace(
             self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
-            steps=max_turns,
         )
         # Stage 3 with a database dependency provisions its OWN Railway Postgres via the
         # `provision-db` db-CLI verb (which wraps deploy_db.provision and persists the teardown
@@ -945,7 +943,6 @@ class Console:
             argv = [
                 "claude", "-p", prompt,
                 "--model", model,
-                "--max-turns", str(max_turns),
                 "--permission-mode", "bypassPermissions",
                 "--output-format", "stream-json", "--verbose",
             ]

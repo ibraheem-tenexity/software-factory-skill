@@ -70,11 +70,10 @@ def _opencode_server(srv: dict) -> dict:
     return {"type": "local", "command": [srv["command"], *srv["args"]], "enabled": True}
 
 
-def opencode_config(stage: int, steps: int) -> dict:
+def opencode_config(stage: int) -> dict:
     """opencode.json for a stage workspace — same MCP set as the claude path, translated to
     OpenCode's shape, plus: permissions that can't 'ask' (headless never answers prompts), the
-    stage contract injected ambiently via `instructions`, and the steps-capped primary agent
-    (OpenCode has no --max-turns; the cap lives here)."""
+    stage contract injected ambiently via `instructions`. No steps cap — stages run to completion."""
     servers = {name: _opencode_server(srv) for name, srv in mcp_config(stage)["mcpServers"].items()}
     cfg = {
         "$schema": "https://opencode.ai/config.json",
@@ -91,7 +90,6 @@ def opencode_config(stage: int, steps: int) -> dict:
             "factory": {
                 "mode": "primary",
                 "description": "Software factory stage agent",
-                "steps": steps,
             },
         },
     }
@@ -116,7 +114,6 @@ def prepare_workspace(
     phase_dir: str | None = None,
     runtime: str = "claude",
     skill_override: str | None = None,
-    steps: int | None = None,
 ) -> str:
     ws = workspace.create(projects_dir, project_id)
 
@@ -125,10 +122,8 @@ def prepare_workspace(
     with open(os.path.join(ws, ".mcp.json"), "w") as f:
         json.dump(mcp_config(stage), f, indent=2)
     if runtime == "opencode":
-        # Per-project cap when the console threads one through; else the SF_MAX_TURNS env default.
-        cap = steps if steps is not None else int(os.environ.get("SF_MAX_TURNS", "200") or 200)
         with open(os.path.join(ws, "opencode.json"), "w") as f:
-            json.dump(opencode_config(stage, cap), f, indent=2)
+            json.dump(opencode_config(stage), f, indent=2)
     else:
         with open(os.path.join(ws, "claude-settings.json"), "w") as f:
             json.dump(CLAUDE_SETTINGS, f, indent=2)
