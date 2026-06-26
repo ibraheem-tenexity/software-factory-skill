@@ -12,6 +12,9 @@ produce the architecture and tickets that Stage 3 will build.
 **You are an ORCHESTRATOR — you do NOT do the work yourself.** Launch native **Task** sub-agents; record state.
 Read the Stage 1 artifacts from `context/` (PRD.md and the design spec).
 
+> The **exa** web-search MCP is wired into your workspace — use its `web_search`-type tools whenever
+> live web results help (verifying libraries/APIs, checking current best practices).
+
 ## Record state in the datastore (there are NO events)
 
 ```bash

@@ -182,7 +182,52 @@ _USAGE = (
     "  start-qa <projects_dir> <project_id> <ticket_id>\n"
     "  qa-approve <projects_dir> <project_id> <ticket_id>\n"
     "  qa-reject <projects_dir> <project_id> <ticket_id> <bug_markdown>   (ticket → open, carries the bug report)\n"
+    "  provision-db <projects_dir> <project_id>   (stage-3: create this run's Railway Postgres; writes context/deploy-db.json)\n"
 )
+
+
+def _provision_db(projects_dir: str, project_id: str) -> int:
+    """Provision (or resume) this run's deploy database and persist its teardown handles to
+    ProjectState — the stage-3 agent calls this exactly once. Wraps the proven
+    ``deploy_db.provision()`` (railway add → DATABASE_URL → context/deploy-db.json); does NOT
+    reimplement it. On success: persist ``deploy_db_service_id`` (+ ``deploy_db_volume_id`` if
+    present) so the reaper can tear the DB down later, and record the "Deploy DB" artifact. On
+    failure: salvage any partial serviceId provision() wrote to disk before raising (so the reaper
+    still finds it), print the error, and return non-zero so the agent can add-blocker + STOP."""
+    from . import deploy_db
+    from .projectstate import ProjectState
+    base = db_path(projects_dir, project_id)
+    # Resolve the run's context/ dir: the stage workspace's context/ holds deploy-db.json, the same
+    # file the agent then reads for DATABASE_URL. The verb runs in the agent's cwd (the workspace),
+    # so context/ is relative to it.
+    ctx = os.path.join(os.getcwd(), "context")
+    info_path = os.path.join(ctx, deploy_db.DEPLOY_DB_FILE)
+    db = ProjectStore(base)
+    state = ProjectState.load(project_id, db)
+    try:
+        info = deploy_db.provision(project_id, ctx)
+        # Persist the captured serviceId as the DURABLE teardown handle: the reaper needs it even
+        # after this run's context dir (which also holds it) is gone.
+        if info.get("service_id"):
+            state.deploy_db_service_id = info["service_id"]
+        if info.get("volume_id"):
+            state.deploy_db_volume_id = info["volume_id"]
+        state.save()
+        db.record_artifact("Deploy DB", "context/" + deploy_db.DEPLOY_DB_FILE, kind="deploy-db")
+        return 0
+    except Exception as e:
+        # Salvage the serviceId if provision() wrote it to disk before failing (created-but-not-
+        # URL-fetched), so the reaper can still tear it down.
+        try:
+            with open(info_path) as _pf:
+                _partial = json.load(_pf)
+            if _partial.get("service_id") and not state.deploy_db_service_id:
+                state.deploy_db_service_id = _partial["service_id"]
+                state.save()
+        except Exception:
+            pass
+        sys.stderr.write(f"provision-db failed: {e}\n")
+        return 1
 
 
 def main(argv: list[str]) -> int:
@@ -200,6 +245,8 @@ def main(argv: list[str]) -> int:
         )
         sys.stderr.write(_USAGE)
         return 2
+    if verb == "provision-db":
+        return _provision_db(projects_dir, project_id)
     db = ProjectStore(db_path(projects_dir, project_id))
     if verb == "set-phase":
         db.set_phase(rest[0], rest[1] if len(rest) > 1 else "active")

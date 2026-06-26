@@ -48,9 +48,10 @@ draft from the SAME context (`input/brief.md` + `input/interview.md` + `context.
 `input/images/`). For each: `spawn-agent <id> <role> <model> research`, do its work YOURSELF, then
 `finish-agent <id> success`:
 
-1. **VANGUARD** (domain.expert) — the grounding anchor. **Web research REQUIRED.** No websearch tool;
-   `webfetch` `https://duckduckgo.com/html/?q=<query>` for 4–6 queries, then `webfetch` the best pages.
-   Surface **≥3 real existing products** (name + URL + features + gaps); evaluate ≥2 solution paths.
+1. **VANGUARD** (domain.expert) — the grounding anchor. **Web research REQUIRED.** Prefer the **exa**
+   web-search MCP (wired into your workspace — its `web_search`-type tools give real search results);
+   `webfetch` the best pages it returns (or `webfetch` `https://duckduckgo.com/html/?q=<query>` as a
+   fallback) for 4–6 queries. Surface **≥3 real existing products** (name + URL + features + gaps); evaluate ≥2 solution paths.
    Never fabricate a URL — every product URL must come from a page you actually fetched. Write
    `PRD-draft-vanguard.md`.
 2. **CHROMA** (design.lead) — journeys, screens, states, a11y; the primary happy-flow click-path the

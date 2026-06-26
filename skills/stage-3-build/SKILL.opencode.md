@@ -37,6 +37,9 @@ BEFORE building, write `build-plan.md` (approach; the wave/ticket order; mock/MC
 disposition; the exact happy-flow you will verify). Then `record-artifact "Build Plan" build-plan.md plan`.
 THEN execute the plan — autonomously, no human approval.
 
+> The **exa** web-search MCP is wired into your workspace — use its `web_search`-type tools whenever
+> live web results help (current library versions, API docs, error-message lookups).
+
 **Brand canon (every UI ticket):** `skills/tenexity-design/` is the visual source of truth.
 Ship its `tokens.css` into the app verbatim (additions ok, edits/deletions of existing tokens
 are not) and use its `tailwind.config.ts` theme; colors only via tokens (`hsl(var(--brand))`),
@@ -64,11 +67,14 @@ later tickets build on merged work.
 **Dependency dispositions** (the launch prompt lists each token's disposition):
 - **MOCK** → build a WORKING LOCAL FAKE wired into the real app (demo-login session for SSO, seeded DB rows
   for ERP/HR data, emails to a table/log) — never a dead stub, never block on the real third-party.
-- **DEPLOY-DB** (any database token) → the FACTORY already provisioned this run's database and wrote
-  its connection details to **`context/deploy-db.json`** (`{"DATABASE_URL": ...}`). READ that file,
-  point the app at that `DATABASE_URL`, set it on the `sf-<project_id>` service at deploy. You do **NOT**
-  provision a database and have **NO Supabase access** — no Supabase MCP, no Supabase token. Never
-  call Supabase, never create a project.
+- **DEPLOY-DB** (any database token) → provision this run's database YOURSELF, exactly once:
+  run **`python3 -m software_factory.db provision-db <projects_dir> <project_id>`** (creates a per-run
+  Railway Postgres in `software-factory-projects`, records it for teardown, writes
+  **`context/deploy-db.json`** = `{"DATABASE_URL": ...}`). Run it **EXACTLY ONCE** — no loop. On a
+  **non-zero exit**: `add-blocker` and **STOP** (never deploy DB-less, never retry). On success: READ
+  that file, set its `DATABASE_URL` on the `sf-<project_id>` service at deploy. You have **NO Supabase
+  access** — no Supabase MCP, no Supabase token. Never call Supabase, never create a database any
+  other way.
 - **MCP** (e.g. `NEXTAUTH_SECRET`) → generate it yourself / via the Railway MCP.
 - everything else with a real value is already in your environment.
 
@@ -91,16 +97,22 @@ project, STOP and `add-blocker` instead of deploying.
 
 ### Use the local Railway MCP (`railway`) — wired into your workspace
 It is the local stdio MCP server (`railway mcp`) and authenticates with the container's
-`RAILWAY_TOKEN` (a **project** token). VERIFIED, rely on this:
-- **Project-scoped tools WORK** with this token and infer the project from `RAILWAY_PROJECT_ID` in
-  your env (most take no project arg). Use these for the whole deploy:
-  `create_service`, `set_variables`, `deploy`, `generate_domain`, `get_logs`, `list_services`,
-  `list_deployments`, `environment_status`.
-- **Account-level tools do NOT work** with a project token — `whoami` and `list_projects` return
-  *"Not authenticated. Run 'railway login'…"*. You do **not** need them; never call them, and never
-  treat that error as "the MCP is broken" — it only means the token has no user identity.
-- There is **NO Supabase MCP and no Supabase access**. The database is provisioned by the factory;
-  read its `DATABASE_URL` from `context/deploy-db.json` (see DEPLOY-DB above).
+`RAILWAY_TOKEN` — a **project token scoped to `software-factory-projects`**. You have **FULL latitude
+to use any Railway MCP capability within that project**: the token scope is the guardrail, not a tool
+allowlist. So:
+- **Proactively inspect what's already deployed** before acting — `list_services`, `list_deployments`,
+  `environment_status`, `get_logs` — and **reuse / redeploy / repair** rather than blindly recreate.
+  The whole deploy lifecycle (`create_service`, `set_variables`, `deploy`, `generate_domain`,
+  `get_logs`, …) is yours to drive.
+- `software-factory-projects` hosts **every** run's app + DB, so you can see/touch sibling runs'
+  services. That breadth is intended for inspection — but **operate on your own run's resources**: the
+  `sf-<project_id>` service you deploy and the Postgres you provisioned via `provision-db`.
+- **TRIPWIRE:** if `environment_status` ever reports a project **other than `software-factory-projects`**,
+  STOP and `add-blocker` (mis-scoped token) — do not deploy.
+- Account-identity tools (`whoami`, `list_projects`) may return *"Not authenticated…"* — that only
+  means the project token has no user identity, NOT that the MCP is broken. You don't need them.
+- There is **NO Supabase MCP and no Supabase access**. The database comes from `provision-db`
+  (see DEPLOY-DB above) — read its `DATABASE_URL` from `context/deploy-db.json`, never from Supabase.
 
 ### Successful deploy path (the proven sequence — follow it in order)
 1. **Preflight the build FIRST** (see below) — skipping this is why deploys fail at "scheduling build".

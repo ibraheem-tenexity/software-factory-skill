@@ -98,3 +98,52 @@ def test_cli_accepts_correctly_ordered_call(tmp_path):
     assert main(["set-phase", runs, "project-0ddd55fe", "research", "active"]) == 0
     db = ProjectStore(db_path(runs, "project-0ddd55fe"))
     assert db.phase_status()["research"] == "active"
+
+
+# ── provision-db verb (moved out of Console._launch_stage; the stage-3 agent calls it) ──────────
+# The verb wraps deploy_db.provision and persists the teardown handle onto ProjectState + records
+# the artifact on success; on failure it salvages any partial serviceId and exits non-zero.
+
+def test_provision_db_verb_persists_service_id_and_records_artifact(tmp_path, monkeypatch):
+    import os
+    from software_factory.db import main
+    from software_factory import deploy_db as dd
+    runs = str(tmp_path); pid = "project-aaaa1111"
+    # The agent's cwd is the workspace; the verb resolves context/ from cwd.
+    ws = tmp_path / pid / "workspace"; (ws / "context").mkdir(parents=True)
+    monkeypatch.chdir(ws)
+    monkeypatch.setattr(dd, "provision",
+                        lambda project_id, ctx: {"service_id": "svc-xyz", "volume_id": "vol-9",
+                                                 "DATABASE_URL": "postgres://x",
+                                                 "provider": "railway-postgres", "service": "Postgres-XX"})
+    assert main(["provision-db", runs, pid]) == 0
+    st = ProjectState.load(pid, ProjectStore(db_path(runs, pid)))
+    assert st.deploy_db_service_id == "svc-xyz"          # durable teardown handle persisted
+    assert st.deploy_db_volume_id == "vol-9"             # volume handle persisted when present
+    arts = ProjectStore(db_path(runs, pid)).artifacts()
+    assert any(a["title"] == "Deploy DB" and a["kind"] == "deploy-db"
+               and a["path"] == "context/" + dd.DEPLOY_DB_FILE for a in arts)
+
+
+def test_provision_db_verb_salvages_partial_service_id_and_exits_nonzero(tmp_path, monkeypatch):
+    """provision() writes the serviceId to disk then raises (e.g. variables read timed out): the
+    verb salvages that partial id onto state (so the reaper can tear it down) and exits non-zero
+    so the agent add-blockers + STOPs — no artifact, no DB-less deploy."""
+    import os
+    from software_factory.db import main
+    from software_factory import deploy_db as dd
+    runs = str(tmp_path); pid = "project-bbbb2222"
+    ws = tmp_path / pid / "workspace"; (ws / "context").mkdir(parents=True)
+    monkeypatch.chdir(ws)
+
+    def provision_writes_id_then_raises(project_id, ctx):
+        dd.write_file(ctx, {"service_id": "svc-salvage", "service": "Postgres-SL",
+                            "provider": "railway-postgres", "project_id": project_id})
+        raise RuntimeError("variables read timed out")
+    monkeypatch.setattr(dd, "provision", provision_writes_id_then_raises)
+
+    assert main(["provision-db", runs, pid]) == 1        # non-zero → agent stops
+    st = ProjectState.load(pid, ProjectStore(db_path(runs, pid)))
+    assert st.deploy_db_service_id == "svc-salvage"      # partial id salvaged for the reaper
+    arts = ProjectStore(db_path(runs, pid)).artifacts()
+    assert not any(a["title"] == "Deploy DB" for a in arts)   # no artifact on failure

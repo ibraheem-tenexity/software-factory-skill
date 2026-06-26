@@ -27,15 +27,21 @@ BUILD_SKILL_NAMES = ("tenexity-design",)
 # supabase server reads SUPABASE_ACCESS_TOKEN from env. ruflo/claude-flow is gone.
 _PLAYWRIGHT = {"command": "npx", "args": ["-y", "@playwright/mcp@latest", "--headless", "--browser", "chromium"]}
 _RAILWAY = {"command": "railway", "args": ["mcp"]}
+# Exa web-search — a REMOTE (HTTP) MCP, not a local command server. Wired into EVERY stage so any
+# stage agent can search the web when useful. The key is env-var'd (${EXA_API_KEY}, resolved at MCP
+# load from EXA_API_KEY in the stage env — see env._STAGE_ESSENTIAL) and never literal. Because it's
+# url-only it has no `command`: the server-translation/health loops below branch on `url`.
+_EXA = {"type": "http", "url": "https://mcp.exa.ai/mcp", "headers": {"x-api-key": "${EXA_API_KEY}"}}
 # NO Supabase MCP — stage agents must never have Supabase access. The Supabase access token is
 # an account-wide PAT (can create/DELETE any project, incl. production); an autonomous
 # --dangerously-skip-permissions agent must not hold it. The app's database is provisioned BY
-# THE FACTORY (deploy_db.py) and handed to the agent as context/deploy-db.json. Railway stays —
-# the agent needs it to deploy the app (create_service/deploy/generate_domain), not to make a DB.
+# THE STAGE-3 AGENT (the `provision-db` verb wrapping deploy_db.py) and written to
+# context/deploy-db.json. Railway stays — the agent needs it to deploy the app
+# (create_service/deploy/generate_domain), not to make a DB.
 
 
 def mcp_config(stage: int) -> dict:
-    servers = {"playwright": _PLAYWRIGHT}
+    servers = {"playwright": _PLAYWRIGHT, "exa": _EXA}
     if stage >= 3:
         servers["railway"] = _RAILWAY
     return {"mcpServers": servers}
@@ -47,15 +53,28 @@ MCP_CONFIG = mcp_config(1)
 CLAUDE_SETTINGS = {"enableAllProjectMcpServers": True}
 
 
+def _to_opencode_envref(value: str) -> str:
+    """Rewrite a claude `.mcp.json` env-ref (`${VAR}`) to OpenCode's (`{env:VAR}`)."""
+    import re
+    return re.sub(r"\$\{(\w+)\}", r"{env:\1}", value) if isinstance(value, str) else value
+
+
+def _opencode_server(srv: dict) -> dict:
+    """Translate one .mcp.json server-dict to OpenCode's mcp shape. A url-only server (e.g. exa,
+    the remote web-search MCP) becomes OpenCode's remote form with its headers carried over; a
+    command server stays local. Header env-refs use OpenCode's `{env:VAR}` syntax, not `${VAR}`."""
+    if srv.get("url"):
+        headers = {k: _to_opencode_envref(v) for k, v in (srv.get("headers") or {}).items()}
+        return {"type": "remote", "url": srv["url"], "headers": headers, "enabled": True}
+    return {"type": "local", "command": [srv["command"], *srv["args"]], "enabled": True}
+
+
 def opencode_config(stage: int, steps: int) -> dict:
     """opencode.json for a stage workspace — same MCP set as the claude path, translated to
     OpenCode's shape, plus: permissions that can't 'ask' (headless never answers prompts), the
     stage contract injected ambiently via `instructions`, and the steps-capped primary agent
     (OpenCode has no --max-turns; the cap lives here)."""
-    servers = {
-        name: {"type": "local", "command": [srv["command"], *srv["args"]], "enabled": True}
-        for name, srv in mcp_config(stage)["mcpServers"].items()
-    }
+    servers = {name: _opencode_server(srv) for name, srv in mcp_config(stage)["mcpServers"].items()}
     cfg = {
         "$schema": "https://opencode.ai/config.json",
         "mcp": servers,

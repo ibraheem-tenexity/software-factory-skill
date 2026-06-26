@@ -55,6 +55,12 @@ def check_mcp(
     servers = cfg.get("mcpServers", {})
     results = []
     for name, spec in servers.items():
+        if "command" not in spec:
+            # Remote (url-only) MCP server, e.g. exa web-search: no local process to spawn-probe.
+            # Treat as best-effort/non-spawnable (same posture as railway) so it can't fail the
+            # health gate — the JSON-RPC stdio handshake doesn't apply to an HTTP transport.
+            results.append(McpCheck(name=name, ok=True, detail="remote (skipped spawn-probe)"))
+            continue
         cmd = [spec["command"]] + spec.get("args", [])
         try:
             _rc, stdout, stderr = run(cmd, _INIT_REQUEST + "\n", timeout_s)
