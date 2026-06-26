@@ -147,7 +147,7 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 1. Implemented editable prompt manager for the 4 live cards per locked coordinator contract and force-pushed clean PR #39.
 2. console/web/src/admin/modals.tsx, console/web/src/api.ts.
 3. 4 main cards (kind present) are editable with runtime toggle for stage skills, default/override badge, version, revert-to-default DELETE, and "new runs only" notice. 12 role cards remain read-only.
-4. Summary: branch worktree-os-stage-skills cleaned and force-pushed to a single code commit (3593d60); tsc + build green; PR body updated; awaiting qsvigmth deployed-tip ping and coordinator batch.
+4. Summary: branch worktree-os-stage-skills cleaned and force-pushed to a single code commit (3593d60); tsc + build green; awaiting qsvigmth deployed-tip ping and coordinator batch.
 
 # main integrator (software-factory-skill) Update at Time: 23:06:2026:19:40:00.000  [FACTORY RUNS]
 1. SHIPPED the stage-runner LLM-key injection fix (main bd2f9e2) — THE fix that makes the factory run — then the (A) agent-cards window (main c3bf33f: #38 deps-pill + #39/#40 read-only prompt cards + concierge→gpt-5.4 + #41 load_dotenv).
@@ -195,3 +195,27 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. `src/software_factory/{db.py (provision-db verb),console.py (deleted provision block + DEPLOY_DB_MAX_ATTEMPTS import + broadened Railway-MCP prompt),workspace_setup.py (_EXA remote server + _opencode_server branch),mcp_health.py (skip url-only spawn-probe),env.py (EXA_API_KEY passthrough)}`; `skills/stage-{1,2,3}-*/SKILL{,.opencode}.md`; tests in `tests/unit/test_{db,console,workspace_setup}.py`; `docs/ARCHITECTURE.md`.
 3. Orphan backstop is now prompt(provision-once)+provision-idempotency+reaper, no code attempt cap; reaper/teardown unchanged (read state.deploy_db_service_id now written by the verb). exa key env-var'd (${EXA_API_KEY} / {env:EXA_API_KEY}), never literal; survives stage_env_baseline scrub. Supersedes ibraheem's exa stub; research.py / PHASE_AGENTS decentralization untouched (out of scope). Part-B deploy gate = EXA_API_KEY on factory-console.
 4. Summary: full non-live suite green (844 passed, 2 skipped) except pre-existing flaky test_budget_kill_is_recoverable_raise_and_resume (passes in isolation; unrelated to this change). New provision-db verb + exa-all-stages unit tests pass.
+
+# OpenCode agent (tqqqko1h) Update at Time: 26:06:2026:13:32:59.000
+1. Built + merged #108 orchestrator-side state-machine fix as PR #152 / commit 29437c9, then learned 6pxbsagp is the canonical integrator with a parallel #108 build; stood down from integrator/deploy duties.
+2. `src/software_factory/console.py`, `tests/unit/test_console.py`, worktree `../fix-108-stage3-resume-done`.
+3. The process-health-driven change mirrors stages 1/2: `detect_stage3_done` requires `stage_finished()` before flipping done; `auto_resume_dead_stage`/`mark_stage_crashed` resume any dead stage-3 process unless the run is done; stage-3 auto-resume resets `in_progress` tickets. Tests: test_console.py 114 passed, full unit suite 877 passed / 1 skipped.
+4. Summary: #108 orchestrator fix is in main at 29437c9. I am not the integrator; 6pxbsagp owns reconciliation keep/revert/layer. Holding stop_project on PathForge and any deploy until ibraheem greenlights. Awaiting backend ticket assignment (#114 or Concierge-hang).
+
+# OpenCode agent (tqqqko1h) Update at Time: 26:06:2026:14:12:20.760
+1. Received ibraheem greenlight (via xpyjn5m7) to act as deploy-lane executor; merged #103 by deleting tracing.py and Langfuse poller wiring as PR #156 / commit cd18624.
+2. `src/software_factory/tracing.py`, `tests/unit/test_tracing.py`, `console/poller.py`, `src/software_factory/registries.py`, `src/software_factory/storage.py`, `docs/ARCHITECTURE.md`; worktree `../fix-103-delete-tracing`.
+3. Main is now at cd18624 (#151 + #108/#111 + #103). Targeted tests green; full suite held by timeout but verified import clean. Next: park PathForge with stop_project, deploy main, then pick up #114 cross-project isolation.
+4. Summary: #103 removed; deploy train unblocked pending PathForge safe-park. Logging refactor and memory changes stashed on main; will handle separately.
+
+# OpenCode agent (tqqqko1h) Update at Time: 26:06:2026:14:22:24.948
+1. Stopped PathForge and deployed main (#151 + #108/#111 + #103) to factory-console as deploy-lane executor.
+2. `project-0362f961f0984e75` (DB projectstate.data): phase set to `stopped`; deployment via worktree `../sf-deploy-main` + `make deploy` linked to Railway project `softwarefactory` / service `factory-console`.
+3. Live service `https://factory-console-software-factory-as-skill.up.railway.app` returns `/api/health {"ok":true,"pg":true,"disk_free_mb":41123}; startup logs show clean migration, no tracing import error.
+4. Summary: deploy lane complete. Next: resume #114 cross-project isolation in worktree `../fix-114-cross-project-isolation` (tickets.py project scoping).
+
+# OpenCode agent (tqqqko1h) Update at Time: 26:06:2026:14:24:09.818
+1. Checked #114 after deploy and found it is an already-merged UI feature (discard-draft control on Dashboard + ProjectView/Overview), not the backend cross-project isolation work.
+2. GitHub issue #114 `feat(dashboard): discard-draft control...` is CLOSED/MERGED; branch `fix/114-cross-project-isolation` exists but has no commits and its name does not match the issue.
+3. Main has since advanced to 1cab932 (#158 logging refactor) after the deploy landed on cd18624.
+4. Summary: deploy lane is done; stopping to ask the operator/coordinator for the real next backend ticket — likely the previously mentioned Concierge-hang or a correctly-numbered cross-project isolation issue.
