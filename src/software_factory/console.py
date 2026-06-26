@@ -38,6 +38,9 @@ from .db import ProjectStore
 from . import dbshim
 from .tickets import TicketStore
 from .workspace_setup import prepare_workspace
+from .log import get_logger
+
+logger = get_logger(__name__)
 
 SKILL_VERSION = "0.0.1"
 
@@ -588,9 +591,9 @@ class Console:
             return None   # within grace — give a clean teardown a chance to exit on its own first
         pid = getattr(p, "pid", None)
         if self._kill_stage_process(project_id):
-            print(f"[stage-reap] {project_id}: reaped completed-but-hung claude process {pid} "
-                  f"({grace:.0f}s after terminal result event) — stage will now self-advance",
-                  file=sys.stderr, flush=True)
+            logger.info("[stage-reap] %s: reaped completed-but-hung claude process %s "
+                        "(%.0fs after terminal result event) — stage will now self-advance",
+                        project_id, pid, grace)
             return pid
         return None
 
@@ -665,6 +668,7 @@ class Console:
             return False
         if stage == 3:
             self._reset_stuck_tickets(project_id)
+        logger.info("[auto-resume] %s relaunching dead stage %s", project_id, stage)
         return self.retry_stage(project_id, stage) is not None
 
     def mark_stage_crashed(self, project_id: str) -> bool:
@@ -691,6 +695,8 @@ class Console:
         state.crashed_at_node = state.phase
         state.phase = "crashed"
         state.save()
+        logger.warning("[crash] %s marked crashed at node %s (stage %s) — auto-resume exhausted",
+                       project_id, state.crashed_at_node, stage)
         return True
 
     def pause_project(self, project_id: str) -> dict:
@@ -793,6 +799,7 @@ class Console:
         # closes both gaps: the un-guarded callers are covered and TOCTOU window shrinks to the
         # launch() call itself (a tight native Popen, not an LLM round-trip).
         if self._stage_process_alive(project_id):
+            logger.debug("[launch] %s stage %s refused — orchestrator already alive", project_id, stage)
             return None
 
         paths = self._paths(project_id)
@@ -804,6 +811,8 @@ class Console:
         reserve = float(os.environ.get("SF_STAGE_RESERVE", "5") or 5)
         spend = self._project_spend(project_id)
         if spend + reserve > ceiling:
+            logger.info("[launch] %s stage %s refused — per-run budget: $%.2f + reserve $%.2f > ceiling $%.2f",
+                        project_id, stage, spend, reserve, ceiling)
             ProjectStore(paths["db"]).add_blocker(
                 f"Per-run budget: this run ${spend:.2f} + reserve ${reserve:.2f} "
                 f"> ceiling ${ceiling:.2f} — stage {stage} launch refused",
@@ -818,7 +827,8 @@ class Console:
                 decrypted = _vault.vault_retrieve_many(vault_ids)
                 env = {**decrypted, **env}  # vault base; caller env (extra_creds) wins
             except Exception:
-                pass  # Vault unavailable — caller env used as-is
+                logger.debug("[launch] %s vault retrieve failed — caller env used as-is",
+                             project_id, exc_info=True)  # Vault unavailable — best-effort
         runtime = state.runtime or "claude"
         # The stage RUNNER (`claude -p` / `opencode run`) is itself an LLM agent and needs its OWN
         # provider key to authenticate. stage_env_baseline scrubs the console's env down to a tiny
@@ -843,6 +853,8 @@ class Console:
             row = PromptStore().get(override_key(f"STAGE-{stage}", runtime))
             override = row["prompt"] if row else None
         except Exception:
+            logger.debug("[launch] %s prompt-override lookup failed — using on-disk default",
+                         project_id, exc_info=True)
             override = None
         ws = prepare_workspace(
             self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
@@ -864,6 +876,9 @@ class Console:
             for c in unhealthy:
                 db.add_blocker(f"MCP:{c.name} — {c.detail}", blocks="mcp")
             if any(c.name in _HARD for c in unhealthy):
+                logger.warning("[launch] %s stage %s refused — hard-gated MCP unhealthy: %s",
+                               project_id, stage,
+                               ", ".join(c.name for c in unhealthy if c.name in _HARD))
                 return None
 
         state.stage = stage
@@ -936,9 +951,12 @@ class Console:
                 "--output-format", "stream-json", "--verbose",
             ]
         # cwd = the workspace so the stage's SKILL.md / phases/ / context/ (its contract) load.
+        logger.info("[launch] %s stage %s — runtime=%s model=%s", project_id, stage, runtime, model)
         result = self._launch(argv, env, os.path.join(paths["base"], "project.log"), cwd=ws)
         if result is not None:
             self._procs[project_id] = result   # SPEC §1: tracked for the stage-handoff guard
+        else:
+            logger.warning("[launch] %s stage %s — _launch returned no handle", project_id, stage)
         return result
 
     def name_taken(self, name: str, exclude: str | None = None) -> bool:
@@ -1838,8 +1856,8 @@ class Console:
         # registry-only run with no local dir is still fully removed.
         try:
             ProjectStore(self._paths(project_id)["db"]).delete_project(project_id)
-        except Exception as e:
-            print(f"[delete] state-row delete failed for {project_id}: {e}", file=sys.stderr)
+        except Exception:
+            logger.exception("[delete] state-row delete failed for %s", project_id)
         shutil.rmtree(self._paths(project_id)["base"], ignore_errors=True)
         self._procs.pop(project_id, None)
         return {"project_id": project_id, "deleted": True}
@@ -1854,9 +1872,9 @@ class Console:
             return
         try:
             state.log_url = storage.put(project_id, "logs/project.log", log_path)
-            print(f"[storage] uploaded project.log for {project_id}: {state.log_url}", flush=True)
-        except Exception as e:
-            print(f"[storage] log upload failed for {project_id}: {e}", flush=True)
+            logger.info("[storage] uploaded project.log for %s: %s", project_id, state.log_url)
+        except Exception:
+            logger.exception("[storage] log upload failed for %s", project_id)
 
     def _maybe_teardown_deploy_db(self, project_id: str, state: ProjectState | None = None) -> dict | None:
         """Reap THIS run's captured deploy-DB on a terminal/archive transition, per the configured
@@ -1874,9 +1892,9 @@ class Console:
                 has_verified_deploy=bool(getattr(st, "deploy_url", None)),
                 volume_id=getattr(st, "deploy_db_volume_id", "") or "",
             )
-            return deploy_db.reap([rec], log=lambda m: print(m, file=sys.stderr))
-        except Exception as e:
-            print(f"[deploy-db] teardown hook error for {project_id}: {e}", file=sys.stderr)
+            return deploy_db.reap([rec], log=logger.info)
+        except Exception:
+            logger.exception("[deploy-db] teardown hook error for %s", project_id)
             return None
 
     def reap_deploy_dbs(self, dry_run: bool = False) -> dict:
@@ -1902,7 +1920,7 @@ class Console:
                 has_verified_deploy=bool(getattr(st, "deploy_url", None)),
                 volume_id=getattr(st, "deploy_db_volume_id", "") or "",
             ))
-        return deploy_db.reap(records, log=lambda m: print(m, file=sys.stderr), dry_run=dry_run)
+        return deploy_db.reap(records, log=logger.info, dry_run=dry_run)
 
     def reap_github_repos(self, org: str, dry_run: bool = False) -> dict:
         """Sweep factory-created repos in `org` and reap those whose project is confirmed dead.
@@ -1941,8 +1959,8 @@ class Console:
             if not match:
                 # Suffix has no DB match — log-only, never auto-delete.
                 unknown_repos.append({"repo": f"{org}/{name}", "suffix": suffix})
-                print(f"[github-reaper] UNKNOWN suffix {suffix!r} on {org}/{name} "
-                      f"— surfaced for manual review", file=sys.stderr)
+                logger.warning("[github-reaper] UNKNOWN suffix %r on %s/%s — surfaced for manual review",
+                               suffix, org, name)
                 continue
             pid, st = match
             records.append(_ghr.ReapRecord(
@@ -1952,7 +1970,7 @@ class Console:
                 phase=getattr(st, "phase", "") or "",
                 has_verified_deploy=bool(getattr(st, "deploy_url", None)),
             ))
-        report = _ghr.reap(records, log=lambda m: print(m, file=sys.stderr), dry_run=dry_run)
+        report = _ghr.reap(records, log=logger.info, dry_run=dry_run)
         report["unknown_repos"] = unknown_repos
         return report
 
