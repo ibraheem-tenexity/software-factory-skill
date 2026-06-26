@@ -384,7 +384,7 @@ export const api = {
   // ── Recovery endpoints (bkkc52v5 PR #89) ──
   pauseProject: (id: string) => send<Record<string, any>>(`/api/projects/${id}/pause`, "POST"),
   resumeProject: (id: string) => send<Record<string, any>>(`/api/projects/${id}/resume`, "POST"),
-  relaunachProject: (id: string) => send<{ project_id: string; relaunched_from: string }>(`/api/projects/${id}/relaunch`, "POST"),
+  relaunchProject: (id: string) => send<{ project_id: string; relaunched_from: string }>(`/api/projects/${id}/relaunch`, "POST"),
   retryNode: (id: string, node: string) => send<Record<string, any>>(`/api/projects/${id}/retry-node`, "POST", { node }),
   rewindTo: (id: string, node: string) => send<Record<string, any>>(`/api/projects/${id}/rewind`, "POST", { node }),
   uploadMaterial: (id: string, file: { name: string; tag?: string; content_type?: string; data_b64: string }) =>
