@@ -215,6 +215,18 @@ def _poll_transitions():
                     continue
                 if project_info.get("held"):  # gated hold: nothing to advance/enforce/narrate
                     continue
+                # #104: reap a claude orchestrator that declared itself done (terminal `result`)
+                # but hung at remote-MCP teardown — its live handle would otherwise pin
+                # stage_finished=False forever. Reaping BEFORE _auto_advance lets the run advance
+                # this same tick once the process is gone.
+                try:
+                    _reaped = console.reap_completed_zombie(pid)
+                    if _reaped:
+                        _narrate(pid, "reap-%s" % _reaped,
+                                 f"♻️ Stage process {_reaped} finished its work but hung at "
+                                 "teardown — reaped so the run can continue.")
+                except Exception:
+                    pass
                 _auto_advance(pid)
                 st = console.status(pid)
                 # LLM traces: ship this run's new log lines to Langfuse (no-op without keys).

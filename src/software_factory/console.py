@@ -390,6 +390,34 @@ class Console:
         return (last.get("type") == "step_finish"
                 and (last.get("part") or {}).get("reason") == "stop")
 
+    @staticmethod
+    def _claude_session_completed(log_path: str) -> bool:
+        """True when the claude stream-json log's last parseable session event is the
+        session-terminal `result` event — the orchestrator declared ITSELF done (streamlog
+        treats `result.total_cost_usd` as the authoritative session end). Claude's analog of
+        opencode's step_finish=stop. Used ONLY by reap_completed_zombie: it means the agent
+        said it finished, so reaping a still-alive handle cannot race an actively-orchestrating
+        claude (the §1 double-orchestrator guard) — it only ever reaps a declared-done zombie."""
+        try:
+            with open(log_path, "rb") as f:
+                f.seek(0, 2)
+                f.seek(max(0, f.tell() - 65536))
+                tail = f.read().decode("utf-8", "replace")
+        except OSError:
+            return False
+        last = None
+        for line in tail.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if ev.get("type") in ("system", "user", "assistant", "result"):
+                last = ev
+        return bool(last) and last.get("type") == "result"
+
     # ---- SPEC §1: host-derived phase state machine ----------------------------------------
     _CLOSED = ("done", "passed", "completed")
 
@@ -528,6 +556,43 @@ class Console:
                     p.kill()
             return True
         return False
+
+    def reap_completed_zombie(self, project_id: str) -> int | None:
+        """SPEC §1 zombie reap (#104): a claude orchestrator that emitted its session-terminal
+        `result` event but whose process is STILL ALIVE — i.e. it SAID it's done and then hung at
+        teardown (observed as a remote-MCP connection-close hang after #100 wired the exa MCP into
+        every stage). A live handle is normally proof of work, so `stage_finished` stays False
+        forever and the run never advances past 'research' despite a complete PRD on disk.
+
+        When THIS run's tracked handle is live, the runtime is claude, the log's terminal event is
+        `result` (the agent declared itself done), and it's been idle past a short grace measured
+        from the log mtime (the `result` line is the last write), SIGTERM→SIGKILL it via
+        `_kill_stage_process`. That converts the zombie to the exited state the EXISTING
+        completed-detection in `stage_finished` already advances on — no relaunch.
+
+        Because it fires ONLY after the orchestrator's own terminal `result`, it can never reap an
+        actively-orchestrating claude — it does NOT race the §1 double-orchestrator guard, it
+        completes it for the hung-teardown case. Keyed strictly off THIS run's handle + THIS run's
+        project.log (never a global signal), so a healthy concurrent stage is untouched. Systemic by
+        design: it reaps ANY hung remote-MCP teardown, not just exa. Returns the reaped pid, else None."""
+        p = self._procs.get(project_id)
+        if not (p is not None and hasattr(p, "poll") and p.poll() is None):
+            return None   # no live tracked handle → the no-handle idle-advance path already covers it
+        if self._load_state(project_id).runtime == "opencode":
+            return None   # opencode's linger is handled by the step_finish=stop path in stage_finished
+        log = os.path.join(self._paths(project_id)["base"], "project.log")
+        if not os.path.exists(log) or not self._claude_session_completed(log):
+            return None   # not done yet — an actively-orchestrating claude, leave it alone
+        grace = float(os.environ.get("SF_STAGE_REAP_GRACE_SEC", "60") or 60)
+        if (time.time() - os.path.getmtime(log)) <= grace:
+            return None   # within grace — give a clean teardown a chance to exit on its own first
+        pid = getattr(p, "pid", None)
+        if self._kill_stage_process(project_id):
+            print(f"[stage-reap] {project_id}: reaped completed-but-hung claude process {pid} "
+                  f"({grace:.0f}s after terminal result event) — stage will now self-advance",
+                  file=sys.stderr, flush=True)
+            return pid
+        return None
 
     def stop_project(self, project_id: str) -> dict:
         """Operator 'stop all progress': kill any live stage process + set phase=stopped (TERMINAL —
