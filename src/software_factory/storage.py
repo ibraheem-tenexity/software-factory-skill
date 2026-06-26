@@ -8,7 +8,7 @@ Two scopes share one bucket: run-scoped `<project_id>/<kind>/<file>` and org-sco
 `org/<org_id>/<kind>/<file>`. Callers pass `scope_id` (e.g. "project-abc123" or "org/org-9f")
 and a `key` (e.g. "qa/ticket-3-1718.png"); the object path is `<scope_id>/<key>`.
 
-Env-gated, mirroring `notify`/`tracing`: with `SUPABASE_URL` + `SUPABASE_SERVICE_KEY`
+Env-gated, mirroring `notify`: with `SUPABASE_URL` + `SUPABASE_SERVICE_KEY`
 + `SF_STORAGE_BUCKET` set, uploads go to Supabase Storage via its REST API using the
 *project-scoped* service key (a console-side secret — agents never get an account-wide
 Supabase token). The bucket is PRIVATE; url() mints a long-lived signed URL via the

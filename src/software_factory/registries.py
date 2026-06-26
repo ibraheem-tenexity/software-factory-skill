@@ -24,8 +24,6 @@ SEED_TOOLS = [
      "scope": "concierge + agent models", "status": "connected", "auth": "service key"},
     {"name": "OpenRouter", "type": "API", "provider": "OpenRouter",
      "scope": "Kimi K2.7 + model routing", "status": "available", "auth": "service key"},
-    {"name": "Langfuse", "type": "HTTP", "provider": "Langfuse",
-     "scope": "LLM tracing", "status": "available", "auth": "token"},
     {"name": "Resend", "type": "HTTP", "provider": "Resend",
      "scope": "operator email", "status": "available", "auth": "service key"},
 ]
