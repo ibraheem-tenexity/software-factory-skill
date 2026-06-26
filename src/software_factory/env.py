@@ -55,6 +55,12 @@ _STAGE_ESSENTIAL = {
     # web search 401s. It's the factory's key (set on factory-console), not an app secret; the
     # built app never sees it (it's not forwarded to the app's Railway service vars).
     "EXA_API_KEY",
+    # GitHub token — the stage-3 build agent shells out to `gh` (repo create / push / PR), which
+    # reads GH_TOKEN/GITHUB_TOKEN from the env. Scrubbed, `gh` is unauthenticated and repo
+    # creation fails (#102). Same posture as EXA_API_KEY: the factory's token (set on
+    # factory-console), surviving the scrub; the built app never sees it (the SKILL strips any
+    # token from the recorded remote URL and it isn't forwarded to the app's Railway vars).
+    "GH_TOKEN", "GITHUB_TOKEN",
 }
 
 
