@@ -21,7 +21,6 @@ from .constants import (
     PROJECT_ID_RE,
     STAGE_1, STAGE_2, STAGE_3, PIPELINE,
     STAGE_MODEL as _STAGE_MODEL,
-    DEPLOY_DB_MAX_ATTEMPTS as _DEPLOY_DB_MAX_ATTEMPTS,
     OPENCODE_MODEL_IDS as _OPENCODE_MODEL_IDS,
     OPENCODE_DEFAULT_ALIAS as _OPENCODE_DEFAULT_ALIAS,
     PLANNING_MODELS, IMPL_MODELS,
@@ -198,9 +197,10 @@ def _disposition_guidance(dispositions: dict | None) -> str:
         f"- **MOCK** (build a WORKING LOCAL FAKE wired into the real app so the happy-flow passes "
         f"end-to-end — e.g. a 'sign in as demo admin' session for SSO, seeded DB rows for ERP/HR "
         f"data, emails written to a table/log for mail; NOT a dead stub): {mock or 'none'}\n"
-        f"- **DEPLOY-DB** (the FACTORY already provisioned this run's database; read its DATABASE_URL "
-        f"from context/deploy-db.json and point the app at it — you have NO Supabase access and must "
-        f"NEVER provision a database): {dbtok or 'none'}\n"
+        f"- **DEPLOY-DB** (run `python3 -m software_factory.db provision-db <projects_dir> <project_id>` "
+        f"ONCE to create this run's Railway Postgres; on failure add-blocker + STOP, never loop; then "
+        f"read DATABASE_URL from context/deploy-db.json and point the app at it — you have NO Supabase "
+        f"access and must NEVER provision a database any other way): {dbtok or 'none'}\n"
         f"- **SELF/MCP** (generate it yourself / via the Railway MCP — e.g. NEXTAUTH_SECRET; set "
         f"NEXTAUTH_URL from the deploy URL): {mcp or 'none'}\n"
         f"- Operator-PROVIDED tokens ride in your environment with real values; NEVER copy any "
@@ -230,11 +230,14 @@ def make_prompt_stage3(req: ProjectRequest, project_id: str, projects_dir: str, 
     return (
         _orchestration_preamble("Stage 3 — Build & Ship", project_id, projects_dir, req.budget, runtime)
         + _disposition_guidance(dispositions)
-        + f"Deploy target: {req.target}. DEPLOY VIA THE **Railway MCP** (its project-scoped tools work "
-          f"with the env's RAILWAY_TOKEN; `whoami`/`list_projects` do NOT — don't call them). Create + deploy "
-          f"ONLY to the dedicated service '{service}': `create_service` '{service}' → `set_variables` (all runtime "
-          f"env) → `deploy` → `generate_domain` (the app has NO public url until you do this; derive the health url "
-          f"from it). NEVER deploy to the console service.\n"
+        + f"Deploy target: {req.target}. DEPLOY VIA THE **Railway MCP**: your RAILWAY_TOKEN is scoped to "
+          f"the `software-factory-projects` project and you have FULL latitude with any Railway MCP capability "
+          f"within it — proactively INSPECT what's already deployed (`list_services`/`list_deployments`/"
+          f"`environment_status`/`get_logs`) and reuse/repair/redeploy rather than blindly recreate. The token "
+          f"scope is the guardrail. Operate on this run's own service '{service}': `create_service` '{service}' "
+          f"(reuse if it already exists) → `set_variables` (all runtime env) → `deploy` → `generate_domain` (the app "
+          f"has NO public url until you do this; derive the health url from it). If `environment_status` ever shows a "
+          f"project OTHER than software-factory-projects, STOP + add-blocker. NEVER deploy to the console service.\n"
           f"DEPLOY PREFLIGHT (Railway blocks the build otherwise): run `npm audit` and bump HIGH/CRITICAL deps to "
           f"patched versions + regen the lockfile; give module-load clients (e.g. a Postgres pool) BUILD-TIME placeholder env "
           f"in the Dockerfile so `next build` doesn't throw (runtime values override); ship a Dockerfile. The build runs "
@@ -779,57 +782,10 @@ class Console:
         ws = prepare_workspace(
             self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
         )
-        # Stage 3 with a database dependency: the FACTORY provisions the DB (per-project Railway
-        # Postgres) and hands the agent context/deploy-db.json — the agent has no Supabase access
-        # and never provisions a DB. Provision failure blocks the launch (don't build DB-less).
-        if stage == 3 and deploy_db.needs_deploy_db(state.deps_required):
-            ctx = os.path.join(ws, "context")
-            info_path = os.path.join(ctx, deploy_db.DEPLOY_DB_FILE)
-            have_url = False
-            if os.path.exists(info_path):
-                try:
-                    with open(info_path) as f:
-                        have_url = bool(json.load(f).get("DATABASE_URL"))
-                except Exception:
-                    have_url = False
-            if not have_url:
-                # HARD retry cap: a provision failure must never spawn unbounded DBs (the orphan leak).
-                # Count the attempt BEFORE trying; after the cap, park the run with a blocker instead of
-                # re-provisioning. provision() itself is idempotent (reuses this run's captured service).
-                attempts = int(getattr(state, "deploy_db_attempts", 0) or 0)
-                db = ProjectStore(paths["db"])
-                if attempts >= _DEPLOY_DB_MAX_ATTEMPTS:
-                    if not any(b.get("blocks") == "deploy-db" and not b["cleared"] for b in db.blockers()):
-                        db.add_blocker(
-                            f"deploy-db provisioning failed {attempts}× — parked (clear to retry)",
-                            blocks="deploy-db")
-                    return None
-                state.deploy_db_attempts = attempts + 1
-                state.save()
-                try:
-                    info = deploy_db.provision(project_id, ctx)
-                    # Persist the captured serviceId as the DURABLE teardown handle: the reaper needs
-                    # it even after this run's context dir (which also holds it) is gone.
-                    if info.get("service_id"):
-                        state.deploy_db_service_id = info["service_id"]
-                    if info.get("volume_id"):
-                        state.deploy_db_volume_id = info["volume_id"]
-                    state.save()
-                    db.record_artifact("Deploy DB", "context/" + deploy_db.DEPLOY_DB_FILE,
-                                       kind="deploy-db")
-                except Exception as e:
-                    # Salvage the serviceId if provision() wrote it to disk before failing.
-                    # Without this the reaper can't teardown services created-but-not-URL-fetched.
-                    try:
-                        with open(info_path) as _pf:
-                            _partial = json.load(_pf)
-                        if _partial.get("service_id") and not state.deploy_db_service_id:
-                            state.deploy_db_service_id = _partial["service_id"]
-                            state.save()
-                    except Exception:
-                        pass
-                    db.add_blocker(f"deploy-db provisioning failed: {e}", blocks="deploy-db")
-                    return None
+        # Stage 3 with a database dependency provisions its OWN Railway Postgres via the
+        # `provision-db` db-CLI verb (which wraps deploy_db.provision and persists the teardown
+        # handles to ProjectState) — see skills/stage-3-build. The console no longer provisions;
+        # the reaper still reads state.deploy_db_service_id, now written by the verb.
         mcp_path = os.path.join(ws, ".mcp.json")
         checks = check_mcp(mcp_path)
         unhealthy = [c for c in checks if not c.ok]

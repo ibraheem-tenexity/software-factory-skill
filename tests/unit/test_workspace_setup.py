@@ -79,14 +79,57 @@ def test_stage3_workspace_wires_railway_mcp_and_no_supabase(tmp_path):
     assert mcp["railway"]["command"] == "railway" and mcp["railway"]["args"] == ["mcp"]
 
 
-def test_stage1_and_2_workspace_is_playwright_only(tmp_path):
+def test_stage1_and_2_workspace_has_playwright_and_exa_no_deploy_mcps(tmp_path):
+    # Stages 1-2 get playwright + exa (web search, all stages) but NOT the deploy MCPs (railway).
     runs = tmp_path / "runs"; runs.mkdir()
     skills_dir = _make_skills_dir(tmp_path); phase_dir = _make_phase_dir(tmp_path)
     for stage in (1, 2):
         ws = prepare_workspace(str(runs), "project-s%d" % stage, stage,
                                skills_dir=skills_dir, phase_dir=phase_dir)
         mcp = json.loads(open(os.path.join(ws, ".mcp.json")).read())["mcpServers"]
-        assert set(mcp) == {"playwright"}, "stages 1-2 must not get the deploy MCPs"
+        assert set(mcp) == {"playwright", "exa"}, "stages 1-2 = playwright + exa, no deploy MCPs"
+
+
+def test_exa_web_search_mcp_in_every_stage_both_runtimes_env_var_key(tmp_path):
+    """exa (the remote web-search MCP) is wired into EVERY stage for both runtimes, with its
+    api-key sourced from an env var (never a literal), in the runtime-correct remote shape."""
+    from software_factory.workspace_setup import mcp_config, opencode_config
+    for stage in (1, 2, 3):
+        # claude .mcp.json shape: remote http server, ${EXA_API_KEY} expansion.
+        exa = mcp_config(stage)["mcpServers"]["exa"]
+        assert exa == {"type": "http", "url": "https://mcp.exa.ai/mcp",
+                       "headers": {"x-api-key": "${EXA_API_KEY}"}}
+        # opencode shape: remote, {env:EXA_API_KEY} expansion; no `command` key.
+        oc = opencode_config(stage, steps=50)["mcp"]["exa"]
+        assert oc["type"] == "remote" and oc["url"] == "https://mcp.exa.ai/mcp"
+        assert oc["headers"] == {"x-api-key": "{env:EXA_API_KEY}"}
+        assert "command" not in oc
+        # The key is env-var'd in BOTH runtimes — never a literal value.
+        assert "EXA_API_KEY" in json.dumps(exa) and "EXA_API_KEY" in json.dumps(oc)
+
+
+def test_generated_workspace_configs_contain_exa_and_health_check_survives(tmp_path):
+    """A generated stage workspace (claude .mcp.json + opencode opencode.json) contains exa with the
+    env-var key, and mcp_health.check_mcp tolerates the url-only exa server (no KeyError, no fail)."""
+    from software_factory.mcp_health import check_mcp
+    runs = tmp_path / "runs"; runs.mkdir()
+    skills_dir = _make_skills_dir(tmp_path); phase_dir = _make_phase_dir(tmp_path)
+    for stage in (1, 2, 3):
+        # claude runtime
+        ws = prepare_workspace(str(runs), "project-clx%d" % stage, stage,
+                               skills_dir=skills_dir, phase_dir=phase_dir)
+        mcp = json.loads(open(os.path.join(ws, ".mcp.json")).read())["mcpServers"]
+        assert mcp["exa"]["headers"]["x-api-key"] == "${EXA_API_KEY}"
+        # check_mcp must not crash on the url-only exa server; remote is best-effort (ok=True).
+        results = check_mcp(os.path.join(ws, ".mcp.json"),
+                            run=lambda cmd, inp, t: (0, '{"jsonrpc":"2.0","id":1,"result":{}}', ""))
+        by_name = {c.name: c for c in results}
+        assert by_name["exa"].ok is True
+        # opencode runtime
+        wso = prepare_workspace(str(runs), "project-ocx%d" % stage, stage, runtime="opencode",
+                                skills_dir=skills_dir, phase_dir=phase_dir)
+        ocmcp = json.loads(open(os.path.join(wso, "opencode.json")).read())["mcp"]
+        assert ocmcp["exa"]["headers"]["x-api-key"] == "{env:EXA_API_KEY}"
 
 
 def test_stage1_includes_design_skills(tmp_path):

@@ -54,6 +54,9 @@ reconciles them into the single final PRD. For each seat `spawn-agent <id> <role
 a native **Task** sub-agent, then `finish-agent <id> success`. **Launch the 3 seats in PARALLEL**
 (multiple Task calls in one turn) — they are independent:
 
+> The **exa** web-search MCP is wired into your workspace — use its `web_search`-type tools whenever
+> live web results help (alongside / instead of `WebSearch`).
+
 1. **VANGUARD** (domain.expert) — the grounding anchor. **Web search REQUIRED:** `WebSearch` 4–6
    queries, `WebFetch` the best, surface **≥3 real existing products** (name + URL + features + gaps);
    evaluate ≥2 solution paths. Writes `PRD-draft-vanguard.md`.

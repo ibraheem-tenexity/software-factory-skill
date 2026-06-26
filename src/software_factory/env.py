@@ -50,6 +50,11 @@ _STAGE_ESSENTIAL = {
     # Factory swarm tooling only
     "SF_SWARM_BIN",
     "OPENCODE_SWARM_PLUGIN",
+    # Exa web-search MCP key — the workspace exa server (wired into every stage) resolves
+    # ${EXA_API_KEY}/{env:EXA_API_KEY} from the stage env, so this must survive the scrub or
+    # web search 401s. It's the factory's key (set on factory-console), not an app secret; the
+    # built app never sees it (it's not forwarded to the app's Railway service vars).
+    "EXA_API_KEY",
 }
 
 

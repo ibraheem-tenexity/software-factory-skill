@@ -189,3 +189,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. `src/software_factory/chat_agent.py`, `scripts/benchmark_prompt_fetch.py`, `tests/unit/test_chat_agent.py`, `docs/ARCHITECTURE.md`.
 3. Prompt edits should drive new concierge sessions without adding a DB hit to each chat turn; DB failures keep the last good prompt or fallback constant.
 4. Summary: created worktree `../software-factory-skill-prompt-fetch` on `feature/prompt-fetch-latency`; focused chat tests passed; full non-live suite passed.
+
+# Backend agent Update at Time: 25:06:2026:00:00:00.000
+1. Moved deploy-DB provisioning out of Console._launch_stage into a new `provision-db` db-CLI verb (the stage-3 agent calls it once); wired the exa remote web-search MCP into all stages/both runtimes.
+2. `src/software_factory/{db.py (provision-db verb),console.py (deleted provision block + DEPLOY_DB_MAX_ATTEMPTS import + broadened Railway-MCP prompt),workspace_setup.py (_EXA remote server + _opencode_server branch),mcp_health.py (skip url-only spawn-probe),env.py (EXA_API_KEY passthrough)}`; `skills/stage-{1,2,3}-*/SKILL{,.opencode}.md`; tests in `tests/unit/test_{db,console,workspace_setup}.py`; `docs/ARCHITECTURE.md`.
+3. Orphan backstop is now prompt(provision-once)+provision-idempotency+reaper, no code attempt cap; reaper/teardown unchanged (read state.deploy_db_service_id now written by the verb). exa key env-var'd (${EXA_API_KEY} / {env:EXA_API_KEY}), never literal; survives stage_env_baseline scrub. Supersedes ibraheem's exa stub; research.py / PHASE_AGENTS decentralization untouched (out of scope). Part-B deploy gate = EXA_API_KEY on factory-console.
+4. Summary: full non-live suite green (844 passed, 2 skipped) except pre-existing flaky test_budget_kill_is_recoverable_raise_and_resume (passes in isolation; unrelated to this change). New provision-db verb + exa-all-stages unit tests pass.

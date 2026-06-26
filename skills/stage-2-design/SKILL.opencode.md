@@ -14,6 +14,9 @@ sub-agents. Each unit of work below (architect, tickets) is recorded as a LOGICA
 `spawn-agent` before you start it, `finish-agent` when it's done.
 Read the Stage 1 artifacts from `context/` (PRD.md and the design spec).
 
+> The **exa** web-search MCP is wired into your workspace — use its `web_search`-type tools whenever
+> live web results help (verifying libraries/APIs, current best practices).
+
 ## Record state in the datastore (there are NO events)
 
 ```bash
