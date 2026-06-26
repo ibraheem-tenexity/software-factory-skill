@@ -37,7 +37,7 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
   const [events, setEvents] = useState<ProjectEvent[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
-  const [steerErr, setSteerErr] = useState("");
+  const [sendErr, setSendErr] = useState("");
   const [rail, setRail] = useState<Rail>("feed");
   const feedRef = useRef<HTMLDivElement>(null);
 
@@ -58,16 +58,20 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
+    setSendErr("");
     setMessages((m) => [...m, { role: "user", content: text, ts: Date.now() / 1000 }]);
     setDraft("");
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90_000);
     try {
-      const r = await api.chat({ project_id: projectId, project_name: projectName || "", message: text });
-      const reply = (r.messages || []) as ChatMsg[];
-      setMessages((m) => [...m, ...reply]);
-      setSteerErr("");
+      const r = await api.chat({ project_id: projectId, project_name: projectName || "", message: text }, ctrl.signal);
+      setMessages((m) => [...m, ...(r.messages || []) as ChatMsg[]]);
     } catch (e: any) {
-      setSteerErr(String(e?.message || "Message failed — try again."));
-    } finally { setSending(false); }
+      setSendErr(ctrl.signal.aborted ? "Response timed out — try again." : String(e?.message || "Message failed — try again."));
+    } finally {
+      clearTimeout(timer);
+      setSending(false);
+    }
   };
 
   return (
@@ -147,9 +151,7 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
         </div>
       )}
 
-      {steerErr && (
-        <span style={{ font: `500 11.5px/1.4 ${T.sans}`, color: T.secondary }}>{steerErr}</span>
-      )}
+      {sendErr && <span style={{ font: `400 11.5px/1.4 ${T.sans}`, color: T.danger }}>{sendErr}</span>}
       <div>
         <Composer placeholder="Steer the build…" value={draft} onChange={setDraft} onSend={steer} loading={sending} />
       </div>
