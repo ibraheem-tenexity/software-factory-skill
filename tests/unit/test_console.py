@@ -1813,3 +1813,58 @@ def test_reap_completed_zombie_skips_opencode(tmp_path, monkeypatch):
     log = _write_log(c, rid, {"type": "result", "total_cost_usd": 1.0})
     os.utime(log, (1, 1))
     assert c.reap_completed_zombie(rid) is None
+
+
+# ---------------------------------------------------------------------------------------
+# #19 archive / restore / permanent-delete flow
+# ---------------------------------------------------------------------------------------
+
+def test_list_projects_include_archived_surfaces_rows_with_flag(tmp_path):
+    # Default listing hides archived rows; include_archived=True keeps them, and EVERY row
+    # carries an `archived` flag so the dashboard can split active from archived.
+    c = console(tmp_path, FakeLauncher())
+    ids = iter(["project-a", "project-b"])
+    c._new_id = lambda: next(ids)
+    live = c.start_project(ProjectRequest(description="live one"))
+    arch = c.start_project(ProjectRequest(description="to archive"))
+    c.set_archived(arch, True)
+
+    default_ids = {r["project_id"] for r in c.list_projects()}
+    assert live in default_ids and arch not in default_ids          # archived hidden by default
+
+    rows = {r["project_id"]: r for r in c.list_projects(include_archived=True)}
+    assert live in rows and arch in rows                            # archived now surfaced
+    assert rows[arch]["archived"] is True
+    assert rows[live]["archived"] is False                          # flag present on every row
+
+
+def test_archive_then_restore_round_trip(tmp_path):
+    # archive → restore → visible again in the default listing.
+    c = console(tmp_path, FakeLauncher())
+    c._new_id = lambda: "project-r"
+    rid = c.start_project(ProjectRequest(description="restore me"))
+    assert c.set_archived(rid, True) is True
+    assert rid not in {r["project_id"] for r in c.list_projects()}
+    assert c.set_archived(rid, False) is False
+    assert rid in {r["project_id"] for r in c.list_projects()}      # back in the default listing
+
+
+def test_delete_project_removes_run_and_is_idempotent(tmp_path, monkeypatch):
+    # Permanent delete: the run vanishes from EVERY listing (incl. include_archived), the dir is
+    # gone, the registry no longer knows it, and deleting again does not raise.
+    import os
+    from software_factory.console import project_paths
+    c = console(tmp_path, FakeLauncher())
+    c._new_id = lambda: "project-d"
+    rid = c.start_project(ProjectRequest(description="delete me"))
+    base = project_paths(str(tmp_path), rid)["base"]
+    assert os.path.isdir(base)
+
+    out = c.delete_project(rid)
+    assert out == {"project_id": rid, "deleted": True}
+    assert not os.path.isdir(base)                                  # run dir gone
+    assert rid not in {r["project_id"] for r in c.list_projects(include_archived=True)}
+    assert not c.project_exists(rid)                                # not on disk, not in the registry
+
+    # Idempotent — a second delete (run already gone) must not raise.
+    assert c.delete_project(rid) == {"project_id": rid, "deleted": True}

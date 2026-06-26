@@ -87,11 +87,70 @@ function AgentDots({ agents, owner }: { agents: string[]; owner?: string }) {
 
 const rowMenuItem: React.CSSProperties = { display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "none", border: "none", cursor: "pointer", font: `500 12.5px/1 ${"'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif"}`, color: T.fg };
 
-function ProjectRow({ r, onClick, first, onRename, onArchive }:
-  { r: ProjectSummary; onClick: () => void; first: boolean; onRename: (id: string, name: string) => void; onArchive: (id: string) => void }) {
+// A confirm action — kind drives the copy, button variant, and icon.
+type ConfirmAction = { kind: "archive" | "delete"; project: ProjectSummary };
+
+// archive / trash glyphs for the confirm modal. Kept local (same 24×24 stroke convention as the
+// shared Icon) so #19 touches no shared design file; the design icon set has neither glyph.
+const CONFIRM_ICON: Record<"archive" | "trash", string> = {
+  archive: "M21 8v13H3V8 M1 3h22v5H1z M10 12h4",
+  trash: "M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2 M10 11v6 M14 11v6",
+};
+function ConfirmIcon({ name, size = 16, color = "currentColor" }: { name: "archive" | "trash"; size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+      strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      {CONFIRM_ICON[name].split(" M").map((seg, i) => <path key={i} d={i === 0 ? seg : "M" + seg} />)}
+    </svg>
+  );
+}
+
+// Centered confirm overlay — replaces the browser confirm() for archive / permanent delete.
+function ConfirmModal({ action, onConfirm, onCancel }:
+  { action: ConfirmAction; onConfirm: () => void; onCancel: () => void }) {
+  const { kind, project } = action;
+  const label = project.name || draftLabel(project.project_id);
+  const running = statusOf(project).key === "building" || statusOf(project).key === "researching";
+  const isDelete = kind === "delete";
+  const title = isDelete ? "Delete project permanently?" : "Archive project?";
+  const body = isDelete
+    ? `${label} and its build history will be permanently removed. This cannot be undone.`
+    : `${label} will move to Archived.${running ? " Any running agents stop and the automation is paused." : ""} You can restore it anytime.`;
+  return (
+    <div onClick={onCancel} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(9,7,9,0.42)", display: "grid", placeItems: "center", padding: 24 }}>
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true"
+        style={{ width: "100%", maxWidth: 420, background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, boxShadow: T.shadowMd, padding: "22px 22px 18px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 10 }}>
+          <span style={{ display: "grid", placeItems: "center", width: 36, height: 36, borderRadius: "50%", background: isDelete ? T.dangerSoft : T.brandSoft }}>
+            <ConfirmIcon name={isDelete ? "trash" : "archive"} size={17} color={isDelete ? T.danger : T.brandDeep} />
+          </span>
+          <h2 style={{ font: `700 17px/1.2 ${T.display}`, letterSpacing: "-0.01em", color: T.fg, margin: 0 }}>{title}</h2>
+        </div>
+        <p style={{ font: `400 13.5px/1.5 ${T.sans}`, color: T.secondary, margin: "0 0 18px" }}>{body}</p>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+          <Btn variant={isDelete ? "danger" : "primary"} onClick={onConfirm}>
+            <ConfirmIcon name={isDelete ? "trash" : "archive"} size={14} color="#fff" /> {isDelete ? "Delete permanently" : "Archive project"}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type RowHandlers = {
+  onRename: (id: string, name: string) => void;
+  onRequestArchive: (r: ProjectSummary) => void;
+  onRequestDelete: (r: ProjectSummary) => void;
+  onRestore: (id: string) => void;
+};
+
+function ProjectRow({ r, onClick, first, onRename, onRequestArchive, onRequestDelete, onRestore }:
+  { r: ProjectSummary; onClick: () => void; first: boolean } & RowHandlers) {
   const st = statusOf(r);
   const live = st.key === "building" || st.key === "researching";
   const pct = pctOf(r, st.key);
+  const archived = !!r.archived;
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(r.name || "");
@@ -100,6 +159,7 @@ function ProjectRow({ r, onClick, first, onRename, onArchive }:
     <div role="button" tabIndex={0} onClick={renaming ? undefined : onClick}
       onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !renaming) onClick(); }}
       style={{ width: "100%", textAlign: "left", cursor: renaming ? "default" : "pointer", background: T.raised,
+        opacity: archived ? 0.6 : 1,
         borderTop: first ? "none" : `1px solid ${T.borderSubtle}`, padding: "16px 18px", display: "grid",
         gridTemplateColumns: "minmax(0,1fr) 132px 150px 96px 28px", alignItems: "center", gap: 16, transition: "background .12s" }}
       onMouseEnter={(e) => (e.currentTarget.style.background = T.sunken)} onMouseLeave={(e) => (e.currentTarget.style.background = T.raised)}>
@@ -114,7 +174,9 @@ function ProjectRow({ r, onClick, first, onRename, onArchive }:
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
               <span style={{ font: `600 14.5px/1.2 ${T.sans}`, color: r.name ? T.fg : T.tertiary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name || draftLabel(r.project_id)}</span>
-              <StatusPill tone={st.tone} dot={live}>{st.label}</StatusPill>
+              {archived
+                ? <StatusPill tone="neutral">Archived</StatusPill>
+                : <StatusPill tone={st.tone} dot={live}>{st.label}</StatusPill>}
             </div>
             <p style={{ margin: "5px 0 0", font: `400 12.5px/1.4 ${T.sans}`, color: T.secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.description || "—"}</p>
             {r.created_by && <p style={{ margin: "3px 0 0", font: `400 11px/1 ${T.mono}`, color: T.tertiary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Created by {r.created_by}{r.created_at ? ` · ${new Date(r.created_at * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}</p>}
@@ -123,7 +185,7 @@ function ProjectRow({ r, onClick, first, onRename, onArchive }:
       </div>
       <div>
         <div style={{ font: `500 11.5px/1 ${T.mono}`, color: T.secondary, marginBottom: 6 }}>{r.phase || "—"}</div>
-        {st.key !== "draft" && (
+        {st.key !== "draft" && !archived && (
           <span style={{ display: "block", width: 110, height: 5, borderRadius: 3, background: T.sunken, overflow: "hidden" }}>
             <span style={{ display: "block", height: "100%", width: pct + "%", background: barColor(st.key) }} />
           </span>
@@ -137,11 +199,20 @@ function ProjectRow({ r, onClick, first, onRename, onArchive }:
           <>
             <div onClick={() => setMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 9 }} />
             <div style={{ position: "absolute", right: 0, top: 30, zIndex: 10, background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rMd, boxShadow: T.shadowMd, overflow: "hidden", minWidth: 150 }}>
-              <button onClick={() => { setMenu(false); setName(r.name || ""); setRenaming(true); }} style={rowMenuItem}>Rename</button>
-              {st.key === "draft"
-                ? <button onClick={() => { setMenu(false); if (confirm(`Discard "${r.name || draftLabel(r.project_id)}"? This draft will be permanently deleted.`)) onArchive(r.project_id); }} style={{ ...rowMenuItem, color: T.danger }}>Discard draft</button>
-                : <button onClick={() => { setMenu(false); if (confirm(`Archive "${r.name || draftLabel(r.project_id)}"? It'll be hidden from your projects.`)) onArchive(r.project_id); }} style={{ ...rowMenuItem, color: T.danger }}>Archive</button>
-              }
+              {archived ? (
+                <>
+                  <button onClick={() => { setMenu(false); onRestore(r.project_id); }} style={rowMenuItem}>Restore project</button>
+                  <button onClick={() => { setMenu(false); onRequestDelete(r); }} style={{ ...rowMenuItem, color: T.danger }}>Delete permanently</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => { setMenu(false); setName(r.name || ""); setRenaming(true); }} style={rowMenuItem}>Rename</button>
+                  {st.key === "draft"
+                    ? <button onClick={() => { setMenu(false); onRequestArchive(r); }} style={{ ...rowMenuItem, color: T.danger }}>Discard draft</button>
+                    : <button onClick={() => { setMenu(false); onRequestArchive(r); }} style={{ ...rowMenuItem, color: T.danger }}>Archive project</button>
+                  }
+                </>
+              )}
             </div>
           </>
         )}
@@ -150,12 +221,12 @@ function ProjectRow({ r, onClick, first, onRename, onArchive }:
   );
 }
 
-function ProjectList({ projects, onOpen, onRename, onArchive, empty }:
-  { projects: ProjectSummary[]; onOpen: (id: string) => void; onRename: (id: string, name: string) => void; onArchive: (id: string) => void; empty: string }) {
+function ProjectList({ projects, onOpen, handlers, empty }:
+  { projects: ProjectSummary[]; onOpen: (id: string) => void; handlers: RowHandlers; empty: string }) {
   if (!projects.length) return <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "22px", textAlign: "center", font: `400 13px/1.4 ${T.sans}`, color: T.tertiary }}>{empty}</div>;
   return (
     <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden", boxShadow: T.shadowXs }}>
-      {projects.map((r, i) => <ProjectRow key={r.project_id} r={r} first={i === 0} onClick={() => onOpen(r.project_id)} onRename={onRename} onArchive={onArchive} />)}
+      {projects.map((r, i) => <ProjectRow key={r.project_id} r={r} first={i === 0} onClick={() => onOpen(r.project_id)} {...handlers} />)}
     </div>
   );
 }
@@ -169,7 +240,9 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
 
   const [loading, setLoading] = useState(true);
   const [ownerFilter, setOwnerFilter] = useState<string>(""); // "" = all
-  const loadProjects = () => api.projects().then((d) => setProjects(d.projects || [])).catch(() => setProjects([]));
+  const [confirm, setConfirm] = useState<ConfirmAction | null>(null);
+  // include_archived=true so the Archived section has rows; statusOf() never sees them (split below).
+  const loadProjects = () => api.projects(true).then((d) => setProjects(d.projects || [])).catch(() => setProjects([]));
   useEffect(() => {
     setLoading(true);
     loadProjects().finally(() => setLoading(false));
@@ -180,13 +253,31 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
     api.orgMembers().then((d) => setMemberCount(d.members?.length ?? 0)).catch(() => setMemberCount(null));
   }, []);
 
-  // Project CRUD (NEW endpoints — graceful until tjyb5gmy ships; refetch on success).
+  // Project CRUD — refetch on success.
   const renameProject = async (id: string, name: string) => {
     if (!name) return;
-    try { await api.patchProject(id, { name }); await loadProjects(); } catch { /* endpoint not live yet */ }
+    try { await api.patchProject(id, { name }); await loadProjects(); } catch { /* surface nothing — keep the row */ }
   };
-  const archiveProject = async (id: string) => {
-    try { await api.deleteProject(id); await loadProjects(); } catch { /* endpoint not live yet */ }
+  const restoreProject = async (id: string) => {
+    try { await api.restoreProject(id); await loadProjects(); } catch { /* keep archived */ }
+  };
+  // Archive + permanent delete go through the styled ConfirmModal; this runs on confirm.
+  const runConfirm = async () => {
+    if (!confirm) return;
+    const { kind, project } = confirm;
+    setConfirm(null);
+    try {
+      if (kind === "delete") await api.deleteProjectPermanently(project.project_id);
+      else await api.deleteProject(project.project_id);
+      await loadProjects();
+    } catch { /* keep the row */ }
+  };
+
+  const handlers: RowHandlers = {
+    onRename: renameProject,
+    onRequestArchive: (r) => setConfirm({ kind: "archive", project: r }),
+    onRequestDelete: (r) => setConfirm({ kind: "delete", project: r }),
+    onRestore: restoreProject,
   };
 
   const isAdmin = me?.role === "admin";
@@ -195,12 +286,15 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
   const owners = Array.from(new Set(projects.map((r) => r.owner).filter(Boolean) as string[])).sort();
   const visibleProjects = ownerFilter ? projects.filter((r) => r.owner === ownerFilter) : projects;
 
-  const active = visibleProjects.filter((r) => statusOf(r).key !== "deployed");
-  const shipped = visibleProjects.filter((r) => statusOf(r).key === "deployed");
+  // Archived rows live in their own section; statusOf() must never classify them as active/deployed.
+  const archived = visibleProjects.filter((r) => r.archived);
+  const liveProjects = visibleProjects.filter((r) => !r.archived);
+  const active = liveProjects.filter((r) => statusOf(r).key !== "deployed");
+  const shipped = liveProjects.filter((r) => statusOf(r).key === "deployed");
   const building = active.filter((r) => statusOf(r).key === "building");
   const researching = active.filter((r) => statusOf(r).key === "researching");
   const withAgents = active.filter((r) => { const k = statusOf(r).key; return (k === "building" || k === "researching") && (r.agents?.length || 0) > 0; }).length;
-  const totalSpend = projects.reduce((s, r) => s + (r.spent_usd || 0), 0);
+  const totalSpend = liveProjects.reduce((s, r) => s + (r.spent_usd || 0), 0);
   const orgName = org?.name || "Your organization";
 
   // Org-admin preview stats — built only from real org data (KB doc count + team member count
@@ -254,7 +348,7 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
               <MetricCard label="Active projects" value={String(active.length)} hint={`${withAgents} with agents working now`} accent />
               <MetricCard label="In build" value={String(building.length)} hint={`${researching.length} researching`} />
               <MetricCard label="Deployed" value={String(shipped.length)} hint={shipped[0] ? (shipped[0].name || draftLabel(shipped[0].project_id)) + " · live" : "none yet"} />
-              <MetricCard label="Spend to date" value={money(totalSpend) === "—" ? "$0.00" : money(totalSpend)} hint={org?.monthly_budget_cap != null ? `of $${org.monthly_budget_cap} cap` : `across ${projects.length} project${projects.length === 1 ? "" : "s"}`} />
+              <MetricCard label="Spend to date" value={money(totalSpend) === "—" ? "$0.00" : money(totalSpend)} hint={org?.monthly_budget_cap != null ? `of $${org.monthly_budget_cap} cap` : `across ${liveProjects.length} project${liveProjects.length === 1 ? "" : "s"}`} />
             </>)}
           </div>
 
@@ -311,7 +405,7 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
                 {[0, 1, 2].map((i) => <ProjectRowSkel key={i} first={i === 0} />)}
               </div>
             ) : (
-              <ProjectList projects={active} onOpen={onOpen} onRename={renameProject} onArchive={archiveProject} empty='No projects in progress. Start one with "New project".' />
+              <ProjectList projects={active} onOpen={onOpen} handlers={handlers} empty='No projects in progress. Start one with "New project".' />
             )}
           </div>
 
@@ -319,12 +413,22 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
           {shipped.length > 0 && (
             <div>
               <CategoryLabel style={{ marginBottom: 10 }}>Deployed · {shipped.length}</CategoryLabel>
-              <ProjectList projects={shipped} onOpen={onOpen} onRename={renameProject} onArchive={archiveProject} empty="" />
+              <ProjectList projects={shipped} onOpen={onOpen} handlers={handlers} empty="" />
+            </div>
+          )}
+
+          {/* archived — only shown when there's at least one archived project */}
+          {archived.length > 0 && (
+            <div>
+              <CategoryLabel style={{ marginBottom: 10 }}>Archived · {archived.length}</CategoryLabel>
+              <ProjectList projects={archived} onOpen={onOpen} handlers={handlers} empty="" />
             </div>
           )}
 
         </div>
       </div>
+
+      {confirm && <ConfirmModal action={confirm} onConfirm={runConfirm} onCancel={() => setConfirm(null)} />}
     </div>
   );
 }

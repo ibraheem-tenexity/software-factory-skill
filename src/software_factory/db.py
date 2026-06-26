@@ -58,6 +58,15 @@ class ProjectStore:
         )
         self._conn.commit()
 
+    def delete_project(self, project_id: str) -> None:
+        """Permanently remove every flat-schema row for this run (projectstate + the per-project
+        tables). Dropping the projectstate row is what stops the run reappearing from the registry
+        (dbshim.registry_projects reads that table). Idempotent — deleting a gone run is a no-op."""
+        from .models import FLAT_TABLES
+        for table in FLAT_TABLES:
+            self._conn.execute(f"DELETE FROM {table.name} WHERE project_id = ?", (project_id,))
+        self._conn.commit()
+
     # ---- canvas-state writes (used by the CLI the orchestrator calls) ----------------
     def set_phase(self, name: str, status: str = "active", stage: Optional[int] = None) -> None:
         self._conn.execute(

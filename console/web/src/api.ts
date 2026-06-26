@@ -17,6 +17,7 @@ export type ProjectSummary = {
   created_by?: string;    // immutable creator email (set-once; backfilled from owner for legacy projects)
   created_at?: number;    // epoch seconds of project creation
   max_turns?: number;     // per-stage turn cap (resolved per-project value)
+  archived?: boolean;     // soft-deleted — rendered in the dashboard's Archived section
 };
 
 export type TicketStatus =
@@ -276,7 +277,8 @@ export const api = {
     });
     return { ok: r.ok, status: r.status };
   },
-  projects: () => get<{ projects: ProjectSummary[] }>("/api/projects"),
+  projects: (includeArchived = false) =>
+    get<{ projects: ProjectSummary[] }>(`/api/projects${includeArchived ? "?include_archived=true" : ""}`),
   status: (id: string) => get<ProjectSummary & Record<string, any>>(`/api/projects/${id}`),
   graph: (id: string) => get<Graph>(`/api/projects/${id}/graph`),
   tickets: (id: string) => get<TicketsResponse>(`/api/projects/${id}/tickets`),
@@ -378,7 +380,10 @@ export const api = {
     send<ProjectSummary & Record<string, any>>(`/api/projects/${id}`, "PATCH", body),
   setMaterialScope: (id: string, materialId: string, scope: "project" | "org") =>
     send<ProjectDocuments>(`/api/projects/${id}/materials/${materialId}`, "PATCH", { scope }),
-  deleteProject: (id: string) => send<{ ok?: boolean }>(`/api/projects/${id}`, "DELETE"),
+  deleteProject: (id: string) => send<{ project_id: string; archived: boolean }>(`/api/projects/${id}`, "DELETE"),
+  // Restore an archived project (un-archives it); permanent delete removes the run for good.
+  restoreProject: (id: string) => send<{ project_id: string; archived: boolean }>(`/api/projects/${id}/restore`, "POST"),
+  deleteProjectPermanently: (id: string) => send<{ project_id: string; deleted: boolean }>(`/api/projects/${id}/permanent`, "DELETE"),
   // Manual kill-switch — halts the live stage process, sets phase=stopped, stops the poller
   // re-advancing. Endpoint shipping in qsvigmth's run-control PR; graceful until then.
   stopProject: (id: string) => send<ProjectSummary & Record<string, any>>(`/api/projects/${id}/stop`, "POST"),
