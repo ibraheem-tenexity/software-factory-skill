@@ -43,15 +43,6 @@ SKILL_VERSION = "0.0.1"
 
 PIPELINE_LABELS = {"wait-for-deps": "wait for deps"}
 
-PHASE_AGENTS = {
-    "research": [
-        ("horizon", "HORIZON"), ("archivist", "ARCHIVIST"),
-        ("vanguard", "VANGUARD"), ("chroma", "CHROMA"),
-        ("designer", "DESIGNER"),
-    ],
-    "architect": [("architect", "software-architect")],
-}
-
 PHASE_STAGE = {}
 for _p in STAGE_1:
     PHASE_STAGE[_p] = 1
