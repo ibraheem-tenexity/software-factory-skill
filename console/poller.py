@@ -20,6 +20,7 @@ import console.state as state
 _stage2_launched: set = set()
 _stage3_launched: set = set()
 _narrated: set = set()
+_log_offsets: dict = {}  # pid -> bytes uploaded on last log flush
 # project_id -> crash auto-resume attempts, bounded per server life. Configurable: long opencode
 # sessions (multi-hour Kimi build/test loops) crash more often than claude's — run-b594a5f4
 # exhausted 2 resumes mid-test-phase and stalled 12h. The bound exists to stop crash loops,
@@ -178,12 +179,29 @@ def _github_reaper_tick(tick: int, interval: int, console) -> dict | None:
     return report
 
 
+def _log_flush_tick(pid: str, log_path: str) -> None:
+    """Upload project.log to Supabase Storage when new bytes have arrived since the last flush.
+    Re-uploads the whole file (upsert, same key) — idempotent. No-op when storage is disabled."""
+    from software_factory import storage
+    if not storage.enabled() or not os.path.exists(log_path):
+        return
+    size = os.path.getsize(log_path)
+    if size <= _log_offsets.get(pid, 0):
+        return
+    try:
+        storage.put(pid, "logs/project.log", log_path)
+        _log_offsets[pid] = size
+    except Exception as e:
+        print(f"[log-flush] {pid}: {e}", flush=True)
+
+
 def _poll_transitions():
     """Background thread: auto-advance stages, enforce the per-project budget, narrate progress."""
     console = state.console
     tick = 0
     _reaper_interval = int(os.environ.get("SF_REAPER_INTERVAL_TICKS", "0") or "0")
     _gh_reaper_interval = int(os.environ.get("SF_GITHUB_REAPER_INTERVAL_TICKS", "0") or "0")
+    _log_flush_interval = max(1, int(os.environ.get("SF_LOG_FLUSH_TICKS", "10") or "10"))
     while True:
         time.sleep(3)
         tick += 1
@@ -227,6 +245,11 @@ def _poll_transitions():
                     pass
                 _auto_advance(pid)
                 st = console.status(pid)
+                if tick % _log_flush_interval == 0:
+                    try:
+                        _log_flush_tick(pid, os.path.join(state.PROJECTS_DIR, pid, "project.log"))
+                    except Exception:
+                        pass
                 try:
                     if not st.get("done") and console.enforce_budget(pid):
                         _narrate(pid, "budget-%d" % int(console._budget_ceiling(pid)),
