@@ -80,14 +80,16 @@ def test_stage3_workspace_wires_railway_mcp_and_no_supabase(tmp_path):
 
 
 def test_stage1_and_2_workspace_has_playwright_and_exa_no_deploy_mcps(tmp_path):
-    # Stages 1-2 get playwright + exa (web search, all stages) but NOT the deploy MCPs (railway).
+    # Stages 1-2 get playwright + exa + openrouter (web search & LLM, all stages) but NOT the
+    # deploy MCPs (railway).
     runs = tmp_path / "runs"; runs.mkdir()
     skills_dir = _make_skills_dir(tmp_path); phase_dir = _make_phase_dir(tmp_path)
     for stage in (1, 2):
         ws = prepare_workspace(str(runs), "project-s%d" % stage, stage,
                                skills_dir=skills_dir, phase_dir=phase_dir)
         mcp = json.loads(open(os.path.join(ws, ".mcp.json")).read())["mcpServers"]
-        assert set(mcp) == {"playwright", "exa"}, "stages 1-2 = playwright + exa, no deploy MCPs"
+        assert set(mcp) == {"playwright", "exa", "openrouter"}, \
+            "stages 1-2 = playwright + exa + openrouter, no deploy MCPs"
 
 
 def test_exa_web_search_mcp_in_every_stage_both_runtimes_env_var_key(tmp_path):

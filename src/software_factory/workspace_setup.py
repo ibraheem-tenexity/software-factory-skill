@@ -42,7 +42,7 @@ _OPEN_ROUTER = { "type":"http", "url": "https://mcp.openrouter.ai/mcp" }
 
 
 def mcp_config(stage: int) -> dict:
-    servers = {"playwright": _PLAYWRIGHT, "exa": _EXA. "openrouter":_OPEN_ROUTER}
+    servers = {"playwright": _PLAYWRIGHT, "exa": _EXA, "openrouter": _OPEN_ROUTER}
     if stage >= 3:
         servers["railway"] = _RAILWAY
     return {"mcpServers": servers}
