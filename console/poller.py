@@ -13,7 +13,6 @@ from fastapi import FastAPI
 
 from software_factory.chat_store import ChatStore, ChatMessage
 from software_factory import notify
-from software_factory import tracing
 from software_factory import env as _env
 
 import console.state as state
@@ -27,7 +26,6 @@ _narrated: set = set()
 # not to ration recovery; budget enforcement is the real spend brake.
 _AUTO_RESUME_MAX = int(os.environ.get("SF_AUTO_RESUME_MAX", "2") or 2)
 _auto_resumed: dict = {}
-_tracer = tracing.Tracer()
 _health_bad_since = [None]  # [-]: None = healthy; float = first failure ts (alert once)
 
 
@@ -229,9 +227,6 @@ def _poll_transitions():
                     pass
                 _auto_advance(pid)
                 st = console.status(pid)
-                # LLM traces: ship this run's new log lines to Langfuse (no-op without keys).
-                _tracer.tick(pid, os.path.join(state.PROJECTS_DIR, pid, "project.log"),
-                             meta={"runtime": st.get("runtime", "")})
                 try:
                     if not st.get("done") and console.enforce_budget(pid):
                         _narrate(pid, "budget-%d" % int(console._budget_ceiling(pid)),
