@@ -116,6 +116,7 @@ def prepare_workspace(
     phase_dir: str | None = None,
     runtime: str = "claude",
     skill_override: str | None = None,
+    steps: int | None = None,
 ) -> str:
     ws = workspace.create(projects_dir, project_id)
 
@@ -124,9 +125,10 @@ def prepare_workspace(
     with open(os.path.join(ws, ".mcp.json"), "w") as f:
         json.dump(mcp_config(stage), f, indent=2)
     if runtime == "opencode":
-        steps = int(os.environ.get("SF_MAX_TURNS", "200") or 200)
+        # Per-project cap when the console threads one through; else the SF_MAX_TURNS env default.
+        cap = steps if steps is not None else int(os.environ.get("SF_MAX_TURNS", "200") or 200)
         with open(os.path.join(ws, "opencode.json"), "w") as f:
-            json.dump(opencode_config(stage, steps), f, indent=2)
+            json.dump(opencode_config(stage, cap), f, indent=2)
     else:
         with open(os.path.join(ws, "claude-settings.json"), "w") as f:
             json.dump(CLAUDE_SETTINGS, f, indent=2)

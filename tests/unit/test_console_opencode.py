@@ -115,6 +115,20 @@ def test_opencode_workspace_gets_opencode_json_not_claude_settings(tmp_path, mon
     assert "playwright" in json.loads(open(os.path.join(ws, ".mcp.json")).read())["mcpServers"]
 
 
+def test_opencode_steps_uses_per_project_max_turns_over_env(tmp_path, monkeypatch):
+    # The per-project turn cap reaches the opencode `steps` cap, overriding SF_MAX_TURNS.
+    monkeypatch.setenv("SF_RUNTIME", "opencode")
+    monkeypatch.setenv("SF_MAX_TURNS", "150")
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_project(ProjectRequest(description="guestbook", target="railway"))
+    c.set_max_turns(rid, 77)
+    st = c._load_state(rid); st.stage1_done = True; st.save()
+    c.start_stage2(rid)                                          # relaunch writes opencode.json
+    cfg = json.loads(open(os.path.join(launcher.cwd, "opencode.json")).read())
+    assert cfg["agent"]["factory"]["steps"] == 77                # per-project override, not the env 150
+
+
 def test_opencode_prompts_are_monolithic_with_logical_agents():
     req = ProjectRequest(description="x")
     p1 = make_prompt_stage1(req, "project-1", "/runs", runtime="opencode")
