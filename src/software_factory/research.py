@@ -1,7 +1,6 @@
 """Company research — enrich a company profile via Exa (quick) or OpenRouter Fusion (deep)."""
 from __future__ import annotations
 
-import os
 import httpx
 from dataclasses import dataclass, asdict
 
@@ -87,8 +86,6 @@ def _exa_search(
     if website and website not in sources:
         sources.insert(0, website)
 
-    # Aggregate text from all results for field extraction
-    all_text = " ".join(r.get("text", "") for r in results)
     description = results[0].get("text", "")[:300].strip() if results else ""
 
     # Best-effort: collect headlines from non-primary results as recent news
