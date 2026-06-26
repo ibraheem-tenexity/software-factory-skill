@@ -86,8 +86,6 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
   const [scopeDraft, setScopeDraft] = useState("");
   const [capEditing, setCapEditing] = useState(false);
   const [capInput, setCapInput] = useState("");
-  const [turnsEditing, setTurnsEditing] = useState(false);
-  const [turnsInput, setTurnsInput] = useState("");
   const addInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadDocs = () => api.documents(projectId).then(setDocs).catch(() => setDocs(null));
@@ -275,28 +273,6 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                       <span style={{ font: `500 12.5px/1 ${T.mono}`, color: T.fg }}>{build.budget_ceiling != null ? money(build.budget_ceiling) : "—"}</span>
                       <button onClick={() => { setCapInput(build.budget_ceiling != null ? String(build.budget_ceiling) : ""); setCapEditing(true); }}
                         style={{ background: "none", border: "none", cursor: "pointer", color: T.tertiary, padding: 0, lineHeight: 1, display: "inline-flex" }} title="Edit budget cap">
-                        <Icon name="pencil" size={11} color={T.tertiary} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ font: `400 12.5px/1 ${T.sans}`, color: T.secondary }}>Max turns per stage</span>
-                  {turnsEditing ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <input value={turnsInput} onChange={(e) => setTurnsInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") { const n = parseInt(turnsInput, 10); if (!isNaN(n) && n > 0) { api.setProjectTurns(projectId, n).then(loadOverview).catch(() => undefined); } setTurnsEditing(false); } if (e.key === "Escape") setTurnsEditing(false); }}
-                        style={{ width: 58, font: `500 12.5px/1 ${T.mono}`, color: T.fg, background: T.bg, border: `1px solid ${T.borderDefault}`, borderRadius: 4, padding: "2px 5px", outline: "none" }} autoFocus />
-                      <button onClick={() => { const n = parseInt(turnsInput, 10); if (!isNaN(n) && n > 0) { api.setProjectTurns(projectId, n).then(loadOverview).catch(() => undefined); } setTurnsEditing(false); }}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: T.success, font: `600 11px/1 ${T.sans}`, padding: "0 2px" }}>Save</button>
-                      <button onClick={() => setTurnsEditing(false)}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: T.tertiary, font: `500 11px/1 ${T.sans}`, padding: "0 2px" }}>Cancel</button>
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ font: `500 12.5px/1 ${T.mono}`, color: T.fg }}>{build.max_turns ? String(build.max_turns) : "—"}</span>
-                      <button onClick={() => { setTurnsInput(build.max_turns ? String(build.max_turns) : ""); setTurnsEditing(true); }}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: T.tertiary, padding: 0, lineHeight: 1, display: "inline-flex" }} title="Edit max turns per stage">
                         <Icon name="pencil" size={11} color={T.tertiary} />
                       </button>
                     </div>

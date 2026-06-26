@@ -77,7 +77,6 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
   const cap = status.budget_ceiling || 0;
   const spent = status.spent_usd || 0;
   const overCap = cap > 0 && spent > cap;
-  const maxTurns = status.max_turns || 0;
 
   // ticket progress (Done column = approved); pct drives the header bar.
   const doneTickets = tickets.filter((t) => t.status === "approved").length;
@@ -141,11 +140,6 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
         <span style={{ font: `500 12px/1 ${T.mono}`, color: overCap ? T.danger : T.secondary }}>
           spent <b style={{ color: overCap ? T.danger : T.fg }}>${spent.toFixed(2)}</b>{cap > 0 && ` / $${cap.toFixed(0)} cap`}
         </span>
-        {maxTurns > 0 && (
-          <span style={{ font: `500 12px/1 ${T.mono}`, color: T.secondary }}>
-            {maxTurns} turns/stage
-          </span>
-        )}
         {running && (
           <button onClick={pauseRun} title="Pause this run — can be resumed"
             style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 28, padding: "0 9px", borderRadius: T.rMd, cursor: "pointer", border: `1px solid ${T.borderDefault}`, background: T.raised, color: T.secondary, font: `600 10.5px/1 ${T.mono}` }}>

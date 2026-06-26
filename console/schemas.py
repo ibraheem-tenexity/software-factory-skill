@@ -108,10 +108,6 @@ class BudgetIn(BaseModel):
     ceiling: float | None = None
 
 
-class TurnsIn(BaseModel):
-    turns: int | None = None
-
-
 class RetryIn(BaseModel):
     stage: int = 0
     creds: dict | None = None
@@ -139,7 +135,6 @@ class ProjectCreateIn(BaseModel):
     gated: bool = False
     railway_token: str = ""
     railway_project_id: str = ""
-    max_turns: int | None = None  # per-stage turn cap; None → SF_MAX_TURNS default
 
 
 # Option C onboarding (draft model): the form defers draft creation until the user types a name,
@@ -151,7 +146,6 @@ class DraftCreateIn(BaseModel):
     impl_model: str = ""
     model: str = ""   # opencode model alias: "kimi"|"glm"
     budget: float | None = None  # per-project spend ceiling ($); None → SF_COST_CEILING default
-    max_turns: int | None = None  # per-stage turn cap; None → SF_MAX_TURNS default
 
 
 class DraftPatchIn(BaseModel):
@@ -161,7 +155,6 @@ class DraftPatchIn(BaseModel):
     runtime: str | None = None   # "claude"|"opencode" — lets the Build-engine card update the draft's runtime after the eager create
     model: str | None = None     # opencode model alias: "kimi"|"glm"
     budget: float | None = None  # update the spend ceiling
-    max_turns: int | None = None  # update the per-stage turn cap
 
 
 class CredsIn(BaseModel):

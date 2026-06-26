@@ -98,7 +98,6 @@ def test_default_runtime_is_claude(tmp_path):
 
 def test_opencode_workspace_gets_opencode_json_not_claude_settings(tmp_path, monkeypatch):
     monkeypatch.setenv("SF_RUNTIME", "opencode")
-    monkeypatch.setenv("SF_MAX_TURNS", "150")
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
     c.start_project(ProjectRequest(description="guestbook", target="railway"))
@@ -107,26 +106,12 @@ def test_opencode_workspace_gets_opencode_json_not_claude_settings(tmp_path, mon
     cfg = json.loads(open(os.path.join(ws, "opencode.json")).read())
     assert "playwright" in cfg["mcp"]
     assert cfg["mcp"]["playwright"]["type"] == "local"
-    assert cfg["agent"]["factory"]["steps"] == 150           # SF_MAX_TURNS -> steps cap
+    assert "steps" not in cfg["agent"]["factory"]            # no turn cap — runs to completion
     assert cfg["instructions"] == ["SKILL.md"]               # contract injected ambiently
     assert cfg["permission"]["doom_loop"] == "allow"         # 'ask' would hang headless
     assert not os.path.exists(os.path.join(ws, "claude-settings.json"))
     # .mcp.json still written for BOTH runtimes — mcp_health hard-gates on it
     assert "playwright" in json.loads(open(os.path.join(ws, ".mcp.json")).read())["mcpServers"]
-
-
-def test_opencode_steps_uses_per_project_max_turns_over_env(tmp_path, monkeypatch):
-    # The per-project turn cap reaches the opencode `steps` cap, overriding SF_MAX_TURNS.
-    monkeypatch.setenv("SF_RUNTIME", "opencode")
-    monkeypatch.setenv("SF_MAX_TURNS", "150")
-    launcher = FakeLauncher()
-    c = console(tmp_path, launcher)
-    rid = c.start_project(ProjectRequest(description="guestbook", target="railway"))
-    c.set_max_turns(rid, 77)
-    st = c._load_state(rid); st.stage1_done = True; st.save()
-    c.start_stage2(rid)                                          # relaunch writes opencode.json
-    cfg = json.loads(open(os.path.join(launcher.cwd, "opencode.json")).read())
-    assert cfg["agent"]["factory"]["steps"] == 77                # per-project override, not the env 150
 
 
 def test_opencode_prompts_are_monolithic_with_logical_agents():

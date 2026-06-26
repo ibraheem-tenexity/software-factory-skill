@@ -73,7 +73,6 @@ class ProjectRequest:
     name: str = ""            # operator-chosen project name (display label)
     gated: bool = False       # create held: registered + visible at $0, stage 1 launches on release
     owner: str = ""           # email of the creating user (multi-tenant: members see only their own)
-    max_turns: int | None = None  # per-project per-stage turn cap; None -> SF_MAX_TURNS default
 
 
 def project_paths(projects_dir: str, project_id: str) -> dict:
@@ -541,14 +540,6 @@ class Console:
             return float(state.budget_ceiling)
         return float(os.environ.get("SF_COST_CEILING", "30") or 30)
 
-    def _max_turns(self, project_id: str) -> int:
-        """Per-project per-stage turn cap — the run's own override, else SF_MAX_TURNS (default 200).
-        Feeds claude's --max-turns and the opencode `steps` cap."""
-        state = self._load_state(project_id)
-        if state.max_turns:
-            return int(state.max_turns)
-        return int(os.environ.get("SF_MAX_TURNS", "200") or 200)
-
     def _kill_stage_process(self, project_id: str) -> bool:
         """Terminate this run's live stage process: SIGTERM → 5s grace → SIGKILL. opencode processes
         SURVIVE a plain SIGTERM (confirmed in prod — serve ignored SIGTERM and even pkill), so escalate
@@ -793,17 +784,6 @@ class Console:
                 db.clear_blocker(b["what"])
         return {"project_id": project_id, "budget_ceiling": float(ceiling)}
 
-    def set_max_turns(self, project_id: str, turns: int) -> dict:
-        """Persist a new per-project per-stage turn cap (the SF_MAX_TURNS override). Validates a
-        positive integer; subsequent stage launches read it via _max_turns."""
-        n = int(turns)
-        if n <= 0:
-            raise ValueError("max_turns must be a positive integer")
-        state = self._load_state(project_id)
-        state.max_turns = n
-        state.save()
-        return {"project_id": project_id, "max_turns": n}
-
     def _launch_stage(self, project_id: str, stage: int, prompt: str, env: dict) -> Any:
         """Prepare workspace, health-check MCP, and launch a claude -p process for a stage."""
         # §1 double-orchestrator guard: refuse if an orchestrator is already alive for this run.
@@ -864,10 +844,8 @@ class Console:
             override = row["prompt"] if row else None
         except Exception:
             override = None
-        max_turns = self._max_turns(project_id)  # per-project override else SF_MAX_TURNS (default 200)
         ws = prepare_workspace(
             self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
-            steps=max_turns,
         )
         # Stage 3 with a database dependency provisions its OWN Railway Postgres via the
         # `provision-db` db-CLI verb (which wraps deploy_db.provision and persists the teardown
@@ -954,7 +932,6 @@ class Console:
             argv = [
                 "claude", "-p", prompt,
                 "--model", model,
-                "--max-turns", str(max_turns),
                 "--permission-mode", "bypassPermissions",
                 "--output-format", "stream-json", "--verbose",
             ]
@@ -1037,8 +1014,6 @@ class Console:
         state.planning_model = req.planning_model if req.planning_model in PLANNING_MODELS else ""
         state.impl_model = req.impl_model if req.impl_model in IMPL_MODELS else ""
         state.opencode_model = req.model if req.model in _OPENCODE_MODEL_IDS else ""
-        if req.max_turns is not None and int(req.max_turns) > 0:
-            state.max_turns = int(req.max_turns)
         state.held = bool(gated)
         state.owner = (req.owner or state.owner or "").lower()
         # Immutable creator stamp — set ONCE (covers a direct start_project with no prior draft; a draft
@@ -1067,7 +1042,7 @@ class Console:
     # ---- Durable drafts: an interview before a run exists -------------------------------
     def create_draft(self, owner: str = "", name: str = "", runtime: str = "",
                      planning_model: str = "", impl_model: str = "", model: str = "",
-                     budget: float | None = None, max_turns: int | None = None) -> str:
+                     budget: float | None = None) -> str:
         """Mint a CANONICAL run-<8hex> id at the START of the onboarding interview and persist a
         draft ProjectState (phase='draft', held, NO artifact recorded → is_pipeline_project False, so the
         poller/ghost-resume guard ignore it until promotion). Using a canonical id up front means
@@ -1093,8 +1068,6 @@ class Console:
         state.opencode_model = model if model in _OPENCODE_MODEL_IDS else ""
         if budget is not None and float(budget) > 0:
             state.budget_ceiling = float(budget)
-        if max_turns is not None and int(max_turns) > 0:
-            state.max_turns = int(max_turns)
         state.brief = {}
         state.interview_coverage = {}
         state.save()
@@ -1260,7 +1233,6 @@ class Console:
         state.opencode_model = source_state.opencode_model
         state.deploy_target = source_state.deploy_target or "railway"
         state.budget_ceiling = source_state.budget_ceiling
-        state.max_turns = source_state.max_turns
         state.creds_vault_ids = dict(source_state.creds_vault_ids or {})
         state.creds_provided = list(source_state.creds_provided or [])
         state.relaunched_from = source_id
@@ -1709,7 +1681,6 @@ class Console:
                      else (state.impl_model or state.planning_model or ""),
             "key_source": _key_source(state.runtime or "claude", state.creds_provided or []),
             "budget_ceiling": self._budget_ceiling(project_id),
-            "max_turns": self._max_turns(project_id),
             "paused_at_node": state.paused_at_node or "",
             "crashed_at_node": state.crashed_at_node or "",
             "held": state.held,
