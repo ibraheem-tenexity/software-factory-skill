@@ -120,6 +120,21 @@ export function CategoryLabel({ children, tone = "tertiary", style }:
     color: tone === "brand" ? T.brand : T.tertiary, display: "inline-block", ...style }}>{children}</span>;
 }
 
+export function SectionDivider({ label, sub, icon }:
+  { label: string; sub?: string; icon?: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "6px 0 2px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        {icon && <span style={{ width: 22, height: 22, borderRadius: 6, display: "grid", placeItems: "center", background: T.sunken, border: `1px solid ${T.borderSubtle}`, color: T.secondary }}>
+          <Icon name={icon} size={13} color={T.secondary} /></span>}
+        <CategoryLabel style={{ color: T.fg }}>{label}</CategoryLabel>
+        {sub && <span style={{ font: `400 12px/1 ${T.sans}`, color: T.tertiary }}>{sub}</span>}
+      </div>
+      <span style={{ flex: 1, height: 1, background: T.borderSubtle }} />
+    </div>
+  );
+}
+
 export function Btn({ children, variant = "secondary", size = "md", onClick, disabled, style, full, title }:
   { children: React.ReactNode; variant?: "primary" | "secondary" | "ghost" | "danger";
     size?: "sm" | "md" | "lg"; onClick?: () => void; disabled?: boolean; style?: CSS;
@@ -390,6 +405,44 @@ export function Composer({ placeholder = "Reply…", onSend, value, onChange, lo
         style={{ flex: 1, minWidth: 0, resize: "none", border: "none", outline: "none", background: "transparent", padding: "6px", font: `400 13px/1.4 ${T.sans}`, color: T.fg }} />
       <button title="Dictate" style={{ width: 30, height: 30, display: "grid", placeItems: "center", borderRadius: T.rMd, border: "none", background: "transparent", color: T.tertiary, cursor: "pointer" }}><Icon name="mic" size={15} /></button>
       <Btn variant="primary" size="sm" onClick={loading ? undefined : onSend} disabled={loading} style={{ height: 30 }}>{loading ? "Working…" : <><Icon name="send" size={13} color="#fff" /> Send</>}</Btn>
+    </div>
+  );
+}
+
+export function OrgImportPicker({ docs = [] }:
+  { docs?: { id: string; name: string }[] }) {
+  const [open, setOpen] = React.useState(false);
+  const [picks, setPicks] = React.useState<string[]>([]);
+  if (!docs.length) return null;
+  const toggle = (id: string) => setPicks((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
+  return (
+    <div style={{ border: `1px solid ${T.borderDefault}`, borderRadius: T.rLg, overflow: "hidden", background: T.raised }}>
+      <button onClick={() => setOpen((o) => !o)}
+        style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left" }}>
+        <Icon name="building" size={15} color={T.secondary} />
+        <span style={{ flex: 1, font: `500 13px/1.2 ${T.sans}`, color: T.fg }}>Import from organization</span>
+        <CategoryLabel style={{ marginRight: 4 }}>{picks.length ? `${picks.length} selected` : `${docs.length} available`}</CategoryLabel>
+        <Icon name={open ? "chevronDown" : "chevronRight"} size={14} color={T.tertiary} />
+      </button>
+      {open && (
+        <div style={{ borderTop: `1px solid ${T.borderSubtle}` }}>
+          {docs.map((d) => {
+            const on = picks.includes(d.id);
+            return (
+              <button key={d.id} onClick={() => toggle(d.id)}
+                style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 14px",
+                  background: on ? T.brandSoft : "transparent", border: "none", borderBottom: `1px solid ${T.borderSubtle}`, cursor: "pointer", textAlign: "left" }}>
+                <span style={{ width: 16, height: 16, flexShrink: 0, borderRadius: 4, display: "grid", placeItems: "center",
+                  background: on ? T.brand : "transparent", border: `1.5px solid ${on ? T.brand : T.borderDefault}` }}>
+                  {on && <Icon name="check" size={10} color="#fff" />}
+                </span>
+                <Icon name="file" size={14} color={T.tertiary} />
+                <span style={{ flex: 1, minWidth: 0, font: `500 13px/1.2 ${T.sans}`, color: T.fg, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

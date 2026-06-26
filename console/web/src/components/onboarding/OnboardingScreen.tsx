@@ -15,9 +15,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api, Org, OrgInput } from "../../api";
 import {
-  T, Icon, Sparkle, Wordmark, Avatar, StatusPill, CategoryLabel, Btn, TextInput, TextArea,
+  T, Icon, Sparkle, Wordmark, Avatar, StatusPill, CategoryLabel, SectionDivider, Btn, TextInput, TextArea,
   Field, Chip, Chips, IndustryTile, IntegrationRow, Dropzone, Message, Composer, Segmented,
-  INDUSTRIES, SIZES, REVENUE, ROLES, INTEGRATIONS,
+  OrgImportPicker, INDUSTRIES, SIZES, REVENUE, ROLES, INTEGRATIONS,
 } from "./design";
 
 type Check = { id: string; label: string; done: boolean; optional?: boolean; nudge?: string };
@@ -613,6 +613,8 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                     </p>
                   </div>
 
+                  <SectionDivider label="Your organization" sub="set up once · reused on every project" icon="building" />
+
                   <Card cat="Your company" title="What kind of operation is this?" desc="Tuned for industrial & IT distribution.">
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 9 }}>
                       {INDUSTRIES.map((it) => <IndustryTile key={it.id} item={it} compact selected={f.industry === it.id} onClick={() => setFresh("industry", it.id)} />)}
@@ -637,11 +639,16 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                     </div>
                   </Card>
 
+                  <SectionDivider label="This project" sub="specific to what you’re building now" icon="layers" />
+
                   <Card cat="Your first project" title="Project basics" accent>
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                       <Field label="Project name"><TextInput value={p.name} onChange={(v) => setProj("name", v)} placeholder="e.g. Quote-to-Epicor automation" /></Field>
                       <Field label="What are you building?" hint="One or two sentences on the outcome you want.">
                         <TextArea rows={3} value={p.goal} onChange={(v) => setProj("goal", v)} placeholder="e.g. Replace the manual quoting spreadsheet and write won quotes back to Epicor…" />
+                      </Field>
+                      <Field label="Budget cap" optional hint="Stop and notify when spend reaches this amount. Leave unset to run to completion.">
+                        <BudgetPicker value={budget} onChange={setBudget} />
                       </Field>
                     </div>
                   </Card>
@@ -651,14 +658,12 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                   <Card cat="Your first project" title="Build engine" desc="Choose the coding agent that builds this project. The factory, console, and output look the same either way.">
                     <EnginePicker value={engine} onChange={setEngine} />
                   </Card>
-                  <Card cat="Your first project" title="Budget cap" desc="Stop and notify you when spend reaches this amount. Leave unset to run to completion.">
-                    <BudgetPicker value={budget} onChange={setBudget} />
-                  </Card>
                   <Card cat="Your first project" title="Max turns per stage" desc="How many agent turns each stage may run before stopping. Leave unset for the default (200).">
                     <TurnsPicker value={turns} onChange={setTurns} />
                   </Card>
                   <Card cat="Your first project" title="Project materials" desc="A walkthrough recording is the highest-signal input you can give.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                      <OrgImportPicker />
                       <Field label="Walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} /></Field>
                       <Field label="Supporting documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
                     </div>
@@ -673,6 +678,8 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       Your company context is already on file — no need to repeat it. Just tell the Concierge about this project.
                     </p>
                   </div>
+
+                  <SectionDivider label="Your organization" sub="on file · reused automatically" icon="building" />
 
                   <section style={{ borderRadius: T.rXl, border: `1px solid ${editOrg ? T.brand + "55" : T.borderSubtle}`, background: T.sunken, overflow: "hidden" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px" }}>
@@ -701,11 +708,16 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                     )}
                   </section>
 
+                  <SectionDivider label="This project" sub="specific to what you're building now" icon="layers" />
+
                   <Card cat="This project" title="Project basics" accent>
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                       <Field label="Project name"><TextInput value={p.name} onChange={(v) => setProj("name", v)} placeholder="e.g. Quote-to-Epicor automation" /></Field>
                       <Field label="What are you building?" hint="One or two sentences on the outcome you want.">
                         <TextArea rows={3} value={p.goal} onChange={(v) => setProj("goal", v)} placeholder="e.g. Replace the manual quoting spreadsheet…" />
+                      </Field>
+                      <Field label="Budget cap" optional hint="Stop and notify when spend reaches this amount. Leave unset to run to completion.">
+                        <BudgetPicker value={budget} onChange={setBudget} />
                       </Field>
                     </div>
                   </Card>
@@ -715,14 +727,12 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                   <Card cat="This project" title="Build engine" desc="Choose the coding agent that builds this project. The factory, console, and output look the same either way.">
                     <EnginePicker value={engine} onChange={setEngine} />
                   </Card>
-                  <Card cat="This project" title="Budget cap" desc="Stop and notify you when spend reaches this amount. Leave unset to run to completion.">
-                    <BudgetPicker value={budget} onChange={setBudget} />
-                  </Card>
                   <Card cat="This project" title="Max turns per stage" desc="How many agent turns each stage may run before stopping. Leave unset for the default (200).">
                     <TurnsPicker value={turns} onChange={setTurns} />
                   </Card>
                   <Card cat="This project" title="Project materials" desc="We already have your line card & pricing on file — only add what's specific to this project.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                      <OrgImportPicker />
                       <Field label="Project walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} /></Field>
                       <Field label="Extra documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
                     </div>
