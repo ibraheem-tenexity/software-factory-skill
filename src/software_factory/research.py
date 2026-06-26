@@ -1,6 +1,8 @@
 """Company research — enrich a company profile via Exa (quick) or OpenRouter Fusion (deep)."""
 from __future__ import annotations
 
+import os
+import httpx
 from dataclasses import dataclass, asdict
 
 
@@ -56,3 +58,53 @@ class CompanyProfile:
 
 class ResearchError(Exception):
     pass
+
+
+def _exa_search(
+    name: str,
+    website: str | None,
+    extra: str | None,
+    api_key: str,
+) -> CompanyProfile:
+    query_parts = [name, "company overview products industry"]
+    if extra:
+        query_parts.append(extra)
+    query = " ".join(query_parts)
+
+    try:
+        resp = httpx.post(
+            "https://api.exa.ai/search",
+            headers={"x-api-key": api_key, "Content-Type": "application/json"},
+            json={"query": query, "numResults": 5, "contents": {"text": {"maxCharacters": 1500}}},
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        raise ResearchError(f"Exa search failed: {exc}") from exc
+
+    results = resp.json().get("results", [])
+    sources = [r["url"] for r in results if r.get("url")]
+    if website and website not in sources:
+        sources.insert(0, website)
+
+    # Aggregate text from all results for field extraction
+    all_text = " ".join(r.get("text", "") for r in results)
+    description = results[0].get("text", "")[:300].strip() if results else ""
+
+    # Best-effort: collect headlines from non-primary results as recent news
+    recent_news = [r["title"] for r in results[1:] if r.get("title")]
+
+    return CompanyProfile(
+        name=name,
+        website=website,
+        industry=None,
+        size_hint=None,
+        sub_focus=None,
+        connected_systems=[],
+        description=description,
+        products=[],
+        competitors=[],
+        recent_news=recent_news,
+        sources=sources,
+        mode="quick",
+    )
