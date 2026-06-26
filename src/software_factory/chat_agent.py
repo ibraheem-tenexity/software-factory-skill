@@ -37,7 +37,12 @@ def select_chat_model():
         from agents import OpenAIChatCompletionsModel, set_tracing_disabled
         from openai import AsyncOpenAI
 
-        set_tracing_disabled(True)  # tracing would try (and fail) to reach OpenAI
+        from . import langfuse_tracing
+        if not langfuse_tracing.enabled():
+            # Without Langfuse the SDK's default tracing would try (and fail) to reach OpenAI.
+            # With Langfuse on, the OpenInference instrumentor replaces that exporter, so we
+            # KEEP tracing enabled to capture the Kimi path in Langfuse too.
+            set_tracing_disabled(True)
         client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.environ.get("OPENROUTER_API_KEY", ""),
@@ -372,6 +377,10 @@ class ChatAgentRunner:
     def __init__(self, console: Console, users=None):
         self._console = console
         self._users = users
+        # Export concierge runs (Agent + tool calls + generations) to Langfuse when configured.
+        # No-op without LANGFUSE_* keys; idempotent across runner constructions.
+        from . import langfuse_tracing
+        self._langfuse = langfuse_tracing.setup_langfuse()
         self._pending_files: list = []
         self._pending_runtime: str = ""
         self._pending_models: tuple = ("", "")
