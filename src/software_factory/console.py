@@ -1740,9 +1740,13 @@ class Console:
                 n += 1
         return n
 
-    def list_projects(self, owner: str | None = None) -> list[dict]:
+    def list_projects(self, owner: str | None = None, include_archived: bool = False) -> list[dict]:
         """All runs (owner=None — admin/internal callers like the poller), or only those
-        owned by `owner` (a member's email; '' never matches, so unowned runs stay admin-only)."""
+        owned by `owner` (a member's email; '' never matches, so unowned runs stay admin-only).
+
+        include_archived=True keeps soft-deleted rows (the dashboard's Archived section); the
+        default hides them (every existing caller relies on that). Every row carries an
+        `archived` flag so the caller can split active from archived."""
         runs = []
         owner = owner.lower() if owner else None
         # Local dirs ∪ the pg registry (pg mode): a run can exist only in the registry —
@@ -1760,8 +1764,8 @@ class Console:
         names = local + [pid for pid in created if pid not in set(local)]
         for name in names:
             st = self._load_state(name)
-            if getattr(st, "archived", False):
-                continue   # soft-deleted — hidden from every listing
+            if getattr(st, "archived", False) and not include_archived:
+                continue   # soft-deleted — hidden unless the caller asked to include them
             if owner is not None and (st.owner or "").lower() != owner:
                 continue   # member view: skip runs they don't own (unowned '' never matches)
             # A budget-stopped run is NOT active: surfacing it with a live/green status misled
@@ -1801,6 +1805,7 @@ class Console:
                 "updated": updated,
                 "runtime": st.runtime,
                 "is_demo": bool(getattr(st, "is_demo", False)),
+                "archived": bool(getattr(st, "archived", False)),
             })
         runs.sort(key=lambda r: r["updated"], reverse=True)
         return runs
@@ -1828,6 +1833,31 @@ class Console:
                     pass  # best-effort: archive write must never fail due to Vault hiccup
             self._maybe_teardown_deploy_db(project_id, state)
         return state.archived
+
+    def delete_project(self, project_id: str) -> dict:
+        """Permanently remove a run (DELETE /api/projects/{id}/permanent). Runs the same external
+        cleanup as archive (Vault creds + deploy-DB teardown), then deletes the run directory and
+        every flat-schema row so the run does NOT reappear from the registry. Idempotent — deleting
+        an already-gone run never raises."""
+        state = self._load_state(project_id)
+        # External cleanup, mirroring the archive path (best-effort — a hiccup must never wedge the
+        # permanent delete that follows).
+        vault_ids = getattr(state, "creds_vault_ids", {}) or {}
+        if vault_ids:
+            try:
+                _vault.vault_delete_many(list(vault_ids.values()))
+            except Exception:
+                pass
+        self._maybe_teardown_deploy_db(project_id, state)
+        # Drop the persisted state (projectstate row → out of the registry) BEFORE the dir, so a
+        # registry-only run with no local dir is still fully removed.
+        try:
+            ProjectStore(self._paths(project_id)["db"]).delete_project(project_id)
+        except Exception as e:
+            print(f"[delete] state-row delete failed for {project_id}: {e}", file=sys.stderr)
+        shutil.rmtree(self._paths(project_id)["base"], ignore_errors=True)
+        self._procs.pop(project_id, None)
+        return {"project_id": project_id, "deleted": True}
 
     def _upload_project_log(self, project_id: str, state: "ProjectState") -> None:
         """Best-effort: upload project.log to Supabase Storage and stamp state.log_url.

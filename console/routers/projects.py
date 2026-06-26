@@ -21,9 +21,9 @@ router = APIRouter()
 
 # ── Runs: list + create ───────────────────────────────────────────────────────────────────────
 @router.get("/api/projects")
-def projects_list(v: tuple = Depends(require_authed)):
+def projects_list(include_archived: bool = False, v: tuple = Depends(require_authed)):
     owner = None if v[1] == "admin" else v[0]
-    return {"projects": state.console.list_projects(owner=owner)}
+    return {"projects": state.console.list_projects(owner=owner, include_archived=include_archived)}
 
 
 @router.post("/api/projects")
@@ -236,8 +236,20 @@ def project_update(pid: str, body: ProjectPatchIn, v: tuple = Depends(authorize_
 
 @router.delete("/api/projects/{pid}")
 def project_delete(pid: str, v: tuple = Depends(authorize_project)):
-    """Soft-delete (archive) a project — hidden from every listing; discards a draft."""
+    """Soft-delete (archive) a project — hidden from the default listing; discards a draft."""
     return {"project_id": pid, "archived": state.console.set_archived(pid, True)}
+
+
+@router.post("/api/projects/{pid}/restore")
+def project_restore(pid: str, v: tuple = Depends(authorize_project)):
+    """Restore an archived project — un-archives it so it lists again."""
+    return {"project_id": pid, "archived": state.console.set_archived(pid, False)}
+
+
+@router.delete("/api/projects/{pid}/permanent")
+def project_delete_permanent(pid: str, v: tuple = Depends(authorize_project)):
+    """Permanently delete a project — removes the run dir + state rows. Cannot be undone."""
+    return state.console.delete_project(pid)
 
 
 @router.patch("/api/projects/{pid}/materials/{material_id}")
