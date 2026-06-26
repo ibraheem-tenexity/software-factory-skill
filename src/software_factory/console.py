@@ -538,10 +538,14 @@ class Console:
         if not project_ids:
             return out
         placeholders = ",".join("?" for _ in project_ids)
-        rows = dbshim.connect(self._projects_dir).execute(
-            f"SELECT project_id, data FROM projectstate WHERE project_id IN ({placeholders})",
-            tuple(project_ids),
-        ).fetchall()
+        conn = dbshim.connect(self._projects_dir)
+        try:
+            rows = conn.execute(
+                f"SELECT project_id, data FROM projectstate WHERE project_id IN ({placeholders})",
+                tuple(project_ids),
+            ).fetchall()
+        finally:
+            conn.close()
         for row in rows:
             out[row["project_id"]] = ProjectState.from_data(
                 row["project_id"], json.loads(row["data"])
@@ -558,11 +562,15 @@ class Console:
         if not project_ids:
             return out
         placeholders = ",".join("?" for _ in project_ids)
-        rows = dbshim.connect(self._projects_dir).execute(
-            f"SELECT project_id, name, status FROM phases WHERE project_id IN ({placeholders}) "
-            "ORDER BY ts, id",
-            tuple(project_ids),
-        ).fetchall()
+        conn = dbshim.connect(self._projects_dir)
+        try:
+            rows = conn.execute(
+                f"SELECT project_id, name, status FROM phases WHERE project_id IN ({placeholders}) "
+                "ORDER BY ts, id",
+                tuple(project_ids),
+            ).fetchall()
+        finally:
+            conn.close()
         for row in rows:
             out[row["project_id"]][row["name"]] = row["status"]
         return out
@@ -573,10 +581,14 @@ class Console:
         if not project_ids:
             return out
         placeholders = ",".join("?" for _ in project_ids)
-        rows = dbshim.connect(self._projects_dir).execute(
-            f"SELECT project_id, blocks, cleared FROM blockers WHERE project_id IN ({placeholders})",
-            tuple(project_ids),
-        ).fetchall()
+        conn = dbshim.connect(self._projects_dir)
+        try:
+            rows = conn.execute(
+                f"SELECT project_id, blocks, cleared FROM blockers WHERE project_id IN ({placeholders})",
+                tuple(project_ids),
+            ).fetchall()
+        finally:
+            conn.close()
         for row in rows:
             out[row["project_id"]].append(
                 {"blocks": row.get("blocks"), "cleared": row["cleared"]}
@@ -589,11 +601,15 @@ class Console:
         if not project_ids:
             return out
         placeholders = ",".join("?" for _ in project_ids)
-        rows = dbshim.connect(self._projects_dir).execute(
-            f"SELECT project_id, role FROM agents WHERE project_id IN ({placeholders}) "
-            "ORDER BY started_at, agent_id",
-            tuple(project_ids),
-        ).fetchall()
+        conn = dbshim.connect(self._projects_dir)
+        try:
+            rows = conn.execute(
+                f"SELECT project_id, role FROM agents WHERE project_id IN ({placeholders}) "
+                "ORDER BY started_at, agent_id",
+                tuple(project_ids),
+            ).fetchall()
+        finally:
+            conn.close()
         seen = {pid: set() for pid in project_ids}
         for row in rows:
             pid, role = row["project_id"], row.get("role")
