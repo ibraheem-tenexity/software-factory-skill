@@ -12,6 +12,8 @@ dependencies = [
     "python-dotenv>=1.0",
     "psycopg>=3.3.4",
     "httpx>=0.27",
+    "langfuse>=4.12.0",
+    "openinference-instrumentation-openai-agents>=1.6.1",
 ]
 
 [project.optional-dependencies]
