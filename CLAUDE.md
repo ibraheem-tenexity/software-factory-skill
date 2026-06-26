@@ -12,13 +12,13 @@ Before implementing:
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name what's confusing. Ask.
 
-## 2. Verify Datastructures
+## 2. Verify Data Structures
 
-Before Shipping: 
-- Verify that the object an api returns is actually the shape that you expect
-- Do not try to avoid exceptions by attaching try catches or fail safes, actually use the correct return object
+Before shipping:
+- Verify that the object an API returns is actually the shape you expect.
+- Do not avoid exceptions by attaching try/catches or fail-safes — use the correct return object.
 
-## 2. Simplicity First
+## 3. Simplicity First
 
 **Minimum code that solves the problem. Nothing speculative.**
 
@@ -30,7 +30,7 @@ Before Shipping:
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
 
-## 3. Surgical Changes
+## 4. Surgical Changes
 
 **Touch only what you must. Clean up only your own mess.**
 
@@ -46,7 +46,7 @@ When your changes create orphans:
 
 The test: Every changed line should trace directly to the user's request.
 
-## 4. Goal-Driven Execution
+## 5. Goal-Driven Execution
 
 **Define success criteria. Loop until verified.**
 
@@ -64,42 +64,44 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-## Goal & acceptance criteria (every task)
+### Acceptance Criteria
 
 Every task has a GOAL and explicit SATISFACTION / ACCEPTANCE CRITERIA — the concrete, verifiable conditions that define "done" (tests pass, endpoint returns X, screen renders/behaves like Y, no regression in Z). When you deliver (open the PR / hand off), RETURN both in your report:
 - **Goal** — what the task achieves, in one line.
 - **Acceptance criteria** — the checkable conditions that prove the goal is met, each marked pass/fail.
+
 This lets the integrator JUDGE the delivery against its own criteria before merging — not merely that it builds. If the operator handed you criteria, restate them and report pass/fail against each. If a task arrives without criteria, define them, state them back, and build to them. A PR/hand-off that doesn't state its goal + acceptance criteria gets bounced back.
 
-## Architecture doc
+## 6. Architecture Doc
 
-`docs/ARCHITECTURE.md` is the canonical description of how the system is built. **Update it on every
-major structural change** — new/removed service, datastore or schema change, a new pipeline stage or
-runtime, an auth/ownership change, or anything that moves where state lives. Keep it aligned with the
-diagrams in `docs/` (`docs/schema-erd.svg` is the source-of-truth ERD, with `docs/schema-erd.md` the
-schema detail; `docs/service-architecture.svg` is the service/storage topology). If your change makes
-the doc or a diagram wrong, fixing them is part of the change, not a follow-up.
+`docs/ARCHITECTURE.md` is the canonical description of how the system is built. **Update it on every major structural change** — new/removed service, datastore or schema change, a new pipeline stage or runtime, an auth/ownership change, or anything that moves where state lives. Keep it aligned with the diagrams in `docs/` (`docs/schema-erd.svg` is the source-of-truth ERD, with `docs/schema-erd.md` the schema detail; `docs/service-architecture.svg` is the service/storage topology). If your change makes the doc or a diagram wrong, fixing them is part of the change, not a follow-up.
 
-## Blast Radius
+## 7. Blast Radius
 
-If the operator has explicitly instructed you to do something, do not autonomously resject it or defer it based on the blast radius. This project is in its early stages and high blast radius changes are acceptable 
+If the operator has explicitly instructed you to do something, do not autonomously reject it or defer it based on the blast radius. This project is in its early stages and high blast radius changes are acceptable.
 
-# memory.md
+---
 
-Format that should be followed: 
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+---
+
+## Operational Notes
+
+### Memory Log Format
+
+`memory.md` entries follow this format:
+
 ```
-# $AGENT_NAME Update at Time: $DD:MM:YYYY:HH:MM:SS.SSS 
+# $AGENT_NAME Update at Time: $DD:MM:YYYY:HH:MM:SS.SSS
 1. Decision taken or work performed in a single line
 2. Related file or artifact location
 3. Reasoning
 4. Summary in 3 lines
 ```
 
-The file has to serve as a long term store of information sharing betweeen agents and should be used as a central reference not a detailed account of everything. 
-The file should allow the agent to know enough to access more detailed information. 
-An entry should be made in the file whenever a significant change has been made by an agent. 
+The file is a long-term store for information sharing between agents — a central reference, not a detailed log. Each entry should let an agent know enough to find more detail. Write an entry whenever a significant change has been made.
 
+### Verify Before Concluding
 
----
-
-**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+Do not theorize. If you think you know why something is breaking, look at the code or logs to confirm before proposing a fix.
