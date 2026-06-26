@@ -114,13 +114,14 @@ def test_run_scoped_route_forbidden_for_non_owner(auth_mod, auth_client, monkeyp
 def test_chat_threads_viewer_role_to_concierge(auth_mod, auth_client, monkeypatch):
     # A member's chat must carry role='member' (not the default 'admin') so the concierge's
     # run-scoped tools enforce ownership. Regression for the FastAPI port dropping role=.
+    import json as _json
     _login(auth_mod, auth_client, monkeypatch)          # op@tenexity.ai = member (seeded role 'member')
     captured = {}
 
     class _FakeRunner:
-        async def handle_message(self, project_id, message, files, images, **kw):
+        async def handle_message_streamed(self, project_id, message, files, images, **kw):
             captured.update(kw)
-            return ("project-abcdef12", [])
+            yield _json.dumps({"type": "done", "project_id": "project-abcdef12", "messages": []}) + "\n"
 
     monkeypatch.setattr(auth_mod.state, "_chat_runner", _FakeRunner())
     r = auth_client.post("/api/chat", json={"message": "build me an app"})
@@ -129,22 +130,27 @@ def test_chat_threads_viewer_role_to_concierge(auth_mod, auth_client, monkeypatc
     assert captured.get("owner") == "op@tenexity.ai"
 
 
-def test_chat_timeout_returns_504(auth_mod, auth_client, monkeypatch):
-    # If handle_message stalls past the deadline the endpoint returns 504, not a hung connection.
-    import asyncio
+def test_chat_timeout_yields_error_event(auth_mod, auth_client, monkeypatch):
+    # If handle_message_streamed stalls past the deadline the stream emits a NDJSON error event.
+    # The HTTP status stays 200 (streaming started); the error is in the body.
+    import asyncio, json as _json
     _login(auth_mod, auth_client, monkeypatch)
 
     class _StallingRunner:
-        async def handle_message(self, *a, **kw):
+        async def handle_message_streamed(self, *a, **kw):
             await asyncio.sleep(9999)
+            yield ""  # unreachable; marks this as an async generator
 
     monkeypatch.setattr(auth_mod.state, "_chat_runner", _StallingRunner())
-    # Patch the timeout constant to 0.01 s so the test doesn't actually wait 120 s.
     import console.routers.chat as _chat_mod
     monkeypatch.setattr(_chat_mod, "_CHAT_TIMEOUT", 0.01)
     r = auth_client.post("/api/chat", json={"message": "stall"})
-    assert r.status_code == 504
-    assert "timed out" in r.json()["detail"]
+    assert r.status_code == 200
+    lines = [l for l in r.text.split("\n") if l.strip()]
+    assert lines, "expected at least one NDJSON line"
+    evt = _json.loads(lines[-1])
+    assert evt["type"] == "error"
+    assert "timed out" in evt["detail"]
 
 
 def test_get_org_null_before_onboarding(auth_mod, auth_client, monkeypatch):

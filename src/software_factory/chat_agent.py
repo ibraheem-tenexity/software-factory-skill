@@ -518,6 +518,119 @@ class ChatAgentRunner:
 
         return project_id, response_msgs
 
+    async def handle_message_streamed(
+        self, project_id: str | None, user_msg: str,
+        files: list, images: list,
+        runtime: str = "", planning_model: str = "",
+        impl_model: str = "",
+        project_name: str = "",
+        gated: bool = False,
+        owner: str = "", role: str = "admin",
+    ):
+        """Async generator yielding NDJSON lines.
+
+        Yields ``{"type":"delta","content":"..."}`` for each text token, then
+        ``{"type":"done","project_id":...,"messages":[...]}`` once the turn is
+        complete. The caller owns ChatStore persistence and SSE push.
+        """
+        from agents import Runner
+        from openai.types.responses import ResponseTextDeltaEvent
+
+        conv_key = project_id or "__new__"
+        history = self._conversations.get(conv_key, [])
+
+        content_parts = []
+        if user_msg:
+            content_parts.append({"type": "input_text", "text": user_msg})
+        for f in (files or []):
+            content_parts.append({"type": "input_text",
+                                  "text": f"[Attached file: {f.get('name', 'file')}]"})
+        for img in (images or []):
+            content_parts.append({"type": "input_text",
+                                  "text": f"[Attached image: {img.get('name', 'image')}]"})
+
+        if len(content_parts) == 1 and content_parts[0]["type"] == "input_text":
+            user_input = content_parts[0]["text"]
+        else:
+            user_input = "\n".join(p.get("text", "") for p in content_parts)
+
+        history.append({"role": "user", "content": user_input})
+
+        self._pending_files = files or []
+        self._pending_runtime = runtime or ""
+        self._pending_models = (planning_model or "", impl_model or "")
+        self._pending_name = project_name or ""
+        self._pending_gated = bool(gated)
+        self._pending_owner = owner or ""
+        self._pending_viewer = (owner or "", role or "admin")
+        self._pending_draft_id = project_id or ""
+        self._pending_interview_md = _render_interview(history)
+        try:
+            result = Runner.run_streamed(self._agent, input=history)
+            async for event in result.stream_events():
+                if (event.type == "raw_response_event"
+                        and isinstance(event.data, ResponseTextDeltaEvent)
+                        and event.data.delta):
+                    yield json.dumps({"type": "delta", "content": event.data.delta}) + "\n"
+        finally:
+            self._pending_files = []
+            self._pending_runtime = ""
+            self._pending_models = ("", "")
+            self._pending_name = ""
+            self._pending_gated = False
+            self._pending_owner = ""
+            self._pending_viewer = ("", "admin")
+            self._pending_draft_id = ""
+            self._pending_interview_md = ""
+
+        response_msgs = []
+        text_parts: list[str] = []
+        now = time.time()
+        for item in result.new_items:
+            if isinstance(item, MessageOutputItem):
+                text = ItemHelpers.text_message_output(item)
+                if text:
+                    text_parts.append(text)
+            elif isinstance(item, ToolCallItem) and isinstance(item.raw_item, ResponseFunctionToolCall):
+                call = item.raw_item
+                if call.name == "hand_off_to_factory":
+                    if not project_id:
+                        continue
+                    response_msgs.append(ChatMessage(
+                        role="system", content="Pipeline started.",
+                        msg_type="pipeline_started", ts=now,
+                        metadata={"project_id": project_id},
+                    ))
+                elif call.name == "request_dep_input":
+                    try:
+                        dep_names = json.loads(call.arguments)["dep_names"]
+                    except (ValueError, TypeError, KeyError):
+                        continue
+                    response_msgs.append(ChatMessage(
+                        role="assistant",
+                        content="The architecture requires these credentials. Please provide them below.",
+                        msg_type="dep_request", ts=now,
+                        metadata={"project_id": project_id, "dep_names": dep_names},
+                    ))
+        if text_parts:
+            response_msgs.insert(0, ChatMessage(
+                role="assistant", content="\n\n".join(text_parts), msg_type="text", ts=now,
+            ))
+        if result.final_output and not response_msgs:
+            response_msgs.append(ChatMessage(
+                role="assistant", content=str(result.final_output), msg_type="text", ts=now,
+            ))
+
+        history.extend([{"role": "assistant", "content": m.content} for m in response_msgs
+                        if m.role == "assistant"])
+        self._conversations[project_id or conv_key] = history
+
+        yield json.dumps({
+            "type": "done",
+            "project_id": project_id,
+            "messages": [m.to_dict() for m in response_msgs],
+        }) + "\n"
+
     def check_and_notify(self, project_id: str, prev_stage: int = 0) -> list[ChatMessage]:
         """Check pipeline status and generate notification messages for transitions."""
         status = self._console.status(project_id)
