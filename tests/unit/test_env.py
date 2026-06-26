@@ -80,3 +80,16 @@ def test_stage_env_baseline_drops_console_secrets(monkeypatch):
     assert scrubbed["PATH"] == "/usr/bin"
     assert "DATABASE_URL" not in scrubbed
     assert "SF_DB" not in scrubbed
+
+
+def test_stage_env_baseline_forwards_github_token(monkeypatch):
+    # #102: the stage-3 build agent's `gh` calls (repo create / push / PR) need GH_TOKEN to
+    # survive the scrub, exactly like EXA_API_KEY — else `gh` is unauthenticated and repo
+    # creation fails. GITHUB_TOKEN is carried as the alias `gh` also honours.
+    monkeypatch.setenv("GH_TOKEN", "ghp_factory")
+    monkeypatch.setenv("GITHUB_TOKEN", "ght_alias")
+    monkeypatch.setenv("EXA_API_KEY", "exa_factory")
+    scrubbed = env.stage_env_baseline()
+    assert scrubbed["GH_TOKEN"] == "ghp_factory"
+    assert scrubbed["GITHUB_TOKEN"] == "ght_alias"
+    assert scrubbed["EXA_API_KEY"] == "exa_factory"
