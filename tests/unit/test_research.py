@@ -198,3 +198,63 @@ def test_fusion_research_falls_back_on_missing_fields():
     assert profile.industry is None
     assert profile.products == []
     assert profile.connected_systems == []
+
+
+# Task 4: research_company entry point tests
+import os
+from software_factory.research import research_company
+
+
+def test_research_company_quick_dispatches_to_exa(monkeypatch):
+    monkeypatch.setenv("EXA_API_KEY", "exa-test-key")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with patch("software_factory.research._exa_search",
+               return_value=_make_profile(mode="quick")) as mock_exa:
+        profile = research_company("Acme Corp", mode="quick")
+    mock_exa.assert_called_once_with("Acme Corp", None, None, "exa-test-key")
+    assert profile.mode == "quick"
+
+
+def test_research_company_deep_dispatches_to_fusion(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-test-key")
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    with patch("software_factory.research._fusion_research",
+               return_value=_make_profile(mode="deep")) as mock_fusion:
+        profile = research_company("Acme Corp", mode="deep")
+    mock_fusion.assert_called_once_with("Acme Corp", None, None, "or-test-key")
+    assert profile.mode == "deep"
+
+
+def test_research_company_passes_website_and_extra(monkeypatch):
+    monkeypatch.setenv("EXA_API_KEY", "exa-test-key")
+    with patch("software_factory.research._exa_search",
+               return_value=_make_profile()) as mock_exa:
+        research_company("Acme Corp", website="https://acme.com", extra="SaaS company", mode="quick")
+    mock_exa.assert_called_once_with("Acme Corp", "https://acme.com", "SaaS company", "exa-test-key")
+
+
+def test_research_company_raises_when_exa_key_missing(monkeypatch):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    try:
+        research_company("Acme Corp", mode="quick")
+        assert False, "expected ResearchError"
+    except ResearchError as e:
+        assert "EXA_API_KEY" in str(e)
+
+
+def test_research_company_raises_when_openrouter_key_missing(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    try:
+        research_company("Acme Corp", mode="deep")
+        assert False, "expected ResearchError"
+    except ResearchError as e:
+        assert "OPENROUTER_API_KEY" in str(e)
+
+
+def test_research_company_raises_on_invalid_mode(monkeypatch):
+    monkeypatch.setenv("EXA_API_KEY", "x")
+    try:
+        research_company("Acme Corp", mode="turbo")
+        assert False, "expected ResearchError"
+    except ResearchError as e:
+        assert "mode" in str(e).lower()

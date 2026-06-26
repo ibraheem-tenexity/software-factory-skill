@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import httpx
 from dataclasses import dataclass, asdict
 
@@ -184,3 +185,30 @@ def _fusion_research(
         sources=data.get("sources") or [],
         mode="deep",
     )
+
+
+def research_company(
+    name: str,
+    *,
+    website: str | None = None,
+    extra: str | None = None,
+    mode: str = "quick",
+) -> CompanyProfile:
+    """Enrich a company profile.
+
+    mode="quick"  — Exa REST search, ~1-3s, requires EXA_API_KEY
+    mode="deep"   — OpenRouter Fusion (built-in panel web search + LLM synthesis), ~10-30s,
+                    requires OPENROUTER_API_KEY
+    """
+    if mode == "quick":
+        api_key = os.environ.get("EXA_API_KEY")
+        if not api_key:
+            raise ResearchError("EXA_API_KEY is not set — required for mode='quick'")
+        return _exa_search(name, website, extra, api_key)
+    elif mode == "deep":
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ResearchError("OPENROUTER_API_KEY is not set — required for mode='deep'")
+        return _fusion_research(name, website, extra, api_key)
+    else:
+        raise ResearchError(f"Unknown mode '{mode}': must be 'quick' or 'deep'")
