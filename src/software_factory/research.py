@@ -68,6 +68,8 @@ def _exa_search(
     api_key: str,
 ) -> CompanyProfile:
     query_parts = [name, "company overview products industry"]
+    if website:
+        query_parts.append(website)
     if extra:
         query_parts.append(extra)
     query = " ".join(query_parts)
@@ -90,7 +92,8 @@ def _exa_search(
 
     description = results[0].get("text", "")[:300].strip() if results else ""
 
-    # Best-effort: collect headlines from non-primary results as recent news
+    # Best-effort quick-mode heuristic: secondary result titles are often news,
+    # but may include other pages (LinkedIn, about pages). Deep mode is richer.
     recent_news = [r["title"] for r in results[1:] if r.get("title")]
 
     return CompanyProfile(

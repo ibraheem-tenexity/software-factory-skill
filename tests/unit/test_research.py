@@ -60,7 +60,7 @@ def test_to_prompt_block_empty_lists_omitted():
     profile = _make_profile(products=[], competitors=[], recent_news=[], connected_systems=[])
     block = profile.to_prompt_block()
     # empty lists produce no bullet lines
-    assert "- " not in block or "Acme Corp" in block  # only company name line may have content
+    assert "- " not in block
 
 
 import json
