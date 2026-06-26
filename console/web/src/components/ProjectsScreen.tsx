@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, ProjectSummary } from "../api";
+import { api, phaseIsStale, ProjectSummary } from "../api";
 
 export function ProjectsScreen({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () => void }) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -36,7 +36,7 @@ export function ProjectsScreen({ onOpen, onNew }: { onOpen: (id: string) => void
           <div className="project-card" key={r.project_id} onClick={() => onOpen(r.project_id)}>
             <div className="name">{r.name || r.project_id}</div>
             <div className="meta">
-              {r.phase || "—"} · ${(r.spent_usd || 0).toFixed(2)}
+              {phaseIsStale(r.phase, r.stage) ? `stage ${r.stage} · starting` : (r.phase || "—")} · ${(r.spent_usd || 0).toFixed(2)}
             </div>
           </div>
         ))}
