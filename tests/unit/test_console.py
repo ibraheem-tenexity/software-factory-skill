@@ -1671,3 +1671,81 @@ def test_status_model_reflects_opencode_alias(tmp_path):
     st = c.status(pid)
     assert st["runtime"] == "opencode"
     assert st["model"] == "glm"
+
+
+# ---- #104 watchdog: reap a completed-but-hung claude stage process -----------------------
+class _ZombieProc:
+    """A claude orchestrator that emitted its terminal `result` then hung at teardown: poll()
+    keeps returning None until it's signalled."""
+    def __init__(self): self.exit_code = None; self.pid = 4242; self.signals = []
+    def poll(self): return self.exit_code
+    def terminate(self): self.signals.append("term"); self.exit_code = -15
+    def wait(self, timeout=None): return self.exit_code
+    def kill(self): self.signals.append("kill"); self.exit_code = -9
+
+
+def _write_log(c, pid, *events):
+    import json, os
+    log = os.path.join(c._paths(pid)["base"], "project.log")
+    with open(log, "w", encoding="utf-8") as f:
+        for ev in events:
+            f.write(json.dumps(ev) + "\n")
+    return log
+
+
+def test_reap_completed_zombie_kills_hung_claude_after_grace(tmp_path, monkeypatch):
+    # The systemic research-stall (#104): claude emits terminal `result` but the process hangs
+    # at remote-MCP teardown, so the live handle pins stage_finished=False forever. The watchdog
+    # SIGTERM→SIGKILLs it once the log's been idle past the grace, flipping stage_finished True.
+    import os
+    monkeypatch.setenv("SF_STAGE_REAP_GRACE_SEC", "1")
+    proc = _ZombieProc()
+    ids = iter(["project-zb"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
+    rid = c.start_project(ProjectRequest(description="x"))           # runtime defaults to claude
+    log = _write_log(c, rid, {"type": "assistant"}, {"type": "result", "total_cost_usd": 1.2})
+    os.utime(log, (1, 1))                                            # mtime far in the past -> past grace
+    assert c.stage_finished(rid) is False                           # live handle pins it
+    assert c.reap_completed_zombie(rid) == 4242                      # reaped, returns the pid
+    assert "term" in proc.signals                                   # used the SIGTERM→kill path
+    assert c.stage_finished(rid) is True                            # now exited -> existing detection advances
+
+
+def test_reap_completed_zombie_leaves_an_actively_orchestrating_claude(tmp_path, monkeypatch):
+    # Last event is NOT `result` (agent still working) -> never reaped, even past grace. This is
+    # what keeps it from racing the §1 double-orchestrator guard.
+    import os
+    monkeypatch.setenv("SF_STAGE_REAP_GRACE_SEC", "1")
+    proc = _ZombieProc()
+    ids = iter(["project-ac"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
+    rid = c.start_project(ProjectRequest(description="x"))
+    log = _write_log(c, rid, {"type": "result", "total_cost_usd": 1.0}, {"type": "assistant"})
+    os.utime(log, (1, 1))
+    assert c.reap_completed_zombie(rid) is None
+    assert proc.signals == []
+
+
+def test_reap_completed_zombie_respects_the_grace_window(tmp_path, monkeypatch):
+    # A just-completed stage (log fresh) is within grace -> not reaped, giving a clean teardown
+    # a chance to exit on its own first.
+    monkeypatch.setenv("SF_STAGE_REAP_GRACE_SEC", "600")
+    proc = _ZombieProc()
+    ids = iter(["project-gw"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
+    rid = c.start_project(ProjectRequest(description="x"))
+    _write_log(c, rid, {"type": "result", "total_cost_usd": 1.0})   # fresh mtime, within 600s grace
+    assert c.reap_completed_zombie(rid) is None
+
+
+def test_reap_completed_zombie_skips_opencode(tmp_path, monkeypatch):
+    # opencode's linger is handled by the step_finish=stop path in stage_finished, not here.
+    import os
+    monkeypatch.setenv("SF_STAGE_REAP_GRACE_SEC", "1")
+    proc = _ZombieProc()
+    ids = iter(["project-oc"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
+    rid = c.start_project(ProjectRequest(description="x", runtime="opencode"))
+    log = _write_log(c, rid, {"type": "result", "total_cost_usd": 1.0})
+    os.utime(log, (1, 1))
+    assert c.reap_completed_zombie(rid) is None
