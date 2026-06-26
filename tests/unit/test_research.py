@@ -126,3 +126,75 @@ def test_exa_search_handles_empty_results():
     assert profile.name == "NoSuchCorp"
     assert profile.description == ""
     assert profile.products == []
+
+
+# Fusion research tests
+from software_factory.research import _fusion_research
+
+
+_FUSION_PROFILE_JSON = json.dumps({
+    "name": "Acme Corp",
+    "website": "https://acme.com",
+    "industry": "Manufacturing",
+    "size_hint": "mid-market",
+    "sub_focus": "Industrial Widgets",
+    "connected_systems": ["SAP", "Salesforce"],
+    "description": "Acme Corp is a leading widget manufacturer.",
+    "products": ["Widget Pro", "Widget Lite"],
+    "competitors": [{"name": "RivalCo", "url": "https://rivalco.com", "description": "Competitor"}],
+    "recent_news": ["Acme raises $50M Series C"],
+    "sources": ["https://acme.com", "https://techcrunch.com/acme"],
+})
+
+
+def _mock_fusion_response(content: str):
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"choices": [{"message": {"content": content}}]}
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+def test_fusion_research_returns_full_company_profile():
+    with patch("software_factory.research.httpx.post", return_value=_mock_fusion_response(_FUSION_PROFILE_JSON)):
+        profile = _fusion_research("Acme Corp", "https://acme.com", None, "fake-key")
+    assert profile.name == "Acme Corp"
+    assert profile.industry == "Manufacturing"
+    assert profile.size_hint == "mid-market"
+    assert profile.sub_focus == "Industrial Widgets"
+    assert profile.connected_systems == ["SAP", "Salesforce"]
+    assert profile.mode == "deep"
+    assert len(profile.competitors) == 1
+
+
+def test_fusion_research_raises_on_http_error():
+    resp = MagicMock()
+    resp.raise_for_status.side_effect = Exception("403 Forbidden")
+    with patch("software_factory.research.httpx.post", return_value=resp):
+        try:
+            _fusion_research("Acme Corp", None, None, "bad-key")
+            assert False, "expected ResearchError"
+        except ResearchError as e:
+            assert "Fusion" in str(e)
+
+
+def test_fusion_research_raises_on_invalid_json():
+    with patch("software_factory.research.httpx.post",
+               return_value=_mock_fusion_response("not json at all")):
+        try:
+            _fusion_research("Acme Corp", None, None, "fake-key")
+            assert False, "expected ResearchError"
+        except ResearchError as e:
+            assert "parse" in str(e).lower() or "json" in str(e).lower()
+
+
+def test_fusion_research_falls_back_on_missing_fields():
+    """Fusion response missing optional fields → defaults applied, no KeyError."""
+    minimal = json.dumps({"name": "Acme Corp"})
+    with patch("software_factory.research.httpx.post",
+               return_value=_mock_fusion_response(minimal)):
+        profile = _fusion_research("Acme Corp", None, None, "fake-key")
+    assert profile.name == "Acme Corp"
+    assert profile.industry is None
+    assert profile.products == []
+    assert profile.connected_systems == []
