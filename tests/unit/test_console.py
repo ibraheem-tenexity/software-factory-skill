@@ -866,6 +866,7 @@ def _model_of(launcher):
 def test_stage3_done_requires_playwright_pass_and_real_agents(tmp_path):
     # The two NON-NEGOTIABLE Stage-3 gates: (a) done tickets trace to recorded native-Task agents,
     # (b) a PASSING Playwright happy-flow on the live url is recorded. No hollow done.
+    # Also mirrors Stages 1/2: done only flips once the Claude Code process has finished.
     from software_factory.db import ProjectStore, db_path
     from software_factory.tickets import TicketStore
     from software_factory.agents import AgentRegistry
@@ -875,6 +876,9 @@ def test_stage3_done_requires_playwright_pass_and_real_agents(tmp_path):
     db = ProjectStore(dbp)
     ts = TicketStore(dbp)
     reg = AgentRegistry(dbp)
+
+    # Simulate a finished stage process — detect_stage3_done must not flip while Claude is alive.
+    c._procs[rid] = type("DeadProc", (), {"poll": lambda self: 0})()
 
     # A ticket built monolithically (no agent claimed it) -> done with agent=None
     tid = ts.create_ticket("feature", acceptance="a", dod="d", wave=1)
@@ -896,6 +900,35 @@ def test_stage3_done_requires_playwright_pass_and_real_agents(tmp_path):
     assert c.detect_stage3_done(rid) is True
     st = c.status(rid)
     assert st["done"] is True and st["deploy_url"] == "https://sf-x.up.railway.app"
+
+
+def test_detect_stage3_done_waits_for_process_to_finish(tmp_path):
+    # Process health is the real indicator; all gates may be green, but if Claude is still
+    # running we must NOT flip done prematurely.
+    from software_factory.db import ProjectStore, db_path
+    from software_factory.tickets import TicketStore
+    from software_factory.agents import AgentRegistry
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_project(ProjectRequest(description="x"))
+    dbp = db_path(str(tmp_path), rid)
+    db = ProjectStore(dbp)
+    ts = TicketStore(dbp)
+    reg = AgentRegistry(dbp)
+
+    tid = ts.create_ticket("feature", acceptance="a", dod="d", wave=1)
+    reg.spawn("ag1", rid, tid, "builder", "claude-sonnet-4-6", phase="build")
+    ts.claim(tid, "ag1")
+    ts.mark_done(tid, provenance="1", diff_lines=10)
+    ts.mark_deployed(tid); ts.start_qa(tid); ts.qa_approve(tid)
+    db.record_verification("https://sf-x.up.railway.app", True, {"flows": [{"ok": True}]})
+
+    # Simulate a LIVE Claude process
+    c._procs[rid] = type("LiveProc", (), {"poll": lambda self: None})()
+    assert c.detect_stage3_done(rid) is False
+
+    # Simulate process finishing — now done flips.
+    c._procs[rid] = type("DeadProc", (), {"poll": lambda self: 0})()
+    assert c.detect_stage3_done(rid) is True
 
 
 def test_stage3_prompt_is_plan_first_orchestrator_only_with_playwright_gate(tmp_path):

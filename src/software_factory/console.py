@@ -644,6 +644,13 @@ class Console:
         status query after state loss) has no brief to build from — resuming it burns spend on
         an empty prompt (the run-b594a5f4/run-0eb69fdd double-ghost scar).
 
+        STAGE-3 GATE: a passing Playwright verification alone does NOT prove the stage is over;
+        the real indicator is the health of the Claude Code process. The state machine mirrors
+        Stages 1/2: detect_stage3_done only flips done once stage_finished() reports the process
+        has exited, AND the QA loop is fully closed. auto_resume_dead_stage simply resumes a
+        dead Stage-3 process unless the run is already done. (Pairs with #111: resume resets
+        in-flight tickets so the swarm continues, not rebuilds.)
+
         CRASH/PAUSE RECONCILIATION: this method relaunches within the poller's _AUTO_RESUME_MAX
         cap (transient crashes self-heal). Runs already in 'paused' or 'crashed' (operator-
         controlled or already-exhausted) are skipped. When the poller exhausts its retry count
@@ -661,10 +668,12 @@ class Console:
         incomplete = (
             (stage == 1 and not state.stage1_done)
             or (stage == 2 and not state.stage2_done)
-            or (stage == 3 and not db.has_passing_verification())
+            or stage == 3
         )
         if not incomplete:
             return False
+        if stage == 3:
+            self._reset_stuck_tickets(project_id)
         return self.retry_stage(project_id, stage) is not None
 
     def mark_stage_crashed(self, project_id: str) -> bool:
@@ -684,7 +693,7 @@ class Console:
         incomplete = (
             (stage == 1 and not state.stage1_done)
             or (stage == 2 and not state.stage2_done)
-            or (stage == 3 and not db.has_passing_verification())
+            or stage == 3
         )
         if not incomplete:
             return False
@@ -1423,7 +1432,8 @@ class Console:
         return True
 
     def detect_stage3_done(self, project_id: str) -> bool:
-        """Stage 3 is done ONLY when ALL hard gates pass (no hollow done):
+        """Stage 3 is done ONLY when the Claude Code process has finished AND all hard gates pass
+        (no hollow done):
         (a) the completed tickets trace to recorded native-Task agents — not a monolithic build,
         (b) a PASSING Playwright happy-flow against the live URL is recorded in project store, and
         (c) the QA loop closed: EVERY ticket reached `approved` (deployed → qa_testing → approved).
@@ -1432,6 +1442,10 @@ class Console:
         state = self._load_state(project_id)
         if state.phase == "done":
             return True
+        # Process health is the real indicator of whether the stage is still running;
+        # never flip done while Claude Code is alive (mirrors detect_stage1/2_done).
+        if not self.stage_finished(project_id):
+            return False
         paths = self._paths(project_id)
         db = ProjectStore(paths["db"])
         # Gate (b): a real green browser test on the live url must be recorded.
