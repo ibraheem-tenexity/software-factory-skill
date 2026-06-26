@@ -93,3 +93,16 @@ def test_stage_env_baseline_forwards_github_token(monkeypatch):
     assert scrubbed["GH_TOKEN"] == "ghp_factory"
     assert scrubbed["GITHUB_TOKEN"] == "ght_alias"
     assert scrubbed["EXA_API_KEY"] == "exa_factory"
+
+
+def test_stage_env_baseline_forwards_railway_token_and_runapp_project_id(monkeypatch):
+    # #112: the stage-3 build agent deploys via the Railway MCP/CLI, which authenticate from
+    # RAILWAY_TOKEN — it must survive the scrub or the MCP can't start and Railway returns
+    # "Not Authorized". RAILWAY_PROJECT_ID is overridden to the RUN-APP project, NOT the console's
+    # force-injected own project, so the agent targets software-factory-projects.
+    monkeypatch.setenv("RAILWAY_TOKEN", "rwtok-factory")
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", "console-own-project")     # the wrong target
+    monkeypatch.setattr(env, "_RUNAPP_RAILWAY_PROJECT_IDS", {"runapp-project-id"})
+    scrubbed = env.stage_env_baseline()
+    assert scrubbed["RAILWAY_TOKEN"] == "rwtok-factory"                 # token forwarded
+    assert scrubbed["RAILWAY_PROJECT_ID"] == "runapp-project-id"        # run-app, NOT the console's
