@@ -61,6 +61,13 @@ _STAGE_ESSENTIAL = {
     # factory-console), surviving the scrub; the built app never sees it (the SKILL strips any
     # token from the recorded remote URL and it isn't forwarded to the app's Railway vars).
     "GH_TOKEN", "GITHUB_TOKEN",
+    # Railway token — the stage-3 build agent deploys via the Railway MCP/CLI, which authenticate
+    # from RAILWAY_TOKEN. Scrubbed, the railway MCP can't start ("can't find Railway tools") and
+    # any Railway API call returns "Not Authorized" → the agent CANNOT deploy (#112). Forward the
+    # factory's token (set on factory-console). NOTE: RAILWAY_PROJECT_ID is deliberately NOT in
+    # this allow-set — Railway force-injects it as the CONSOLE's own project; stage_env_baseline
+    # instead injects the run-app project id (software-factory-projects) below.
+    "RAILWAY_TOKEN",
 }
 
 
@@ -100,6 +107,13 @@ def stage_env_baseline(provided: dict | None = None) -> dict:
     state_db = os.environ.get("SF_STATE_DB_URL") or os.environ.get("DATABASE_URL")
     if state_db:
         base["SF_STATE_DB_URL"] = state_db
+    # Point the stage's Railway MCP/CLI at the RUN-APP project (software-factory-projects), NOT the
+    # console's own project. Railway force-injects RAILWAY_PROJECT_ID as the console's project, so
+    # we override it with the run-app id (#112); paired with the forwarded RAILWAY_TOKEN, the agent
+    # can authenticate and deploy to its own project. Falls back to no override when unconfigured.
+    runapp_pid = runapp_railway_project_id()
+    if runapp_pid:
+        base["RAILWAY_PROJECT_ID"] = runapp_pid
     if provided:
         base.update(provided)
     return base
