@@ -32,6 +32,7 @@ def build_status(status: dict, tickets: list) -> dict:
         "agents_working": int(agents.get("running") or 0),
         "spent_usd": round(status.get("spent_usd") or 0.0, 2),
         "budget_ceiling": status.get("budget_ceiling") or 0.0,
+        "max_turns": status.get("max_turns") or 0,
         "done": bool(status.get("done")),
         "deploy_url": status.get("deploy_url") or "",
     }

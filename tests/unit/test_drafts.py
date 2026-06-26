@@ -312,6 +312,21 @@ def test_status_exposes_budget_ceiling(tmp_path):
     assert st["budget_ceiling"] == 42.0
 
 
+def test_create_draft_with_max_turns_sets_and_promote_carries_it(tmp_path):
+    c = _console(tmp_path, FakeLauncher())
+    rid = c.create_draft(owner="op@tenexity.ai", name="Cargo", runtime="claude", max_turns=350)
+    assert c._load_state(rid).max_turns == 350
+    c.update_draft_brief(rid, {
+        "goals": "A prototype.",
+        "success_metrics": "Indistinguishable from the hand-built demo.",
+        "definition_of_done": "Deployed.",
+        "constraints": "Web only.",
+    })
+    c.set_draft_project(rid, name="Cargo", goal="A prototype.", scope=["web"])
+    c.promote_draft(rid)
+    assert c._load_state(rid).max_turns == 350      # survives the promote
+
+
 def test_store_draft_creds_survives_vault_unavailable(tmp_path):
     """If Vault is down, store_draft_creds still records the key name so the user sees it
     registered; the UUID is absent (gracefully degraded)."""

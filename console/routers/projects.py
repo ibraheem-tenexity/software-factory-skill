@@ -13,7 +13,7 @@ from software_factory.deps import extract_env_creds
 import console.state as state
 from console.deps import require_authed, authorize_project, _can_see
 from console.schemas import (ProjectCreateIn, DraftCreateIn, ProjectPatchIn, MaterialScopeIn, OrgDocIn,
-                             ContinueIn, DepsIn, Stage3In, BudgetIn, RetryIn, RetryNodeIn, RewindIn,
+                             ContinueIn, DepsIn, Stage3In, BudgetIn, TurnsIn, RetryIn, RetryNodeIn, RewindIn,
                              DraftPatchIn, AttachIn, PromoteIn, CredsIn)
 
 router = APIRouter()
@@ -47,6 +47,7 @@ def projects_create(body: ProjectCreateIn, v: tuple = Depends(require_authed)):
         name=body.project_name,
         gated=bool(body.gated),
         owner=v[0] or "",
+        max_turns=body.max_turns,
     )
     try:
         return {"project_id": state.console.start_project(req)}
@@ -65,7 +66,7 @@ def create_draft(body: DraftCreateIn, v: tuple = Depends(require_authed)):
     project_id = state.console.create_draft(owner=v[0] or "", name=body.project_name,
                                   runtime=body.runtime, planning_model=body.planning_model,
                                   impl_model=body.impl_model, model=body.model,
-                                  budget=body.budget)
+                                  budget=body.budget, max_turns=body.max_turns)
     return {"project_id": project_id}
 
 
@@ -301,6 +302,18 @@ def project_budget(pid: str, body: BudgetIn, v: tuple = Depends(authorize_projec
     return state.console.raise_budget(pid, ceiling)
 
 
+@router.post("/api/projects/{pid}/turns")
+def project_turns(pid: str, body: TurnsIn, v: tuple = Depends(authorize_project)):
+    try:
+        turns = int(body.turns)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="turns (positive integer) required")
+    try:
+        return state.console.set_max_turns(pid, turns)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/api/projects/{pid}/stop")
 def project_stop(pid: str, v: tuple = Depends(authorize_project)):
     """Operator 'stop all progress': kill the live stage process + mark the run stopped (terminal —
@@ -395,6 +408,9 @@ def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_proje
     if body.budget is not None:
         state.console.raise_budget(pid, body.budget)
         result["budget_ceiling"] = body.budget
+    if body.max_turns is not None:
+        state.console.set_max_turns(pid, body.max_turns)
+        result["max_turns"] = body.max_turns
     return result
 
 
