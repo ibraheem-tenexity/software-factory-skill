@@ -406,6 +406,22 @@ export const api = {
     send<Record<string, any>>(`/api/projects/${id}/turns`, "POST", { turns }),
 };
 
+// Phase-lag detection: stage is stamped the moment a new stage launches, before the agent
+// has emitted its first set-phase. If the recorded phase belongs to a DIFFERENT stage,
+// it's stale — show "stage N · starting" instead of the misleading prior-stage phase name.
+const _STAGE_PHASES: Record<number, string[]> = {
+  1: ["extract", "provision", "research"],
+  2: ["architect", "tickets"],
+  3: ["build", "deploy", "test", "teardown"],
+};
+const _ALL_STAGE_PHASES = new Set(Object.values(_STAGE_PHASES).flat());
+
+export function phaseIsStale(phase: string | undefined, stage: number | undefined): boolean {
+  if (!phase || !stage || stage < 1 || stage > 3) return false;
+  if (!_ALL_STAGE_PHASES.has(phase)) return false; // non-pipeline (draft/paused/crashed): never stale
+  return !(_STAGE_PHASES[stage] || []).includes(phase);
+}
+
 export const BRIEF_SECTIONS: { key: string; label: string }[] = [
   { key: "goals", label: "Context & Goals" },
   { key: "scale", label: "Scale & Usage" },

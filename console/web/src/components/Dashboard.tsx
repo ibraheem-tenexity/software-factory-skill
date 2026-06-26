@@ -3,7 +3,7 @@
 // by REAL run-registry data (/api/projects, owner-scoped) + /api/me + /api/org. Fields the prototype
 // mocked are derived from real data where it exists and degrade honestly where it doesn't.
 import React, { useEffect, useState } from "react";
-import { api, ProjectSummary, Org, Me } from "../api";
+import { api, phaseIsStale, ProjectSummary, Org, Me } from "../api";
 import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, TextInput } from "./onboarding/design";
 import { MetricCardSkel, ProjectRowSkel } from "./skeleton";
 import { AccountMenu } from "./AccountMenu";
@@ -184,7 +184,7 @@ function ProjectRow({ r, onClick, first, onRename, onRequestArchive, onRequestDe
         )}
       </div>
       <div>
-        <div style={{ font: `500 11.5px/1 ${T.mono}`, color: T.secondary, marginBottom: 6 }}>{r.phase || "—"}</div>
+        <div style={{ font: `500 11.5px/1 ${T.mono}`, color: T.secondary, marginBottom: 6 }}>{phaseIsStale(r.phase, r.stage) ? `stage ${r.stage} · starting` : (r.phase || "—")}</div>
         {st.key !== "draft" && !archived && (
           <span style={{ display: "block", width: 110, height: 5, borderRadius: 3, background: T.sunken, overflow: "hidden" }}>
             <span style={{ display: "block", height: "100%", width: pct + "%", background: barColor(st.key) }} />

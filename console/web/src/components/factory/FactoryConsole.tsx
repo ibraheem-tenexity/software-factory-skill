@@ -9,7 +9,7 @@
 import { useEffect, useState } from "react";
 import { T, Icon, Wordmark, StatusPill, Btn } from "../onboarding/design";
 import { AccountMenu } from "../AccountMenu";
-import { api, ProjectSummary, Graph, Ticket } from "../../api";
+import { api, phaseIsStale, ProjectSummary, Graph, Ticket } from "../../api";
 import { phaseStatesFromGraph, atWaitForDeps, PhaseStatus } from "./pipeline";
 import { StageRail } from "./StageRail";
 import { WaitForDeps } from "./WaitForDeps";
@@ -135,7 +135,9 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
             {status.phase === "done" || status.phase === "stopped" ? status.phase
             : status.phase === "paused" || status.phase === "crashed"
               ? `${status.phase}${haltedNode ? ` at ${haltedNode}` : ""}`
-              : `phase ${status.phase} · stage ${status.stage || ""}`}
+              : phaseIsStale(status.phase, status.stage)
+                ? `stage ${status.stage} · starting`
+                : `phase ${status.phase} · stage ${status.stage || ""}`}
           </StatusPill>
         )}
         <span style={{ font: `500 12px/1 ${T.mono}`, color: overCap ? T.danger : T.secondary }}>
