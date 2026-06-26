@@ -64,10 +64,41 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 90_000);
     try {
-      const r = await api.chat({ project_id: projectId, project_name: projectName || "", message: text }, ctrl.signal);
-      setMessages((m) => [...m, ...(r.messages || []) as ChatMsg[]]);
+      const resp = await api.chatStream(
+        { project_id: projectId, project_name: projectName || "", message: text },
+        ctrl.signal,
+      );
+      const reader = resp.body!.getReader();
+      const decoder = new TextDecoder();
+      // Optimistic assistant bubble — filled incrementally by delta events
+      setMessages((m) => [...m, { role: "assistant", content: "", ts: Date.now() / 1000 }]);
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop()!;
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const evt = JSON.parse(line);
+          if (evt.type === "delta") {
+            setMessages((m) => {
+              const copy = [...m];
+              copy[copy.length - 1] = { ...copy[copy.length - 1], content: copy[copy.length - 1].content + evt.content };
+              return copy;
+            });
+          } else if (evt.type === "done") {
+            setMessages((m) => [...m.slice(0, -1), ...(evt.messages || []) as ChatMsg[]]);
+          } else if (evt.type === "error") {
+            setSendErr(evt.detail || "Message failed — try again.");
+          }
+        }
+      }
     } catch (e: any) {
       setSendErr(ctrl.signal.aborted ? "Response timed out — try again." : String(e?.message || "Message failed — try again."));
+      // Remove the optimistic bubble on error
+      setMessages((m) => m[m.length - 1]?.role === "assistant" && m[m.length - 1]?.content === "" ? m.slice(0, -1) : m);
     } finally {
       clearTimeout(timer);
       setSending(false);
