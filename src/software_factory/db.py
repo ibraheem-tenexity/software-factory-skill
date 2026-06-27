@@ -20,7 +20,8 @@ import sys
 import time
 from typing import Optional
 
-from .constants import PROJECT_ID_STRICT_RE as _PROJECT_ID_RE
+from .constants import PROJECT_ID_RE as _PROJECT_ID_RE
+from .constants import PROJECT_ID_STRICT_RE as _PROJECT_ID_STRICT_RE
 
 
 def db_path(projects_dir: str, project_id: str) -> str:
@@ -28,9 +29,26 @@ def db_path(projects_dir: str, project_id: str) -> str:
 
 
 def project_id_from_path(path: str) -> str:
-    """The run id a store at `path` belongs to — the basename of `<projects_dir>/<project_id>`.
-    In the flat Postgres schema every per-project table row is scoped by this id; no file is created."""
-    return os.path.basename(path.rstrip("/"))
+    """The run id a store at `path` belongs to — normally the basename of `<projects_dir>/<project_id>`.
+
+    If an agent passes a file path (e.g. `.../<project_id>/project.db`), derive the id from the
+    parent directory instead. In that file-like case the parent *must* be a valid project id,
+    so `project.db` can never become a project_id and leak across runs.
+    """
+    normalized = path.rstrip("/")
+    leaf = os.path.basename(normalized)
+    if _PROJECT_ID_RE.fullmatch(leaf):
+        return leaf
+    # File-like leaf (e.g. project.db) — derive from the containing run directory and validate it.
+    if "." in leaf and not leaf.startswith("."):
+        parent = os.path.basename(os.path.dirname(normalized))
+        if _PROJECT_ID_RE.fullmatch(parent):
+            return parent
+        raise ValueError(
+            f"could not derive a valid project_id from path {path!r} "
+            f"(file-like leaf={leaf!r}, parent={parent!r})"
+        )
+    return leaf
 
 
 class ProjectStore:
@@ -247,7 +265,7 @@ def main(argv: list[str]) -> int:
     # Reject malformed run ids BEFORE constructing ProjectStore — connecting has a side effect
     # (dbshim._ensure runs CREATE SCHEMA in pg mode). A wrong arg order (e.g. junk landing
     # in the project_id slot) must never create a prod schema.
-    if not _PROJECT_ID_RE.fullmatch(project_id):
+    if not _PROJECT_ID_STRICT_RE.fullmatch(project_id):
         sys.stderr.write(
             f"error: project_id {project_id!r} is not a valid factory run id (project-XXXXXXXX); "
             "args go <verb> <projects_dir> <project_id> [args]\n"

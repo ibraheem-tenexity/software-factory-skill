@@ -232,6 +232,13 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 3. `list_projects` now does ~5 queries total (projectstate, phases, blockers, agents, registry) regardless of run count and no longer reparses project.log via `_cost`; it uses persisted `spent_usd`. The pool borrows connections per statement and is enabled automatically on Railway (default 10) or via `SF_DB_POOL_SIZE`, disabled in tests.
 4. Summary: branch `perf/list-projects-pool` in worktree `../fix-perf-list-projects`; syntax-checked. Need to run the real test suite once a database is available, then open a PR through the integrator.
 
+# OpenCode Update at Time: 27:06:2026:00:40:00.000
+1. Implemented #114 guard: `project_id_from_path` now detects file-like leaves (e.g. `project.db`) and derives the project_id from the parent run directory, validating it against `PROJECT_ID_RE`.
+2. `src/software_factory/db.py` (import + `project_id_from_path`), `tests/unit/test_db.py` (new tests).
+3. Prevents `project.db` from becoming a project_id and leaking across runs; preserves existing test fixtures that use generic directory ids like `run`.
+4. Summary: `test_db.py`/`test_tickets.py`/`test_agents.py` pass. Prod data-hygiene sweep blocked: Supabase `software-factory-state` project is INACTIVE, so I cannot query `project_id='project.db'` counts yet. Waiting for go/no-go on restoring it.
+
+
 # OpenCode agent Update at Time: 26:06:2026:16:10:00.000
 1. Resolved the #155 live-log-flush merge conflict, merged it, and deployed the batch (#161 db pool + #154 phase-lag + #155 log flush) to factory-console.
 2. `console/poller.py` (kept log-flush block, dropped removed tracing `_tracer.tick`); main repo `29d6254`; worktree `../fix-perf-list-projects`.
