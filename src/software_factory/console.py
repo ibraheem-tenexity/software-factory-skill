@@ -262,6 +262,15 @@ def make_prompt(req: ProjectRequest, project_id: str, projects_dir: str) -> str:
     return make_prompt_stage1(req, project_id, projects_dir)
 
 
+def _make_drop_privileges(uid: int, gid: int):
+    """Return a preexec_fn that drops from root to (uid, gid) in the child process."""
+    import os as _os
+    def _drop():
+        _os.setgid(gid)
+        _os.setuid(uid)
+    return _drop
+
+
 def _default_launch(argv: list[str], env: dict, log_path: str | None = None, cwd: str | None = None) -> Any:
     """Launch a stage with stdout appended DIRECTLY to project.log — never through a pipe
     pumped by this server. A pump thread dies with the server, leaving the orchestrator
@@ -271,15 +280,31 @@ def _default_launch(argv: list[str], env: dict, log_path: str | None = None, cwd
     owning its own log fd survives any number of server deaths."""
     import subprocess
 
+    # Claude Code refuses --dangerously-skip-permissions when run as root. When the factory
+    # is running as root (Railway may start the container as root despite the Dockerfile USER
+    # directive, or the entrypoint setpriv may not be available), drop the child process to the
+    # unprivileged `node` user (uid/gid 1000 in node:20-bookworm) before exec. The parent
+    # server process keeps its uid — only the spawned stage agent drops.
+    preexec_fn = None
+    if os.geteuid() == 0:
+        import pwd as _pwd
+        try:
+            pw = _pwd.getpwnam("node")
+            preexec_fn = _make_drop_privileges(pw.pw_uid, pw.pw_gid)
+        except KeyError:
+            pass  # node user absent (local dev); proceed as-is
+
     if log_path:
         with open(log_path, "ab") as logf:
             return subprocess.Popen(
                 argv, env=_env.stage_env_baseline(env), cwd=cwd,
                 stdout=logf, stderr=subprocess.STDOUT,
+                preexec_fn=preexec_fn,
             )
     return subprocess.Popen(
         argv, env=_env.stage_env_baseline(env), cwd=cwd,
         stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+        preexec_fn=preexec_fn,
     )
 
 
@@ -1053,7 +1078,7 @@ class Console:
             argv = [
                 "claude", "-p", prompt,
                 "--model", model,
-                "--permission-mode", "bypassPermissions",
+                "--dangerously-skip-permissions",
                 "--output-format", "stream-json", "--verbose",
             ]
         # cwd = the workspace so the stage's SKILL.md / phases/ / context/ (its contract) load.

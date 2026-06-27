@@ -33,7 +33,10 @@ ENV HOME=/home/node
 # Claude Code via the official native installer (a self-contained ELF binary, not the
 # broken npm launcher). It lands in $HOME/.local; symlink onto PATH so `claude` resolves
 # for the orchestrator's `subprocess` calls. Verify the binary actually runs at build time.
-RUN curl -fsSL https://claude.ai/install.sh | bash \
+# VERSION is pinned so a silent upstream release can't silently rename flags or add root
+# restrictions without a deliberate Dockerfile bump (v2.1.195 introduced
+# --dangerously-skip-permissions; root restriction addressed in _default_launch preexec_fn).
+RUN curl -fsSL https://claude.ai/install.sh | VERSION=2.1.195 bash \
     && ln -sf /home/node/.local/bin/claude /usr/local/bin/claude \
     && claude --version
 

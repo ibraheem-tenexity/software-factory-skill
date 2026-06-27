@@ -55,6 +55,9 @@ def test_start_run_stamps_proof_marker_and_launches_headless_claude(tmp_path):
     assert launcher.argv is not None
     assert "claude" in launcher.argv[0]
     assert any("software-factory" in a for a in launcher.argv)
+    # v2.1.195+ renamed --permission-mode bypassPermissions to --dangerously-skip-permissions
+    assert "--dangerously-skip-permissions" in launcher.argv
+    assert "--permission-mode" not in launcher.argv
 
     # the run is stamped at launch: this is the receipt of intent (teeth are in verify_evidence)
     st = c.status(project_id)
