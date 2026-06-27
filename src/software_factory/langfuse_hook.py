@@ -11,6 +11,11 @@ Each line of the transcript JSONL is a message dict with at minimum "role" and
 "content". We create one Langfuse trace per session and one generation for each
 assistant turn, paired with the user message that preceded it.
 
+This implementation targets langfuse SDK v4 (OpenTelemetry-based). The legacy
+``Langfuse.trace()``/``trace.generation()`` API is no longer available in the
+v4 package, so we use ``get_client()``, ``start_as_current_observation()``, and
+``propagate_attributes()`` instead.
+
 Exit codes: always 0 — a tracing failure must never kill the stage run.
 """
 from __future__ import annotations
@@ -21,18 +26,32 @@ import sys
 
 
 def _read_transcript(path: str) -> list[dict]:
-    msgs: list[dict] = []
+    """Return the transcript messages, tolerant of JSON arrays or JSONL."""
     try:
         with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        msgs.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
+            raw = f.read()
     except OSError:
+        return []
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
         pass
+    else:
+        if isinstance(data, list):
+            return [m for m in data if isinstance(m, dict)]
+
+    msgs: list[dict] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            msgs.append(obj)
     return msgs
 
 
@@ -49,6 +68,33 @@ def _text(content: object) -> str:
     return ""
 
 
+def _usage_details(msg: dict) -> dict[str, int] | None:
+    usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else None
+    if not usage:
+        return None
+
+    input_tokens = usage.get("input_tokens")
+    output_tokens = usage.get("output_tokens")
+    total_tokens = usage.get("total_tokens")
+
+    details: dict[str, int] = {}
+    if isinstance(input_tokens, (int, float)):
+        details["input_tokens"] = int(input_tokens)
+    if isinstance(output_tokens, (int, float)):
+        details["output_tokens"] = int(output_tokens)
+    if isinstance(total_tokens, (int, float)):
+        details["total_tokens"] = int(total_tokens)
+    return details or None
+
+
+def _preceding_user_input(msgs: list[dict], assistant_index: int) -> str | None:
+    for j in range(assistant_index - 1, -1, -1):
+        if msgs[j].get("role") == "user":
+            text = _text(msgs[j].get("content", ""))
+            return text or None
+    return None
+
+
 def main() -> None:
     try:
         payload = json.loads(sys.stdin.read())
@@ -59,7 +105,7 @@ def main() -> None:
         return
 
     try:
-        from langfuse import Langfuse
+        from langfuse import get_client, propagate_attributes
     except ImportError:
         sys.stderr.write("[langfuse_hook] langfuse package missing — stage tracing skipped\n")
         return
@@ -70,46 +116,39 @@ def main() -> None:
     if not msgs:
         return
 
-    # Name the trace after the project directory so it's identifiable in the Langfuse UI.
     cwd = os.environ.get("PWD", "")
     trace_name = f"stage:{os.path.basename(cwd)}" if cwd else "stage-run"
 
-    lf = Langfuse(
-        public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
-        secret_key=os.environ["LANGFUSE_SECRET_KEY"],
-        host=(
-            os.environ.get("LANGFUSE_BASE_URL")
-            or os.environ.get("LANGFUSE_HOST")
-            or "https://cloud.langfuse.com"
-        ),
-    )
-    trace = lf.trace(id=session_id or None, name=trace_name)
+    lf = get_client()
 
-    for i, msg in enumerate(msgs):
-        if msg.get("role") != "assistant":
-            continue
-        output = _text(msg.get("content", ""))
-        if not output:
-            continue
-        # Walk back to find the nearest preceding user message as the generation input.
-        user_input = ""
-        for j in range(i - 1, -1, -1):
-            if msgs[j].get("role") == "user":
-                user_input = _text(msgs[j].get("content", ""))
-                break
-        usage = msg.get("usage") or {}
-        trace.generation(
-            name="assistant",
-            input=user_input or None,
-            output=output,
-            model=msg.get("model") or None,
-            usage={
-                "input": usage.get("input_tokens", 0),
-                "output": usage.get("output_tokens", 0),
-            } if usage else None,
-        )
+    try:
+        with lf.start_as_current_observation(as_type="span", name=trace_name):
+            with propagate_attributes(trace_name=trace_name, session_id=session_id or None):
+                for i, msg in enumerate(msgs):
+                    if msg.get("role") != "assistant":
+                        continue
 
-    lf.flush()
+                    output = _text(msg.get("content", ""))
+                    if not output:
+                        continue
+
+                    user_input = _preceding_user_input(msgs, i)
+                    model = msg.get("model") or None
+                    usage_details = _usage_details(msg)
+
+                    with lf.start_as_current_observation(
+                        as_type="generation",
+                        name="assistant",
+                        input=user_input,
+                        output=output,
+                        model=model,
+                        usage_details=usage_details,
+                    ):
+                        pass
+
+        lf.flush()
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write(f"[langfuse_hook] error: {e}\n")
 
 
 if __name__ == "__main__":
