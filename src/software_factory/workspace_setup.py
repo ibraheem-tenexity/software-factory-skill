@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 
 from . import workspace
 
@@ -52,6 +53,25 @@ def mcp_config(stage: int) -> dict:
 MCP_CONFIG = mcp_config(1)
 
 CLAUDE_SETTINGS = {"enableAllProjectMcpServers": True}
+
+
+def _claude_settings() -> dict:
+    """Build the claude-settings.json dict for a stage workspace.
+
+    Adds a Stop hook that ships the session transcript to Langfuse when
+    TRACE_TO_LANGFUSE=1 is set on the factory-console (and the Langfuse keys
+    are forwarded via _STAGE_ESSENTIAL).  The hook path is absolute so it works
+    regardless of where the stage workspace is created.
+    """
+    cfg: dict = {"enableAllProjectMcpServers": True}
+    if os.environ.get("TRACE_TO_LANGFUSE"):
+        hook_py = os.path.join(os.path.dirname(__file__), "langfuse_hook.py")
+        cfg["hooks"] = {
+            "Stop": [
+                {"hooks": [{"type": "command", "command": f"{sys.executable} {hook_py}"}]}
+            ]
+        }
+    return cfg
 
 
 def _to_opencode_envref(value: str) -> str:
@@ -126,7 +146,7 @@ def prepare_workspace(
             json.dump(opencode_config(stage), f, indent=2)
     else:
         with open(os.path.join(ws, "claude-settings.json"), "w") as f:
-            json.dump(CLAUDE_SETTINGS, f, indent=2)
+            json.dump(_claude_settings(), f, indent=2)
 
     # Stage contract → ws/SKILL.md (both the prompt and opencode.json `instructions` reference that
     # one name). An operator's web edit (skill_override, resolved per-runtime by the caller from the
