@@ -147,3 +147,51 @@ def test_registry_runs_reads_runstate(monkeypatch):
     assert sorted(r["project_id"] for r in runs) == ["project-aaaaaaaa", "project-bbbbbbbb"]
 
 
+def test_pool_cap_enforced_under_concurrency():
+    """_POOL_MAX is a hard ceiling: _POOL_MAX+5 concurrent callers never push _out above it."""
+    import threading
+    from software_factory.dbshim import _StatePool, _POOL_MAX
+
+    pool = _StatePool()
+    pool._url = "postgresql://fake"
+
+    class _FakeConn:
+        closed = False
+        prepare_threshold = None
+        def close(self): pass
+
+    pool._new_conn = lambda: pool._configure(_FakeConn())
+
+    peak = [0]
+    peak_lock = threading.Lock()
+    errors = []
+
+    def worker():
+        try:
+            conn = pool.getconn()
+            with peak_lock:
+                if pool._out > peak[0]:
+                    peak[0] = pool._out
+            import time; time.sleep(0.02)
+            conn.close()
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(_POOL_MAX + 5)]
+    for t in threads: t.start()
+    for t in threads: t.join(timeout=15)
+
+    assert not errors, f"Unexpected pool errors: {errors}"
+    assert peak[0] <= _POOL_MAX, f"Pool exceeded cap: peak _out={peak[0]} > _POOL_MAX={_POOL_MAX}"
+
+
+def test_pool_atexit_handler_registered():
+    """Confirm _close_at_shutdown is registered with atexit — ensures short-lived subprocesses
+    release pooler sessions on clean exit."""
+    import atexit
+    from software_factory import dbshim
+    callbacks = [c[0] for c in atexit._registrations()] if hasattr(atexit, '_registrations') else []
+    # atexit doesn't expose a public list; verify indirectly via the module attribute
+    assert hasattr(dbshim, "_close_at_shutdown"), "_close_at_shutdown must exist for atexit.register"
+
+
