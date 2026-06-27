@@ -52,15 +52,21 @@ def _db_url() -> str:
 class _StatePool:
     """Thread-safe pool of warm psycopg3 connections for the factory state DB.
 
-    Grows lazily up to `_POOL_MAX`; idle connections are returned to the queue and reaped if they've
-    sat idle past `_POOL_IDLE_TIMEOUT` on the next checkout. A bad (closed/stale) connection is
-    discarded and another is tried. `close_all()` drains the pool (called at process shutdown)."""
+    Grows lazily up to `_POOL_MAX`; idle connections are returned to the queue and reaped either
+    on the next checkout or by a background daemon thread (_idle_reaper). A bad (closed/stale)
+    connection is discarded and another is tried. `close_all()` drains the pool (called at process
+    shutdown via atexit)."""
 
     def __init__(self):
         self._url: str | None = None
         self._pool: list = []  # [(conn, last_used_ts)]
         self._out = 0
-        self._lock = threading.Lock()
+        # Condition wraps a Lock; `with self._lock:` is identical to the old Lock usage, but
+        # `.wait()` / `.notify_all()` let getconn() block (and yield the lock) when at cap
+        # instead of silently overflowing past _POOL_MAX.
+        self._lock = threading.Condition()
+        t = threading.Thread(target=self._idle_reaper, daemon=True, name="dbshim-idle-reaper")
+        t.start()
 
     def _configure(self, conn):
         conn.prepare_threshold = None
@@ -72,6 +78,24 @@ class _StatePool:
         conn = psycopg.connect(self._url, row_factory=dict_row, autocommit=True)
         return self._configure(conn)
 
+    def _idle_reaper(self):
+        """Background daemon: close connections that have been idle past _POOL_IDLE_TIMEOUT.
+        Without this, quiet periods left stale connections holding Supabase pooler sessions open
+        indefinitely (the lazy in-getconn reaper only ran when a new caller arrived)."""
+        while True:
+            time.sleep(_POOL_IDLE_TIMEOUT / 2)
+            to_close = []
+            with self._lock:
+                now = time.monotonic()
+                fresh = [(c, ts) for c, ts in self._pool if now - ts <= _POOL_IDLE_TIMEOUT]
+                to_close = [(c, ts) for c, ts in self._pool if now - ts > _POOL_IDLE_TIMEOUT]
+                self._pool[:] = fresh
+            for conn, _ in to_close:
+                try:
+                    conn._hard_close()
+                except Exception:
+                    pass
+
     def getconn(self):
         url = _db_url()
         with self._lock:
@@ -81,7 +105,7 @@ class _StatePool:
                 # URL changed (env swap / test reset) — drain + rebind rather than mix pools.
                 self._drain_locked()
                 self._url = url
-            # try a warm idle conn
+            # try a warm idle conn (lazy idle-reap on the way through)
             while self._pool:
                 conn, last_used = self._pool.pop()
                 if (time.monotonic() - last_used) > _POOL_IDLE_TIMEOUT:
@@ -90,10 +114,26 @@ class _StatePool:
                     continue
                 self._out += 1
                 return self._wrap(conn)
-            if self._out >= _POOL_MAX:
-                # at capacity — caller blocks briefly via spin-wait; this is rare for a console.
-                # (A real semaphore would be cleaner, but the console's concurrency is modest.)
-                pass
+            # No idle conn available — if at cap, wait for putconn() to signal a return.
+            # Previously this was a bare `pass` that fell through to _new_conn(), silently
+            # growing the pool past _POOL_MAX and accumulating Supabase pooler sessions (#126).
+            deadline = time.monotonic() + 5.0
+            while self._out >= _POOL_MAX:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(
+                        f"DB pool exhausted: {_POOL_MAX} connections already checked out"
+                    )
+                self._lock.wait(timeout=min(remaining, 0.5))
+                # A putconn() may have returned an idle conn — check before creating a new one.
+                while self._pool:
+                    conn, last_used = self._pool.pop()
+                    if (time.monotonic() - last_used) > _POOL_IDLE_TIMEOUT:
+                        try: conn._hard_close()
+                        except Exception: pass
+                        continue
+                    self._out += 1
+                    return self._wrap(conn)
             conn = self._new_conn()
             self._out += 1
             return self._wrap(conn)
@@ -116,10 +156,13 @@ class _StatePool:
             self._out = max(0, self._out - 1)
             try:
                 if conn.closed:
+                    self._lock.notify_all()
                     return
             except Exception:
+                self._lock.notify_all()
                 return
             self._pool.append((conn, time.monotonic()))
+            self._lock.notify_all()  # wake any getconn() caller blocked at the cap
 
     def _drain_locked(self):
         while self._pool:
@@ -131,6 +174,7 @@ class _StatePool:
         with self._lock:
             self._drain_locked()
             self._url = None
+            self._lock.notify_all()  # unblock any blocked getconn() callers
 
 
 _POOL = _StatePool()
@@ -229,6 +273,7 @@ class PgConn:
 
     def __init__(self, conn):
         self._conn = conn
+        self._closed = False
 
     def execute(self, sql: str, params=()):
         tsql = _translate(sql)
@@ -253,7 +298,15 @@ class PgConn:
         pass
 
     def close(self):
-        self._conn.close()
+        if not self._closed:
+            self._closed = True
+            self._conn.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def _tx(self, sql: str, params: tuple, wants_rows: bool, returning):
         last_err = None
