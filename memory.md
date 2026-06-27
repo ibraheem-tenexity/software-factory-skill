@@ -1,3 +1,9 @@
+# monitor-agent Update at Time: 27:06:2026:08:00:00.000
+1. Investigated stall of project-67f3711d3b0a46a4 and resumed Stage 3 by wrapping the `claude` binary to drop to the `node` user. Root cause: Claude Code v2.1.195 refuses root + `--permission-mode bypassPermissions` (maps to `--dangerously-skip-permissions`), so every console launch as root died instantly.
+2. /data/projects/project-67f3711d3b0a46a4/project.log, /usr/local/bin/claude wrapper, src/software_factory/console.py `_default_launch`.
+3. Stage 2 had actually completed (stage2_done=true, architecture + tickets produced and pushed to https://github.com/ibraheem-tenexity/adaptive-learning-path-platform). Stage 3 launches now run as `node` and the process is alive (node PID 1400), log growing, spending resumed.
+4. Summary: run is advancing again; stage=3, phase=provision, spent ~$17.13/$60; monitoring to the Playwright happy-flow gate. A durable launcher-privilege fix is needed before the next deploy.
+
 # Memory & context architecture + comms  (Proposal §4 + §5)
 
 ## §4 — Memory & context (the core fix: pull, not push)
