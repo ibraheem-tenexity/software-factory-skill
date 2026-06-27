@@ -46,6 +46,96 @@ const Mono = ({ children, style }: { children: React.ReactNode; style?: React.CS
   <span style={{ font: `500 11px/1 ${T.mono}`, letterSpacing: "0.04em", color: T.tertiary, ...style }}>{children}</span>
 );
 
+// Preview/Edit segmented-toggle cell styles for the prompt panel.
+const segIdleStyle: React.CSSProperties = {
+  font: `500 11px/1 ${T.sans}`, padding: "6px 11px", borderRadius: 6, border: "1px solid transparent",
+  background: "transparent", color: T.secondary, cursor: "pointer",
+};
+const segActiveStyle: React.CSSProperties = {
+  font: `600 11px/1 ${T.sans}`, padding: "6px 11px", borderRadius: 6, border: `1px solid ${T.borderDefault}`,
+  background: T.raised, color: T.fg, cursor: "pointer",
+};
+
+// ── Markdown view (read-only render of the SKILL.md / prompt body). Lightweight inline-style
+//    renderer — no new dep. Handles the slice of markdown the stage SKILLs + PRD-shaped prompts use:
+//    ATX headings, fenced code blocks, bold/italic/inline-code, unordered + ordered lists, hr,
+//    blockquotes, and paragraphs. Faithful enough that an operator can read a SKILL.md as it'll read
+//    to the runner, then hit Edit to drop into the textarea. ──
+function MarkdownView({ md }: { md: string }) {
+  const lines = (md || "").split("\n");
+  const out: React.ReactNode[] = [];
+  let i = 0;
+  let key = 0;
+  const k = () => `md${key++}`;
+  const inline = (text: string): React.ReactNode => {
+    // inline `code`, **bold**, *italic* — order matters: code first so its contents aren't re-parsed.
+    const parts: React.ReactNode[] = [];
+    let rest = text;
+    let pi = 0;
+    const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/;
+    while (rest.length) {
+      const m = rest.match(re);
+      if (!m || m.index == null) { parts.push(rest); break; }
+      if (m.index > 0) parts.push(rest.slice(0, m.index));
+      const tok = m[0];
+      if (tok.startsWith("`")) parts.push(<code key={pi++} style={{ font: `400 12px/1 ${T.mono}`, background: T.sunken, padding: "1px 5px", borderRadius: 4, color: T.fg }}>{tok.slice(1, -1)}</code>);
+      else if (tok.startsWith("**")) parts.push(<strong key={pi++} style={{ fontWeight: 700, color: T.fg }}>{tok.slice(2, -2)}</strong>);
+      else parts.push(<em key={pi++}>{tok.slice(1, -1)}</em>);
+      rest = rest.slice(m.index + tok.length);
+    }
+    return parts;
+  };
+  const listItem = (line: string, ol: boolean, idx: number) => (
+    <div key={k()} style={{ display: "flex", gap: 8, padding: "1px 0" }}>
+      <span style={{ font: `500 12.5px/1.6 ${T.mono}`, color: T.tertiary, minWidth: ol ? 18 : 14 }}>{ol ? `${idx + 1}.` : "•"}</span>
+      <span style={{ font: `400 13px/1.6 ${T.sans}`, color: T.fg, flex: 1 }}>{inline(line)}</span>
+    </div>
+  );
+  while (i < lines.length) {
+    const line = lines[i];
+    const t = line.trim();
+    if (!t) { i++; continue; }
+    if (t === "---" || t === "***") { out.push(<hr key={k()} style={{ border: "none", borderTop: `1px solid ${T.borderSubtle}`, margin: "10px 0" }} />); i++; continue; }
+    const fence = t.match(/^```/);
+    if (fence) {
+      const buf: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().startsWith("```")) { buf.push(lines[i]); i++; }
+      i++; // closing fence
+      out.push(<pre key={k()} style={{ font: `400 12px/1.55 ${T.mono}`, background: T.sunken, color: T.fg, padding: "11px 13px", borderRadius: T.rMd, overflow: "auto", margin: "6px 0" }}>{buf.join("\n")}</pre>);
+      continue;
+    }
+    const h = t.match(/^(#{1,6})\s+(.*)$/);
+    if (h) {
+      const lvl = h[1].length;
+      const sz = [20, 17, 15, 13.5, 12.5, 12][lvl - 1] || 13;
+      out.push(<div key={k()} style={{ font: `700 ${sz}px/1.3 ${T.sans}`, color: T.fg, margin: "12px 0 5px", letterSpacing: "-0.01em" }}>{inline(h[2])}</div>);
+      i++; continue;
+    }
+    if (/^[-*]\s+/.test(t)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*]\s+/, "")); i++; }
+      out.push(<div key={k()} style={{ margin: "3px 0" }}>{items.map((it, idx) => listItem(it, false, idx))}</div>);
+      continue;
+    }
+    if (/^\d+\.\s+/.test(t)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*\d+\.\s+/, "")); i++; }
+      out.push(<div key={k()} style={{ margin: "3px 0" }}>{items.map((it, idx) => listItem(it, true, idx))}</div>);
+      continue;
+    }
+    if (t.startsWith(">")) {
+      const buf: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith(">")) { buf.push(lines[i].trim().slice(1).trim()); i++; }
+      out.push(<blockquote key={k()} style={{ borderLeft: `2px solid ${T.brand}`, margin: "6px 0", padding: "2px 12px", color: T.secondary, font: `400 13px/1.6 ${T.sans}` }}>{buf.map((b, idx) => <div key={idx}>{inline(b)}</div>)}</blockquote>);
+      continue;
+    }
+    out.push(<p key={k()} style={{ margin: "4px 0", font: `400 13px/1.65 ${T.sans}`, color: T.fg }}>{inline(t)}</p>);
+    i++;
+  }
+  return <div style={{ display: "flex", flexDirection: "column" }}>{out}</div>;
+}
+
 function CloseBtn({ onClick }: { onClick: () => void }) {
   return (
     <button
@@ -107,6 +197,7 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
   const { data: detail, refetch } = useAdminFetch(() => api.adminAgent(agent.callsign, runtime));
   const [prompt, setPrompt] = React.useState(agent.prompt || "");
   const [tab, setTab] = React.useState<"prompt" | "tools" | "activity">("prompt");
+  const [viewMode, setViewMode] = React.useState<"preview" | "edit">("preview");
   const [saving, setSaving] = React.useState(false);
   const [appliedNote, setAppliedNote] = React.useState<string | null>(null);
   React.useEffect(() => {
@@ -293,43 +384,39 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
                 </span>
               </div>
               {isLive ? (
-                <textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  disabled={saving}
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    minHeight: 280,
-                    padding: "13px 15px",
-                    borderRadius: T.rMd,
-                    resize: "vertical",
-                    border: `1px solid ${T.borderDefault}`,
-                    background: T.bg,
-                    color: T.fg,
-                    font: `400 13px/1.65 ${T.mono}`,
-                    outline: "none",
-                  }}
-                />
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+                    <button onClick={() => setViewMode("preview")} disabled={saving} style={viewMode === "preview" ? segActiveStyle : segIdleStyle}>Preview</button>
+                    <button onClick={() => setViewMode("edit")} disabled={saving} style={viewMode === "edit" ? segActiveStyle : segIdleStyle}>Edit</button>
+                  </div>
+                  {viewMode === "preview" ? (
+                    <div style={{ width: "100%", boxSizing: "border-box", minHeight: 280, maxHeight: "calc(100vh - 360px)", padding: "14px 16px", borderRadius: T.rMd, border: `1px solid ${T.borderDefault}`, background: T.bg, overflow: "auto" }}>
+                      <MarkdownView md={prompt} />
+                    </div>
+                  ) : (
+                    <textarea
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      disabled={saving}
+                      style={{
+                        width: "100%",
+                        boxSizing: "border-box",
+                        minHeight: 280,
+                        padding: "13px 15px",
+                        borderRadius: T.rMd,
+                        resize: "vertical",
+                        border: `1px solid ${T.brand}`,
+                        background: T.bg,
+                        color: T.fg,
+                        font: `400 13px/1.65 ${T.mono}`,
+                        outline: "none",
+                      }}
+                    />
+                  )}
+                </div>
               ) : (
-                <div
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    minHeight: 280,
-                    maxHeight: "calc(100vh - 320px)",
-                    padding: "13px 15px",
-                    borderRadius: T.rMd,
-                    border: `1px solid ${T.borderDefault}`,
-                    background: T.bg,
-                    color: T.fg,
-                    font: `400 13px/1.65 ${T.mono}`,
-                    whiteSpace: "pre-wrap",
-                    overflow: "auto",
-                    userSelect: "text",
-                  }}
-                >
-                  {prompt}
+                <div style={{ width: "100%", boxSizing: "border-box", minHeight: 280, maxHeight: "calc(100vh - 320px)", padding: "14px 16px", borderRadius: T.rMd, border: `1px solid ${T.borderDefault}`, background: T.bg, overflow: "auto" }}>
+                  <MarkdownView md={prompt} />
                 </div>
               )}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, flexWrap: "wrap", gap: 8 }}>
