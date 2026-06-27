@@ -256,3 +256,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. `resources/langfuse_hook.py`, `src/software_factory/workspace_setup.py`, `src/software_factory/env.py`, `Dockerfile`.
 3. The runner image manually installed packages and had drifted from pyproject.toml, so langfuse/openinference were missing; #170's SDK-v4 rewrite became obsolete once coeyi70e vendored the official 2000-line hook.
 4. Summary: headless `claude -p "Say hello"` in a prod-container workspace fired the Stop hook and a trace ("Claude Code - Turn 1") landed in Langfuse; #122 verification complete.
+
+# OpenCode agent Update at Time: 26:06:2026:18:55:00.000
+1. Verified Supabase Vault is live in prod (#123): vault.create_secret / vault.decrypted_secrets round-trips a throwaway secret on the factory-console state DB.
+2. `src/software_factory/vault.py`, `src/software_factory/console.py` (logged warning instead of silent pass), PR #174.
+3. Caveat: vault.delete_secret(uuid) does not exist in our Vault extension, so vault_delete_many is broken; cleaned the test row manually with DELETE FROM vault.secrets. Console's silent except/pass around vault_store is now a logger.warning with exc_info.
+4. Summary: Vault encryption/return works; deletion path needs a separate fix. #174 deployed.
