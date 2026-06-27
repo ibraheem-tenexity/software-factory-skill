@@ -1120,7 +1120,12 @@ class Console:
                 if uid:
                     vault_ids[key_name] = uid
             except Exception:
-                pass  # Vault unavailable — key still reaches Stage 1 via env; Stage 2/3 need Vault
+                logger.warning(
+                    "[vault] store failed for %s key %s; key will still reach Stage 1 via env",
+                    project_id,
+                    key_name,
+                    exc_info=True,
+                )
         state.skill = "software-factory"
         state.skill_version = SKILL_VERSION
         state.description = req.description
@@ -1291,7 +1296,12 @@ class Console:
                 if uid:
                     new_ids[key_name] = uid
             except Exception:
-                pass  # Vault unavailable — still record the name so the user sees it registered
+                logger.warning(
+                    "[vault] store failed for %s key %s; recording name only",
+                    project_id,
+                    key_name,
+                    exc_info=True,
+                )
         merged = {**existing, **new_ids}
         state.creds_vault_ids = merged
         state.creds_provided = sorted({*merged, *(k for k in credentials if credentials[k])})
