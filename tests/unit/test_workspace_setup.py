@@ -102,7 +102,7 @@ def test_exa_web_search_mcp_in_every_stage_both_runtimes_env_var_key(tmp_path):
         assert exa == {"type": "http", "url": "https://mcp.exa.ai/mcp",
                        "headers": {"x-api-key": "${EXA_API_KEY}"}}
         # opencode shape: remote, {env:EXA_API_KEY} expansion; no `command` key.
-        oc = opencode_config(stage, steps=50)["mcp"]["exa"]
+        oc = opencode_config(stage)["mcp"]["exa"]
         assert oc["type"] == "remote" and oc["url"] == "https://mcp.exa.ai/mcp"
         assert oc["headers"] == {"x-api-key": "{env:EXA_API_KEY}"}
         assert "command" not in oc
@@ -274,7 +274,7 @@ def test_opencode_config_pins_provider_key_to_the_env_var():
     # auth.json (spend-limited key) — the workspace config must pin the env key so every
     # opencode entrypoint (run AND serve) uses the run's credential.
     from software_factory.workspace_setup import opencode_config
-    cfg = opencode_config(stage=3, steps=100)
+    cfg = opencode_config(stage=3)
     assert cfg["provider"]["openrouter"]["options"]["apiKey"] == "{env:OPENROUTER_API_KEY}"
 
 
