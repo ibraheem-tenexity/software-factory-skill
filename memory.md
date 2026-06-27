@@ -268,3 +268,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. `src/software_factory/vault.py`, `tests/unit/test_vault.py`, PR #176.
 3. Verified live: stored a throwaway secret, vault_delete_many removed it, and a subsequent retrieve returned {}. BYOK secrets can now be purged on archive/teardown.
 4. Summary: #124 complete; backend queue is now clear unless #114 purge gets ibraheem's ok or new work is assigned.
+
+# OpenCode agent Update at Time: 27:06:2026:06:12:00.000
+1. ibraheem APPROVED #114 data purge; executed DELETE FROM tickets WHERE project_id='project.db' against the live state DB via railway run.
+2. Live state DB via factory-console Railway env.
+3. Count was 33 orphans (LMS/workforce app run mislabeled with file basename project.db). The #165 guard prevents new 'project.db' rows from landing.
+4. Summary: 33 rows deleted; post-purge count is 0. #114 data-hygiene complete.
