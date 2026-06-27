@@ -2,7 +2,7 @@
 
 All tests use an injected mock connection so no real Supabase Vault is required.
 We assert the exact SQL surface called (vault.create_secret / vault.decrypted_secrets /
-vault.delete_secret) and the correct UUID-to-name mapping.
+DELETE FROM vault.secrets) and the correct UUID-to-name mapping.
 """
 from unittest.mock import MagicMock, patch
 
@@ -77,16 +77,19 @@ def test_vault_retrieve_many_skips_null_decrypted_values(monkeypatch):
     assert "OPENROUTER_API_KEY" not in result
 
 
-def test_vault_delete_many_calls_delete_for_each_uuid(monkeypatch):
-    # Each UUID must get its own vault.delete_secret call.
+def test_vault_delete_many_uses_single_delete_from_secrets(monkeypatch):
+    # Our pgsodium/Vault setup does not expose vault.delete_secret(), so we use a
+    # single DELETE FROM vault.secrets WHERE id = ANY(...) for all UUIDs.
     conn, cur = _mock_conn()
     monkeypatch.setenv("DATABASE_URL", "postgresql://x:x@localhost/x")
     with patch("software_factory.vault._conn", return_value=conn):
         from software_factory import vault
         vault.vault_delete_many(["uuid-aaa", "uuid-bbb"])
     calls = [c[0][0] for c in cur.execute.call_args_list]
-    assert all("vault.delete_secret" in sql for sql in calls)
-    assert len(calls) == 2
+    assert len(calls) == 1
+    assert "DELETE FROM vault.secrets" in calls[0]
+    assert "id = ANY" in calls[0]
+    assert cur.execute.call_args[0][1] == (["uuid-aaa", "uuid-bbb"],)
 
 
 def test_vault_delete_many_empty_list_makes_no_db_call(monkeypatch):
@@ -99,7 +102,7 @@ def test_vault_delete_many_empty_list_makes_no_db_call(monkeypatch):
 
 
 def test_vault_delete_many_filters_empty_strings(monkeypatch):
-    # Falsy UUIDs must be silently skipped.
+    # Falsy UUIDs must be silently skipped; the remaining UUIDs are passed in one call.
     conn, cur = _mock_conn()
     monkeypatch.setenv("DATABASE_URL", "postgresql://x:x@localhost/x")
     with patch("software_factory.vault._conn", return_value=conn):
@@ -107,3 +110,4 @@ def test_vault_delete_many_filters_empty_strings(monkeypatch):
         vault.vault_delete_many(["", None, "uuid-real"])
     calls = [c[0][0] for c in cur.execute.call_args_list]
     assert len(calls) == 1
+    assert cur.execute.call_args[0][1] == (["uuid-real"],)
