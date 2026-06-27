@@ -244,3 +244,15 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. `console/poller.py` (kept log-flush block, dropped removed tracing `_tracer.tick`); main repo `29d6254`; worktree `../fix-perf-list-projects`.
 3. Deploy succeeded (Railway build `67b98090-5325-4eaf-8dfb-5f02e11b377a`); rebased `perf/list-projects-pool` onto updated main, stripped redundant dbshim pool code since #161 owns pooling, and rewrote PR #162 as a list-only change.
 4. Summary: full unit suite 872 passed / 2 pre-existing failures (`opencode_config()` `steps` kwarg drift); PR #162 titled/body updated and force-pushed to `3af53d2`; ready for integrator merge.
+
+# OpenCode agent Update at Time: 26:06:2026:18:30:00.000
+1. Merged/deployed #165 (#114 project_id guard) and queried live factory-state DB via factory-console Railway env: 33 orphaned tickets under project_id='project.db', all other project tables clean.
+2. `src/software_factory/db.py`, `tests/unit/test_db.py`; live DB is the Supabase pooler behind factory-console (not the inactive MCP project).
+3. Root cause identified: filenames like project.db were used as project_id. Purge is the safe cleanup (real ID lost), but per xpyjn5m7 this is HELD for ibraheem's explicit ok because it deletes prod ticket rows.
+4. Summary: guard shipped; data-hygiene on hold awaiting operator consent.
+
+# OpenCode agent Update at Time: 26:06:2026:18:45:00.000
+1. Replaced the home-grown #166 Langfuse hook with the official script (#172), added runtime Dockerfile deps (#171), set TRACE_TO_LANGFUSE="true", and deployed.
+2. `resources/langfuse_hook.py`, `src/software_factory/workspace_setup.py`, `src/software_factory/env.py`, `Dockerfile`.
+3. The runner image manually installed packages and had drifted from pyproject.toml, so langfuse/openinference were missing; #170's SDK-v4 rewrite became obsolete once coeyi70e vendored the official 2000-line hook.
+4. Summary: headless `claude -p "Say hello"` in a prod-container workspace fired the Stop hook and a trace ("Claude Code - Turn 1") landed in Langfuse; #122 verification complete.
