@@ -65,7 +65,6 @@ def vault_delete_many(uuids) -> None:
     try:
         with conn.transaction():
             cur = conn.cursor()
-            for uid in uuids:
-                cur.execute("SELECT vault.delete_secret(%s)", (uid,))
+            cur.execute("DELETE FROM vault.secrets WHERE id = ANY(%s)", (uuids,))
     finally:
         conn.close()
