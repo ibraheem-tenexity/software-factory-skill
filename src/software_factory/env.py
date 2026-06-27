@@ -68,10 +68,10 @@ _STAGE_ESSENTIAL = {
     # this allow-set — Railway force-injects it as the CONSOLE's own project; stage_env_baseline
     # instead injects the run-app project id (software-factory-projects) below.
     "RAILWAY_TOKEN",
-    # Langfuse stage-run tracing — the Stop hook (langfuse_hook.py, registered in the stage
-    # workspace claude-settings.json when TRACE_TO_LANGFUSE=1) authenticates with these keys and
-    # ships the session transcript to Langfuse. Scrubbed, the hook exits early and tracing is
-    # silently disabled (safe default). LANGFUSE_BASE_URL is optional (defaults to cloud.langfuse.com).
+    # Langfuse stage-run tracing — the official Stop hook (resources/langfuse_hook.py, copied into
+    # each stage workspace's .claude/hooks/ when TRACE_TO_LANGFUSE="true") authenticates with these
+    # keys and ships the session transcript to Langfuse. Scrubbed, the hook exits early and tracing
+    # is silently disabled (safe default). LANGFUSE_BASE_URL is optional (defaults to cloud.langfuse.com).
     "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL",
     "TRACE_TO_LANGFUSE",
 }
