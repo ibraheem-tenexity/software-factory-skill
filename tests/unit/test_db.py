@@ -1,6 +1,7 @@
 """ProjectStore — the run datastore that backs ProjectState and the canvas projection."""
-from software_factory.db import ProjectStore, db_path
+from software_factory.db import ProjectStore, db_path, project_id_from_path
 from software_factory.projectstate import ProjectState
+import pytest
 
 
 def test_flat_run_id_isolation_in_one_shared_db(tmp_path):
@@ -99,6 +100,24 @@ def test_cli_accepts_correctly_ordered_call(tmp_path):
     db = ProjectStore(db_path(runs, "project-0ddd55fe"))
     assert db.phase_status()["research"] == "active"
 
+
+def test_project_id_from_path_uses_directory_name():
+    assert project_id_from_path("/data/runs/project-0362f961f0984e75") == "project-0362f961f0984e75"
+    assert project_id_from_path("/data/runs/project-0362f961f0984e75/") == "project-0362f961f0984e75"
+    assert project_id_from_path("/tmp/pytest/run") == "run"  # generic directory id still accepted
+
+
+def test_project_id_from_path_derives_from_parent_when_given_db_file():
+    """Agents sometimes hand-construct TicketStore('/.../<run>/project.db'); the guard must use
+    the run directory, not the filename, as project_id."""
+    assert project_id_from_path("/data/runs/project-0362f961f0984e75/project.db") == "project-0362f961f0984e75"
+
+
+def test_project_id_from_path_rejects_file_like_without_valid_parent():
+    with pytest.raises(ValueError, match="could not derive a valid project_id"):
+        project_id_from_path("/data/runs/project.db")
+    with pytest.raises(ValueError, match="could not derive a valid project_id"):
+        project_id_from_path("/data/runs/junk-id/project.db")
 
 # ── provision-db verb (moved out of Console._launch_stage; the stage-3 agent calls it) ──────────
 # The verb wraps deploy_db.provision and persists the teardown handle onto ProjectState + records
