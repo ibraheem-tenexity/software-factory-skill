@@ -29,6 +29,61 @@ python3 -m software_factory.db <verb> <projects_dir> <project_id> ...
 per Task sub-agent; `record-artifact <projects_dir> <project_id> <title> <path> <kind> [agent]`; `record-verification <projects_dir> <project_id> <url> <0|1> <result-json>`
 for the Playwright gate; `add-blocker`/`clear-blocker`. No events — the datastore is the source of truth.
 
+## Entry: resume assessment (always runs first)
+
+**Before any phase work**, run the snippet below to determine whether prior work exists and skip
+forward to the right phase. A relaunch that rebuilds from scratch when the build is already done
+wastes the entire prior run.
+
+```bash
+python3 - <<'RESUME_CHECK'
+import os, sys
+ws = os.getcwd()
+# workspace lives at <projects_dir>/<project_id>/workspace/
+project_id = os.path.basename(os.path.dirname(ws))
+projects_dir = os.path.dirname(os.path.dirname(ws))
+try:
+    from software_factory.db import db_path
+    from software_factory.tickets import TicketStore
+    ts = TicketStore(db_path(projects_dir, project_id))
+    ts.reset_in_progress_tickets()   # clear stale in_progress from a prior interrupted run
+    tickets = ts.all_tickets()
+    if not tickets:
+        print("RESUME:phase0")
+    elif ts.all_approved():
+        print("RESUME:done")
+    else:
+        statuses = {t.status for t in tickets}
+        all_built = statuses.issubset({"done", "deployed", "qa_testing", "approved"})
+        all_deployed = statuses.issubset({"deployed", "qa_testing", "approved"})
+        if all_deployed:
+            print("RESUME:phase3")
+        elif all_built:
+            print("RESUME:phase2")
+        elif os.path.isfile(os.path.join(ws, "build-plan.md")):
+            print("RESUME:phase1")
+        else:
+            print("RESUME:phase0")
+except Exception as e:
+    sys.stderr.write(f"[resume] assessment failed: {e}\n")
+    print("RESUME:phase0")
+RESUME_CHECK
+```
+
+**Act on the output:**
+- `RESUME:done` — the run is already complete (all tickets approved + Playwright verification recorded). Confirm, record teardown, stop.
+- `RESUME:phase3` — build and deploy are done; skip to **Phase 3** (Playwright happy-flow test).
+- `RESUME:phase2` — build is done, deploy not yet; skip to **Phase 2** (deploy).
+- `RESUME:phase1` — build plan exists, tickets partially built; skip to **Phase 1** (continue building remaining open tickets).
+- `RESUME:phase0` — fresh run or plan never written; start from **Phase 0**.
+
+**When resuming mid-build (phase1):** do NOT re-plan. Read the existing `build-plan.md`, call
+`TicketStore.open_waves()` to find remaining work, and pick up from the first open ticket.
+**When resuming at deploy (phase2):** skip `provision-db` if `context/deploy-db.json` already
+exists — the DB was already provisioned; read `DATABASE_URL` from it directly.
+
+---
+
 ## Phase 0: plan FIRST  (`set-phase plan`)
 
 BEFORE building, write `build-plan.md` (approach; the wave/ticket order; mock/MCP decisions per dependency
