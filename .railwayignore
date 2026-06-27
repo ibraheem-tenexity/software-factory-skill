@@ -1,0 +1,10 @@
+.env
+.env.*
+console/web/node_modules/
+console/web/dist/
+.runs/
+.git/
+*.png
+env_text.txt
+open-ai-key.txt
+client_secret_*.json
