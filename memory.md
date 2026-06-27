@@ -262,3 +262,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. `src/software_factory/vault.py`, `src/software_factory/console.py` (logged warning instead of silent pass), PR #174.
 3. Caveat: vault.delete_secret(uuid) does not exist in our Vault extension, so vault_delete_many is broken; cleaned the test row manually with DELETE FROM vault.secrets. Console's silent except/pass around vault_store is now a logger.warning with exc_info.
 4. Summary: Vault encryption/return works; deletion path needs a separate fix. #174 deployed.
+
+# OpenCode agent Update at Time: 26:06:2026:19:05:00.000
+1. Fixed vault_delete_many (#124): replaced per-row vault.delete_secret() (which doesn't exist in our pgsodium) with a single DELETE FROM vault.secrets WHERE id = ANY(%s), added/updated tests, and deployed.
+2. `src/software_factory/vault.py`, `tests/unit/test_vault.py`, PR #176.
+3. Verified live: stored a throwaway secret, vault_delete_many removed it, and a subsequent retrieve returned {}. BYOK secrets can now be purged on archive/teardown.
+4. Summary: #124 complete; backend queue is now clear unless #114 purge gets ibraheem's ok or new work is assigned.
