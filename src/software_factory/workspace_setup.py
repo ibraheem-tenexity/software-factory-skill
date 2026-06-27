@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import sys
 
 from . import workspace
 
@@ -54,24 +53,55 @@ MCP_CONFIG = mcp_config(1)
 
 CLAUDE_SETTINGS = {"enableAllProjectMcpServers": True}
 
+# Official Langfuse Claude Code hook script — vendored from
+# https://langfuse.com/integrations/developer-tools/claude-code
+_LANGFUSE_HOOK_SRC = os.path.join(
+    os.path.dirname(__file__), "..", "..", "resources", "langfuse_hook.py"
+)
 
-def _claude_settings() -> dict:
-    """Build the claude-settings.json dict for a stage workspace.
 
-    Adds a Stop hook that ships the session transcript to Langfuse when
-    TRACE_TO_LANGFUSE=1 is set on the factory-console (and the Langfuse keys
-    are forwarded via _STAGE_ESSENTIAL).  The hook path is absolute so it works
-    regardless of where the stage workspace is created.
+def _write_langfuse_hook(ws: str) -> None:
+    """Copy the official Langfuse Stop-hook into the workspace and register it.
+
+    Places the script at .claude/hooks/langfuse_hook.py and writes
+    .claude/settings.json with the Stop hook registration.  Also appends
+    .claude/ to the workspace .gitignore so the hook (and any keys in the
+    process env) never get committed to the customer's app repo that stage-3
+    pushes to GitHub.
+
+    Only called when TRACE_TO_LANGFUSE="true" is set on the factory-console.
+    The hook itself gates on that same env var at runtime (silently skips if
+    absent), and reads LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_BASE_URL
+    from os.environ (forwarded via env._STAGE_ESSENTIAL).
     """
-    cfg: dict = {"enableAllProjectMcpServers": True}
-    if os.environ.get("TRACE_TO_LANGFUSE"):
-        hook_py = os.path.join(os.path.dirname(__file__), "langfuse_hook.py")
-        cfg["hooks"] = {
+    hooks_dir = os.path.join(ws, ".claude", "hooks")
+    os.makedirs(hooks_dir, exist_ok=True)
+
+    dst_hook = os.path.join(hooks_dir, "langfuse_hook.py")
+    shutil.copy2(_LANGFUSE_HOOK_SRC, dst_hook)
+
+    settings = {
+        "hooks": {
             "Stop": [
-                {"hooks": [{"type": "command", "command": f"{sys.executable} {hook_py}"}]}
+                {"hooks": [{"type": "command", "command": "python3 .claude/hooks/langfuse_hook.py"}]}
             ]
         }
-    return cfg
+    }
+    with open(os.path.join(ws, ".claude", "settings.json"), "w") as f:
+        json.dump(settings, f, indent=2)
+
+    # Gitignore .claude/ so the hook + any env-injected secrets never reach the customer's repo.
+    gitignore_path = os.path.join(ws, ".gitignore")
+    entry = ".claude/\n"
+    try:
+        existing = open(gitignore_path).read() if os.path.isfile(gitignore_path) else ""
+        if ".claude/" not in existing:
+            with open(gitignore_path, "a") as f:
+                if existing and not existing.endswith("\n"):
+                    f.write("\n")
+                f.write(entry)
+    except OSError:
+        pass
 
 
 def _to_opencode_envref(value: str) -> str:
@@ -146,7 +176,9 @@ def prepare_workspace(
             json.dump(opencode_config(stage), f, indent=2)
     else:
         with open(os.path.join(ws, "claude-settings.json"), "w") as f:
-            json.dump(_claude_settings(), f, indent=2)
+            json.dump(CLAUDE_SETTINGS, f, indent=2)
+        if os.environ.get("TRACE_TO_LANGFUSE") == "true":
+            _write_langfuse_hook(ws)
 
     # Stage contract → ws/SKILL.md (both the prompt and opencode.json `instructions` reference that
     # one name). An operator's web edit (skill_override, resolved per-runtime by the caller from the
