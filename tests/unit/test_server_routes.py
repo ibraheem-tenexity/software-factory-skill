@@ -49,6 +49,17 @@ def test_run_restore_link_serves_console_html_not_404(client):
     assert "Software Factory" in r.text
 
 
+def test_api_version_open_and_reports_sha(client, monkeypatch):
+    # /api/version is open (no auth) and returns the running build's git SHA (TEN-151).
+    monkeypatch.setenv("SF_GIT_SHA", "a1b2c3d4e5f60718293a4b5c6d7e8f9001122334")
+    r = client.get("/api/version")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["sha"] == "a1b2c3d4e5f60718293a4b5c6d7e8f9001122334"
+    assert body["short"] == "a1b2c3d"
+    assert set(body) >= {"sha", "short", "dirty"}
+
+
 @pytest.fixture()
 def auth_mod(tmp_path, monkeypatch):
     mod = _load_app(
