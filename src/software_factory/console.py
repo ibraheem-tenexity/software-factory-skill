@@ -566,15 +566,19 @@ class Console:
         conn = dbshim.connect(self._projects_dir)
         try:
             rows = conn.execute(
-                f"SELECT project_id, data FROM projectstate WHERE project_id IN ({placeholders})",
+                f"SELECT project_id, data, name, summary FROM projectstate WHERE project_id IN ({placeholders})",
                 tuple(project_ids),
             ).fetchall()
         finally:
             conn.close()
         for row in rows:
-            out[row["project_id"]] = ProjectState.from_data(
-                row["project_id"], json.loads(row["data"])
-            )
+            data = json.loads(row["data"])
+            # name/summary are authoritative in their own columns (see ProjectStore.read) — merge
+            # them back so the batch-loaded state matches a single ProjectStore.read.
+            if row["name"] is not None:
+                data["name"] = row["name"]
+            data["summary"] = row["summary"]
+            out[row["project_id"]] = ProjectState.from_data(row["project_id"], data)
         # Legacy / registry-only edge cases: produce default states without persisting.
         for pid in project_ids:
             if pid not in out:
@@ -1825,6 +1829,7 @@ class Console:
             "skill_version": state.skill_version,
             "description": state.description,
             "name": state.name,
+            "summary": state.summary,
             "deploy_target": state.deploy_target,
             "phase": self.current_phase(project_id),
             "done": state.phase == "done",
@@ -1954,6 +1959,7 @@ class Console:
                 "phase": self._current_phase_from_state(st, phase_statuses[name]),
                 "description": st.description,
                 "name": st.name,
+                "summary": st.summary,
                 "deploy_url": st.deploy_url,
                 "spent_usd": st.spent_usd or 0,
                 "stage": st.stage,
@@ -2134,9 +2140,11 @@ class Console:
         return report
 
     def rename_project(self, project_id: str, name: str | None = None,
-                       description: str | None = None, scope: list | None = None) -> dict:
-        """Update a project's name / scope / description in place (post-promotion edit). When `scope`
-        is given the description is recomposed (goal + scope line), exactly like the draft setter."""
+                       description: str | None = None, scope: list | None = None,
+                       summary: str | None = None) -> dict:
+        """Update a project's name / scope / description / summary in place (post-promotion edit).
+        When `scope` is given the description is recomposed (goal + scope line), exactly like the
+        draft setter. `summary` is the customer-facing blurb (populated externally)."""
         from .brief import compose_description
         state = self._load_state(project_id)
         if name is not None:
@@ -2147,9 +2155,11 @@ class Console:
             state.description = compose_description(goal, state.scope)
         elif description is not None:
             state.description = description
+        if summary is not None:
+            state.summary = summary
         state.save()
         return {"project_id": project_id, "name": state.name, "scope": list(state.scope or []),
-                "description": state.description}
+                "description": state.description, "summary": state.summary}
 
     def events(self, project_id: str) -> list:
         """Recent run activity, projected from project store for the live activity feed. Shaped like the

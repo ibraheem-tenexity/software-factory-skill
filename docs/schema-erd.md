@@ -16,7 +16,9 @@ The project registry and the canonical project state. One row per project; `data
 | Column | Type | Notes |
 |---|---|---|
 | project_id | Text | PK |
-| data | Text | not null; JSON-encoded `ProjectState` |
+| data | Text | not null; JSON-encoded `ProjectState` (excludes `name`/`summary`, which live in their own columns) |
+| name | Text | authoritative project name (promoted out of `data`; backfilled by migration 0007) |
+| summary | Text | customer-facing project summary shown on the dashboard card; populated externally |
 
 ### phases
 Pipeline phases recorded for a project.

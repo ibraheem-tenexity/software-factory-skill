@@ -9,6 +9,7 @@ export type ProjectSummary = {
   owner?: string;
   done?: boolean;
   description?: string;   // the project goal (one-liner shown on the dashboard row)
+  summary?: string;       // customer-facing summary; preferred over description in the dashboard snippet
   deploy_url?: string;    // present ⇒ deployed/live
   budget_stopped?: boolean;
   held?: boolean;

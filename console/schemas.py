@@ -94,6 +94,7 @@ class ProjectPatchIn(BaseModel):
     name: str | None = None
     description: str | None = None
     scope: list | None = None
+    summary: str | None = None
 
 
 class MaterialScopeIn(BaseModel):

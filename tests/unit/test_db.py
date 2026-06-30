@@ -33,6 +33,32 @@ def test_runstate_round_trips_through_run_db(tmp_path):
     assert again.deps_required == ["OPENROUTER_API_KEY"]
 
 
+def test_name_and_summary_persist_in_columns_not_json(tmp_path):
+    """`name` and `summary` are stored in their own projectstate COLUMNS, never duplicated into the
+    JSON `data` blob, and round-trip back through ProjectState.load (read merges the columns)."""
+    import json
+    db = ProjectStore(str(tmp_path / "project-1"))
+    st = ProjectState.load("project-1", db)
+    st.name = "Quote-to-Epicor"
+    st.summary = "Automates **RFQ** quoting against Epicor."
+    st.description = "goal prose"
+    st.save()
+    # raw row: name/summary live in the columns and are absent from the blob; other fields stay in it.
+    row = db._conn.execute(
+        "SELECT data, name, summary FROM projectstate WHERE project_id = ?", ("project-1",)
+    ).fetchone()
+    blob = json.loads(row["data"])
+    assert "name" not in blob and "summary" not in blob
+    assert blob["description"] == "goal prose"
+    assert row["name"] == "Quote-to-Epicor"
+    assert row["summary"] == "Automates **RFQ** quoting against Epicor."
+    # a fresh load merges the columns back onto the dataclass
+    again = ProjectState.load("project-1", ProjectStore(str(tmp_path / "project-1")))
+    assert again.name == "Quote-to-Epicor"
+    assert again.summary == "Automates **RFQ** quoting against Epicor."
+    assert again.description == "goal prose"
+
+
 def test_phases_artifacts_blockers_gates_project(tmp_path):
     db = ProjectStore(str(tmp_path / "project-1"))
     db.set_phase("research", "active")

@@ -47,6 +47,7 @@ _PERSISTED = {
     "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
     "budget_ceiling", "deploy_db_attempts", "deploy_db_service_id", "deploy_db_volume_id", "held", "owner",
     "brief", "interview_coverage", "scope", "is_demo", "archived",
+    "summary",
     "created_by", "created_at",
     "creds_vault_ids",
     "paused_at_node", "crashed_at_node",
@@ -67,6 +68,7 @@ class ProjectState:
     skill_version: Optional[str] = None
     description: Optional[str] = None
     name: str = ""  # operator-chosen project name (display label; project_id stays the key)
+    summary: Optional[str] = None  # customer-facing project summary (populated externally; see CRUD)
     deploy_target: Optional[str] = None
     creds_provided: list = field(default_factory=list)  # cred NAMES only, never values
     creds_vault_ids: dict = field(default_factory=dict)  # {name: vault_uuid} — never plaintext
