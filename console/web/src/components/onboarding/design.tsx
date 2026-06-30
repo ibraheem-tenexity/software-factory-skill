@@ -447,6 +447,72 @@ export function OrgImportPicker({ docs = [] }:
   );
 }
 
+// ---------- inline markdown ----------
+// Lightweight renderer for short free-text fields (e.g. the project summary/description shown on the
+// dashboard card). Renders **bold**, *italic* / _italic_, `code`, [links](url), and "- " / "1." lists.
+// With no markdown tokens it renders the text verbatim, so plain prose is unaffected. This is a
+// faithful TSX port of the design's shared.jsx `Markdown`, plus an `inline` mode used by the dashboard
+// snippet: it flattens to ONE line (block markers stripped per line, newlines → spaces) inside a
+// <span>, so a parent with nowrap+ellipsis still truncates cleanly and no raw `**`/`- ` ever shows.
+// Distinct from the heavier full-document MarkdownBody/MarkdownPreview (artifact/SOW renderers).
+const MD_INLINE_RE = /(\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+
+export function looksLikeMarkdown(s: unknown): boolean {
+  return typeof s === "string" &&
+    /(\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_|`[^`]+`|\[[^\]]+\]\([^)]+\)|^\s*[-*]\s+|^\s*\d+[.)]\s+)/m.test(s);
+}
+
+function renderInlineMd(text: string, key: string): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  text.split(MD_INLINE_RE).forEach((tok, n) => {
+    if (!tok) return;
+    const k = `${key}-${n}`;
+    if (/^\*\*[^*]+\*\*$/.test(tok)) out.push(<strong key={k} style={{ fontWeight: 600, color: T.fg }}>{tok.slice(2, -2)}</strong>);
+    else if (/^\*[^*]+\*$/.test(tok)) out.push(<em key={k}>{tok.slice(1, -1)}</em>);
+    else if (/^_[^_]+_$/.test(tok)) out.push(<em key={k}>{tok.slice(1, -1)}</em>);
+    else if (/^`[^`]+`$/.test(tok)) out.push(<code key={k} style={{ font: `400 0.92em/1.4 ${T.mono}`, background: T.sunken, border: `1px solid ${T.borderSubtle}`, borderRadius: 4, padding: "1px 5px" }}>{tok.slice(1, -1)}</code>);
+    else {
+      const m = tok.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (m) out.push(<a key={k} href={m[2]} style={{ color: T.brandDeep, textDecoration: "underline" }}>{m[1]}</a>);
+      else out.push(<React.Fragment key={k}>{tok}</React.Fragment>);
+    }
+  });
+  return out;
+}
+
+export function Markdown({ children, style, inline }:
+  { children?: string; style?: CSS; inline?: boolean }) {
+  const text = typeof children === "string" ? children : "";
+  // Inline (single-line) mode: strip per-line block markers, collapse to one line, render emphasis
+  // only — inside a <span> so a parent's nowrap+ellipsis truncation still applies.
+  if (inline) {
+    const flat = text
+      .replace(/^[ \t]*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+)/gm, "")
+      .replace(/\s*\n+\s*/g, " ")
+      .trim();
+    return <span style={style}>{renderInlineMd(flat, "i")}</span>;
+  }
+  if (!looksLikeMarkdown(text)) return <p style={{ margin: 0, ...style }}>{text}</p>;
+  const lines = text.split(/\r?\n/);
+  type Block = { items: string[] } | { p: string };
+  const blocks: Block[] = [];
+  let list: { items: string[] } | null = null;
+  const flush = () => { if (list) { blocks.push(list); list = null; } };
+  lines.forEach((ln) => {
+    const m = ln.match(/^\s*(?:[-*]|\d+[.)])\s+(.*)$/);
+    if (m) { if (!list) list = { items: [] }; list.items.push(m[1]); }
+    else { flush(); if (ln.trim()) blocks.push({ p: ln.trim() }); }
+  });
+  flush();
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 7, ...style }}>
+      {blocks.map((b, i) => "items" in b
+        ? <ul key={i} style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 3 }}>{b.items.map((it, j) => <li key={j}>{renderInlineMd(it, `${i}-${j}`)}</li>)}</ul>
+        : <p key={i} style={{ margin: 0 }}>{renderInlineMd((b as { p: string }).p, `${i}`)}</p>)}
+    </div>
+  );
+}
+
 export function Wordmark({ size = 19 }: { size?: number }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 9 }}>

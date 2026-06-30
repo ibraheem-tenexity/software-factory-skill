@@ -17,7 +17,8 @@ digraph SchemaERD {
       <tr><td bgcolor="#e0f2fe" port="t"><b>projectstate</b></td></tr>
       <tr><td align="left"><b>PK</b> project_id</td></tr>
       <tr><td align="left">data : ProjectState JSON</td></tr>
-      <tr><td align="left"><font color="#64748b" point-size="10">(JSON holds name, owner, phase,<br/>stage, models, budget, brief)</font></td></tr>
+      <tr><td align="left">name, summary : columns</td></tr>
+      <tr><td align="left"><font color="#64748b" point-size="10">(JSON holds owner, phase, stage,<br/>models, budget, brief; name+summary<br/>promoted to columns)</font></td></tr>
       <tr><td align="left"><font color="#64748b" point-size="10">also the project registry</font></td></tr>
     </table>>];
 

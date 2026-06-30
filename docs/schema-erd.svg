@@ -16,20 +16,23 @@
 <!-- projectstate -->
 <g id="node1" class="node">
 <title>projectstate</title>
-<polygon fill="white" stroke="transparent" points="716,-459.5 716,-587.5 878,-587.5 878,-459.5 716,-459.5"/>
-<polygon fill="#e0f2fe" stroke="transparent" points="716,-562.5 716,-587.5 878,-587.5 878,-562.5 716,-562.5"/>
-<polygon fill="none" stroke="black" points="716,-562.5 716,-587.5 878,-587.5 878,-562.5 716,-562.5"/>
-<text text-anchor="start" x="758.5" y="-572.3" font-family="Arial" font-weight="bold" font-size="14.00">projectstate</text>
-<polygon fill="none" stroke="black" points="716,-537.5 716,-562.5 878,-562.5 878,-537.5 716,-537.5"/>
-<text text-anchor="start" x="721" y="-547.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
-<text text-anchor="start" x="740" y="-547.3" font-family="Arial" font-size="14.00"> project_id</text>
-<polygon fill="none" stroke="black" points="716,-512.5 716,-537.5 878,-537.5 878,-512.5 716,-512.5"/>
-<text text-anchor="start" x="721" y="-521.3" font-family="Arial" font-size="14.00">data : ProjectState JSON</text>
-<polygon fill="none" stroke="black" points="716,-480.5 716,-512.5 878,-512.5 878,-480.5 716,-480.5"/>
-<text text-anchor="start" x="721" y="-499.5" font-family="Arial" font-size="10.00" fill="#64748b">(JSON holds name, owner, phase,</text>
-<text text-anchor="start" x="734" y="-488.5" font-family="Arial" font-size="10.00" fill="#64748b">stage, models, budget, brief)</text>
-<polygon fill="none" stroke="black" points="716,-459.5 716,-480.5 878,-480.5 878,-459.5 716,-459.5"/>
-<text text-anchor="start" x="721" y="-467.5" font-family="Arial" font-size="10.00" fill="#64748b">also the project registry</text>
+<polygon fill="white" stroke="transparent" points="707.5,-423.5 707.5,-587.5 886.5,-587.5 886.5,-423.5 707.5,-423.5"/>
+<polygon fill="#e0f2fe" stroke="transparent" points="708,-562.5 708,-587.5 887,-587.5 887,-562.5 708,-562.5"/>
+<polygon fill="none" stroke="black" points="708,-562.5 708,-587.5 887,-587.5 887,-562.5 708,-562.5"/>
+<text text-anchor="start" x="759" y="-572.3" font-family="Arial" font-weight="bold" font-size="14.00">projectstate</text>
+<polygon fill="none" stroke="black" points="708,-537.5 708,-562.5 887,-562.5 887,-537.5 708,-537.5"/>
+<text text-anchor="start" x="713" y="-547.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
+<text text-anchor="start" x="732" y="-547.3" font-family="Arial" font-size="14.00"> project_id</text>
+<polygon fill="none" stroke="black" points="708,-512.5 708,-537.5 887,-537.5 887,-512.5 708,-512.5"/>
+<text text-anchor="start" x="713" y="-521.3" font-family="Arial" font-size="14.00">data : ProjectState JSON</text>
+<polygon fill="none" stroke="black" points="708,-487.5 708,-512.5 887,-512.5 887,-487.5 708,-487.5"/>
+<text text-anchor="start" x="713" y="-496.3" font-family="Arial" font-size="14.00">name, summary : columns</text>
+<polygon fill="none" stroke="black" points="708,-444.5 708,-487.5 887,-487.5 887,-444.5 708,-444.5"/>
+<text text-anchor="start" x="722" y="-474.5" font-family="Arial" font-size="10.00" fill="#64748b">(JSON holds owner, phase, stage,</text>
+<text text-anchor="start" x="713" y="-463.5" font-family="Arial" font-size="10.00" fill="#64748b">models, budget, brief; name+summary</text>
+<text text-anchor="start" x="750" y="-452.5" font-family="Arial" font-size="10.00" fill="#64748b">promoted to columns)</text>
+<polygon fill="none" stroke="black" points="708,-423.5 708,-444.5 887,-444.5 887,-423.5 708,-423.5"/>
+<text text-anchor="start" x="713" y="-431.5" font-family="Arial" font-size="10.00" fill="#64748b">also the project registry</text>
 </g>
 <!-- phases -->
 <g id="node2" class="node">
@@ -50,8 +53,8 @@
 <!-- projectstate&#45;&gt;phases -->
 <g id="edge1" class="edge">
 <title>projectstate:t&#45;&gt;phases:t</title>
-<path fill="none" stroke="#334155" d="M879,-575.5C902.79,-575.5 911.97,-583.97 924,-604.5 956.97,-660.79 928.26,-833.73 942,-897.5 954.31,-954.64 931.95,-1020.05 982.93,-1026.05"/>
-<polygon fill="#334155" stroke="#334155" points="982.86,-1028.85 991,-1026.5 983.17,-1023.26 982.86,-1028.85"/>
+<path fill="none" stroke="#334155" d="M888,-575.5C907.48,-575.5 914.08,-583.73 924,-600.5 943.56,-633.58 937.63,-734.32 942,-772.5 949.79,-840.58 946.97,-858.43 961,-925.5 969.95,-968.29 947.52,-1019.21 982.61,-1025.79"/>
+<polygon fill="#334155" stroke="#334155" points="982.79,-1028.61 991,-1026.5 983.26,-1023.03 982.79,-1028.61"/>
 </g>
 <!-- artifacts -->
 <g id="node3" class="node">
@@ -74,8 +77,8 @@
 <!-- projectstate&#45;&gt;artifacts -->
 <g id="edge2" class="edge">
 <title>projectstate:t&#45;&gt;artifacts:t</title>
-<path fill="none" stroke="#334155" d="M879,-575.5C1027.84,-575.5 841.52,-887.59 977.91,-899.17"/>
-<polygon fill="#334155" stroke="#334155" points="977.89,-901.97 986,-899.5 978.12,-896.38 977.89,-901.97"/>
+<path fill="none" stroke="#334155" d="M888,-575.5C907.48,-575.5 913.78,-583.92 924,-600.5 958.07,-655.79 921.56,-879.11 977.84,-898.2"/>
+<polygon fill="#334155" stroke="#334155" points="977.66,-901 986,-899.5 978.54,-895.47 977.66,-901"/>
 </g>
 <!-- blockers -->
 <g id="node4" class="node">
@@ -96,8 +99,8 @@
 <!-- projectstate&#45;&gt;blockers -->
 <g id="edge3" class="edge">
 <title>projectstate:t&#45;&gt;blockers:t</title>
-<path fill="none" stroke="#334155" d="M879,-575.5C902.79,-575.5 908.66,-586.31 924,-604.5 968.19,-656.92 919.82,-744.91 978.82,-752.04"/>
-<polygon fill="#334155" stroke="#334155" points="978.85,-754.84 987,-752.5 979.17,-749.25 978.85,-754.84"/>
+<path fill="none" stroke="#334155" d="M888,-575.5C975.14,-575.5 902.07,-740.94 978.58,-751.93"/>
+<polygon fill="#334155" stroke="#334155" points="978.83,-754.75 987,-752.5 979.21,-749.16 978.83,-754.75"/>
 </g>
 <!-- gates -->
 <g id="node5" class="node">
@@ -115,8 +118,8 @@
 <!-- projectstate&#45;&gt;gates -->
 <g id="edge4" class="edge">
 <title>projectstate:t&#45;&gt;gates:t</title>
-<path fill="none" stroke="#334155" d="M879,-575.5C931.52,-575.5 937.2,-620.55 984.96,-625.13"/>
-<polygon fill="#334155" stroke="#334155" points="984.88,-627.93 993,-625.5 985.14,-622.33 984.88,-627.93"/>
+<path fill="none" stroke="#334155" d="M888,-575.5C936.86,-575.5 940.98,-620.18 984.95,-625.07"/>
+<polygon fill="#334155" stroke="#334155" points="984.86,-627.87 993,-625.5 985.16,-622.27 984.86,-627.87"/>
 </g>
 <!-- verifications -->
 <g id="node6" class="node">
@@ -139,8 +142,8 @@
 <!-- projectstate&#45;&gt;verifications -->
 <g id="edge5" class="edge">
 <title>projectstate:t&#45;&gt;verifications:t</title>
-<path fill="none" stroke="#334155" d="M879,-575.5C933.34,-575.5 939.37,-529.36 989,-524.85"/>
-<polygon fill="#334155" stroke="#334155" points="989.13,-527.65 997,-524.5 988.88,-522.06 989.13,-527.65"/>
+<path fill="none" stroke="#334155" d="M888,-575.5C938.66,-575.5 943.16,-529.74 988.95,-524.91"/>
+<polygon fill="#334155" stroke="#334155" points="989.15,-527.7 997,-524.5 988.87,-522.11 989.15,-527.7"/>
 </g>
 <!-- deployments -->
 <g id="node7" class="node">
@@ -165,8 +168,8 @@
 <!-- projectstate&#45;&gt;deployments -->
 <g id="edge6" class="edge">
 <title>projectstate:t&#45;&gt;deployments:t</title>
-<path fill="none" stroke="#334155" d="M879,-575.5C977.03,-575.5 894.1,-388.56 981.88,-377.97"/>
-<polygon fill="#334155" stroke="#334155" points="982.17,-380.76 990,-377.5 981.85,-375.16 982.17,-380.76"/>
+<path fill="none" stroke="#334155" d="M888,-575.5C984.09,-575.5 896.47,-388.93 981.79,-378"/>
+<polygon fill="#334155" stroke="#334155" points="982.19,-380.78 990,-377.5 981.84,-375.19 982.19,-380.78"/>
 </g>
 <!-- tickets -->
 <g id="node8" class="node">
@@ -193,8 +196,8 @@
 <!-- projectstate&#45;&gt;tickets -->
 <g id="edge7" class="edge">
 <title>projectstate:t&#45;&gt;tickets:t</title>
-<path fill="none" stroke="#334155" d="M879,-575.5C941.82,-575.5 911.59,-503.09 924,-441.5 935.65,-383.67 908.84,-186.26 959.89,-167.87"/>
-<polygon fill="#334155" stroke="#334155" points="960.58,-170.6 968,-166.5 959.64,-165.08 960.58,-170.6"/>
+<path fill="none" stroke="#334155" d="M888,-575.5C977.72,-575.5 881.77,-191.66 959.89,-167.67"/>
+<polygon fill="#334155" stroke="#334155" points="960.48,-170.42 968,-166.5 959.68,-164.87 960.48,-170.42"/>
 </g>
 <!-- agents -->
 <g id="node9" class="node">
@@ -218,7 +221,7 @@
 <!-- projectstate&#45;&gt;agents -->
 <g id="edge8" class="edge">
 <title>projectstate:t&#45;&gt;agents:t</title>
-<path fill="none" stroke="#334155" d="M879,-575.5C941.82,-575.5 908.53,-502.39 924,-441.5 947.44,-349.22 892.01,-296.11 961,-230.5 1004.16,-189.45 1169.07,-211.34 1227,-197.5 1235.26,-195.53 1238.46,-191.74 1243.99,-189.77"/>
+<path fill="none" stroke="#334155" d="M888,-575.5C966.36,-575.5 903.44,-283.67 961,-230.5 1048.51,-149.67 1111.13,-225.18 1227,-197.5 1235.26,-195.53 1238.46,-191.74 1243.99,-189.77"/>
 <polygon fill="#334155" stroke="#334155" points="1244.54,-192.52 1252,-188.5 1243.66,-186.98 1244.54,-192.52"/>
 </g>
 <!-- tickets&#45;&gt;agents -->
@@ -231,179 +234,179 @@
 <!-- organizations -->
 <g id="node10" class="node">
 <title>organizations</title>
-<polygon fill="white" stroke="transparent" points="678,-752 678,-927 916,-927 916,-752 678,-752"/>
-<polygon fill="#fef9c3" stroke="transparent" points="678,-901.5 678,-926.5 916,-926.5 916,-901.5 678,-901.5"/>
-<polygon fill="none" stroke="black" points="678,-901.5 678,-926.5 916,-926.5 916,-901.5 678,-901.5"/>
-<text text-anchor="start" x="753" y="-911.3" font-family="Arial" font-weight="bold" font-size="14.00">organizations</text>
-<polygon fill="none" stroke="black" points="678,-876.5 678,-901.5 916,-901.5 916,-876.5 678,-876.5"/>
-<text text-anchor="start" x="683" y="-886.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
-<text text-anchor="start" x="702" y="-886.3" font-family="Arial" font-size="14.00"> id</text>
-<polygon fill="none" stroke="black" points="678,-851.5 678,-876.5 916,-876.5 916,-851.5 678,-851.5"/>
-<text text-anchor="start" x="683" y="-860.3" font-family="Arial" font-size="14.00">name, industry, sub_focus</text>
-<polygon fill="none" stroke="black" points="678,-826.5 678,-851.5 916,-851.5 916,-826.5 678,-826.5"/>
-<text text-anchor="start" x="683" y="-835.3" font-family="Arial" font-size="14.00">headcount, revenue (band text)</text>
-<polygon fill="none" stroke="black" points="678,-801.5 678,-826.5 916,-826.5 916,-801.5 678,-801.5"/>
-<text text-anchor="start" x="683" y="-810.3" font-family="Arial" font-size="14.00">location, website, connected_systems</text>
-<polygon fill="none" stroke="black" points="678,-776.5 678,-801.5 916,-801.5 916,-776.5 678,-776.5"/>
-<text text-anchor="start" x="683" y="-785.3" font-family="Arial" font-size="14.00">plan, monthly_budget_cap</text>
-<polygon fill="none" stroke="black" points="678,-751.5 678,-776.5 916,-776.5 916,-751.5 678,-751.5"/>
-<text text-anchor="start" x="683" y="-760.3" font-family="Arial" font-size="14.00">created_at, created_by</text>
+<polygon fill="white" stroke="transparent" points="678,-740 678,-915 916,-915 916,-740 678,-740"/>
+<polygon fill="#fef9c3" stroke="transparent" points="678,-889.5 678,-914.5 916,-914.5 916,-889.5 678,-889.5"/>
+<polygon fill="none" stroke="black" points="678,-889.5 678,-914.5 916,-914.5 916,-889.5 678,-889.5"/>
+<text text-anchor="start" x="753" y="-899.3" font-family="Arial" font-weight="bold" font-size="14.00">organizations</text>
+<polygon fill="none" stroke="black" points="678,-864.5 678,-889.5 916,-889.5 916,-864.5 678,-864.5"/>
+<text text-anchor="start" x="683" y="-874.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
+<text text-anchor="start" x="702" y="-874.3" font-family="Arial" font-size="14.00"> id</text>
+<polygon fill="none" stroke="black" points="678,-839.5 678,-864.5 916,-864.5 916,-839.5 678,-839.5"/>
+<text text-anchor="start" x="683" y="-848.3" font-family="Arial" font-size="14.00">name, industry, sub_focus</text>
+<polygon fill="none" stroke="black" points="678,-814.5 678,-839.5 916,-839.5 916,-814.5 678,-814.5"/>
+<text text-anchor="start" x="683" y="-823.3" font-family="Arial" font-size="14.00">headcount, revenue (band text)</text>
+<polygon fill="none" stroke="black" points="678,-789.5 678,-814.5 916,-814.5 916,-789.5 678,-789.5"/>
+<text text-anchor="start" x="683" y="-798.3" font-family="Arial" font-size="14.00">location, website, connected_systems</text>
+<polygon fill="none" stroke="black" points="678,-764.5 678,-789.5 916,-789.5 916,-764.5 678,-764.5"/>
+<text text-anchor="start" x="683" y="-773.3" font-family="Arial" font-size="14.00">plan, monthly_budget_cap</text>
+<polygon fill="none" stroke="black" points="678,-739.5 678,-764.5 916,-764.5 916,-739.5 678,-739.5"/>
+<text text-anchor="start" x="683" y="-748.3" font-family="Arial" font-size="14.00">created_at, created_by</text>
 </g>
 <!-- roles -->
 <g id="node11" class="node">
 <title>roles</title>
-<polygon fill="white" stroke="transparent" points="692.5,-617.5 692.5,-717.5 901.5,-717.5 901.5,-617.5 692.5,-617.5"/>
-<polygon fill="#fde68a" stroke="transparent" points="693,-692.5 693,-717.5 902,-717.5 902,-692.5 693,-692.5"/>
-<polygon fill="none" stroke="black" points="693,-692.5 693,-717.5 902,-717.5 902,-692.5 693,-692.5"/>
-<text text-anchor="start" x="781" y="-702.3" font-family="Arial" font-weight="bold" font-size="14.00">roles</text>
-<polygon fill="none" stroke="black" points="693,-667.5 693,-692.5 902,-692.5 902,-667.5 693,-667.5"/>
-<text text-anchor="start" x="698" y="-677.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
-<text text-anchor="start" x="717" y="-677.3" font-family="Arial" font-size="14.00"> id (uuid)</text>
-<polygon fill="none" stroke="black" points="693,-642.5 693,-667.5 902,-667.5 902,-642.5 693,-642.5"/>
-<text text-anchor="start" x="698" y="-651.3" font-family="Arial" font-size="14.00">name : admin | member (unique)</text>
-<polygon fill="none" stroke="black" points="693,-617.5 693,-642.5 902,-642.5 902,-617.5 693,-617.5"/>
-<text text-anchor="start" x="698" y="-626.3" font-family="Arial" font-size="14.00">description, created_at</text>
+<polygon fill="white" stroke="transparent" points="692.5,-613.5 692.5,-713.5 901.5,-713.5 901.5,-613.5 692.5,-613.5"/>
+<polygon fill="#fde68a" stroke="transparent" points="693,-688.5 693,-713.5 902,-713.5 902,-688.5 693,-688.5"/>
+<polygon fill="none" stroke="black" points="693,-688.5 693,-713.5 902,-713.5 902,-688.5 693,-688.5"/>
+<text text-anchor="start" x="781" y="-698.3" font-family="Arial" font-weight="bold" font-size="14.00">roles</text>
+<polygon fill="none" stroke="black" points="693,-663.5 693,-688.5 902,-688.5 902,-663.5 693,-663.5"/>
+<text text-anchor="start" x="698" y="-673.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
+<text text-anchor="start" x="717" y="-673.3" font-family="Arial" font-size="14.00"> id (uuid)</text>
+<polygon fill="none" stroke="black" points="693,-638.5 693,-663.5 902,-663.5 902,-638.5 693,-638.5"/>
+<text text-anchor="start" x="698" y="-647.3" font-family="Arial" font-size="14.00">name : admin | member (unique)</text>
+<polygon fill="none" stroke="black" points="693,-613.5 693,-638.5 902,-638.5 902,-613.5 693,-613.5"/>
+<text text-anchor="start" x="698" y="-622.3" font-family="Arial" font-size="14.00">description, created_at</text>
 </g>
 <!-- role_permissions -->
 <g id="node12" class="node">
 <title>role_permissions</title>
-<polygon fill="white" stroke="transparent" points="271,-454.5 271,-550.5 459,-550.5 459,-454.5 271,-454.5"/>
-<polygon fill="#fde68a" stroke="transparent" points="271,-525.5 271,-550.5 459,-550.5 459,-525.5 271,-525.5"/>
-<polygon fill="none" stroke="black" points="271,-525.5 271,-550.5 459,-550.5 459,-525.5 271,-525.5"/>
-<text text-anchor="start" x="308.5" y="-535.3" font-family="Arial" font-weight="bold" font-size="14.00">role_permissions</text>
-<polygon fill="none" stroke="black" points="271,-500.5 271,-525.5 459,-525.5 459,-500.5 271,-500.5"/>
-<text text-anchor="start" x="276" y="-510.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
-<text text-anchor="start" x="295" y="-510.3" font-family="Arial" font-size="14.00"> (role_id, permission)</text>
-<polygon fill="none" stroke="black" points="271,-475.5 271,-500.5 459,-500.5 459,-475.5 271,-475.5"/>
-<text text-anchor="start" x="276" y="-485.3" font-family="Arial" font-weight="bold" font-size="14.00">FK</text>
-<text text-anchor="start" x="295" y="-485.3" font-family="Arial" font-size="14.00"> role_id → roles (cascade)</text>
-<polygon fill="none" stroke="black" points="271,-454.5 271,-475.5 459,-475.5 459,-454.5 271,-454.5"/>
-<text text-anchor="start" x="276" y="-462.5" font-family="Arial" font-size="10.00" fill="#64748b">e.g. &#39;projects.delete&#39;</text>
+<polygon fill="white" stroke="transparent" points="271,-437.5 271,-533.5 459,-533.5 459,-437.5 271,-437.5"/>
+<polygon fill="#fde68a" stroke="transparent" points="271,-508.5 271,-533.5 459,-533.5 459,-508.5 271,-508.5"/>
+<polygon fill="none" stroke="black" points="271,-508.5 271,-533.5 459,-533.5 459,-508.5 271,-508.5"/>
+<text text-anchor="start" x="308.5" y="-518.3" font-family="Arial" font-weight="bold" font-size="14.00">role_permissions</text>
+<polygon fill="none" stroke="black" points="271,-483.5 271,-508.5 459,-508.5 459,-483.5 271,-483.5"/>
+<text text-anchor="start" x="276" y="-493.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
+<text text-anchor="start" x="295" y="-493.3" font-family="Arial" font-size="14.00"> (role_id, permission)</text>
+<polygon fill="none" stroke="black" points="271,-458.5 271,-483.5 459,-483.5 459,-458.5 271,-458.5"/>
+<text text-anchor="start" x="276" y="-468.3" font-family="Arial" font-weight="bold" font-size="14.00">FK</text>
+<text text-anchor="start" x="295" y="-468.3" font-family="Arial" font-size="14.00"> role_id → roles (cascade)</text>
+<polygon fill="none" stroke="black" points="271,-437.5 271,-458.5 459,-458.5 459,-437.5 271,-437.5"/>
+<text text-anchor="start" x="276" y="-445.5" font-family="Arial" font-size="10.00" fill="#64748b">e.g. &#39;projects.delete&#39;</text>
 </g>
 <!-- role_permissions&#45;&gt;roles -->
 <g id="edge11" class="edge">
 <title>role_permissions:t&#45;&gt;roles:t</title>
-<path fill="none" stroke="#334155" d="M460,-538.5C545.36,-538.5 585.48,-490 652,-543.5 678.52,-564.83 658.81,-683.51 684.08,-702.84"/>
-<polygon fill="#334155" stroke="#334155" points="683.52,-705.61 692,-705.5 685.31,-700.3 683.52,-705.61"/>
-<text text-anchor="start" x="597.5" y="-546.3" font-family="Times,serif" font-size="9.00">role_id</text>
+<path fill="none" stroke="#334155" d="M460,-521.5C550.53,-521.5 590.67,-522.92 652,-589.5 685.71,-626.1 644.56,-693.05 683.72,-700.77"/>
+<polygon fill="#334155" stroke="#334155" points="683.78,-703.59 692,-701.5 684.28,-698.01 683.78,-703.59"/>
+<text text-anchor="start" x="597.5" y="-592.3" font-family="Times,serif" font-size="9.00">role_id</text>
 </g>
 <!-- users -->
 <g id="node13" class="node">
 <title>users</title>
-<polygon fill="white" stroke="transparent" points="181,-576.5 181,-926.5 549,-926.5 549,-576.5 181,-576.5"/>
-<polygon fill="#fef9c3" stroke="transparent" points="181,-901.5 181,-926.5 549,-926.5 549,-901.5 181,-901.5"/>
-<polygon fill="none" stroke="black" points="181,-901.5 181,-926.5 549,-926.5 549,-901.5 181,-901.5"/>
-<text text-anchor="start" x="346.5" y="-911.3" font-family="Arial" font-weight="bold" font-size="14.00">users</text>
-<polygon fill="none" stroke="black" points="181,-876.5 181,-901.5 549,-901.5 549,-876.5 181,-876.5"/>
-<text text-anchor="start" x="186" y="-886.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
-<text text-anchor="start" x="205" y="-886.3" font-family="Arial" font-size="14.00"> id (uuid)</text>
-<polygon fill="none" stroke="black" points="181,-851.5 181,-876.5 549,-876.5 549,-851.5 181,-851.5"/>
-<text text-anchor="start" x="186" y="-860.3" font-family="Arial" font-size="14.00">google_sub (unique, null until 1st sign&#45;in)</text>
-<polygon fill="none" stroke="black" points="181,-826.5 181,-851.5 549,-851.5 549,-826.5 181,-826.5"/>
-<text text-anchor="start" x="186" y="-835.3" font-family="Arial" font-size="14.00">email (unique) — allowlist match key</text>
-<polygon fill="none" stroke="black" points="181,-801.5 181,-826.5 549,-826.5 549,-801.5 181,-801.5"/>
-<text text-anchor="start" x="186" y="-811.3" font-family="Arial" font-weight="bold" font-size="14.00">FK</text>
-<text text-anchor="start" x="205" y="-811.3" font-family="Arial" font-size="14.00"> role_id → roles</text>
-<polygon fill="none" stroke="black" points="181,-776.5 181,-801.5 549,-801.5 549,-776.5 181,-776.5"/>
-<text text-anchor="start" x="186" y="-785.3" font-family="Arial" font-size="14.00">is_internal (Tenexity staff flag)</text>
-<polygon fill="none" stroke="black" points="181,-751.5 181,-776.5 549,-776.5 549,-751.5 181,-751.5"/>
-<text text-anchor="start" x="186" y="-760.3" font-family="Arial" font-size="14.00">status : invited | active | disabled</text>
-<polygon fill="none" stroke="black" points="181,-726.5 181,-751.5 549,-751.5 549,-726.5 181,-726.5"/>
-<text text-anchor="start" x="186" y="-735.3" font-family="Arial" font-size="14.00">token_version (session revoke lever)</text>
-<polygon fill="none" stroke="black" points="181,-701.5 181,-726.5 549,-726.5 549,-701.5 181,-701.5"/>
-<text text-anchor="start" x="186" y="-710.3" font-family="Arial" font-size="14.00">metadata jsonb (non&#45;auth extensibility)</text>
-<polygon fill="none" stroke="black" points="181,-676.5 181,-701.5 549,-701.5 549,-676.5 181,-676.5"/>
-<text text-anchor="start" x="186" y="-686.3" font-family="Arial" font-weight="bold" font-size="14.00">FK</text>
-<text text-anchor="start" x="205" y="-686.3" font-family="Arial" font-size="14.00"> invited_by → users; onboarded_at</text>
-<polygon fill="none" stroke="black" points="181,-651.5 181,-676.5 549,-676.5 549,-651.5 181,-651.5"/>
-<text text-anchor="start" x="186" y="-660.3" font-family="Arial" font-size="14.00">created_at, updated_at (trigger)</text>
-<polygon fill="none" stroke="black" points="181,-626.5 181,-651.5 549,-651.5 549,-626.5 181,-626.5"/>
-<text text-anchor="start" x="186" y="-636.3" font-family="Arial" font-weight="bold" font-size="14.00">FK</text>
-<text text-anchor="start" x="205" y="-636.3" font-family="Arial" font-size="14.00"> org_id; designation, role_description</text>
-<polygon fill="none" stroke="black" points="181,-601.5 181,-626.5 549,-626.5 549,-601.5 181,-601.5"/>
-<text text-anchor="start" x="186" y="-610.3" font-family="Arial" font-size="14.00">name; sign_in_method : google | microsoft | password | sso</text>
-<polygon fill="none" stroke="black" points="181,-576.5 181,-601.5 549,-601.5 549,-576.5 181,-576.5"/>
-<text text-anchor="start" x="186" y="-585.3" font-family="Arial" font-size="14.00">last_active; password_hash (scrypt; null = no password)</text>
+<polygon fill="white" stroke="transparent" points="181,-559.5 181,-909.5 549,-909.5 549,-559.5 181,-559.5"/>
+<polygon fill="#fef9c3" stroke="transparent" points="181,-884.5 181,-909.5 549,-909.5 549,-884.5 181,-884.5"/>
+<polygon fill="none" stroke="black" points="181,-884.5 181,-909.5 549,-909.5 549,-884.5 181,-884.5"/>
+<text text-anchor="start" x="346.5" y="-894.3" font-family="Arial" font-weight="bold" font-size="14.00">users</text>
+<polygon fill="none" stroke="black" points="181,-859.5 181,-884.5 549,-884.5 549,-859.5 181,-859.5"/>
+<text text-anchor="start" x="186" y="-869.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
+<text text-anchor="start" x="205" y="-869.3" font-family="Arial" font-size="14.00"> id (uuid)</text>
+<polygon fill="none" stroke="black" points="181,-834.5 181,-859.5 549,-859.5 549,-834.5 181,-834.5"/>
+<text text-anchor="start" x="186" y="-843.3" font-family="Arial" font-size="14.00">google_sub (unique, null until 1st sign&#45;in)</text>
+<polygon fill="none" stroke="black" points="181,-809.5 181,-834.5 549,-834.5 549,-809.5 181,-809.5"/>
+<text text-anchor="start" x="186" y="-818.3" font-family="Arial" font-size="14.00">email (unique) — allowlist match key</text>
+<polygon fill="none" stroke="black" points="181,-784.5 181,-809.5 549,-809.5 549,-784.5 181,-784.5"/>
+<text text-anchor="start" x="186" y="-794.3" font-family="Arial" font-weight="bold" font-size="14.00">FK</text>
+<text text-anchor="start" x="205" y="-794.3" font-family="Arial" font-size="14.00"> role_id → roles</text>
+<polygon fill="none" stroke="black" points="181,-759.5 181,-784.5 549,-784.5 549,-759.5 181,-759.5"/>
+<text text-anchor="start" x="186" y="-768.3" font-family="Arial" font-size="14.00">is_internal (Tenexity staff flag)</text>
+<polygon fill="none" stroke="black" points="181,-734.5 181,-759.5 549,-759.5 549,-734.5 181,-734.5"/>
+<text text-anchor="start" x="186" y="-743.3" font-family="Arial" font-size="14.00">status : invited | active | disabled</text>
+<polygon fill="none" stroke="black" points="181,-709.5 181,-734.5 549,-734.5 549,-709.5 181,-709.5"/>
+<text text-anchor="start" x="186" y="-718.3" font-family="Arial" font-size="14.00">token_version (session revoke lever)</text>
+<polygon fill="none" stroke="black" points="181,-684.5 181,-709.5 549,-709.5 549,-684.5 181,-684.5"/>
+<text text-anchor="start" x="186" y="-693.3" font-family="Arial" font-size="14.00">metadata jsonb (non&#45;auth extensibility)</text>
+<polygon fill="none" stroke="black" points="181,-659.5 181,-684.5 549,-684.5 549,-659.5 181,-659.5"/>
+<text text-anchor="start" x="186" y="-669.3" font-family="Arial" font-weight="bold" font-size="14.00">FK</text>
+<text text-anchor="start" x="205" y="-669.3" font-family="Arial" font-size="14.00"> invited_by → users; onboarded_at</text>
+<polygon fill="none" stroke="black" points="181,-634.5 181,-659.5 549,-659.5 549,-634.5 181,-634.5"/>
+<text text-anchor="start" x="186" y="-643.3" font-family="Arial" font-size="14.00">created_at, updated_at (trigger)</text>
+<polygon fill="none" stroke="black" points="181,-609.5 181,-634.5 549,-634.5 549,-609.5 181,-609.5"/>
+<text text-anchor="start" x="186" y="-619.3" font-family="Arial" font-weight="bold" font-size="14.00">FK</text>
+<text text-anchor="start" x="205" y="-619.3" font-family="Arial" font-size="14.00"> org_id; designation, role_description</text>
+<polygon fill="none" stroke="black" points="181,-584.5 181,-609.5 549,-609.5 549,-584.5 181,-584.5"/>
+<text text-anchor="start" x="186" y="-593.3" font-family="Arial" font-size="14.00">name; sign_in_method : google | microsoft | password | sso</text>
+<polygon fill="none" stroke="black" points="181,-559.5 181,-584.5 549,-584.5 549,-559.5 181,-559.5"/>
+<text text-anchor="start" x="186" y="-568.3" font-family="Arial" font-size="14.00">last_active; password_hash (scrypt; null = no password)</text>
 </g>
 <!-- users&#45;&gt;projectstate -->
 <g id="edge16" class="edge">
 <title>users:t&#45;&gt;projectstate:t</title>
-<path fill="none" stroke="#64748b" stroke-dasharray="5,2" d="M550,-914.5C586.43,-914.5 562.1,-786.57 575,-752.5 609.54,-661.26 614.45,-580.06 706.99,-575.69"/>
-<polygon fill="#64748b" stroke="#64748b" points="707.07,-578.48 715,-575.5 706.94,-572.89 707.07,-578.48"/>
-<text text-anchor="start" x="575" y="-755.3" font-family="Times,serif" font-size="9.00">owner (in JSON)</text>
+<path fill="none" stroke="#64748b" stroke-dasharray="5,2" d="M550,-897.5C585.55,-897.5 561.87,-772.54 575,-739.5 591.3,-698.49 652.68,-588.91 698.86,-576.62"/>
+<polygon fill="#64748b" stroke="#64748b" points="699.46,-579.37 707,-575.5 698.69,-573.82 699.46,-579.37"/>
+<text text-anchor="start" x="575" y="-742.3" font-family="Times,serif" font-size="9.00">owner (in JSON)</text>
 </g>
 <!-- users&#45;&gt;organizations -->
 <g id="edge13" class="edge">
 <title>users:t&#45;&gt;organizations:t</title>
-<path fill="none" stroke="#334155" d="M550,-914.5C603.58,-914.5 619.01,-914.5 668.72,-914.5"/>
-<polygon fill="#334155" stroke="#334155" points="669,-917.3 677,-914.5 669,-911.7 669,-917.3"/>
-<text text-anchor="start" x="598.5" y="-917.3" font-family="Times,serif" font-size="9.00">org_id</text>
+<path fill="none" stroke="#334155" d="M550,-897.5C603.62,-897.5 618.98,-902.01 668.71,-902.46"/>
+<polygon fill="#334155" stroke="#334155" points="668.99,-905.26 677,-902.5 669.01,-899.66 668.99,-905.26"/>
+<text text-anchor="start" x="598.5" y="-904.3" font-family="Times,serif" font-size="9.00">org_id</text>
 </g>
 <!-- users&#45;&gt;roles -->
 <g id="edge10" class="edge">
 <title>users:t&#45;&gt;roles:t</title>
-<path fill="none" stroke="#334155" d="M550,-914.5C556.31,-914.5 660.24,-745.8 686.37,-711.53"/>
-<polygon fill="#334155" stroke="#334155" points="688.59,-713.26 692,-705.5 684.49,-709.44 688.59,-713.26"/>
-<text text-anchor="start" x="597.5" y="-881.3" font-family="Times,serif" font-size="9.00">role_id</text>
+<path fill="none" stroke="#334155" d="M550,-897.5C562.13,-897.5 657.04,-737.91 685.34,-706.74"/>
+<polygon fill="#334155" stroke="#334155" points="687.45,-708.65 692,-701.5 683.98,-704.25 687.45,-708.65"/>
+<text text-anchor="start" x="597.5" y="-867.3" font-family="Times,serif" font-size="9.00">role_id</text>
 </g>
 <!-- users&#45;&gt;users -->
 <g id="edge12" class="edge">
 <title>users:t&#45;&gt;users:t</title>
-<path fill="none" stroke="#64748b" stroke-dasharray="5,2" d="M180.78,-921.22C108.89,-921.54 49,-919.3 49,-914.5 49,-909.89 104.31,-907.64 172.41,-907.75"/>
-<polygon fill="#64748b" stroke="#64748b" points="172.77,-910.56 180.78,-907.78 172.79,-904.96 172.77,-910.56"/>
-<text text-anchor="start" x="0" y="-749.3" font-family="Times,serif" font-size="9.00">invited_by</text>
+<path fill="none" stroke="#64748b" stroke-dasharray="5,2" d="M180.78,-904.22C108.89,-904.54 49,-902.3 49,-897.5 49,-892.89 104.31,-890.64 172.41,-890.75"/>
+<polygon fill="#64748b" stroke="#64748b" points="172.77,-893.56 180.78,-890.78 172.79,-887.96 172.77,-893.56"/>
+<text text-anchor="start" x="0" y="-732.3" font-family="Times,serif" font-size="9.00">invited_by</text>
 </g>
 <!-- blobs -->
 <g id="node14" class="node">
 <title>blobs</title>
-<polygon fill="white" stroke="transparent" points="698.5,-278.5 698.5,-428.5 895.5,-428.5 895.5,-278.5 698.5,-278.5"/>
-<polygon fill="#ecfdf5" stroke="transparent" points="699,-403.5 699,-428.5 896,-428.5 896,-403.5 699,-403.5"/>
-<polygon fill="none" stroke="black" points="699,-403.5 699,-428.5 896,-428.5 896,-403.5 699,-403.5"/>
-<text text-anchor="start" x="779" y="-413.3" font-family="Arial" font-weight="bold" font-size="14.00">blobs</text>
-<polygon fill="none" stroke="black" points="699,-378.5 699,-403.5 896,-403.5 896,-378.5 699,-378.5"/>
-<text text-anchor="start" x="704" y="-388.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
-<text text-anchor="start" x="723" y="-388.3" font-family="Arial" font-size="14.00"> id</text>
-<polygon fill="none" stroke="black" points="699,-353.5 699,-378.5 896,-378.5 896,-353.5 699,-353.5"/>
-<text text-anchor="start" x="704" y="-362.3" font-family="Arial" font-size="14.00">scope : project | org, scope_id</text>
-<polygon fill="none" stroke="black" points="699,-328.5 699,-353.5 896,-353.5 896,-328.5 699,-328.5"/>
-<text text-anchor="start" x="704" y="-337.3" font-family="Arial" font-size="14.00">kind, name, tag</text>
-<polygon fill="none" stroke="black" points="699,-303.5 699,-328.5 896,-328.5 896,-303.5 699,-303.5"/>
-<text text-anchor="start" x="704" y="-312.3" font-family="Arial" font-size="14.00">storage_key, content_type</text>
-<polygon fill="none" stroke="black" points="699,-278.5 699,-303.5 896,-303.5 896,-278.5 699,-278.5"/>
-<text text-anchor="start" x="704" y="-287.3" font-family="Arial" font-size="14.00">size_bytes, sha256, created_at</text>
+<polygon fill="white" stroke="transparent" points="698.5,-247.5 698.5,-397.5 895.5,-397.5 895.5,-247.5 698.5,-247.5"/>
+<polygon fill="#ecfdf5" stroke="transparent" points="699,-372.5 699,-397.5 896,-397.5 896,-372.5 699,-372.5"/>
+<polygon fill="none" stroke="black" points="699,-372.5 699,-397.5 896,-397.5 896,-372.5 699,-372.5"/>
+<text text-anchor="start" x="779" y="-382.3" font-family="Arial" font-weight="bold" font-size="14.00">blobs</text>
+<polygon fill="none" stroke="black" points="699,-347.5 699,-372.5 896,-372.5 896,-347.5 699,-347.5"/>
+<text text-anchor="start" x="704" y="-357.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
+<text text-anchor="start" x="723" y="-357.3" font-family="Arial" font-size="14.00"> id</text>
+<polygon fill="none" stroke="black" points="699,-322.5 699,-347.5 896,-347.5 896,-322.5 699,-322.5"/>
+<text text-anchor="start" x="704" y="-331.3" font-family="Arial" font-size="14.00">scope : project | org, scope_id</text>
+<polygon fill="none" stroke="black" points="699,-297.5 699,-322.5 896,-322.5 896,-297.5 699,-297.5"/>
+<text text-anchor="start" x="704" y="-306.3" font-family="Arial" font-size="14.00">kind, name, tag</text>
+<polygon fill="none" stroke="black" points="699,-272.5 699,-297.5 896,-297.5 896,-272.5 699,-272.5"/>
+<text text-anchor="start" x="704" y="-281.3" font-family="Arial" font-size="14.00">storage_key, content_type</text>
+<polygon fill="none" stroke="black" points="699,-247.5 699,-272.5 896,-272.5 896,-247.5 699,-247.5"/>
+<text text-anchor="start" x="704" y="-256.3" font-family="Arial" font-size="14.00">size_bytes, sha256, created_at</text>
 </g>
 <!-- blob_uses -->
 <g id="node15" class="node">
 <title>blob_uses</title>
-<polygon fill="white" stroke="transparent" points="296.5,-282.5 296.5,-428.5 433.5,-428.5 433.5,-282.5 296.5,-282.5"/>
-<polygon fill="#ecfdf5" stroke="transparent" points="297,-403.5 297,-428.5 434,-428.5 434,-403.5 297,-403.5"/>
-<polygon fill="none" stroke="black" points="297,-403.5 297,-428.5 434,-428.5 434,-403.5 297,-403.5"/>
-<text text-anchor="start" x="332" y="-413.3" font-family="Arial" font-weight="bold" font-size="14.00">blob_uses</text>
-<polygon fill="none" stroke="black" points="297,-378.5 297,-403.5 434,-403.5 434,-378.5 297,-378.5"/>
-<text text-anchor="start" x="302" y="-388.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
-<text text-anchor="start" x="321" y="-388.3" font-family="Arial" font-size="14.00"> id</text>
-<polygon fill="none" stroke="black" points="297,-353.5 297,-378.5 434,-378.5 434,-353.5 297,-353.5"/>
-<text text-anchor="start" x="302" y="-363.3" font-family="Arial" font-weight="bold" font-size="14.00">FK</text>
-<text text-anchor="start" x="321" y="-363.3" font-family="Arial" font-size="14.00"> blob_id</text>
-<polygon fill="none" stroke="black" points="297,-328.5 297,-353.5 434,-353.5 434,-328.5 297,-328.5"/>
-<text text-anchor="start" x="302" y="-338.3" font-family="Arial" font-weight="bold" font-size="14.00">FK</text>
-<text text-anchor="start" x="321" y="-338.3" font-family="Arial" font-size="14.00"> project_id</text>
-<polygon fill="none" stroke="black" points="297,-303.5 297,-328.5 434,-328.5 434,-303.5 297,-303.5"/>
-<text text-anchor="start" x="302" y="-312.3" font-family="Arial" font-size="14.00">created_at</text>
-<polygon fill="none" stroke="black" points="297,-282.5 297,-303.5 434,-303.5 434,-282.5 297,-282.5"/>
-<text text-anchor="start" x="302" y="-290.5" font-family="Arial" font-size="10.00" fill="#64748b">org KB doc used by a project</text>
+<polygon fill="white" stroke="transparent" points="296.5,-256.5 296.5,-402.5 433.5,-402.5 433.5,-256.5 296.5,-256.5"/>
+<polygon fill="#ecfdf5" stroke="transparent" points="297,-377.5 297,-402.5 434,-402.5 434,-377.5 297,-377.5"/>
+<polygon fill="none" stroke="black" points="297,-377.5 297,-402.5 434,-402.5 434,-377.5 297,-377.5"/>
+<text text-anchor="start" x="332" y="-387.3" font-family="Arial" font-weight="bold" font-size="14.00">blob_uses</text>
+<polygon fill="none" stroke="black" points="297,-352.5 297,-377.5 434,-377.5 434,-352.5 297,-352.5"/>
+<text text-anchor="start" x="302" y="-362.3" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
+<text text-anchor="start" x="321" y="-362.3" font-family="Arial" font-size="14.00"> id</text>
+<polygon fill="none" stroke="black" points="297,-327.5 297,-352.5 434,-352.5 434,-327.5 297,-327.5"/>
+<text text-anchor="start" x="302" y="-337.3" font-family="Arial" font-weight="bold" font-size="14.00">FK</text>
+<text text-anchor="start" x="321" y="-337.3" font-family="Arial" font-size="14.00"> blob_id</text>
+<polygon fill="none" stroke="black" points="297,-302.5 297,-327.5 434,-327.5 434,-302.5 297,-302.5"/>
+<text text-anchor="start" x="302" y="-312.3" font-family="Arial" font-weight="bold" font-size="14.00">FK</text>
+<text text-anchor="start" x="321" y="-312.3" font-family="Arial" font-size="14.00"> project_id</text>
+<polygon fill="none" stroke="black" points="297,-277.5 297,-302.5 434,-302.5 434,-277.5 297,-277.5"/>
+<text text-anchor="start" x="302" y="-286.3" font-family="Arial" font-size="14.00">created_at</text>
+<polygon fill="none" stroke="black" points="297,-256.5 297,-277.5 434,-277.5 434,-256.5 297,-256.5"/>
+<text text-anchor="start" x="302" y="-264.5" font-family="Arial" font-size="10.00" fill="#64748b">org KB doc used by a project</text>
 </g>
 <!-- blob_uses&#45;&gt;projectstate -->
 <g id="edge15" class="edge">
 <title>blob_uses:t&#45;&gt;projectstate:t</title>
-<path fill="none" stroke="#64748b" stroke-dasharray="5,2" d="M435,-416.5C490.35,-416.5 506.58,-418.66 557,-441.5 605.26,-463.36 611.93,-478.85 652,-513.5 679.51,-537.29 676.41,-570.17 706.97,-574.92"/>
-<polygon fill="#64748b" stroke="#64748b" points="706.82,-577.72 715,-575.5 707.22,-572.13 706.82,-577.72"/>
+<path fill="none" stroke="#64748b" stroke-dasharray="5,2" d="M435,-390.5C542.93,-390.5 577.3,-421.6 652,-499.5 678.83,-527.48 667.27,-569.12 699.02,-574.84"/>
+<polygon fill="#64748b" stroke="#64748b" points="698.8,-577.63 707,-575.5 699.26,-572.05 698.8,-577.63"/>
 </g>
 <!-- blob_uses&#45;&gt;blobs -->
 <g id="edge14" class="edge">
 <title>blob_uses:t&#45;&gt;blobs:t</title>
-<path fill="none" stroke="#334155" d="M435,-416.5C549.15,-416.5 579.69,-416.5 689.92,-416.5"/>
-<polygon fill="#334155" stroke="#334155" points="690,-419.3 698,-416.5 690,-413.7 690,-419.3"/>
+<path fill="none" stroke="#334155" d="M435,-390.5C549.17,-390.5 579.67,-385.73 689.92,-385.51"/>
+<polygon fill="#334155" stroke="#334155" points="690,-388.31 698,-385.5 690,-382.71 690,-388.31"/>
 </g>
 </g>
 </svg>

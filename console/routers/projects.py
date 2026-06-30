@@ -230,9 +230,11 @@ def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authori
 
 @router.patch("/api/projects/{pid}")
 def project_update(pid: str, body: ProjectPatchIn, v: tuple = Depends(authorize_project)):
-    """Rename / re-scope / re-describe a promoted project (drafts use PATCH /api/projects/{pid}/draft).
-    Sending `scope` recomposes the description (goal + scope line) server-side."""
-    return state.console.rename_project(pid, name=body.name, description=body.description, scope=body.scope)
+    """Rename / re-scope / re-describe / re-summarize a promoted project (drafts use PATCH
+    /api/projects/{pid}/draft). Sending `scope` recomposes the description (goal + scope line)
+    server-side; `summary` sets the customer-facing blurb."""
+    return state.console.rename_project(pid, name=body.name, description=body.description,
+                                        scope=body.scope, summary=body.summary)
 
 
 @router.delete("/api/projects/{pid}")

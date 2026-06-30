@@ -5,7 +5,7 @@
 import React, { useEffect, useState } from "react";
 import { api, phaseIsStale, ProjectSummary, Org } from "../api";
 import { useMe } from "./MeContext";
-import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, TextInput } from "./onboarding/design";
+import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, TextInput, Markdown } from "./onboarding/design";
 import { MetricCardSkel, ProjectRowSkel } from "./skeleton";
 import { AccountMenu } from "./AccountMenu";
 
@@ -179,7 +179,7 @@ function ProjectRow({ r, onClick, first, onRename, onRequestArchive, onRequestDe
                 ? <StatusPill tone="neutral">Archived</StatusPill>
                 : <StatusPill tone={st.tone} dot={live}>{st.label}</StatusPill>}
             </div>
-            <p style={{ margin: "5px 0 0", font: `400 12.5px/1.4 ${T.sans}`, color: T.secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.description || "—"}</p>
+            <p style={{ margin: "5px 0 0", font: `400 12.5px/1.4 ${T.sans}`, color: T.secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><Markdown inline>{r.summary || r.description || "—"}</Markdown></p>
             {r.created_by && <p style={{ margin: "3px 0 0", font: `400 11px/1 ${T.mono}`, color: T.tertiary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Created by {r.created_by}{r.created_at ? ` · ${new Date(r.created_at * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}</p>}
           </>
         )}

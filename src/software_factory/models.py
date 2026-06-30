@@ -23,6 +23,11 @@ projectstate = Table(
     "projectstate", metadata,
     Column("project_id", Text, primary_key=True),
     Column("data", Text, nullable=False),
+    # `name` and `summary` are promoted out of the JSON `data` blob into authoritative columns
+    # (queryable; the dashboard card reads them). The store pops them from `data` on write and
+    # merges them back on read, so the blob never carries duplicate copies.
+    Column("name", Text),
+    Column("summary", Text),
 )
 
 phases = Table(

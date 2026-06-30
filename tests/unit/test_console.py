@@ -257,6 +257,25 @@ def test_list_runs_includes_distinct_agent_roles_and_updated_timestamp(tmp_path)
     assert isinstance(row["updated"], (int, float)) and row["updated"] > 0
 
 
+def test_summary_round_trips_through_project_crud(tmp_path):
+    """The `summary` key is set via rename_project and surfaced by both the batch list_projects
+    projection (exercises the _load_states column merge) and the single status() read."""
+    c = console(tmp_path, FakeLauncher())
+    c._new_id = lambda: "project-0"
+    rid = c.start_project(ProjectRequest(description="app"))
+    # no summary at creation
+    row = [r for r in c.list_projects() if r["project_id"] == rid][0]
+    assert row["summary"] is None
+    assert c.status(rid)["summary"] is None
+    # set it through the write CRUD
+    out = c.rename_project(rid, summary="A clean customer-facing blurb.")
+    assert out["summary"] == "A clean customer-facing blurb."
+    # both read paths reflect it
+    row = [r for r in c.list_projects() if r["project_id"] == rid][0]
+    assert row["summary"] == "A clean customer-facing blurb."
+    assert c.status(rid)["summary"] == "A clean customer-facing blurb."
+
+
 def test_list_runs_agents_empty_when_none_spawned(tmp_path):
     c = console(tmp_path, FakeLauncher())
     c._new_id = lambda: "project-0"

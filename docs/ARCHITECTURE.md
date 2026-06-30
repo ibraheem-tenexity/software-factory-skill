@@ -101,7 +101,7 @@ Stage 3 BUILD      tickets → built app(s) → deploy → verify  gate: done ti
 | `console/app.py` | FastAPI/uvicorn (ASGI) HTTP shell. **Modularized**: `app.py` is now only `FastAPI()` + access-log middleware + lifespan + static mounts + router includes. Pieces: `console/state.py` (shared singletons console/users/blobs/prompts/tool_store/agent_store/`_chat_runner`/`login_throttle` behind `reset()` + SSE registry/`_push_sse` + SPA/serving helpers), `console/throttle.py` (in-process password-login brute-force/DoS throttle), `console/deps.py` (auth DI: `viewer`/`require_authed`/`authorize_project`/`require_admin`/`require_staff`/`_staff_session`), `console/schemas.py` (Pydantic bodies), `console/poller.py` (3s background poller + `_health` + lifespan), `console/routers/{open_routes,auth,org,admin_os,projects,chat}.py`. Routes unchanged: `/api/chat` (mints a draft) + `/api/projects/{id}/{tickets,brief,deployments}` + Project View §2.5 `/api/projects/{id}/{overview,documents}` + SSE + `/api/health`, `/api/me`, `/api/users` + Org §2.3 + Tenexity OS §3. Serves the **React SPA** (`console/web/dist`) when `SF_CONSOLE=react`, else the legacy `index.html`. Also serves the **Tenexity OS operator portal** (`admin.html` SPA entry) at `/admin` + `/admin.html` (React mode only, staff-gated). |
 | `console/web/` | The **React console** (Vite + React + TypeScript SPA): toolbar with the **graph↔kanban view toggle**, Cytoscape graph, kanban (status columns + wave swimlanes + per-app badge/filter), chat + SSE, the structured **brief form**, projects screen. Built at image-build time; served by `console/app.py`. Opt-in via `SF_CONSOLE=react`. A second entry — `console/web/admin.html` → `src/admin/main.tsx` → `AdminPortal.tsx` (PRD §3 Tenexity OS operator portal: shell + Factory Pulse + Overview/Clients/Projects/Agents/Tools/Provide-access, mock data per §5) — builds alongside it (vite `rollupOptions.input` main+admin) and is served at `/admin`. |
 | `brief.py` | The structured onboarding **brief** vocabulary: the 7 sections, interview topics + rubrics, `coverage`/`enough` (the "ready to proceed" heuristic), `brief_to_prompt_block` (injected into Stage 1). |
-| `projectstate.py` | `ProjectState` dataclass (project metadata, incl. `brief` + `interview_coverage`, `phase="draft"` for pre-run interviews) + the `Store` protocol; persisted as JSON in the `projectstate` table. |
+| `projectstate.py` | `ProjectState` dataclass (project metadata, incl. `brief` + `interview_coverage`, `phase="draft"` for pre-run interviews) + the `Store` protocol; persisted in the `projectstate` table — most fields as JSON in `data`, with `name` + `summary` promoted to their own authoritative columns (the store pops them out of the blob on write, merges them back on read). |
 | `db.py` | `ProjectStore` — the per-project datastore (projectstate + canvas tables incl. `deployments`) + the `python3 -m software_factory.db` CLI (incl. `record-deployment`) the stage agents call to record state. |
 | `tickets.py`, `agents.py` | `TicketStore` (work units, per-wave, each tagged with its target `app` for multi-deliverable builds) and `AgentRegistry` (per-agent telemetry/cost). |
 | `dbshim.py` | The storage seam: `connect(path)` returns a minimal DB-API wrapper over **psycopg3** against the flat `public` schema (Supabase 6543 transaction pooler, `prepare_threshold=None`); `?`→`%s` + `RETURNING` translation. All per-project stores go through it; `registry_projects()` lists `public.projectstate`. |
@@ -143,9 +143,12 @@ Tenexity org — cut over from the old personal-org `software-factory-state`; fu
 prod and `metadata.create_all` builds it in tests, so the two cannot drift.
 
 *Per-project tables (keyed by `project_id`):*
-- `projectstate` (PK `project_id`) — the `ProjectState` JSON (`data`): description, name, **owner**,
-  models, budget, **`brief`** + `interview_coverage`, and `phase` (`"draft"` for a pre-run interview).
-  This table doubles as the **project registry** — discovery (`dbshim.registry_projects()`) lists it.
+- `projectstate` (PK `project_id`) — the `ProjectState`: most fields as JSON in `data` (description,
+  **owner**, models, budget, **`brief`** + `interview_coverage`, `phase` — `"draft"` for a pre-run
+  interview), with **`name`** + **`summary`** promoted to their own authoritative columns (queryable;
+  the store keeps them out of the JSON blob — `summary` is the customer-facing blurb shown on the
+  dashboard card, populated externally). This table doubles as the **project registry** — discovery
+  (`dbshim.registry_projects()`) lists it.
 - `phases`, `artifacts` (metadata: title + path + kind, not the bytes), `blockers`, `gates`
   (composite PK `(project_id, name)`), `verifications`, **`deployments`** (one row per deliverable:
   `app`, `service_name`, `url`, `status`, `verified`).

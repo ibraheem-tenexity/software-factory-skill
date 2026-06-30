@@ -64,15 +64,26 @@ class ProjectStore:
     # ---- ProjectState Store protocol (the projectstate table) --------------------------------
     def read(self, project_id: str) -> Optional[dict]:
         row = self._conn.execute(
-            "SELECT data FROM projectstate WHERE project_id = ?", (project_id,)
+            "SELECT data, name, summary FROM projectstate WHERE project_id = ?", (project_id,)
         ).fetchone()
-        return json.loads(row["data"]) if row else None
+        if not row:
+            return None
+        data = json.loads(row["data"])
+        data["name"] = row["name"]
+        data["summary"] = row["summary"]
+        return data
 
     def write(self, project_id: str, data: dict) -> None:
+        # name/summary live in dedicated columns, not the JSON blob — pop them off a copy so the
+        # persisted `data` never carries duplicates; the columns are the source of truth.
+        blob = dict(data)
+        name = blob.pop("name", None)
+        summary = blob.pop("summary", None)
         self._conn.execute(
-            "INSERT INTO projectstate (project_id, data) VALUES (?, ?) "
-            "ON CONFLICT(project_id) DO UPDATE SET data = excluded.data",
-            (project_id, json.dumps(data)),
+            "INSERT INTO projectstate (project_id, data, name, summary) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(project_id) DO UPDATE SET data = excluded.data, "
+            "name = excluded.name, summary = excluded.summary",
+            (project_id, json.dumps(blob), name, summary),
         )
         self._conn.commit()
 
