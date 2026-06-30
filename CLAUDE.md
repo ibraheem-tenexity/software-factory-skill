@@ -116,3 +116,9 @@ Do not theorize. If you think you know why something is breaking, look at the co
 
 ## Edits by the operator
 Edits by the operator are authoritative. If in between sessions you realise that code has changed, check with the operator to make sure if the code was manually edited by the operator, if it was, then you MUST surface errors or assumptions inherent in those edits and make sure that they were explicitly and correctly made, or if the code is correct then defer to the operator. 
+
+## Design System: 
+Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
+https://claude.ai/design/p/b4af3934-9633-4d26-bade-e53b92d7cc49?file=Software+Factory+Onboarding.html
+
+That is the design system contain prototypes of all screens and tokens and 
