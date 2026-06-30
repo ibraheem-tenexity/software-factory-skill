@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact } from "../../api";
 import { openArtifact } from "../factory/Artifacts";
-import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, TextInput, TextArea } from "../onboarding/design";
+import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, TextInput, TextArea, Markdown } from "../onboarding/design";
 import { PanelBodySkel } from "../skeleton";
 
 const fileToB64 = (file: File): Promise<string> => new Promise((resolve) => {
@@ -194,7 +194,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                 <>
                   <div>
                     <CategoryLabel style={{ marginBottom: 6 }}>Goal</CategoryLabel>
-                    <p style={{ margin: 0, font: `400 14px/1.55 ${T.sans}`, color: T.fg }}>{brief.goal || brief.description || <Empty>No goal captured yet.</Empty>}</p>
+                    <div style={{ margin: 0, font: `400 14px/1.55 ${T.sans}`, color: T.fg }}><Markdown>{brief.goal || brief.description || ""}</Markdown>{!(brief.goal || brief.description) && <Empty>No goal captured yet.</Empty>}</div>
                   </div>
                   {!!(brief.scope && brief.scope.length) ? (
                     <div>
