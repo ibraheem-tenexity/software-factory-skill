@@ -105,3 +105,14 @@ The file is a long-term store for information sharing between agents — a centr
 ### Verify Before Concluding
 
 Do not theorize. If you think you know why something is breaking, look at the code or logs to confirm before proposing a fix.
+
+## Worktrees
+* Git worktree should be used by sessions and agents so that their work doesn't conflict with other sessions and/or agents.
+
+* Worktrees Must Be Checked out in ~/software-factory-skill-bare Not in Home Dir
+
+~/software-factory-skill-bare is a bare clone of the software factory skill repository and worktree should be checked out there and not in the home dir.
+
+
+## Edits by the operator
+Edits by the operator are authoritative. If in between sessions you realise that code has changed, check with the operator to make sure if the code was manually edited by the operator, if it was, then you MUST surface errors or assumptions inherent in those edits and make sure that they were explicitly and correctly made, or if the code is correct then defer to the operator. 
