@@ -92,17 +92,41 @@ by reaping the zombie / manually launching Stage 2; no rework needed.
 
 ## 🔧 In-flight
 
-### #105 — Exa MCP teardown hang (root fix) 🟠🔧
+### #105 — Exa MCP teardown hang (shrink the reap grace) 🟢✅
 **Symptom.** Every claude stage incurs a ~60s hang at exa remote-MCP teardown. The acute
 case (stage-1 writing a complete PRD, logging `result`, then hanging on teardown so
 `stage_finished` never flipped → permanent stall) is already mitigated by the **#104
-watchdog** (reaps the completed-but-hung process). #105 is the *root* fix.
+watchdog** (reaps the completed-but-hung process).
 
-**Fix.** Lazy-connect the exa MCP (open the connection only on the first `web_search`) and
-add a teardown/disconnect timeout on the MCP client, so a stage that never searches never
-pays the teardown cost and one that does can't block on it.
+**Investigated, not achievable as originally framed.** The original fix idea — lazy-connect
+exa (open the connection only on the first `web_search`) and/or a teardown/disconnect timeout
+on the MCP client — turns out to require capabilities Claude Code CLI doesn't expose. Confirmed
+against upstream: Claude Code eagerly connects every configured MCP server at session start
+regardless of use (lazy-connect is an open, unimplemented feature request,
+[anthropics/claude-code#31198](https://github.com/anthropics/claude-code/issues/31198)), and
+there is no config/env var bounding exit-time MCP teardown — `MCP_TIMEOUT`/`MCP_TOOL_TIMEOUT`
+cover startup-connect and per-tool-call timeouts only ([#1935](https://github.com/anthropics/claude-code/issues/1935),
+[#41024](https://github.com/anthropics/claude-code/issues/41024) track the unbounded-teardown gap
+itself). Also checked: dropping exa from stages 2/3's `.mcp.json` (config-gating it to stage 1
+only) was considered, but `skills/stage-{1,2,3}-build|design|research/SKILL.md` all carry the
+identical "use exa whenever live web results help" line — there's no SKILL-level signal that
+any one stage is exa-free, so narrowing the wiring would be guessing, not evidence, and would
+reverse #100's deliberate "every stage gets exa" decision.
 
-**Status.** In progress. Watchdog (#104) is the live safety net until this lands.
+**Fix shipped instead.** `reap_completed_zombie` (#104) only ever fires *after* the
+orchestrator's own terminal `result` event, so it can never preempt real work — the grace
+window before reaping exists only to let a clean exit land on its own, and observed exa
+teardown hangs never resolve on their own. Cut `SF_STAGE_REAP_GRACE_SEC`'s default from 60s to
+5s (just above the poller's 3s tick) — a finished-but-hung stage is now reaped in ~5-8s instead
+of up to a minute, on every claude+exa stage.
+
+**Verification.** Unit-level only: `test_reap_completed_zombie_default_grace_is_short_not_60s`
+pins the new default (idle-10s zombie reaped with no env override). Not verified via a live
+in-container `claude -p` run — that would need an exa-wired stage to actually search and exit,
+which wasn't exercised here; the by-code-inspection + reap-unit-test evidence is what backs this
+status, not an end-to-end timing measurement.
+
+**Status.** Shipped. The #104 watchdog remains the mechanism — this just makes it fire fast.
 
 ### #107 — LLM provider keys misclassified as "mock" 🔴🔧
 **Symptom.** `OPENROUTER_API_KEY` (and similar provider keys) are classified as "mock" by
