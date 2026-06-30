@@ -709,7 +709,17 @@ class Console:
         actively-orchestrating claude — it does NOT race the §1 double-orchestrator guard, it
         completes it for the hung-teardown case. Keyed strictly off THIS run's handle + THIS run's
         project.log (never a global signal), so a healthy concurrent stage is untouched. Systemic by
-        design: it reaps ANY hung remote-MCP teardown, not just exa. Returns the reaped pid, else None."""
+        design: it reaps ANY hung remote-MCP teardown, not just exa. Returns the reaped pid, else None.
+
+        #105 root-fix note: Claude Code CLI has no config for lazy MCP connection or a teardown
+        timeout (confirmed against upstream — anthropics/claude-code#31198 open/unimplemented for
+        lazy-connect; #1935/#41024 for the unbounded teardown hang itself); it eagerly connects every
+        configured server every session and there's nothing we can set to bound its exit-time
+        teardown. So the grace window below isn't "wait for a slow-but-working teardown" — observed
+        teardown hangs never resolve on their own — it exists only so a process that DOES exit
+        cleanly within grace isn't needlessly SIGTERM'd. Keep it just above one poller tick (3s, see
+        console/poller.py), not the original 60s, since every extra second here is pure stall on
+        every claude+exa stage."""
         p = self._procs.get(project_id)
         if not (p is not None and hasattr(p, "poll") and p.poll() is None):
             return None   # no live tracked handle → the no-handle idle-advance path already covers it
@@ -718,7 +728,7 @@ class Console:
         log = os.path.join(self._paths(project_id)["base"], "project.log")
         if not os.path.exists(log) or not self._claude_session_completed(log):
             return None   # not done yet — an actively-orchestrating claude, leave it alone
-        grace = float(os.environ.get("SF_STAGE_REAP_GRACE_SEC", "60") or 60)
+        grace = float(os.environ.get("SF_STAGE_REAP_GRACE_SEC", "5") or 5)
         if (time.time() - os.path.getmtime(log)) <= grace:
             return None   # within grace — give a clean teardown a chance to exit on its own first
         pid = getattr(p, "pid", None)

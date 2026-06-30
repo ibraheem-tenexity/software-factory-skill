@@ -1793,6 +1793,24 @@ def test_reap_completed_zombie_respects_the_grace_window(tmp_path, monkeypatch):
     assert c.reap_completed_zombie(rid) is None
 
 
+def test_reap_completed_zombie_default_grace_is_short_not_60s(tmp_path):
+    # #105 root-fix: Claude Code has no lazy-MCP-connect or teardown-timeout knob (confirmed
+    # against upstream), so every claude+exa stage pays the full hung-teardown cost on every run.
+    # The grace exists only to let a clean exit land on its own — it must NOT still default to the
+    # original 60s (a minute of pure stall per stage); a few seconds past one poller tick (3s) is
+    # plenty. No SF_STAGE_REAP_GRACE_SEC set here — this pins the shipped default, not an override.
+    import os
+    import time
+    proc = _ZombieProc()
+    ids = iter(["project-dg"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
+    rid = c.start_project(ProjectRequest(description="x"))
+    log = _write_log(c, rid, {"type": "result", "total_cost_usd": 1.0})
+    os.utime(log, (time.time() - 10, time.time() - 10))   # idle 10s — past a short default grace
+    assert c.reap_completed_zombie(rid) == 4242
+    assert "term" in proc.signals
+
+
 def test_reap_completed_zombie_skips_opencode(tmp_path, monkeypatch):
     # opencode's linger is handled by the step_finish=stop path in stage_finished, not here.
     import os
