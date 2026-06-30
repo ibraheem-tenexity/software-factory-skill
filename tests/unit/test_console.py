@@ -148,8 +148,8 @@ def test_uploaded_pdf_is_extracted_to_markdown_and_composed_into_stage1_input(tm
     project_id = c.start_project(ProjectRequest(description="analyze this",
                                     context_files=[{"name": "brief.pdf", "content_b64": b64}]))
     input_dir = os.path.join(str(tmp_path), project_id, "input")
-    # raw PDF is consumed by the conversion; the markdown is what Stage 1 reads
-    assert not os.path.exists(os.path.join(input_dir, "brief.pdf"))
+    # original PDF is kept on disk (for blob storage); markdown is what Stage 1 reads
+    assert os.path.exists(os.path.join(input_dir, "brief.pdf"))
     assert "EPC contract T&C" in open(os.path.join(input_dir, "brief.pdf.md")).read()
     # the composed Stage 1 input merges the user prompt and the extracted markdown
     ctx = open(os.path.join(input_dir, "context.txt")).read()
