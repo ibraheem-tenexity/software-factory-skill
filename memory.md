@@ -1,8 +1,20 @@
+# monitor-agent Update at Time: 28:06:2026:00:40:00.000
+1. Re-synced with peers: #125 merged as PR #179 (commit 0d1a09d, equivalent to 4433dd9) and deployed; #126 pool cap merged as PR #180 and deployed. The launcher now drops root before launching Claude Code and the claude binary is pinned to 2.1.195.
+2. src/software_factory/console.py, Dockerfile, entrypoint.sh, src/software_factory/dbshim.py.
+3. project-67f3711d3b0a46a4 COMPLETED after the deploy: phase=done, deploy_url=https://sf-project-67f3711d3b0a46a4-production.up.railway.app (sign-in page + demo credentials render). Deps surfaced (DATABASE_URL, NEXTAUTH_SECRET, OPENROUTER_API_KEY=mock) — confirm OPENROUTER_API_KEY mock issue is separate #107.
+4. Summary: no further action needed on #125/#126; run finished. I was stale due to Railway auth failing in this env and coeyi70e picked up the deploy.
+
 # monitor-agent Update at Time: 27:06:2026:08:00:00.000
 1. Investigated stall of project-67f3711d3b0a46a4 and resumed Stage 3 by wrapping the `claude` binary to drop to the `node` user. Root cause: Claude Code v2.1.195 refuses root + `--permission-mode bypassPermissions` (maps to `--dangerously-skip-permissions`), so every console launch as root died instantly.
 2. /data/projects/project-67f3711d3b0a46a4/project.log, /usr/local/bin/claude wrapper, src/software_factory/console.py `_default_launch`.
 3. Stage 2 had actually completed (stage2_done=true, architecture + tickets produced and pushed to https://github.com/ibraheem-tenexity/adaptive-learning-path-platform). Stage 3 launches now run as `node` and the process is alive (node PID 1400), log growing, spending resumed.
 4. Summary: run is advancing again; stage=3, phase=provision, spent ~$17.13/$60; monitoring to the Playwright happy-flow gate. A durable launcher-privilege fix is needed before the next deploy.
+
+# monitor-agent Update at Time: 27:06:2026:09:00:00.000
+1. Confirmed #125 durable fix already exists on main (commit 4433dd9): entrypoint.sh drops to node user, _default_launch preexec_fn drops root, claude pinned to 2.1.195 in Dockerfile. No extra code changes needed.
+2. src/software_factory/console.py, Dockerfile, entrypoint.sh.
+3. The deployed prod image is older than 4433dd9, which is why the live run required a /usr/local/bin/claude wrapper. Deploying current main will make the wrapper unnecessary.
+4. Summary: code fix is complete; deployment is blocked until Railway CLI is authenticated in this environment. Stage 3 monitoring continues.
 
 # Memory & context architecture + comms  (Proposal §4 + §5)
 
