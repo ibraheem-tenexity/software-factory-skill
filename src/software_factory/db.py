@@ -69,11 +69,7 @@ class ProjectStore:
         if not row:
             return None
         data = json.loads(row["data"])
-        # name/summary are authoritative in their own columns — merge them back so the dataclass
-        # hydrates from the columns rather than the (now column-free) blob. Leave a legacy JSON
-        # name in place only when the column hasn't been backfilled yet.
-        if row["name"] is not None:
-            data["name"] = row["name"]
+        data["name"] = row["name"]
         data["summary"] = row["summary"]
         return data
 

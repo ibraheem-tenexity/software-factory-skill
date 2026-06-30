@@ -573,10 +573,7 @@ class Console:
             conn.close()
         for row in rows:
             data = json.loads(row["data"])
-            # name/summary are authoritative in their own columns (see ProjectStore.read) — merge
-            # them back so the batch-loaded state matches a single ProjectStore.read.
-            if row["name"] is not None:
-                data["name"] = row["name"]
+            data["name"] = row["name"]
             data["summary"] = row["summary"]
             out[row["project_id"]] = ProjectState.from_data(row["project_id"], data)
         # Legacy / registry-only edge cases: produce default states without persisting.
