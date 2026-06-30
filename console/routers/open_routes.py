@@ -56,3 +56,11 @@ def admin_portal(v: tuple = Depends(viewer)):
 def health():
     # Health is OPEN (platform probes don't authenticate) and carries no secrets.
     return _health()
+
+
+@router.get("/api/version")
+def version():
+    # OPEN (no secrets): the running build's git SHA, so a deploy can be verified against the
+    # expected commit — stops link-drift false-negative verifies (TEN-151 / KNOWN_ISSUES #87).
+    from software_factory.version import version_info
+    return version_info()

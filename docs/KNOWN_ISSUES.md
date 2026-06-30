@@ -186,6 +186,8 @@ linked project/SHA).
 **Fix.** Add a `/api/version` endpoint exposing the running git SHA, and re-assert
 `railway link` before verification so a drifted link can't silently invalidate a check.
 
+**Resolved (TEN-151).** `GET /api/version` (`console/routers/open_routes.py` → `software_factory.version.version_info`) returns `{sha, short, dirty}`, sourced from `SF_GIT_SHA` (baked onto the service by `scripts/deploy.sh`) → `RAILWAY_GIT_COMMIT_SHA` → `git rev-parse` fallback. Link re-assertion: `software_factory.railway_link.assert_link` parses `railway status` and fails loudly on any project/env/service drift — run it before verifying via `make verify-link` (`scripts/assert-railway-link.sh`).
+
 ### #95 — Harden the repo-reaper with an exact-name handle
 **Symptom.** The reaper matches orphan repos heuristically, which is fuzzy.
 

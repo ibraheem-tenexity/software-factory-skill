@@ -2,7 +2,7 @@
 # Disabling third-party plugin autoload isolates our suite.
 PYTEST = PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest
 
-.PHONY: test test-live deploy-check deploy
+.PHONY: test test-live deploy-check deploy verify-link
 test:        ## unit + eval (no real money, runs anywhere)
 	$(PYTEST) -q
 test-live:   ## full end-to-end slice against real infra (spends real money)
@@ -11,3 +11,5 @@ deploy-check: ## preflight only — assert clean tree + HEAD==origin/main + corr
 	./scripts/deploy-preflight.sh
 deploy:      ## preflight (hard-fail on dirty/stale/mis-linked) then railway up factory-console
 	./scripts/deploy.sh
+verify-link: ## re-assert railway link == console target (fail loud on drift) — run before verifying a deploy
+	./scripts/assert-railway-link.sh
