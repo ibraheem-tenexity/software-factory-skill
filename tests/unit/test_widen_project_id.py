@@ -27,8 +27,10 @@ def test_db_regex_accepts_new_16hex_ids():
     assert _PROJECT_ID_RE.fullmatch("project-ab12cd34ef56ab12"), "16-hex id must validate"
 
 
-def test_db_regex_rejects_7hex():
-    assert not _PROJECT_ID_RE.fullmatch("project-ab12cd3"), "7-hex must not validate"
+def test_db_regex_accepts_named_ids():
+    # After widening, arbitrary [A-Za-z0-9-]+ suffixes are valid (e.g. human-readable derived ids).
+    assert _PROJECT_ID_RE.fullmatch("project-zzz-never-touched"), "named id must validate"
+    assert _PROJECT_ID_RE.fullmatch("project-ab12cd3"), "7-hex is now valid under widened regex"
 
 
 def test_console_regex_accepts_both_widths():
