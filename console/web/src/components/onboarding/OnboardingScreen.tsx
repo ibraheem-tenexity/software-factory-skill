@@ -257,8 +257,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // the one eager draft the form + rail share
+  // the one draft the form + rail share — created explicitly when the user saves Project basics
   const [draftId, setDraftId] = useState<string | null>(null);
+  const [savingBasics, setSavingBasics] = useState(false);
 
   // returning "on file" org card — inline-edit (Manage) state, seeded from onFile when editing starts.
   const [orgEdit, setOrgEdit] = useState<{ company: string; industry: string; scale: string; systems: string; subFocus: string; website: string }>(
@@ -322,15 +323,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     }
   }, [resumeProjectId]);
 
-  // Deferred draft creation: only POST /api/drafts when the user has typed a non-empty project name.
-  // Navigating away without a name creates zero orphan rows.
-  useEffect(() => {
-    if (resumeProjectId || draftId || draftCreatingRef.current || !p.name.trim()) return;
-    draftCreatingRef.current = true;
-    api.createDraft({ runtime: engineProviderRef.current, project_name: p.name, budget: budgetRef.current ?? undefined })
-      .then(({ project_id }) => setDraftId(project_id))
-      .catch(() => { draftCreatingRef.current = false; });
-  }, [resumeProjectId, draftId, p.name]);
+  // Draft creation is explicit: the user fills Project basics and clicks Save (see saveBasics).
+  // Until then draftId is null and the downstream cards stay locked. Navigating away without
+  // saving creates zero orphan rows.
 
   // DEBOUNCED project write-through. Fire-and-forget — the response is intentionally ignored so it
   // can never overwrite what the user is typing (the focus-loss trap).
@@ -444,6 +439,23 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     } catch (e: any) { setError(String(e?.message || e)); }
   };
   const addScopeOption = (o: string) => setScopeOptions((s) => (s.includes(o) ? s : [...s, o]));
+
+  // Save Project basics → mint the draft (POST /api/drafts) and unlock the rest of the form.
+  const saveBasics = async () => {
+    if (!p.name.trim() || draftId || draftCreatingRef.current) return;
+    draftCreatingRef.current = true;
+    setSavingBasics(true);
+    setError("");
+    try {
+      const { project_id } = await api.createDraft({ runtime: engineProviderRef.current, project_name: p.name, budget: budgetRef.current ?? undefined });
+      setDraftId(project_id);
+    } catch (e: any) {
+      draftCreatingRef.current = false;
+      setError(`Couldn’t save project: ${String(e?.message || e)}`);
+    } finally {
+      setSavingBasics(false);
+    }
+  };
 
   const attachFiles = async (list: FileList | null, kind: "video" | "docs") => {
     if (!draftId || !list || !list.length) return;
@@ -601,7 +613,28 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                         <BudgetPicker value={budget} onChange={setBudget} />
                       </Field>
                     </div>
+                    {/* Create-the-project gate (PRD §2.4/§24): a real POST /api/drafts in `draft` state. */}
+                    <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${T.borderSubtle}` }}>
+                      {draftId ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                          <span style={{ width: 22, height: 22, borderRadius: "50%", background: T.successSoft, display: "grid", placeItems: "center", flexShrink: 0 }}><Icon name="check" size={13} color={T.success} /></span>
+                          <span style={{ font: `400 12.5px/1.45 ${T.sans}`, color: T.secondary }}><b style={{ color: T.success }}>Project created</b> — “{p.name || "Untitled project"}” is saved. Enrich it below to move it toward build.</span>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+                          <span style={{ font: `400 12.5px/1.45 ${T.sans}`, color: T.tertiary, maxWidth: 380 }}>Name the project and save to create it. The rest — scope, engine &amp; materials — unlocks once it exists.</span>
+                          <Btn variant="primary" onClick={saveBasics} disabled={!p.name.trim() || savingBasics} title={p.name.trim() ? "Create this project" : "Enter a project name first"}>
+                            {savingBasics ? "Creating…" : <><Icon name="check" size={14} color="#fff" /> Create project</>}
+                          </Btn>
+                        </div>
+                      )}
+                    </div>
                   </Card>
+                  {/* Scope / Build engine / Materials stay locked until the project is created. */}
+                  <div style={{ position: "relative" }}>
+                    <div aria-hidden={!draftId} style={draftId
+                      ? { display: "flex", flexDirection: "column", gap: 16 }
+                      : { display: "flex", flexDirection: "column", gap: 16, opacity: 0.4, filter: "grayscale(0.5)", pointerEvents: "none", userSelect: "none" }}>
                   <Card cat="Your first project" title="Scope of work" desc="Which parts of the business does this project touch?">
                     <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
                   </Card>
@@ -615,6 +648,15 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <Field label="Supporting documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
                     </div>
                   </Card>
+                    </div>
+                    {!draftId && (
+                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 30 }}>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 9, padding: "11px 17px", borderRadius: 9999, background: T.raised, border: `1px solid ${T.borderDefault}`, boxShadow: T.shadowSm, font: `500 12.5px/1 ${T.sans}`, color: T.secondary }}>
+                          <Icon name="lock" size={14} color={T.tertiary} /> Create the project above to unlock
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </>
               ) : (
                 <>
@@ -667,7 +709,28 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                         <BudgetPicker value={budget} onChange={setBudget} />
                       </Field>
                     </div>
+                    {/* Create-the-project gate (PRD §2.4/§24): a real POST /api/drafts in `draft` state. */}
+                    <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${T.borderSubtle}` }}>
+                      {draftId ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                          <span style={{ width: 22, height: 22, borderRadius: "50%", background: T.successSoft, display: "grid", placeItems: "center", flexShrink: 0 }}><Icon name="check" size={13} color={T.success} /></span>
+                          <span style={{ font: `400 12.5px/1.45 ${T.sans}`, color: T.secondary }}><b style={{ color: T.success }}>Project created</b> — “{p.name || "Untitled project"}” is saved. Enrich it below to move it toward build.</span>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+                          <span style={{ font: `400 12.5px/1.45 ${T.sans}`, color: T.tertiary, maxWidth: 380 }}>Name the project and save to create it. The rest — scope, engine &amp; materials — unlocks once it exists.</span>
+                          <Btn variant="primary" onClick={saveBasics} disabled={!p.name.trim() || savingBasics} title={p.name.trim() ? "Create this project" : "Enter a project name first"}>
+                            {savingBasics ? "Creating…" : <><Icon name="check" size={14} color="#fff" /> Create project</>}
+                          </Btn>
+                        </div>
+                      )}
+                    </div>
                   </Card>
+                  {/* Scope / Build engine / Materials stay locked until the project is created. */}
+                  <div style={{ position: "relative" }}>
+                    <div aria-hidden={!draftId} style={draftId
+                      ? { display: "flex", flexDirection: "column", gap: 16 }
+                      : { display: "flex", flexDirection: "column", gap: 16, opacity: 0.4, filter: "grayscale(0.5)", pointerEvents: "none", userSelect: "none" }}>
                   <Card cat="This project" title="Scope of work" desc="Which parts of the business does this project touch?">
                     <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
                   </Card>
@@ -681,6 +744,15 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <Field label="Extra documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
                     </div>
                   </Card>
+                    </div>
+                    {!draftId && (
+                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 30 }}>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 9, padding: "11px 17px", borderRadius: 9999, background: T.raised, border: `1px solid ${T.borderDefault}`, boxShadow: T.shadowSm, font: `500 12.5px/1 ${T.sans}`, color: T.secondary }}>
+                          <Icon name="lock" size={14} color={T.tertiary} /> Create the project above to unlock
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
             </div>
