@@ -26,6 +26,8 @@ from software_factory.blobs import BlobStore  # noqa: E402
 from software_factory.agent_prompts import PromptStore  # noqa: E402
 from software_factory.registries import ToolStore, AgentRegistryStore  # noqa: E402
 from software_factory.sow import SowStore  # noqa: E402
+from software_factory.services.org_service import OrgService  # noqa: E402
+from software_factory.services.files import doc_kind as _doc_kind  # noqa: E402,F401
 
 from console.throttle import LoginThrottle  # noqa: E402
 
@@ -43,6 +45,7 @@ prompts = None
 tool_store = None
 agent_store = None
 sow_store = None
+org_service = None
 _has_chat_key = False
 _chat_runner = None
 _sse_clients: dict[str, list] = {}
@@ -55,6 +58,7 @@ def reset():
     """(Re)instantiate the long-lived singletons from the current environment. Called at import and
     by app.py on every reload — matches the monolith's reload-re-instantiates-stores behavior."""
     global PROJECTS_DIR, console, users, blobs, prompts, tool_store, agent_store, sow_store
+    global org_service
     global _has_chat_key, _chat_runner, _sse_clients, _sse_lock, _project_stages, login_throttle
 
     PROJECTS_DIR = os.environ.get("SF_PROJECTS_DIR", os.path.join(HERE, "..", ".projects"))
@@ -68,6 +72,9 @@ def reset():
     tool_store = ToolStore()      # tools/MCP registry (§3.5) — real datastore (seeded), CRUD-able
     agent_store = AgentRegistryStore()   # agent identity registry (§3.4)
     sow_store = SowStore()               # statement-of-work CRUD
+    # Service layer (business logic between routers and stores). Built AFTER the stores so it holds
+    # the current instances; rebuilt each reset() so per-test TRUNCATE + re-seed is reflected.
+    org_service = OrgService(users, blobs, console)
     # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
     _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
     _chat_runner = ChatAgentRunner(console, users) if _has_chat_key else None
@@ -78,16 +85,6 @@ def reset():
 
 
 reset()
-
-
-# Filename → doc-kind classifier for uploaded materials / KB docs (shared by org + projects routers).
-_DOC_KIND = {"pdf": "pdf", "xlsx": "xlsx", "xls": "xlsx", "csv": "csv", "doc": "doc", "docx": "doc",
-             "mp4": "video", "mov": "video", "png": "img", "jpg": "img", "jpeg": "img"}
-
-
-def _doc_kind(name: str) -> str:
-    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    return _DOC_KIND.get(ext, "doc")
 
 
 def _chat_path(project_id: str) -> str:
