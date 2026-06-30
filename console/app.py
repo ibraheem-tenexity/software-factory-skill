@@ -64,6 +64,18 @@ from console.state import (console, users, blobs, prompts, tool_store, agent_sto
 app = FastAPI(title="software-factory console", lifespan=lifespan)
 
 
+# ── Service-layer domain errors → HTTP ────────────────────────────────────────────────────────
+# Services raise framework-free errors (software_factory.services.errors); map each to its status
+# with the same {"detail": ...} body FastAPI's HTTPException uses, so the wire contract is unchanged.
+from fastapi.responses import JSONResponse  # noqa: E402
+from software_factory.services.errors import ServiceError  # noqa: E402
+
+
+@app.exception_handler(ServiceError)
+async def _service_error_handler(request: Request, exc: ServiceError):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 # ── Structured access log ───────────────────────────────────────────────────────────────────
 # One JSON line per response on stdout — Railway captures stdout natively, so `railway logs`
 # becomes greppable by route/status/project_id. Mirrors the old Handler._send logging.
