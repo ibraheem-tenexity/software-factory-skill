@@ -33,16 +33,19 @@ def test_make_prompt_with_no_description_is_just_the_docs():
 
 # ---- persist_and_compose (I/O + conversion) ----
 
-def test_pdf_is_converted_to_markdown_not_kept_raw(tmp_path):
+def test_pdf_original_and_markdown_both_retained(tmp_path):
     input_dir = str(tmp_path / "input")
     written = persist_and_compose(
         input_dir, "analyze this",
         [{"name": "brief.pdf", "content_b64": _b64(b"%PDF-1.4 ...")}],
         extract=lambda path: "# Extracted\n\nthe contract terms",
     )
-    assert not os.path.exists(os.path.join(input_dir, "brief.pdf"))   # raw consumed
+    # original kept on disk so caller can push it to blob storage
+    assert os.path.exists(os.path.join(input_dir, "brief.pdf"))
+    assert open(os.path.join(input_dir, "brief.pdf"), "rb").read() == b"%PDF-1.4 ..."
     md = open(os.path.join(input_dir, "brief.pdf.md")).read()
     assert "# Extracted" in md
+    assert "brief.pdf" in written
     assert "brief.pdf.md" in written
 
 
@@ -95,7 +98,9 @@ def test_docx_is_extracted_to_markdown_and_composed(tmp_path):
         extract_docx=lambda p: "# Singer SOW\n\nrecipes, quotes, P21",
     )
     assert "singer-sow.docx.md" in written and "context.txt" in written
-    assert not os.path.exists(os.path.join(str(tmp_path), "singer-sow.docx"))  # consumed
+    # original kept on disk so caller can push it to blob storage
+    assert "singer-sow.docx" in written
+    assert os.path.exists(os.path.join(str(tmp_path), "singer-sow.docx"))
     ctx = open(os.path.join(str(tmp_path), "context.txt")).read()
     assert "build the AutoBuilder" in ctx and "recipes, quotes, P21" in ctx
 
@@ -117,7 +122,9 @@ def test_docx_default_path_extracts_embedded_images(tmp_path, monkeypatch):
         str(tmp_path), "build it",
         [{"name": "spec.docx", "content_b64": base64.b64encode(b"docx").decode()}],
     )
+    assert "spec.docx" in written          # original retained alongside extraction
     assert "spec.docx.md" in written
+    assert os.path.isfile(os.path.join(str(tmp_path), "spec.docx"))
     assert os.path.join("images", "image-01.png") in written
     assert os.path.isfile(os.path.join(str(tmp_path), "images", "image-01.png"))
 
@@ -135,7 +142,9 @@ def test_docx_falls_back_to_text_when_image_deps_missing(tmp_path, monkeypatch):
         str(tmp_path), "build it",
         [{"name": "spec.docx", "content_b64": base64.b64encode(b"docx").decode()}],
     )
+    assert "spec.docx" in written          # original retained even via fallback path
     assert "spec.docx.md" in written
+    assert os.path.isfile(os.path.join(str(tmp_path), "spec.docx"))
     assert "# Fallback text" in open(os.path.join(str(tmp_path), "spec.docx.md")).read()
 
 
@@ -149,6 +158,35 @@ def test_brief_and_interview_are_written_when_supplied(tmp_path):
     assert "brief.md" in written and "interview.md" in written
     assert "PROJECT BRIEF" in open(os.path.join(str(tmp_path), "brief.md")).read()
     assert "cargo screening" in open(os.path.join(str(tmp_path), "interview.md")).read()
+
+
+def test_plain_text_upload_unchanged(tmp_path):
+    """Non-PDF/DOCX files (images, txt, csv) are unchanged — no regression."""
+    input_dir = str(tmp_path / "input")
+    written = persist_and_compose(
+        input_dir, "",
+        [{"name": "spec.txt", "content_b64": _b64(b"raw spec text")},
+         {"name": "logo.png", "content_b64": _b64(b"\x89PNG")}],
+        extract=lambda p: (_ for _ in ()).throw(AssertionError("should not extract")),
+    )
+    assert open(os.path.join(input_dir, "spec.txt"), "rb").read() == b"raw spec text"
+    assert open(os.path.join(input_dir, "logo.png"), "rb").read() == b"\x89PNG"
+    assert "spec.txt" in written
+    assert "logo.png" in written
+    # no spurious .md extractions for plain files
+    assert not any(n.endswith(".md") for n in written)
+
+
+def test_pdf_original_bytes_match_what_was_uploaded(tmp_path):
+    """The retained original must be bit-for-bit identical to what was uploaded."""
+    input_dir = str(tmp_path / "input")
+    raw_pdf = b"%PDF-1.4 fake content for test"
+    persist_and_compose(
+        input_dir, "test",
+        [{"name": "doc.pdf", "content_b64": _b64(raw_pdf)}],
+        extract=lambda path: "# Extracted",
+    )
+    assert open(os.path.join(input_dir, "doc.pdf"), "rb").read() == raw_pdf
 
 
 def test_docx_extractor_real_pandoc_on_singer_sow():

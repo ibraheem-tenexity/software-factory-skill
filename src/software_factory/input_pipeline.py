@@ -45,6 +45,10 @@ def persist_and_compose(
     deps are unavailable. If `brief`/`interview_md` are supplied, the structured onboarding brief
     and interview transcript are written as `brief.md`/`interview.md` for Stage 1 to consume.
 
+    PDF/DOCX originals are kept on disk alongside their `.md` extractions so callers can push
+    them to object storage. Returned list includes both the original filename AND the `.md` name
+    for each converted document; callers distinguish them by suffix.
+
     Returns the input-relative paths written (for artifact emission).
     """
     written: list[str] = []
@@ -55,11 +59,12 @@ def persist_and_compose(
         with open(src_path, "wb") as out:
             out.write(raw)
         md = converter(src_path)            # raises on empty/failed extraction
-        os.remove(src_path)                 # consumed by the conversion
+        # keep original alongside the extraction (caller records it as a blob)
         md_name = name + ".md"
         with open(os.path.join(input_dir, md_name), "w") as out:
             out.write(md)
         docs.append((name, md))
+        written.append(name)                # original retained
         written.append(md_name)
 
     def _convert_docx_with_images(raw: bytes, name: str) -> None:
@@ -70,14 +75,15 @@ def persist_and_compose(
         try:
             md, images = docx_extract.extract_with_images(src_path, input_dir)
         except ImportError:
-            os.remove(src_path)
+            # original already written; _convert will keep it too
             _convert(raw, name, extract_docx or docx_extract.extract_to_markdown)
             return
-        os.remove(src_path)
+        # keep original alongside the extraction (caller records it as a blob)
         md_name = name + ".md"
         with open(os.path.join(input_dir, md_name), "w") as out:
             out.write(md)
         docs.append((name, md))
+        written.append(name)                # original retained
         written.append(md_name)
         written.extend(images)              # input/images/image-NN.ext (wireframes survive)
 

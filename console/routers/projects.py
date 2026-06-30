@@ -1,12 +1,14 @@
 """Projects (runs) + drafts: list/create, run-scoped GETs, Project View §2.5 aggregates,
 run-scoped actions, and the Option C draft write-through + handoff."""
 import base64
+import mimetypes
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import PlainTextResponse
 
 from software_factory import storage, project_view
-from software_factory.console import ProjectRequest
+from software_factory.console import ProjectRequest, project_paths
 from software_factory.db import artifact_by_id
 from software_factory.deps import extract_env_creds
 
@@ -412,10 +414,28 @@ def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_proje
 
 @router.post("/api/projects/{pid}/attach")
 def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)):
-    """Attach project materials (walkthrough video / documents) to the draft's input/."""
+    """Attach project materials (walkthrough video / documents) to the draft's input/.
+    PDF/DOCX originals are kept alongside their .md extractions, pushed to object storage,
+    and recorded as blobs so they appear in GET /api/projects/{pid}/documents.uploaded."""
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
-    return {"attached": state.console.attach_to_draft(pid, body.files or [])}
+    written = state.console.attach_to_draft(pid, body.files or [])
+    # push PDF/DOCX originals to blob storage and record in the manifest
+    input_dir = project_paths(state.PROJECTS_DIR, pid)["input_dir"]
+    for name in written:
+        nl = name.lower()
+        if nl.endswith(".pdf") or nl.endswith(".docx"):
+            file_path = os.path.join(input_dir, name)
+            if not os.path.exists(file_path):
+                continue
+            raw = open(file_path, "rb").read()
+            key = f"materials/{name}"
+            storage.put(pid, key, raw)
+            state.blobs.record("project", pid, f"{pid}/{key}", name=name,
+                               kind=state._doc_kind(name),
+                               content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
+                               size_bytes=len(raw), sha256=storage.sha256(raw))
+    return {"attached": written}
 
 
 @router.post("/api/projects/{pid}/creds")

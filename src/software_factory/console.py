@@ -1236,8 +1236,10 @@ class Console:
 
     def attach_to_draft(self, project_id: str, files: list) -> list[str]:
         """Persist + extract files attached during the interview into the draft's input/ (PDF/DOCX
-        → Markdown[+images], wireframes survive). Records them as context artifacts; the draft stays
-        invisible to the poller (is_pipeline_project excludes drafts). Returns paths written."""
+        → Markdown[+images], wireframes survive). Records .md extractions as context artifacts;
+        original PDF/DOCX binaries are kept on disk for the caller to push to blob storage.
+        The draft stays invisible to the poller (is_pipeline_project excludes drafts).
+        Returns paths written (includes original binaries for PDF/DOCX so callers can blob-record)."""
         if not files:
             return []
         paths = self._paths(project_id)
@@ -1245,8 +1247,15 @@ class Console:
         written = persist_and_compose(paths["input_dir"], "", files, extract=self._extract)
         db = ProjectStore(paths["db"])
         for name in written:
-            if name != "context.txt":   # no description here → skip the (empty) composed prompt
-                db.record_artifact("input", "input/" + name, kind="context")
+            # raw PDF/DOCX originals go to blob storage (handled by the router, not here);
+            # .md extractions + other file types (images, txt, …) become context artifacts;
+            # context.txt is skipped (no description in attach calls)
+            if name == "context.txt":
+                continue
+            nl = name.lower()
+            if nl.endswith(".pdf") or nl.endswith(".docx"):
+                continue  # original binary — caller blob-records it
+            db.record_artifact("input", "input/" + name, kind="context")
         return [w for w in written if w != "context.txt"]
 
     def update_draft_brief(self, project_id: str, brief: dict, coverage: dict | None = None) -> dict:
