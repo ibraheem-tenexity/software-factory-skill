@@ -154,23 +154,30 @@ create / contradicts the description).
 
 ---
 
-### #128 — Dashboard status pill shows "Building" for stopped/crashed/paused runs 🟠
+### #128 — Dashboard status pill shows "Building" for stopped/crashed/paused runs 🟢✅
 **Symptom.** A single project card shows contradictory states at once — e.g. a blue
 **"Building"** pill next to the text **"stopped"** (observed on `project-67f3711d`, which is
 stopped, `done=false`, `deploy_url=null`).
 
-**Root cause.** `statusOf()` in `console/web/src/components/Dashboard.tsx:16-22` has no branch
-for `phase` of `stopped` / `crashed` / `paused`; those fall through to the default
+**Root cause.** `statusOf()` in `console/web/src/components/Dashboard.tsx:16-22` had no branch
+for `phase` of `stopped` / `crashed` / `paused`; those fell through to the default
 `return … "Building"`. The card separately renders the raw `phase` text, so the two
-derivations disagree on the same card. State derivation is **duplicated**: the project detail
-view (`FactoryConsole.tsx:35-37`) maps `stopped/crashed→danger`, `paused→warning`, `done→success`
-correctly — the dashboard card was never updated to match. (Dashboard-card sibling of #106,
-which fixed the detail view's label lag.)
+derivations disagreed on the same card. State derivation is **duplicated**: the project detail
+view (`FactoryConsole.tsx`'s `phaseTone()`) maps `stopped/crashed→danger`, `paused→warning`,
+`done→success` correctly — the dashboard card had drifted out of sync. (Dashboard-card sibling
+of #106, which fixed the detail view's label lag.)
 
-**Fix.** Add `stopped` / `crashed` / `paused` cases to `statusOf()` (mirror `FactoryConsole`'s
-`tone()`), so a halted run reads "Stopped"/"Crashed"/"Paused" instead of "Building". Consider
-extracting one shared status-derivation helper used by both surfaces to stop the drift
-recurring. FE-only; no backend change.
+**Fix.** Added `stopped` / `crashed` / `paused` cases to `statusOf()` (mirroring
+`FactoryConsole`'s `phaseTone()`): stopped/crashed → "Stopped"/"Crashed" (danger tone),
+paused → "Paused" (warning tone), inserted after the existing `needs-input` check so a
+budget-stopped/held run still reads "Needs input" first. Bonus: the pill's live pulsing dot
+(`live = key === "building" || "researching"`) and the archive-confirm copy ("Any running
+agents stop...") both implicitly stopped misfiring on halted runs too, since they derive from
+the same `statusOf()` key. Did **not** extract a shared status-derivation helper across
+Dashboard.tsx/FactoryConsole.tsx — the two return different shapes (a label+tone+key triplet vs.
+a bare tone) and unifying them is a larger refactor than this bug warrants; flagging the drift
+risk here instead. FE-only; no backend change. Verified live via a mocked-API Playwright render
+(stopped/crashed pills now red, paused amber, no more contradictory "Building" pill).
 
 > Note: the underlying "this run isn't actually `done`" is **#127** — it deployed but was
 > stopped before the done-gate flipped (no demo creds). #128 is only the badge mislabel.

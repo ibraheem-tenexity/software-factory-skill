@@ -9,14 +9,19 @@ import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, TextInput, M
 import { MetricCardSkel, ProjectRowSkel } from "./skeleton";
 import { AccountMenu } from "./AccountMenu";
 
-type StatusKey = "deployed" | "needs-input" | "draft" | "researching" | "building";
-type Tone = "success" | "warning" | "neutral" | "brand" | "info";
+type StatusKey = "deployed" | "needs-input" | "draft" | "researching" | "building" | "stopped" | "crashed" | "paused";
+type Tone = "success" | "warning" | "neutral" | "brand" | "info" | "danger";
 
 // Derive the project status from real run state (never fabricated).
 function statusOf(r: ProjectSummary): { key: StatusKey; label: string; tone: Tone } {
   if (r.deploy_url || r.done || r.phase === "done") return { key: "deployed", label: "Deployed", tone: "success" };
   if (r.phase === "draft") return { key: "draft", label: "Draft", tone: "neutral" };
   if (r.budget_stopped || r.held) return { key: "needs-input", label: "Needs input", tone: "warning" };
+  // Mirror FactoryConsole's phaseTone() (factory/FactoryConsole.tsx) so a halted run reads
+  // the same here as in the detail view, instead of falling through to the "Building" default.
+  if (r.phase === "stopped") return { key: "stopped", label: "Stopped", tone: "danger" };
+  if (r.phase === "crashed") return { key: "crashed", label: "Crashed", tone: "danger" };
+  if (r.phase === "paused") return { key: "paused", label: "Paused", tone: "warning" };
   if ((r.phase || "").toLowerCase().includes("research")) return { key: "researching", label: "Researching", tone: "brand" };
   return { key: "building", label: "Building", tone: "info" };
 }
