@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import os
 
-from . import dbshim
+from .repositories._exec import GlobalExec
+from .repositories.aggregates_repo import AggregatesRepository
+
+_aggregates = AggregatesRepository(GlobalExec())
 
 
 # ── stage skills (PRD §3.4, Part 1) ───────────────────────────────────────────────────────────────
@@ -162,49 +165,26 @@ def is_editable_orchestrator(callsign: str) -> bool:
 
 
 # ── cross-run SQL (flat Postgres tables; no per-run accessor exposes these) ───────────────────────
-def _query(sql: str, params: tuple = ()) -> list:
-    conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
-    try:
-        with conn.transaction():
-            cur = conn.cursor()
-            cur.execute(sql, params)
-            return [dict(r) for r in cur.fetchall()]
-    finally:
-        conn.close()
-
-
 def agent_rollups() -> list[dict]:
     """Per-role aggregates across ALL runs: distinct runs, total spend, success rate, active count."""
-    return _query(
-        "SELECT role, count(DISTINCT project_id) AS runs, coalesce(sum(cost_usd),0) AS cost_usd, "
-        "count(*) AS total, count(*) FILTER (WHERE status='running') AS active, "
-        "count(*) FILTER (WHERE outcome IN ('real_diff','success')) AS successes, "
-        "max(model) AS model FROM public.agents GROUP BY role")
+    return [dict(r) for r in _aggregates.agent_rollups()]
 
 
 def agents_active_count() -> int:
-    rows = _query("SELECT count(*) AS n FROM public.agents WHERE status='running'")
-    return int(rows[0]["n"]) if rows else 0
+    return _aggregates.agents_active_count()
 
 
 def today_burn(since_epoch: float) -> float:
-    rows = _query("SELECT coalesce(sum(cost_usd),0) AS burn FROM public.agents "
-                  "WHERE started_at >= %s", (since_epoch,))
-    return float(rows[0]["burn"]) if rows else 0.0
+    return _aggregates.today_burn(since_epoch)
 
 
 def open_tickets_by_project() -> dict:
-    rows = _query("SELECT project_id, count(*) AS n FROM public.tickets "
-                  "WHERE status IN ('open','in_progress') GROUP BY project_id")
-    return {r["project_id"]: int(r["n"]) for r in rows}
+    return {r["project_id"]: int(r["n"]) for r in _aggregates.open_tickets_by_project()}
 
 
 def ticket_counts_by_project() -> dict:
     """{project_id: {"done": d, "total": t}} across all projects (delivered = done/deployed/approved)."""
-    rows = _query(
-        "SELECT project_id, count(*) AS total, "
-        "count(*) FILTER (WHERE status IN ('done','deployed','approved')) AS done "
-        "FROM public.tickets GROUP BY project_id")
+    rows = _aggregates.ticket_counts_by_project()
     return {r["project_id"]: {"done": int(r["done"]), "total": int(r["total"])} for r in rows}
 
 
