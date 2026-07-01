@@ -1,5 +1,10 @@
+/* Canonical Tenexity design tokens (shared.jsx / tokens.css) — brand color, confidence cascade,
+   .ai-tint/.agent-at-work, --shadow-focus, dark-mode vars. See docs/design-compliance-audit.md. */
+@import "../../../skills/tenexity-design/tokens.css";
+
 :root {
-  --primary: #002b5c;
+  /* Tenexity Blue #1A7BFF — was navy (#002b5c), the SOF-11 non-compliance. */
+  --primary: #1A7BFF;
   --primary-fg: #fff;
   --bg: #f6f7f9;
   --card: #ffffff;
@@ -11,7 +16,7 @@
   --amber: #d97706;
   --destructive: #dc2626;
   --radius: 8px;
-  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --sans: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
 }
 

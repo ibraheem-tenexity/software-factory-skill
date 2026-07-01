@@ -4,31 +4,9 @@
 // JSX→TSX: window globals replaced with ES module exports; props typed; styles kept verbatim.
 import React from "react";
 import { Spinner } from "../skeleton";
-
-export const T = {
-  bg: "#FAFAFA", raised: "#FFFFFF", sunken: "#F4F4F5", ink: "#060709",
-  fg: "#18181B", secondary: "#52525B", tertiary: "#8A8A92",
-  borderSubtle: "#E7E7E9", borderDefault: "#D4D4D8",
-  brand: "#1A7BFF", brandSoft: "#E8F1FF", brandDeep: "#0958C9",
-  success: "#059669", successSoft: "#E4F8EF",
-  warning: "#D97706", warningSoft: "#FBEFDC",
-  danger: "#DC2626", dangerSoft: "#FBE3E3",
-  // confidence cascade
-  cExact: "#059669", cExactSoft: "#E4F8EF",
-  cHigh: "#11A0B8", cHighSoft: "#E0F4F7",
-  cMed: "#F2A516", cMedSoft: "#FBEFDC",
-  cLow: "#DC2626", cLowSoft: "#FBE3E3",
-  cNone: "#8A8A92", cNoneSoft: "#EDEDEF",
-  // The design names Hanken Grotesk / Georgia / JetBrains Mono; system fallbacks keep it
-  // legible offline (no CDN <link> — CSP/offline). Bundling the real woff2 is a follow-up.
-  sans: "'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, sans-serif",
-  display: "Georgia, 'Times New Roman', serif",
-  mono: "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace",
-  rSm: "6px", rMd: "8px", rLg: "12px", rXl: "16px",
-  shadowXs: "0 1px 2px 0 hsl(240 6% 10% / 0.04)",
-  shadowSm: "0 2px 6px -2px hsl(240 6% 10% / 0.06), 0 1px 2px hsl(240 6% 10% / 0.04)",
-  shadowMd: "0 8px 24px -8px hsl(240 6% 10% / 0.10), 0 2px 6px -2px hsl(240 6% 10% / 0.06)",
-};
+// SOF-11: T used to be a byte-for-byte duplicate of admin/tokens.ts; both now share one source.
+import { T } from "../../theme";
+export { T };
 
 type CSS = React.CSSProperties;
 
