@@ -71,7 +71,9 @@ export type DepsSubmitResponse = {
 // POST /api/projects/{id}/deps/provide — #107 post-deploy "provide your own key": pushes a real
 // value onto the ALREADY-LIVE app's Railway service (triggers a redeploy). Always 200; `ok`
 // carries success/failure so the UI can show a specific error, never a silent no-op.
-export type ProvideDepResponse = { ok: boolean; detail?: string; name?: string; disposition?: string };
+// vault_saved false (on an ok:true response) means the live app got the real key (it works) but
+// the value wasn't recorded in the vault — a later replace would need it re-entered.
+export type ProvideDepResponse = { ok: boolean; detail?: string; name?: string; disposition?: string; vault_saved?: boolean };
 
 export type ProjectEvent = { ts: number; type: string; payload: Record<string, any> };
 export type Artifact = { path: string; content?: string; error?: string };

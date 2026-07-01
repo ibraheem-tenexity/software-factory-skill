@@ -93,6 +93,9 @@ function DependenciesPanel({ projectId, deps, onProvided }:
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Soft (non-error) note: the key WAS applied to the live app (it works) but the vault write
+  // failed, so it wasn't recorded — a later replace would need it re-entered.
+  const [warnings, setWarnings] = useState<Record<string, string>>({});
 
   if (!deps.deps_required.length) return null;
 
@@ -104,6 +107,8 @@ function DependenciesPanel({ projectId, deps, onProvided }:
       if (r.ok) {
         setEditing(null); setValue("");
         setErrors((e) => ({ ...e, [name]: "" }));
+        setWarnings((w) => ({ ...w, [name]: r.vault_saved === false
+          ? "Applied to your app — it's using the new key now — but it wasn't saved to your vault. You'll need to re-enter it if you replace it again." : "" }));
         onProvided();
       } else {
         setErrors((e) => ({ ...e, [name]: r.detail || "Failed to apply key" }));
@@ -150,6 +155,7 @@ function DependenciesPanel({ projectId, deps, onProvided }:
                 </div>
               )}
               {errors[name] && <span style={{ font: `500 11.5px/1.3 ${T.sans}`, color: T.danger }}>{errors[name]}</span>}
+              {warnings[name] && <span style={{ font: `500 11.5px/1.3 ${T.sans}`, color: T.warning }}>{warnings[name]}</span>}
             </div>
           );
         })}

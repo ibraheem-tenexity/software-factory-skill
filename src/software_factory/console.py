@@ -1717,7 +1717,12 @@ class Console:
         failed live push never silently marks the dep as provided. FAILS LOUD: returns
         {"ok": False, "detail": ...} on any failure, matching `deploy_db.set_app_variable`; never
         raises, never no-ops silently. Zero-touch (SPEC §3) is unaffected — this is a normal
-        authed user action on a finished project, not a mid-build pause."""
+        authed user action on a finished project, not a mid-build pause.
+
+        A vault-store failure after a SUCCESSFUL live push does not undo the disposition flip —
+        the deployed app already has the real key and works — but the response's `vault_saved`
+        flag goes False so the caller can surface that the value wasn't recorded (a later
+        replace/retry would need it re-entered)."""
         state = self._load_state(project_id)
         if not state.deploy_url:
             return {"ok": False, "detail": "project has no live deployment yet"}
@@ -1744,7 +1749,7 @@ class Console:
         if uid:
             state.creds_vault_ids = {**(state.creds_vault_ids or {}), name: uid}
         state.save()
-        return {"ok": True, "name": name, "disposition": "provide"}
+        return {"ok": True, "name": name, "disposition": "provide", "vault_saved": uid is not None}
 
     def start_stage3(self, project_id: str, extra_creds: dict | None = None) -> str | None:
         """Launch Stage 3. Returns project_id or None if blocked."""
