@@ -13,12 +13,14 @@
 // defined inside render gets a new identity each keystroke → React remounts the <input> → focus
 // lost). Keep it that way — do NOT move Card/CheckRow/GroupHead back inside the component.
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { api, Org, OrgInput, LearnedFact, ReflectionQuestion } from "../../api";
+import { api, Org, OrgInput } from "../../api";
 import {
   T, Icon, Sparkle, Wordmark, Avatar, StatusPill, CategoryLabel, SectionDivider, Btn, TextInput, TextArea,
   Field, Chip, Chips, IndustryTile, IntegrationRow, Dropzone, Message, Composer, Segmented,
   OrgImportPicker, SuggestedResponseList, SuggestedResponseOption, INDUSTRIES, SIZES, REVENUE, ROLES, INTEGRATIONS,
 } from "./design";
+import { ProcessingScreen } from "./ProcessingScreen";
+import { InterviewView } from "./InterviewView";
 
 type Check = { id: string; label: string; done: boolean; optional?: boolean; nudge?: string };
 // T2.2: suggestedResponses replaces choices — {response,type} drives single/multi-select render.
@@ -61,57 +63,6 @@ function Card({ cat, title, desc, children, accent }:
   );
 }
 
-// SOF-37: the reflection surface — reference-backed facts learned from uploaded materials, plus
-// any unreferenced candidates awaiting an answer/dismissal. No confidence pill anywhere — every
-// fact row has a real source chip instead, and a fact with no supporting source never renders
-// here as a fact at all; it only ever shows up below as an open question.
-function ReflectionPanel({ cat, learnedFacts, openQuestions, onResolve }: {
-  cat: string;
-  learnedFacts: LearnedFact[];
-  openQuestions: ReflectionQuestion[];
-  onResolve: (questionId: string, action: "answer" | "dismiss", answer?: string) => void;
-}) {
-  if (learnedFacts.length === 0 && openQuestions.length === 0) return null;
-  return (
-    <Card cat={cat} title="What I learned from your materials" accent={openQuestions.length > 0}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {learnedFacts.map((f, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "8px 0", borderBottom: i < learnedFacts.length - 1 ? `1px solid ${T.borderSubtle}` : "none" }}>
-            <p style={{ flex: 1, margin: 0, font: `400 13px/1.5 ${T.sans}`, color: T.fg }}>{f.fact}</p>
-            <span style={{ flexShrink: 0, font: `500 11px/1 ${T.sans}`, color: T.brandDeep, background: T.brandSoft, padding: "4px 10px", borderRadius: 9999, whiteSpace: "nowrap" }}>
-              {f.document_name}{f.section_path ? ` · ${f.section_path}` : ""}
-            </span>
-          </div>
-        ))}
-        {openQuestions.length > 0 && (
-          <div style={{ marginTop: learnedFacts.length ? 8 : 0, padding: 14, borderRadius: T.rLg, border: `1px solid ${T.brand}33`, background: T.brandSoft + "66" }}>
-            <p style={{ margin: "0 0 10px", font: `500 12.5px/1.4 ${T.sans}`, color: T.fg }}>
-              {openQuestions.length} question{openQuestions.length > 1 ? "s" : ""} to clear before hand-off
-            </p>
-            {openQuestions.map((q) => <ReflectionQuestionRow key={q.id} question={q} onResolve={onResolve} />)}
-          </div>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-// MODULE-SCOPE (never define inside render — remounts the <input> on each keystroke → focus loss).
-function ReflectionQuestionRow({ question, onResolve }: {
-  question: ReflectionQuestion;
-  onResolve: (questionId: string, action: "answer" | "dismiss", answer?: string) => void;
-}) {
-  const [answer, setAnswer] = useState("");
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
-      <p style={{ flex: 1, margin: 0, font: `400 12.5px/1.4 ${T.sans}`, color: T.secondary }}>{question.fact}</p>
-      <input value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Clarify…"
-        style={{ width: 160, height: 28, padding: "0 8px", borderRadius: T.rSm, border: `1px solid ${T.borderDefault}`, background: T.bg, color: T.fg, font: `400 12px/1 ${T.sans}`, outline: "none" }} />
-      <Btn variant="secondary" size="sm" disabled={!answer.trim()} onClick={() => onResolve(question.id, "answer", answer)}>Answer</Btn>
-      <Btn variant="ghost" size="sm" onClick={() => onResolve(question.id, "dismiss")}>Not needed</Btn>
-    </div>
-  );
-}
 
 // SOF-49: "continue in background" affordance for the ingest-progress SSE stream. The upload
 // form is never actually blocked while files process (the Dropzone list already renders inline,
@@ -323,6 +274,9 @@ function BudgetPicker({ value, onChange }: { value: number | null; onChange: (v:
 
 export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onComplete: (projectId: string) => void; onBack?: () => void; resumeProjectId?: string | null }) {
   const [mode, setMode] = useState<"loading" | "fresh" | "returning">("loading");
+  // Intake → Processing → Interview state machine (PRD §2.4a). Handoff itself only ever fires
+  // from the Interview step, not directly off the intake screen — intake's CTA just advances.
+  const [view, setView] = useState<"intake" | "processing" | "interview">("intake");
   const [onFile, setOnFile] = useState<Org | null>(null);
   const [editOrg, setEditOrg] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -362,28 +316,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const [mats, setMats] = useState<{ video: MatFile[]; docs: MatFile[] }>({ video: [], docs: [] });
   const setProj = (k: string, v: any) => setP((x) => ({ ...x, [k]: v }));
 
-  // SOF-37: reflection surface — reference-backed facts learned from uploaded materials, and
-  // unreferenced candidates awaiting an answer/dismissal. Ingestion runs in the background
-  // (maybe_ingest_async), so this polls rather than fetching once on upload.
-  const [learnedFacts, setLearnedFacts] = useState<LearnedFact[]>([]);
-  const [questions, setQuestions] = useState<ReflectionQuestion[]>([]);
-  useEffect(() => {
-    if (!draftId) return;
-    let live = true;
-    const load = () => api.brief(draftId).then((d) => {
-      if (!live) return;
-      setLearnedFacts(d.learned_facts || []);
-      setQuestions(d.reflection_questions || []);
-    }).catch(() => {});
-    load();
-    const h = setInterval(load, 5000);
-    return () => { live = false; clearInterval(h); };
-  }, [draftId]);
-  const openQuestions = questions.filter((q) => q.status === "open");
-  const resolveQuestion = async (questionId: string, action: "answer" | "dismiss", answer?: string) => {
-    const d = await api.resolveReflection(draftId!, questionId, action, answer);
-    setQuestions(d.reflection_questions);
-  };
+  // Reflection Q&A (SOF-37) and brief-completeness Q&A now live in InterviewView (Step 3) —
+  // moved there so they're an active gate the user must clear before hand-off, not an inline
+  // aside on the intake form.
 
   // concierge rail chat (shares draftId)
   const [composer, setComposer] = useState("");
@@ -455,30 +390,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     api.patchDraft(draftId, { budget }).catch(() => {});
   }, [draftId, budget]);
 
-  // SOF-49: real per-file ingestion progress, over T3.2's dedicated SSE channel (separate from
-  // the chat stream — see console/state.py's _push_ingest_sse). One subscription per draft, for
-  // its whole lifetime — matches every file attached across both Dropzones, not just the batch
-  // that was in flight when it opened. Malformed/unrelated frames are ignored, never thrown.
-  useEffect(() => {
-    if (!draftId) return;
-    const applyEvent = (data: { blob_id: number; stage: string; pct: number; status: string }) => {
-      const patch = (list: MatFile[]): MatFile[] =>
-        list.map((f) => f.blobId === data.blob_id
-          ? { ...f, ingestStage: data.stage, ingestPct: data.pct,
-              ingestStatus: data.status === "ready" || data.status === "failed" ? data.status : "running" }
-          : f);
-      setMats((m) => ({ video: patch(m.video), docs: patch(m.docs) }));
-    };
-    const es = new EventSource(`/api/projects/${draftId}/ingest/stream`);
-    es.onmessage = (ev) => {
-      // Keepalive frames are bare `:` comment lines (SSE spec) — EventSource never fires
-      // onmessage for those at all, so this only ever sees real progress payloads; the
-      // try/catch is defensive against any other malformed frame, not the keepalive itself.
-      try { applyEvent(JSON.parse(ev.data)); } catch { /* malformed — skip */ }
-    };
-    return () => es.close();
-  }, [draftId]);
-
   // BYOK key submission: when the user brings their own key, POST it to /creds (Vault-stored; promote
   // threads creds_vault_ids into the runner env, BYOK wins over the platform key). The key NAME is
   // runtime-specific (ANTHROPIC_API_KEY for claude, OPENROUTER_API_KEY for opencode) — the runner-key
@@ -535,7 +446,10 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const projReady = projChecks.every((c) => c.done);
   // SOF-37 trust gate: the client-side disable mirrors the /promote route's own 409 (the real
   // enforcement point — this is only a proactive UX nicety, not the security boundary).
-  const ready = (fresh ? !!(f.industry && f.name && f.size && projReady) : projReady) && openQuestions.length === 0;
+  // Reflection questions are resolved in the Interview step now, not before Continue — gating
+  // Continue on them would trap a resumed draft that already has open questions before the user
+  // ever sees the screen that lets them resolve them.
+  const ready = fresh ? !!(f.industry && f.name && f.size && projReady) : projReady;
 
   // Returning org card: "Manage" seeds the inline editor from onFile; "Done" commits via PATCH /api/org
   // (the same org-patch the OrgAdmin screen uses) and refreshes the on-file card.
@@ -692,6 +606,14 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     </div>;
   }
 
+  if (view === "processing" && draftId) {
+    return <ProcessingScreen draftId={draftId} projectName={p.name} onDone={() => setView("interview")} />;
+  }
+
+  if (view === "interview" && draftId) {
+    return <InterviewView draftId={draftId} projectName={p.name} goal={p.goal} onBack={() => setView("intake")} onHandoff={handoff} submitting={submitting} error={error} />;
+  }
+
   const company = onFile?.name || "";
   const scaleText = [onFile?.headcount && `${onFile.headcount} people`, onFile?.revenue].filter(Boolean).join(" · ");
 
@@ -801,7 +723,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <ProcessingBanner files={mats.video.concat(mats.docs)} />
                     </div>
                   </Card>
-                  <ReflectionPanel cat="Your first project" learnedFacts={learnedFacts} openQuestions={openQuestions} onResolve={resolveQuestion} />
                     </div>
                     {!draftId && (
                       <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 30 }}>
@@ -899,7 +820,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <ProcessingBanner files={mats.video.concat(mats.docs)} />
                     </div>
                   </Card>
-                  <ReflectionPanel cat="This project" learnedFacts={learnedFacts} openQuestions={openQuestions} onResolve={resolveQuestion} />
                     </div>
                     {!draftId && (
                       <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 30 }}>
@@ -927,7 +847,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {onBack && <Btn variant="ghost" onClick={onBack}>Save & finish later</Btn>}
-              <Btn variant="primary" onClick={handoff} disabled={!ready || submitting || !draftId} title={ready ? "Hand off to the build factory" : (fresh ? "Set up your company & project to continue" : "Answer the project questions to continue")} style={ready ? { background: T.success } : undefined}>{submitting ? "Handing off…" : "Hand off to factory"} <Icon name="arrowRight" size={14} color="#fff" /></Btn>
+              <Btn variant="primary" onClick={() => setView("processing")} disabled={!ready || !draftId} title={ready ? "Continue to processing" : (fresh ? "Set up your company & project to continue" : "Answer the project questions to continue")} style={ready ? { background: T.success } : undefined}>Continue <Icon name="arrowRight" size={14} color="#fff" /></Btn>
             </div>
           </div>
         </div>

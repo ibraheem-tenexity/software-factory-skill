@@ -28,6 +28,7 @@ body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-s
 :root { --ease-out: cubic-bezier(0.16, 1, 0.3, 1); }
 @keyframes sfRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes sfPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@keyframes sfSpin { to { transform: rotate(360deg); } }
 
 .app { display: flex; flex-direction: column; height: 100%; }
 
