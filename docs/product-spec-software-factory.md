@@ -26,7 +26,7 @@ Six commitments that hold across every screen — the tests any new feature shou
 1. **Never a blank, silent screen.** Anything loading from the network shows a placeholder shaped like the real content. Anything long-running shows visible, specific progress — never a spinner standing in for an unknown wait.
 2. **One assistant, one identity, everywhere.** The guiding agent is the same character with the same voice on every project screen — onboarding, project home, the build board, documents. Only what it's talking about changes.
 3. **Nothing is created by accident.** State-changing actions — creating a project, starting a build — are explicit, named actions with visible confirmation, never an implicit side effect of moving through a flow.
-4. **Trust is calibrated, not assumed.** Every fact the system infers rather than the customer stated is visibly labeled with how confident the system is, so the customer knows exactly what to double-check.
+4. **Show sources, don't invent a score.** Every fact the system infers rather than the customer stated is traceable back to exactly where it came from — the specific file, upload, or answer — so the customer can judge it themselves. The system never asserts a confidence level it has no real way to compute.
 5. **Progress is resumable, never fragile.** Everything the system produces during a build is saved permanently as it's produced. A failure or a pause must never mean starting over.
 6. **Momentum beats completeness.** The product's job is to reach a *good* brief fast, not to interrogate for a *perfect* one. The customer can always say "that's enough, build it" — a longer intake is not automatically a better one.
 
@@ -83,7 +83,7 @@ The surface that creates the value — from first sign-in through a shipped, liv
 **Capabilities:**
 - Visible ingestion progress — what's being read right now, how much is left, an estimate of time remaining — never a generic spinner.
 - An option to keep working elsewhere while ingestion finishes in the background, with a clear indicator and an easy way back the moment it's done.
-- A review step showing exactly what the system learned — each fact traced back to the file it came from, with a confidence indicator, so the customer knows what's solid vs. what to double-check. **Correcting a wrong assumption here must be cheap and obvious** — this is the single biggest trust risk in the product: an uncaught wrong assumption means the whole build starts from a bad premise.
+- A review step showing exactly what the system learned — each fact traced back to the specific file or answer it came from, so the customer can see where it came from and judge it for themselves. **Correcting a wrong assumption here must be cheap and obvious** — this is the single biggest trust risk in the product: an uncaught wrong assumption means the whole build starts from a bad premise, and there is no confidence score doing the customer's judgment for them.
 - A short, focused follow-up conversation — one question at a time, offered as a quick multiple-choice when there's a clean set of likely answers, open-ended when the real answer needs nuance.
 - Building only begins once the customer has confirmed what was learned and answered every outstanding question — there is no path to a build starting on unconfirmed assumptions. But per Principle 6, "enough" is decided by the customer's own "let's build it," not by exhausting every possible question.
 
@@ -128,7 +128,7 @@ The surface that creates the value — from first sign-in through a shipped, liv
 ### 4.9 Reading the work: the Artifact Viewer
 **Need:** Every document or file the build produces needs one good place to actually read it — not a generic file download.
 
-**Capabilities:** Opens full-page from anywhere a produced file is clickable; browsable and searchable across everything produced for a project. Each file displayed appropriately to its type — formatted text with a table of contents, diagrams as diagrams, code with line numbers, tables for tabular data, a browsable tree for a codebase, a frame grid for designs, images as images. Basic metadata on every file — type, confidence where relevant, last updated; copy and download actions.
+**Capabilities:** Opens full-page from anywhere a produced file is clickable; browsable and searchable across everything produced for a project. Each file displayed appropriately to its type — formatted text with a table of contents, diagrams as diagrams, code with line numbers, tables for tabular data, a browsable tree for a codebase, a frame grid for designs, images as images. Basic metadata on every file — type and last updated; copy and download actions.
 
 **Feels like:** opening any artifact and having it look like it was made to be read — never a wall of raw markdown symbols.
 
@@ -185,7 +185,7 @@ A distinct surface for Tenexity's own staff, not customers — because someone h
 Not features of any one screen — properties every screen must have.
 
 - **Loading states.** Nothing reading from a live source may render empty or pop in unstyled. Every list, card, table, or field shows a placeholder matching its eventual shape and size while loading.
-- **Confidence transparency.** Anywhere the system presents a derived fact rather than one the customer explicitly stated, it's visibly labeled with how confident the system is — from very confident down to unknown.
+- **Source transparency.** Anywhere the system presents a derived fact rather than one the customer explicitly stated, it's visibly traced back to exactly where it came from, so the customer always knows what came from them versus what was inferred — without the system asserting a confidence score it has no real way to compute.
 - **Accessible control.** Every interactive element is clearly focusable and operable without a mouse.
 - **No silent state changes.** Creating a project, starting a build, and other consequential actions are explicit and confirmed — never an implicit side effect of navigation.
 
