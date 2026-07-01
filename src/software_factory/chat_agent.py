@@ -276,13 +276,14 @@ class ConciergeAgent:
         failure: retries once, then falls back to a safe {response, suggested_responses: []}
         rather than 500ing the turn (spec §3).
 
-        NOTE ON EXCEPTION SCOPE: this catches ValidationError (pydantic) and ValueError (this
-        class's own "no structured_response" guard) as the retry-worthy failure modes. It has
-        NOT been verified against a live model call in this environment (no API key available,
-        and no live spend was authorized for this exploratory build) -- confirm the exact
-        exception LangChain 1.x's structured-output coercion actually raises on a malformed
-        generation before this ships, and widen/narrow this catch to match reality rather than
-        assumption."""
+        EXCEPTION SCOPE (confirmed against the installed LangChain 1.3.11 source, not assumed):
+        `langchain.agents.create_agent`'s structured-output coercion raises
+        `langchain.agents.structured_output.StructuredOutputError` (base class covering both its
+        `StructuredOutputValidationError` and `MultipleStructuredOutputsError` subclasses) when the
+        model's tool-calling strategy produces a malformed/ambiguous structured response. Caught
+        alongside pydantic's own ValidationError (a direct `ConciergeTurn.model_validate` failure)
+        and this method's own "no structured_response" ValueError guard."""
+        from langchain.agents.structured_output import StructuredOutputError
         agent = self._compiled_agent_for(context)
         for _attempt in range(2):
             try:
@@ -293,6 +294,6 @@ class ConciergeAgent:
                 if structured is None:
                     raise ValueError("agent returned no structured_response")
                 return ConciergeTurn.model_validate(structured)
-            except (ValidationError, ValueError):
+            except (ValidationError, ValueError, StructuredOutputError):
                 continue
         return ConciergeTurn(response=_SAFE_FALLBACK_RESPONSE, suggested_responses=[])

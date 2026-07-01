@@ -17,11 +17,12 @@ import { api, Org, OrgInput } from "../../api";
 import {
   T, Icon, Sparkle, Wordmark, Avatar, StatusPill, CategoryLabel, SectionDivider, Btn, TextInput, TextArea,
   Field, Chip, Chips, IndustryTile, IntegrationRow, Dropzone, Message, Composer, Segmented,
-  OrgImportPicker, ChoiceList, INDUSTRIES, SIZES, REVENUE, ROLES, INTEGRATIONS,
+  OrgImportPicker, SuggestedResponseList, SuggestedResponseOption, INDUSTRIES, SIZES, REVENUE, ROLES, INTEGRATIONS,
 } from "./design";
 
 type Check = { id: string; label: string; done: boolean; optional?: boolean; nudge?: string };
-type ChatMsg = { role: string; content: string; choices?: string[] };
+// T2.2: suggestedResponses replaces choices — {response,type} drives single/multi-select render.
+type ChatMsg = { role: string; content: string; suggestedResponses?: SuggestedResponseOption[] };
 
 const SCOPE = ["Quoting / RFQ", "Order entry", "Pricing & approvals", "Inventory", "AP / AR", "Customer comms"];
 
@@ -502,8 +503,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     }
   };
 
-  // One Concierge conversation turn (shared by the Composer and the ChoiceList). Ensures a draft
-  // exists, posts the message, appends the agent's reply — plain text or up to 4 choices.
+  // One Concierge conversation turn (shared by the Composer and SuggestedResponseList). Ensures
+  // a draft exists, posts the message, appends the agent's reply — plain text or suggested
+  // responses (single/multi-select, T2.2).
   const sendTurn = async (raw: string) => {
     const text = raw.trim();
     if (!text || chatBusy) return;
@@ -526,13 +528,17 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     setComposer(""); setChatBusy(true); setChatErr("");
     try {
       const r = await api.converse(pid, text);
-      setMsgs((m) => [...m, { role: "agent", content: r.message, choices: r.choices }]);
+      setMsgs((m) => [...m, { role: "agent", content: r.response, suggestedResponses: r.suggested_responses }]);
     } catch {
       setChatErr("Message failed — try again.");
     }
     setChatBusy(false);
   };
   const sendChat = () => sendTurn(composer);
+  // SuggestedResponseList submits an array (one item for single-select, the ticked set for
+  // multi-select "Confirm") — sendTurn takes one message, so join multi-select picks into one
+  // reply, matching the spec's "Confirm submits the joined set."
+  const sendSuggested = (values: string[]) => sendTurn(values.join(", "));
 
   if (mode === "loading") {
     return <div style={{ height: "100%", display: "grid", placeItems: "center", background: T.bg }}>
@@ -816,8 +822,8 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
             {msgs.map((m, i) => (
               <React.Fragment key={i}>
                 <Message who={m.role === "user" ? "user" : "agent"} text={m.content} />
-                {m.role === "agent" && m.choices && m.choices.length > 0 && i === msgs.length - 1 && (
-                  <ChoiceList options={m.choices} onPick={sendTurn} disabled={chatBusy} />
+                {m.role === "agent" && m.suggestedResponses && m.suggestedResponses.length > 0 && i === msgs.length - 1 && (
+                  <SuggestedResponseList options={m.suggestedResponses} onSubmit={sendSuggested} disabled={chatBusy} />
                 )}
               </React.Fragment>
             ))}

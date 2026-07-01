@@ -79,12 +79,19 @@ class DbConversation:
     `choices` list per row (the existing test contract only asserts `role` values from
     `history()`, never `choices`/`content`, so this is a safe, surgical simplification)."""
 
-    def __init__(self, users=None, store=None):
+    def __init__(self, users=None, store=None, agent=None):
         if store is not None:
             self._store = store
         else:
             from software_factory.conversation_store import ConversationStore
             self._store = ConversationStore(users=users)
+        self._agent = agent   # ConciergeAgent, injectable; lazily built on first use if None
+
+    def _get_agent(self):
+        if self._agent is None:
+            from software_factory.chat_agent import ConciergeAgent
+            self._agent = ConciergeAgent()
+        return self._agent
 
     def history(self, project_id: str) -> list[dict]:
         """The full transcript for a project (oldest first). Empty if none yet."""
@@ -92,9 +99,13 @@ class DbConversation:
         return [{"role": r["role"], "content": r["input"] or "", "choices": []} for r in rows]
 
     def turn(self, project_id: str, message: str) -> dict:
-        """Record the user's message and return the (mock-scripted) agent's next turn:
-        {"message": str, "choices": list[str] (≤4), "done": bool}. Raises `Invalid` on an empty
-        message — persists nothing on that path, matching the mock."""
+        """Record the user's message, run it through the real LangChain ConciergeAgent (T2.1/T2.2,
+        "intake" context), and return a ConciergeTurn dict: {response, suggested_responses,
+        message_id, session_id}. Raises `Invalid` on an empty message — persists nothing on that
+        path, matching the mock.
+
+        Replaces T1.3's scripted `_SCRIPT` reply (agent rewrite, explicitly out of T1.3's scope,
+        now in scope here) — storage via ConversationStore is unchanged from T1.3."""
         text = (message or "").strip()
         if not text:
             raise Invalid("message is empty")
@@ -103,9 +114,15 @@ class DbConversation:
         self._store.append(session_id, "user", [{"type": "text", "text": text}],
                           project_id=project_id)
 
-        prior_agent_turns = sum(1 for r in self._store.history(session_id) if r["role"] == "agent")
-        done = prior_agent_turns >= len(_SCRIPT)
-        reply, choices = _HANDOFF if done else _SCRIPT[prior_agent_turns]
-        self._store.append(session_id, "agent", [{"type": "text", "text": reply}],
-                          project_id=project_id)
-        return {"message": reply, "choices": list(choices), "done": done}
+        from software_factory.conversation_provider import to_provider
+        rows = self._store.history(session_id)
+        messages = to_provider(rows, "openai")   # OpenRouter (Kimi) also uses the OpenAI shape
+
+        turn = self._get_agent().run("intake", messages)
+
+        suggested = [sr.model_dump() for sr in turn.suggested_responses]
+        block = {"type": "text", "text": turn.response, "suggested_responses": suggested}
+        message_id = self._store.append(session_id, "agent", [block], project_id=project_id)
+
+        return {"response": turn.response, "suggested_responses": suggested,
+                "message_id": message_id, "session_id": session_id}
