@@ -173,10 +173,27 @@ prod and `metadata.create_all` builds it in tests, so the two cannot drift.
   plus **`plan`/`monthly_budget_cap`** for Org Admin Usage & billing) — the org-on-file model behind
   Option C onboarding.
 - `blobs` — manifest for durable file storage (scope **`project`**|`org`, scope_id, kind, **`name`**
-  display filename, **`tag`** category, storage_key, content_type, size, sha256); see §6. The org
-  knowledge base (PRD §2.3) is the `scope='org'` rows.
+  display filename, **`tag`** category, storage_key, content_type, size, sha256, and **provenance**
+  — `source_blob_id`/`source_page`/`provenance` jsonb, set when a blob is itself an asset extracted
+  FROM another blob, e.g. an image pulled out of a document page); see §6. The org knowledge base
+  (PRD §2.3) is the `scope='org'` rows.
 - `blob_uses` (`blob_id`, `project_id`) — one row per project that imported an org knowledge-base doc;
   the doc's "used by N projects" count is `COUNT(DISTINCT project_id)`.
+- **Project Memory (SOF-26):** `doc_summary` (PK `blob_id`→`blobs.id` cascade) — the per-document
+  "2,000-ft view": `summary_md`, `key_facts` jsonb (each fact carries its own source reference,
+  never a bare confidence score), `outline` jsonb, a pgvector `embedding Vector(1024)`, and a
+  `status` (`pending|ready|failed`) advanced by the ingestion pipeline. `chunk` (PK `id`) — the leaf
+  retrieval unit: `ordinal`/`section_path`, `content`, a dense `Vector(1024)` embedding, and a
+  Postgres-generated `fts tsvector` (the sparse/keyword channel — no separate learned-sparse model
+  yet, see `project-memory-stack-2026.md`). Both are `scope`/`scope_id`-filtered like `blobs`, so
+  project- and org-scoped memory share one app-layer filter shape. Requires `CREATE EXTENSION
+  vector` (pgvector) on the target Postgres.
+- **Conversation store (SOF-26):** `conversation` — one row per message/turn (PK `id` = the
+  message_id returned to the FE), `session_id`+`seq` (unique together) for deterministic replay
+  order, `role`, a canonical `json_blob` content-block list (the source of truth for provider
+  replay — `input`/`tool_result` are denormalized display/query conveniences), and per-turn
+  `model`/`provider`/token/`cost_usd` attribution. Replaces the in-memory `/converse` mock and the
+  volume-only `chat.jsonl` — see `concierge-conversation-store.md`.
 
 *Access + migrations:*
 - `dbshim` is the storage seam: `connect(path)` returns a **minimal DB-API wrapper over psycopg3**
