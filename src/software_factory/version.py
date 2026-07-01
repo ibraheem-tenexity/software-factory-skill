@@ -1,13 +1,17 @@
 """Expose the running build's git SHA so a deploy can be verified against an expected commit.
 
 Sourced at runtime, in order: ``RAILWAY_GIT_COMMIT_SHA`` (injected fresh by Railway on every
-git-connected deploy, auto or manual) → ``SF_GIT_SHA`` (a manual override; no longer baked
-persistently by scripts/deploy.sh as of SOF-24) → ``git rev-parse HEAD`` fallback (local / dev
-checkout) → ``"unknown"``. RAILWAY_GIT_COMMIT_SHA must win: it's the only source that's guaranteed
-current on every deploy. SF_GIT_SHA is a persistent Railway service variable — once set, it
-outlives the deploy that set it, so checking it first let a stale value from an old MANUAL deploy
-silently shadow newer commits shipped by a native git-source AUTO-deploy (which never runs
-deploy.sh and so never refreshes it) — SOF-24, follow-up to the SOF-16 auto-deploy rollout.
+deploy triggered by a connected GitHub push — SOF-16's auto-deploy) → ``SF_GIT_SHA`` (still
+baked onto the service by every manual ``scripts/deploy.sh`` / ``railway up`` run — Railway's
+git-metadata vars are GitHub-source-only, so this remains the only signal a CLI deploy has) →
+``git rev-parse HEAD`` fallback (local / dev checkout) → ``"unknown"``.
+
+RAILWAY_GIT_COMMIT_SHA must be checked FIRST: it's the only source guaranteed current on every
+GitHub-triggered deploy. SF_GIT_SHA is a persistent Railway service variable — once set, it
+outlives the deploy that set it. Checking it first (the pre-SOF-24 bug) let a stale value baked
+by an old MANUAL deploy silently shadow newer commits shipped by a later native git-source
+AUTO-deploy, which never touches SF_GIT_SHA. SOF-24 fixed the READ order, not the write — deploy.sh
+still bakes SF_GIT_SHA on every manual run; it's just no longer checked before the fresher signal.
 ``dirty`` reflects an uncommitted working tree and is only meaningful in a dev checkout; an
 env-provided deploy reports ``false``.
 
