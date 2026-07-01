@@ -17,10 +17,10 @@ after — safe to run against a shared scratch DB.
 """
 from software_factory import dbshim
 from software_factory.repositories._exec import GlobalExec
-from software_factory.repositories.agent_prompts_repo import AgentPromptRepository
-from software_factory.repositories.blobs_repo import BlobRepository
-from software_factory.repositories.conversation_repo import ConversationRepository
-from software_factory.repositories.sow_repo import SowRepository
+from software_factory.repositories.agent_prompts import AgentPromptRepository
+from software_factory.repositories.blobs import BlobRepository
+from software_factory.repositories.conversation import ConversationRepository
+from software_factory.repositories.sow import SowRepository
 from software_factory.repositories.users import UserRepository
 
 

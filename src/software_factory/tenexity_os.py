@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 
 from .repositories._exec import GlobalExec
-from .repositories.aggregates_repo import AggregatesRepository
+from .repositories.aggregates import AggregatesRepository
 
 _aggregates = AggregatesRepository(GlobalExec())
 

@@ -1,7 +1,7 @@
 """Pure (no-DB) checks for OrgSecretsRepository — Core statements compile through the same
 to_sql pipeline as VaultRepository's text() constructs (see test_vault_repo_compile.py)."""
 from software_factory.repositories._compile import to_sql
-from software_factory.repositories.org_secrets_repo import OrgSecretsRepository
+from software_factory.repositories.org_secrets import OrgSecretsRepository
 
 
 class FakeExec:

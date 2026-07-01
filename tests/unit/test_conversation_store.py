@@ -15,7 +15,7 @@ import psycopg
 import pytest
 
 from software_factory.conversation_store import ConversationStore
-from software_factory.repositories.conversation_repo import ConversationRepository
+from software_factory.repositories.conversation import ConversationRepository
 from software_factory.repositories._exec import GlobalExec
 
 

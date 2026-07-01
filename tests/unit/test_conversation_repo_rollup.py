@@ -5,7 +5,7 @@ staying entirely off the DB (to_sql() only compiles a SQLAlchemy Core statement 
 tuple; it never opens a socket). Matches the standing no-DB-connection constraint on this box."""
 import datetime
 
-from software_factory.repositories.conversation_repo import ConversationRepository
+from software_factory.repositories.conversation import ConversationRepository
 from software_factory.repositories._compile import to_sql
 
 
