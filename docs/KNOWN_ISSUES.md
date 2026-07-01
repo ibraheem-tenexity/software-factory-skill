@@ -301,3 +301,17 @@ unambiguous).
   mitigated by the #104 watchdog and getting its root fix in **#105 (in-flight, above)**.
   Any broader research-decentralization beyond #100 was explicitly out of scope and is not
   started.
+- **SOF-23 — poller auto-resumed a real Stage-1 agent when seeding a verify/test project 🟢✅.**
+  A project row seeded directly for a fixture (bypassing `create_draft()`) could pass
+  `is_pipeline_project` if it also recorded an artifact, then look identical to a stage that
+  "died without finishing" — `stage_finished()` treats a missing `project.log` as "finished,"
+  which is true for a genuine crash but equally true for a stage that was never launched at
+  all. Hit twice (an earlier ticket, then again during SOF-21 verification): the poller
+  launched a real `claude -p` Stage-1 agent against the seed, creating a real empty GitHub
+  repo before it was noticed and killed. Fix: `auto_resume_dead_stage` now also requires
+  `state.launch_attempted` (set unconditionally the first time `_launch_stage` runs for a
+  project, even if the launch is then refused) OR an existing `project.log` on disk (covers
+  every real run launched before this guard shipped — no migration/backfill needed). Neither
+  signal is ever true for a bare seeded row. `create_draft()` remains the required way to seed
+  test/verify projects (see CLAUDE.md "Seeding test/verify projects"); this guard is
+  defense-in-depth for fixtures that need a pre-recorded artifact a draft can't have.

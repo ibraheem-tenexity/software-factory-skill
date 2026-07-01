@@ -114,6 +114,20 @@ Do not theorize. If you think you know why something is breaking, look at the co
 ~/software-factory-skill-bare is a bare clone of the software factory skill repository and worktree should be checked out there and not in the home dir.
 
 
+## Seeding test/verify projects (SOF-23)
+Never insert a project row directly (writing state/artifacts straight into the project store) to
+exercise a feature. The live poller auto-resumes any project row that looks mid-pipeline — it has
+launched a real Stage-1 `claude -p` agent against a bare seeded row before, creating a real GitHub
+repo and burning real cost, because a seeded row with an artifact can look identical to a stage
+that "died without finishing."
+- **Always seed via `Console.create_draft()`** — it sets `phase='draft'` and records no artifact,
+  and the poller explicitly ignores drafts (`is_pipeline_project` returns False for any draft).
+  Promote it via `promote_draft()` only when you actually want the pipeline to run.
+- If your fixture needs a non-draft row with a pre-recorded artifact (drafts can't have artifacts),
+  `auto_resume_dead_stage` also refuses any row whose current stage was never actually launched
+  (no `state.launch_attempted` and no `project.log` on disk) — but `create_draft()` remains the
+  required, primary method; this is defense-in-depth, not a green light to skip it.
+
 ## PR Review Loop
 PRs are a two-way conversation, not a fire-and-forget hand-off:
 - **The integrator MUST leave review comments on every PR** — concrete, actionable suggested improvements (not a silent merge or a bare reject). Even when merging, note what could be better; when bouncing, say exactly what to change.

@@ -1382,6 +1382,55 @@ def test_auto_resume_never_resurrects_a_ghost_run(tmp_path):
     assert launcher.argv is None    # nothing launched
 
 
+def test_auto_resume_never_resurrects_a_seeded_row_with_no_launch_history(tmp_path):
+    # SOF-23: a project row seeded directly for a test/verify fixture (not via create_draft,
+    # which the poller already ignores) — but WITH a recorded artifact, so it passes the ghost
+    # check above — must still not auto-resume. It never went through _launch_stage, so it has
+    # neither launch_attempted nor a project.log; both the never-armed row and a genuinely-dead
+    # real stage look identical by phase/stage/stage1_done alone, so this guard is the only thing
+    # telling them apart.
+    from software_factory.db import ProjectStore, db_path
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    pid = "project-seeded"
+    ProjectStore(db_path(str(tmp_path), pid)).record_artifact("input", "input/brief.md", kind="context")
+    st = c._load_state(pid)
+    st.phase = "provision"   # deliberately NOT 'draft' — a seed that skipped create_draft()
+    st.stage = 1
+    st.save()
+    assert c.is_pipeline_project(pid) is True      # has an artifact + non-draft phase: passes the ghost check
+    assert c.auto_resume_dead_stage(pid) is False  # SOF-23 guard: never launched -> refuse
+    assert launcher.argv is None
+
+
+def test_auto_resume_still_resumes_a_real_run_via_preexisting_project_log(tmp_path):
+    # SOF-23 backward-compat: a real run launched BEFORE this guard shipped never had a chance
+    # to set launch_attempted, so the guard must also accept a project.log that already exists
+    # on disk — written at the exact path Console._paths()/auto_resume_dead_stage itself uses,
+    # not a parallel hand-built path (a path mismatch here would silently block ALL auto-resume,
+    # including genuine crashes).
+    import os
+    import time
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    pid = "project-oldrun"
+    from software_factory.db import ProjectStore, db_path
+    ProjectStore(db_path(str(tmp_path), pid)).record_artifact("input", "input/brief.md", kind="context")
+    st = c._load_state(pid)
+    st.phase = "research"
+    st.stage = 1
+    assert st.launch_attempted is False    # simulates a pre-fix row: field never got set
+    st.save()
+    base = c._paths(pid)["base"]
+    log_path = os.path.join(base, "project.log")
+    with open(log_path, "wb") as f:
+        f.write(b"[real historical launch output]\n")
+    stale = time.time() - 300   # past stage_finished's 120s idle-log grace (no live handle either)
+    os.utime(log_path, (stale, stale))
+    assert c.auto_resume_dead_stage(pid) is True    # log-existence fallback still resumes it
+    assert launcher.argv is not None
+
+
 # ---- Per-run model picks (claude runtime): planning = S1/S2, implementation = S3 ----
 
 def _argv_model(argv):
