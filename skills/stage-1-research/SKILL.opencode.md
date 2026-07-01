@@ -54,6 +54,15 @@ draft from the SAME context (`input/brief.md` + `input/interview.md` + `context.
 `input/images/`). For each: `spawn-agent <id> <role> <model> research`, do its work YOURSELF, then
 `finish-agent <id> success`:
 
+The **memory** MCP (present when the operator enabled Project Memory) grounds every seat in the
+customer's uploaded materials, not just `input/brief.md`. Call `get_project_overview` FIRST — a
+project brief + rollup + key-facts digest, cheap and coarse. Then `search_memory("<specific
+question>")` for anything a seat needs that the brief doesn't spell out — it returns the source
+document + section for every hit, so cite it. **Graceful fallback (do this, don't skip it):** if a
+memory tool errors, times out, or isn't offered this run, do NOT retry and do NOT block — continue
+with `input/brief.md`/`context.md`/`input/interview.md` alone, exactly as before Project Memory
+existed. Memory makes the PRD more grounded; it must never be a reason the stage stalls.
+
 1. **VANGUARD** (domain.expert) — the grounding anchor. **Web research REQUIRED.** Prefer the **exa**
    web-search MCP (wired into your workspace — its `web_search`-type tools give real search results);
    `webfetch` the best pages it returns (or `webfetch` `https://duckduckgo.com/html/?q=<query>` as a
