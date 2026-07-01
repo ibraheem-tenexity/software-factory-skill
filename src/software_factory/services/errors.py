@@ -30,3 +30,13 @@ class NotFound(ServiceError):
 class Forbidden(ServiceError):
     """The caller is authenticated but not allowed to perform this action."""
     status_code = 403
+
+
+class Conflict(ServiceError):
+    """The request conflicts with current state (duplicate, or a guarded invariant)."""
+    status_code = 409
+
+
+class Unprocessable(ServiceError):
+    """Well-formed but semantically invalid (a store-level ValueError)."""
+    status_code = 422
