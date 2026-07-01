@@ -5,18 +5,19 @@
 // Usage & billing via /api/org/usage (+ PATCH /api/org/billing). Every section degrades to an empty
 // state until its backend lands, so the screen ships independently.
 import { useEffect, useRef, useState } from "react";
-import { api, Org, Member, OrgDoc, OrgUsage } from "../api";
+import { api, Org, Member, OrgDoc, OrgUsage, OrgSecret } from "../api";
 import { useMe } from "./MeContext";
 import { T, Icon, Sparkle, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, Field, TextInput } from "./onboarding/design";
 import { AccountMenu } from "./AccountMenu";
 import { ListRowSkel, FileTileSkel, MetricCardSkel } from "./skeleton";
 
-type Section = "profile" | "knowledge" | "systems" | "team" | "billing";
+type Section = "profile" | "knowledge" | "systems" | "secrets" | "team" | "billing";
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "profile", label: "Company profile" },
   { id: "knowledge", label: "Knowledge base" },
   { id: "systems", label: "Connected systems" },
+  { id: "secrets", label: "Secrets" },
   { id: "team", label: "Team & access" },
   { id: "billing", label: "Usage & billing" },
 ];
@@ -133,11 +134,18 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
   const [editPlan, setEditPlan] = useState(false);
   const [planDraft, setPlanDraft] = useState<{ plan: string; cap: string }>({ plan: "", cap: "" });
 
+  // secrets
+  const [secrets, setSecrets] = useState<OrgSecret[]>([]);
+  const [secretsLoading, setSecretsLoading] = useState(true);
+  const [secretModal, setSecretModal] = useState<{ mode: "add" } | { mode: "rotate"; name: string } | null>(null);
+  const [secretForm, setSecretForm] = useState({ name: "", kind: "api_key", value: "", show: false });
+
   const docsInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadMembers = () => api.orgMembers().then((d) => { setMembers(d.members || []); setMembersLoading(false); }).catch(() => { setMembers([]); setMembersLoading(false); });
   const loadUsage = () => api.orgUsage().then((u) => { setUsage(u); setUsageLoading(false); }).catch(() => { setUsage(null); setUsageLoading(false); });
   const loadDocs = () => { setDocsLoading(true); api.orgDocs().then((d) => setDocs(d.docs || [])).catch(() => setDocs([])).finally(() => setDocsLoading(false)); };
+  const loadSecrets = () => { setSecretsLoading(true); api.listSecrets().then((d) => setSecrets(d.secrets || [])).catch(() => setSecrets([])).finally(() => setSecretsLoading(false)); };
 
   // KB: real upload (FileReader→base64→POST /api/org/docs) + delete.
   const uploadDocs = async (list: FileList | null) => {
@@ -178,6 +186,24 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
     loadDocs();
     loadUsage();
   }, []);
+
+  useEffect(() => { if (sec === "secrets") loadSecrets(); }, [sec]);
+
+  const saveSecret = async () => {
+    if (secretModal?.mode === "add") {
+      await api.createSecret({ name: secretForm.name, value: secretForm.value, kind: secretForm.kind });
+    } else if (secretModal?.mode === "rotate") {
+      await api.rotateSecret(secretModal.name, { value: secretForm.value });
+    }
+    setSecretModal(null);
+    loadSecrets();
+  };
+
+  const deleteSecret = async (name: string) => {
+    if (!window.confirm(`Delete secret "${name}"?`)) return;
+    await api.deleteSecret(name);
+    loadSecrets();
+  };
 
   const startEdit = () => { setDraft({ ...org }); setEditing(true); setNotice(""); };
   const saveProfile = async () => {
@@ -352,6 +378,71 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
                       </div>
                     );
                   })}
+                </div>
+              </>
+            )}
+
+            {/* ── Secrets ── */}
+            {sec === "secrets" && (
+              <>
+                <SecHead title="Secrets" desc="Encrypted credentials shared across projects — reference by name as org:<NAME>."
+                  action={<Btn variant="primary" size="sm" onClick={() => { setSecretModal({ mode: "add" }); setSecretForm({ name: "", kind: "api_key", value: "", show: false }); }}><Icon name="plus" size={14} color="#fff" /> Add secret</Btn>} />
+                {secretModal && (
+                  <div style={{ marginBottom: 16, padding: "14px 16px", border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised }}>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
+                      {secretModal.mode === "add" ? (
+                        <Field label="Name (A–Z, 0–9, _)" style={{ flex: 1, minWidth: 140 }}>
+                          <TextInput value={secretForm.name} onChange={(v) => setSecretForm({ ...secretForm, name: v.toUpperCase().replace(/[^A-Z0-9_]/g, "") })} placeholder="MY_API_KEY" />
+                        </Field>
+                      ) : (
+                        <div style={{ flex: 1, minWidth: 140 }}>
+                          <CategoryLabel style={{ display: "block", marginBottom: 6 }}>Name</CategoryLabel>
+                          <div style={{ font: `600 13px/1 ${T.mono}`, color: T.fg, padding: "9px 0" }}>{secretModal.name}</div>
+                        </div>
+                      )}
+                      <Field label="Kind" style={{ width: 140 }}>
+                        <select value={secretForm.kind} onChange={(e) => setSecretForm({ ...secretForm, kind: e.target.value })}
+                          style={{ height: 36, borderRadius: T.rMd, border: `1px solid ${T.borderDefault}`, padding: "0 10px", font: `500 13px/1 ${T.sans}`, color: T.fg, background: T.raised, width: "100%" }}>
+                          <option value="api_key">API Key</option>
+                          <option value="token">Token</option>
+                          <option value="password">Password</option>
+                          <option value="connection_string">Connection String</option>
+                        </select>
+                      </Field>
+                      <Field label="Value" style={{ flex: 2, minWidth: 180 }}>
+                        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                          <TextInput type={secretForm.show ? "text" : "password"} value={secretForm.value} onChange={(v) => setSecretForm({ ...secretForm, value: v })} placeholder="paste value here" style={{ flex: 1, paddingRight: 40 }} />
+                          <button onClick={() => setSecretForm({ ...secretForm, show: !secretForm.show })} style={{ position: "absolute", right: 8, border: "none", background: "transparent", cursor: "pointer", font: `500 11px/1 ${T.sans}`, color: T.secondary }}>{secretForm.show ? "hide" : "show"}</button>
+                        </div>
+                      </Field>
+                      <Btn variant="primary" size="md" onClick={saveSecret}>{secretModal.mode === "add" ? "Save" : "Rotate"}</Btn>
+                      <Btn variant="ghost" size="md" onClick={() => setSecretModal(null)}>Cancel</Btn>
+                    </div>
+                  </div>
+                )}
+                <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden", background: T.raised, boxShadow: T.shadowXs }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 110px 60px 90px 90px", padding: "9px 16px", borderBottom: `1px solid ${T.borderSubtle}`, background: T.sunken }}>
+                    {["Name", "Value", "Kind", "Used", "Updated", ""].map((h) => <CategoryLabel key={h}>{h}</CategoryLabel>)}
+                  </div>
+                  {secretsLoading && <div style={{ padding: "12px 16px" }}><ListRowSkel rows={3} /></div>}
+                  {!secretsLoading && secrets.length === 0 && (
+                    <div style={{ padding: "20px", textAlign: "center", font: `400 13px/1.4 ${T.sans}`, color: T.tertiary }}>No secrets yet. Add one to share credentials across projects.</div>
+                  )}
+                  {secrets.map((s, i) => (
+                    <div key={s.name} style={{ display: "grid", gridTemplateColumns: "1fr 140px 110px 60px 90px 90px", alignItems: "center", padding: "12px 16px", borderTop: i ? `1px solid ${T.borderSubtle}` : "none" }}>
+                      <span style={{ font: `600 13px/1 ${T.mono}`, color: T.fg }}>{s.name}</span>
+                      <span style={{ font: `500 13px/1 ${T.mono}`, color: T.tertiary }}>••••••{s.last4}</span>
+                      <CategoryLabel>{s.kind}</CategoryLabel>
+                      <span style={{ font: `400 12px/1 ${T.sans}`, color: T.secondary }}>{s.used_by}</span>
+                      <span style={{ font: `400 11px/1 ${T.mono}`, color: T.tertiary }}>{s.updated_at.slice(0, 10)}</span>
+                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                        <button onClick={() => { setSecretModal({ mode: "rotate", name: s.name }); setSecretForm({ name: "", kind: s.kind, value: "", show: false }); }}
+                          style={{ font: `500 11.5px/1 ${T.sans}`, color: T.brandDeep, border: "none", background: "transparent", cursor: "pointer" }}>Rotate</button>
+                        <button onClick={() => deleteSecret(s.name)}
+                          style={{ font: `500 11.5px/1 ${T.sans}`, color: T.danger, border: "none", background: "transparent", cursor: "pointer" }}>Delete</button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </>
             )}

@@ -102,6 +102,8 @@ export type OrgUsage = {
   by_project: { project_id: string; name: string; spent_usd: number }[];
 };
 
+export type OrgSecret = { name: string; kind: string; last4: string; used_by: number; updated_at: string };
+
 // Public boot config the SPA reads to decide whether to gate on login (auth on) or open
 // straight to the console (auth off, dev/test). client_id feeds the Google sign-in button.
 export type AuthConfig = { enabled: boolean; client_id: string };
@@ -329,6 +331,10 @@ export const api = {
   orgDocs: () => get<{ docs: OrgDoc[] }>("/api/org/docs"),
   orgUsage: () => get<OrgUsage>("/api/org/usage"),
   patchBilling: (body: { plan?: string; monthly_budget_cap?: number }) => send<OrgUsage>("/api/org/billing", "PATCH", body),
+  listSecrets: () => get<{ secrets: OrgSecret[] }>("/api/org/secrets"),
+  createSecret: (body: { name: string; value: string; kind: string }) => send<{ secret: OrgSecret }>("/api/org/secrets", "POST", body),
+  rotateSecret: (name: string, body: { value: string }) => send<{ secret: OrgSecret }>(`/api/org/secrets/${encodeURIComponent(name)}`, "PATCH", body),
+  deleteSecret: (name: string) => send<void>(`/api/org/secrets/${encodeURIComponent(name)}`, "DELETE"),
   createProject: (body: { description: string; project_name: string }) =>
     send<{ project_id: string }>("/api/projects", "POST", body),
   // ── Tenexity OS admin portal (§3). Staff-gated, cross-tenant. Degrade to empty until live.
