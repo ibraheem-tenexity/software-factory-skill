@@ -1,10 +1,10 @@
 """Golden-file tests for to_provider (SOF-30/T1.2) — no DB, no live model calls, no real Storage.
 `resolve_image` is always injected with a fake for the role-mapping/shape tests; the two tests that
 exercise the REAL default resolver mock its dependencies (BlobRepository.by_id, storage.enabled/
-storage.get/storage.url) rather than hitting Postgres or a network. Safe to run anywhere — but per
-the standing constraint on the box this was built on (conftest.py's collection-time create_all
-against live Postgres once T0.1's pgvector columns landed), no pytest invocation was run in this
-session at all; verified via direct python3 -c imports instead (see PR notes)."""
+storage.get_by_path/storage.url_by_path) rather than hitting Postgres or a network. Safe to run
+anywhere. `storage_key` in the by_id mock must be a full path (e.g. "project-abc/diagram.png"), not
+a bare key — SOF-50 found that mocking the two-arg storage.url/get here (bypassing _object_path
+entirely) let a real double-concatenation bug through un-caught."""
 import base64
 from unittest.mock import patch
 
@@ -116,17 +116,22 @@ def test_unsupported_provider_rejected():
 
 
 def test_default_image_resolver_prefers_signed_url_when_storage_enabled():
+    # storage_key is recorded as the FULL bucket-relative path (see storage.put) — SOF-50: using
+    # storage.url(scope_id, storage_key) here re-prefixed scope_id onto an already-full path
+    # (FileNotFoundError on real re-fetch). Assert url_by_path is called with the RAW storage_key,
+    # unmodified — that's the regression this test exists to catch.
     from software_factory.repositories.blobs_repo import BlobRepository
     from software_factory import storage
     with patch.object(BlobRepository, "by_id",
-                      return_value={"scope_id": "project-abc", "storage_key": "diagram.png"}), \
+                      return_value={"scope_id": "project-abc", "storage_key": "project-abc/diagram.png"}), \
          patch.object(storage, "enabled", return_value=True), \
-         patch.object(storage, "url", return_value="https://signed.example/diagram.png"):
+         patch.object(storage, "url_by_path", return_value="https://signed.example/diagram.png") as url_by_path:
         block = {"type": "image", "blob_id": 42, "media_type": "image/png"}
         assert _default_resolve_image(block, "openai") == {
             "type": "image_url", "image_url": {"url": "https://signed.example/diagram.png"}}
         assert _default_resolve_image(block, "anthropic") == {
             "type": "image", "source": {"type": "url", "url": "https://signed.example/diagram.png"}}
+    url_by_path.assert_called_with("project-abc/diagram.png")
 
 
 def test_default_image_resolver_falls_back_to_base64_when_storage_disabled():
@@ -136,15 +141,16 @@ def test_default_image_resolver_falls_back_to_base64_when_storage_disabled():
     from software_factory import storage
     raw = b"\x89PNG\r\n\x1a\nfakepngbytes"
     with patch.object(BlobRepository, "by_id",
-                      return_value={"scope_id": "project-abc", "storage_key": "diagram.png"}), \
+                      return_value={"scope_id": "project-abc", "storage_key": "project-abc/diagram.png"}), \
          patch.object(storage, "enabled", return_value=False), \
-         patch.object(storage, "get", return_value=raw):
+         patch.object(storage, "get_by_path", return_value=raw) as get_by_path:
         block = {"type": "image", "blob_id": 42, "media_type": "image/png"}
         openai_part = _default_resolve_image(block, "openai")
         anthropic_part = _default_resolve_image(block, "anthropic")
         assert openai_part["image_url"]["url"] == f"data:image/png;base64,{base64.b64encode(raw).decode()}"
         assert anthropic_part["source"]["type"] == "base64"
         assert base64.b64decode(anthropic_part["source"]["data"]) == raw
+    get_by_path.assert_called_with("project-abc/diagram.png")
 
 
 def test_default_image_resolver_raises_on_unknown_blob_id():
