@@ -59,6 +59,12 @@ _has_chat_key = False
 _chat_runner = None
 _sse_clients: dict[str, list] = {}
 _sse_lock = threading.Lock()
+# SOF-32: a SEPARATE channel from _sse_clients/_push_sse — that one feeds the live chat
+# transcript (ChatPanel.tsx), which does not filter by msg_type, so piping ingest-progress
+# events through it would spam the visible chat with "processing chunk 3/12" noise. This is
+# its own stream for a future ProcessingScreen (SOF-49) to consume, with zero risk to chat.
+_ingest_sse_clients: dict[str, list] = {}
+_ingest_sse_lock = threading.Lock()
 _project_stages: dict[str, int] = {}
 login_throttle = None
 
@@ -69,6 +75,7 @@ def reset():
     global PROJECTS_DIR, console, users, blobs, prompts, tool_store, agent_store, sow_store
     global org_service, secrets_svc, conversation_svc, admin_service
     global _has_chat_key, _chat_runner, _sse_clients, _sse_lock, _project_stages, login_throttle
+    global _ingest_sse_clients, _ingest_sse_lock
 
     PROJECTS_DIR = os.environ.get("SF_PROJECTS_DIR", os.path.join(HERE, "..", ".projects"))
     console = Console(PROJECTS_DIR)
@@ -100,6 +107,8 @@ def reset():
     _chat_runner = ChatAgentRunner(console, users) if _has_chat_key else None
     _sse_clients = {}
     _sse_lock = threading.Lock()
+    _ingest_sse_clients = {}
+    _ingest_sse_lock = threading.Lock()
     _project_stages = {}
     login_throttle = LoginThrottle()   # brute-force/DoS guard for POST /api/auth/password (in-process)
 
@@ -119,6 +128,18 @@ def _push_sse(project_id: str, msgs):
         data = json.dumps(msg.to_dict())
         for q in clients:
             q.append(f"data: {data}\n\n")
+
+
+def _push_ingest_sse(project_id: str, event: dict):
+    """SOF-32: push one ingest-progress event (plain dict, no ChatMessage wrapper needed since
+    this channel has no chat-history contract to keep) to clients watching this project's
+    ingestion. Shape: {blob_id, doc_name, stage, pct, status}. Separate from _push_sse — see
+    the _ingest_sse_clients docstring for why."""
+    with _ingest_sse_lock:
+        clients = _ingest_sse_clients.get(project_id, [])
+    data = json.dumps(event)
+    for q in clients:
+        q.append(f"data: {data}\n\n")
 
 
 def _react_enabled() -> bool:

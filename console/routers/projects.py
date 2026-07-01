@@ -1,15 +1,18 @@
 """Projects (runs) + drafts: list/create, run-scoped GETs, Project View §2.5 aggregates,
 run-scoped actions, and the Option C draft write-through + handoff."""
+import asyncio
 import base64
 import mimetypes
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 
 from software_factory import storage, project_view
 from software_factory.console import ProjectRequest, project_paths
 from software_factory.db import artifact_by_id
 from software_factory.deps import extract_env_creds
+from software_factory.memory.ingest import maybe_ingest_async
 
 import console.state as state
 from console.deps import require_authed, authorize_project, _can_see
@@ -210,10 +213,38 @@ def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authori
         raise HTTPException(status_code=400, detail="data_b64 must be valid base64")
     key = f"materials/{body.name}"
     storage.put(pid, key, raw)
-    state.blobs.record("project", pid, f"{pid}/{key}", name=body.name, tag=body.tag,
+    blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=body.name, tag=body.tag,
                  kind=state._doc_kind(body.name), content_type=body.content_type,
                  size_bytes=len(raw), sha256=storage.sha256(raw))
+    maybe_ingest_async(blob_id, state.console)
     return project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid))
+
+
+@router.get("/api/projects/{pid}/ingest/stream")
+async def project_ingest_stream(pid: str, v: tuple = Depends(authorize_project)):
+    """SOF-32: SSE for real-time ingestion progress — a channel SEPARATE from the chat stream
+    (see console/state.py's _push_ingest_sse docstring). Same drain/keepalive pattern as
+    chat_stream (console/routers/chat.py)."""
+    q: list[str] = []
+    with state._ingest_sse_lock:
+        state._ingest_sse_clients.setdefault(pid, []).append(q)
+
+    async def gen():
+        try:
+            while True:
+                if q:
+                    yield q.pop(0)
+                else:
+                    yield ": keepalive\n\n"
+                    await asyncio.sleep(2)
+        finally:
+            with state._ingest_sse_lock:
+                clients = state._ingest_sse_clients.get(pid, [])
+                if q in clients:
+                    clients.remove(q)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
 
 
 @router.patch("/api/projects/{pid}")
@@ -430,10 +461,15 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
             raw = open(file_path, "rb").read()
             key = f"materials/{name}"
             storage.put(pid, key, raw)
-            state.blobs.record("project", pid, f"{pid}/{key}", name=name,
+            blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=name,
                                kind=state._doc_kind(name),
                                content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
                                size_bytes=len(raw), sha256=storage.sha256(raw))
+            # SOF-32: this is the actual live onboarding upload path (draft-only, pre-promotion)
+            # — the /materials route below is a separate, any-phase path. Missing this hook here
+            # means real user uploads during the interview never get ingested at all, which is
+            # exactly when SOF-37's reflection step needs facts to already exist.
+            maybe_ingest_async(blob_id, state.console)
     return {"attached": written}
 
 
