@@ -3,7 +3,7 @@ import cytoscape, { Core } from "cytoscape";
 import { api } from "../api";
 
 const NODE_COLORS: Record<string, string> = {
-  orchestrator: "#002b5c", phase: "#4a8fd4", agent: "#7c3aed", artifact: "#0891b2",
+  orchestrator: "#1A7BFF", phase: "#4a8fd4", agent: "#7c3aed", artifact: "#0891b2",
   blocker: "#dc2626", gate: "#0891b2", deps: "#d97706",
 };
 
