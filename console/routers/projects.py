@@ -18,7 +18,7 @@ import console.state as state
 from console.deps import require_authed, authorize_project, _can_see
 from console.schemas import (ProjectCreateIn, DraftCreateIn, ProjectPatchIn, MaterialScopeIn, OrgDocIn,
                              ContinueIn, DepsIn, ProvideDepIn, Stage3In, BudgetIn, RetryIn, RetryNodeIn,
-                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn)
+                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, ReflectionAnswerIn)
 
 router = APIRouter()
 
@@ -103,10 +103,19 @@ def project_deployments(pid: str, v: tuple = Depends(authorize_project)):
 
 @router.get("/api/projects/{pid}/brief")
 def project_brief(pid: str, v: tuple = Depends(authorize_project)):
-    """The structured onboarding brief (shared by the chat interview and the brief form)."""
+    """The structured onboarding brief (shared by the chat interview and the brief form).
+    SOF-37: also carries the reflection surface — learned_facts (reference-backed, from ready
+    doc_summary rows) and reflection_questions (unreferenced candidates awaiting an answer/
+    dismissal — see the promote-route gate below)."""
     from software_factory.brief import coverage as _cov
+    from software_factory.memory.store import MemoryStore
     brief = state.console.draft_brief(pid)
-    return {"brief": brief, "coverage": _cov(brief)}
+    project_state = state.console._load_state(pid)
+    return {
+        "brief": brief, "coverage": _cov(brief),
+        "learned_facts": MemoryStore().learned_facts("project", pid),
+        "reflection_questions": project_state.reflection_questions,
+    }
 
 
 @router.put("/api/projects/{pid}/brief")
@@ -481,12 +490,45 @@ def store_draft_creds(pid: str, body: CredsIn, v: tuple = Depends(authorize_proj
     return state.console.store_draft_creds(pid, body.credentials)
 
 
+@router.patch("/api/projects/{pid}/reflection/{question_id}")
+def resolve_reflection_question(pid: str, question_id: str, body: ReflectionAnswerIn,
+                                v: tuple = Depends(authorize_project)):
+    """SOF-37: resolve one outstanding reflection question (an unreferenced key_facts
+    candidate) — "answer" records the supplied text, "dismiss" says it isn't needed. Either
+    way flips status off "open", which is what the promote-route gate below checks."""
+    if body.action not in ("answer", "dismiss"):
+        raise HTTPException(status_code=400, detail="action must be 'answer' or 'dismiss'")
+    project_state = state.console._load_state(pid)
+    questions = list(project_state.reflection_questions or [])
+    match = next((q for q in questions if q["id"] == question_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="reflection question not found")
+    match["status"] = "answered" if body.action == "answer" else "dismissed"
+    match["answer"] = body.answer if body.action == "answer" else None
+    project_state.reflection_questions = questions
+    project_state.save()
+    return {"reflection_questions": questions}
+
+
 @router.post("/api/projects/{pid}/promote")
 def promote_draft(pid: str, body: PromoteIn, v: tuple = Depends(authorize_project)):
     """Hand off to the factory: promote the draft into a real run and launch Stage 1. The composed
-    state.description + accumulated brief are the payload (description override optional)."""
+    state.description + accumulated brief are the payload (description override optional).
+
+    SOF-37 trust gate: refuses while any reflection question (an unreferenced key_facts
+    candidate from the ingested materials) is still open — the operator must answer or
+    dismiss it first. This is independent of (and does not touch) brief.enough()'s required-
+    section coverage check, which is not currently wired into this route at all — a separate,
+    pre-existing gap outside this ticket's scope."""
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
+    open_questions = [q for q in (state.console._load_state(pid).reflection_questions or [])
+                      if q["status"] == "open"]
+    if open_questions:
+        raise HTTPException(status_code=409, detail={
+            "error": "outstanding reflection questions must be answered or dismissed first",
+            "open_questions": open_questions,
+        })
     try:
         project_id = state.console.promote_draft(pid, description=body.description, target=body.target)
     except ValueError as e:                # duplicate project name

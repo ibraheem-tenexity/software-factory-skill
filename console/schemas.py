@@ -192,6 +192,14 @@ class PromoteIn(BaseModel):
     target: str = "railway"
 
 
+class ReflectionAnswerIn(BaseModel):
+    """SOF-37: resolve one reflection question — either supply the missing info ("answer") or
+    say it isn't needed ("dismiss"). Either way flips status off "open", which is what the
+    promote-route gate checks."""
+    action: str  # "answer" | "dismiss"
+    answer: str = ""
+
+
 # ── Tenexity OS (§3) admin bodies ───────────────────────────────────────────────────────────────
 class DemoIn(BaseModel):
     is_demo: bool = False
