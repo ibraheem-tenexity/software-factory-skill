@@ -235,7 +235,7 @@ def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authori
     blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=body.name, tag=body.tag,
                  kind=state._doc_kind(body.name), content_type=body.content_type,
                  size_bytes=len(raw), sha256=storage.sha256(raw))
-    maybe_ingest_async(blob_id, state.console)
+    maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
     return _project_documents(pid)
 
 
@@ -506,7 +506,7 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
             # — the /materials route below is a separate, any-phase path. Missing this hook here
             # means real user uploads during the interview never get ingested at all, which is
             # exactly when SOF-37's reflection step needs facts to already exist.
-            maybe_ingest_async(blob_id, state.console)
+            maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
     return {"attached": written}
 
 
@@ -543,20 +543,30 @@ def promote_draft(pid: str, body: PromoteIn, v: tuple = Depends(authorize_projec
     """Hand off to the factory: promote the draft into a real run and launch Stage 1. The composed
     state.description + accumulated brief are the payload (description override optional).
 
-    SOF-37 trust gate: refuses while any reflection question (an unreferenced key_facts
-    candidate from the ingested materials) is still open — the operator must answer or
-    dismiss it first. This is independent of (and does not touch) brief.enough()'s required-
-    section coverage check, which is not currently wired into this route at all — a separate,
-    pre-existing gap outside this ticket's scope."""
+    SOF-51 trust gate: refuses to promote unless BOTH hold — the brief covers every
+    brief.REQUIRED_SECTIONS (goals/success_metrics/definition_of_done) AND no reflection
+    question (an unreferenced key_facts candidate from ingested materials, SOF-37) is still
+    open. Composed into ONE 409 when either or both fail, so the FE/operator sees everything
+    that's missing at once rather than fixing one and re-discovering the other on resubmit.
+
+    Known gap, not fixed here (flagging, not silently patching): this check is enforced only at
+    this HTTP layer. console.promote_draft() itself has no such gate, and the concierge's own
+    hand_off_to_factory tool (chat_agent.py) calls that method directly — so a user who talks
+    the concierge into promoting bypasses BOTH this check and SOF-37's, same as before this
+    ticket. Out of scope per the ticket's explicit "at the promote route" framing."""
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
-    open_questions = [q for q in (state.console._load_state(pid).reflection_questions or [])
-                      if q["status"] == "open"]
-    if open_questions:
-        raise HTTPException(status_code=409, detail={
-            "error": "outstanding reflection questions must be answered or dismissed first",
-            "open_questions": open_questions,
-        })
+    project_state = state.console._load_state(pid)
+    from software_factory.brief import enough as _enough
+    ready, missing_sections = _enough(project_state.brief or {})
+    open_questions = [q for q in (project_state.reflection_questions or []) if q["status"] == "open"]
+    if not ready or open_questions:
+        detail = {"error": "project is not ready to promote"}
+        if not ready:
+            detail["missing_sections"] = missing_sections
+        if open_questions:
+            detail["open_questions"] = open_questions
+        raise HTTPException(status_code=409, detail=detail)
     try:
         project_id = state.console.promote_draft(pid, description=body.description, target=body.target)
     except ValueError as e:                # duplicate project name
