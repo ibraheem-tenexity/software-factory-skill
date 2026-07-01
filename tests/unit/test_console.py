@@ -152,7 +152,7 @@ def test_uploaded_pdf_is_extracted_to_markdown_and_composed_into_stage1_input(tm
     assert os.path.exists(os.path.join(input_dir, "brief.pdf"))
     assert "EPC contract T&C" in open(os.path.join(input_dir, "brief.pdf.md")).read()
     # the composed Stage 1 input merges the user prompt and the extracted markdown
-    ctx = open(os.path.join(input_dir, "context.txt")).read()
+    ctx = open(os.path.join(input_dir, "context.md")).read()
     assert "analyze this" in ctx
     assert "EPC contract T&C" in ctx
 
@@ -840,12 +840,12 @@ def test_graph_agent_status_reflects_outcome(tmp_path):
 
 
 def test_pasted_description_is_persisted_and_input_artifact_is_real(tmp_path):
-    # The user pastes context (no file) → it's saved as input/context.txt and the input artifact
+    # The user pastes context (no file) → it's saved as input/context.md and the input artifact
     # is a REAL green node, not a hollow placeholder.
     import os
     c = console(tmp_path, FakeLauncher())
     rid = c.start_project(ProjectRequest(description="the full SOW text"))
-    assert open(os.path.join(str(tmp_path), rid, "input", "context.txt")).read() == "the full SOW text"
+    assert open(os.path.join(str(tmp_path), rid, "input", "context.md")).read() == "the full SOW text"
     inp = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "artifact" and n["data"]["label"] == "input"]
     assert inp and inp[0]["status"] == "created"
 

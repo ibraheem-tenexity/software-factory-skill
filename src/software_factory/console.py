@@ -1319,14 +1319,14 @@ class Console:
         for name in written:
             # raw PDF/DOCX originals go to blob storage (handled by the router, not here);
             # .md extractions + other file types (images, txt, …) become context artifacts;
-            # context.txt is skipped (no description in attach calls)
-            if name == "context.txt":
+            # context.md is skipped (no description in attach calls)
+            if name == "context.md":
                 continue
             nl = name.lower()
             if nl.endswith(".pdf") or nl.endswith(".docx"):
                 continue  # original binary — caller blob-records it
             db.record_artifact("input", "input/" + name, kind="context")
-        return [w for w in written if w != "context.txt"]
+        return [w for w in written if w != "context.md"]
 
     def update_draft_brief(self, project_id: str, brief: dict, coverage: dict | None = None) -> dict:
         """Merge brief sections into a draft and persist. Returns the updated coverage so the

@@ -38,7 +38,9 @@ def persist_and_compose(
     interview_md: str | None = None,
 ) -> list[str]:
     """Write attached files into `input_dir`, converting PDFs (markitdown) and Word docs to
-    Markdown, then write the composed Stage 1 input to `input_dir/context.txt`. Word docs go
+    Markdown, then write the composed Stage 1 input to `input_dir/context.md` (it's composed from
+    the user's description plus `## Attached document: …` sections — genuinely Markdown, not
+    plain text, per SOF-21). Word docs go
     through the image-aware path (`docx_extract.extract_with_images`) so embedded wireframe/
     screenshot images — including those inside table cells — are extracted to `input_dir/images/`
     and kept paired with their captions; falls back to the text-only converter if the image
@@ -110,9 +112,9 @@ def persist_and_compose(
     composed = make_prompt(description, docs)
     if composed.strip():
         os.makedirs(input_dir, exist_ok=True)
-        with open(os.path.join(input_dir, "context.txt"), "w") as cf:
+        with open(os.path.join(input_dir, "context.md"), "w") as cf:
             cf.write(composed)
-        written.append("context.txt")
+        written.append("context.md")
 
     if brief:
         from .brief import brief_to_prompt_block
