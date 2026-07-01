@@ -176,7 +176,7 @@ One filterable, cross-tenant view of **all** conversation history — the store 
 
 ## 8. Open decisions
 
-1. **Thread table now or later?** Recommend `thread_id` column only for now (deterministic `uuid5` for onboarding); add `conversation_thread` when a thread-list/rename UI needs it.
+1. **Session table now or later?** Recommend the `session_id` column only for now (deterministic `uuid5` for onboarding); add `conversation_session` when a session-list/rename UI needs it.
 2. **Unify `/api/chat` onto this table in the same PR, or migrate `/converse` first?** Recommend `/converse` first (it's the mock you don't trust), then fold `/api/chat` off `chat.jsonl` in a follow-up so the blast radius is staged.
 3. **Image bytes to the provider:** signed Storage URL (cheaper, needs public-ish URL) vs base64 inline (works everywhere, larger payloads). Recommend signed URL with base64 fallback.
 4. **`user_id` type:** `users.id` is `_UUID`; the chat routes currently carry the owner **email** (`v[0]`). Either resolve email→`users.id` at write time (recommended, clean FK) or store email in a separate column. 

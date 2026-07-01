@@ -55,7 +55,7 @@ Each ticket states **Goal** and **Acceptance** (per CLAUDE.md §5). Do the work 
 ### Phase 1 — Conversation store (P0)  ·  *needs T0.1*
 
 **T1.1 — `ConversationStore` + content-block model**
-- *Goal:* durable store over `dbshim`; `json_blob` holds canonical blocks (`text`/`image`/`tool_use`/`tool_result`); `input`/`tool_result`/`choices`/`done` denormalized; `seq` ordering.
+- *Goal:* durable store over `dbshim`; `json_blob` holds canonical blocks (`text`/`image`/`tool_use`/`tool_result`); `input`/`tool_result` denormalized (no `choices`/`done` columns — those live in `json_blob`); `seq` ordering.
 - *Acceptance:* append + `history(session_id)` round-trips ordered by `seq`; image blocks reference a `blobs.id` (never inline bytes); unit tests with no DB for the block model, one integration test for persistence.
 
 **T1.2 — `to_provider` adapter (OpenAI + Anthropic)**

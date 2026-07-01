@@ -3,6 +3,9 @@
 **Status:** Draft for review · **Owner:** Ibraheem · **Date:** 2026-06-30
 **Scope:** The per-project knowledge layer that ingests user-uploaded documents and project context, then exposes it to Software Factory agents through hybrid search and a hierarchical summary tree. Backed by Supabase Postgres + pgvector.
 
+
+> **Scope note (read first):** this is the *target* conceptual design. What P0 actually ships uses the sparse slot as Postgres `tsvector` (dense + keyword, fused with RRF); `sparsevec`/SPLADE learned-sparse is a **deferred** upgrade. For the shipping stack see `project-memory-stack-2026.md` and `software-factory-build-plan.md`.
+
 ---
 
 ## 1. Purpose & where it sits
@@ -142,7 +145,8 @@ upload → store object + content_hash
       → parse (pdf/docx/md/html/transcript → clean text + structure)
       → chunk (structure-aware: respect headings; ~400 tok, ~50 overlap; keep section_path)
       → embed dense  (batch → vector(1024))
-      → embed sparse (SPLADE → sparsevec)  + generate fts
+      → keyword channel: generate fts (tsvector)          # P0
+      → (deferred) learned-sparse: SPLADE → sparsevec
       → summarize (map-reduce → doc_summary, key_facts, outline)
       → recompute project overview rollup
       → status = ready
