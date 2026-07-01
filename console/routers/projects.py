@@ -461,10 +461,15 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
             raw = open(file_path, "rb").read()
             key = f"materials/{name}"
             storage.put(pid, key, raw)
-            state.blobs.record("project", pid, f"{pid}/{key}", name=name,
+            blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=name,
                                kind=state._doc_kind(name),
                                content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
                                size_bytes=len(raw), sha256=storage.sha256(raw))
+            # SOF-32: this is the actual live onboarding upload path (draft-only, pre-promotion)
+            # — the /materials route below is a separate, any-phase path. Missing this hook here
+            # means real user uploads during the interview never get ingested at all, which is
+            # exactly when SOF-37's reflection step needs facts to already exist.
+            maybe_ingest_async(blob_id, state.console)
     return {"attached": written}
 
 
