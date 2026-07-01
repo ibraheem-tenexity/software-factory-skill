@@ -14,7 +14,7 @@ QA loop: a deployed ticket is exercised on its live URL; on a bug it bounces bac
 Illegal transitions (e.g. approving a ticket that was never QA'd, deploying an open
 ticket) raise `IllegalTransition`.
 
-DATA ACCESS: all `tickets` SQL lives in `repositories.tickets_repo.TicketRepository` (SQLAlchemy
+DATA ACCESS: all `tickets` SQL lives in `repositories.tickets.TicketRepository` (SQLAlchemy
 Core); this store keeps only the lifecycle rules, the `Ticket` dataclass mapping, and the small
 Python folds (`buildable_count`/`all_approved`), delegating every query/write to that repository.
 """
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from .db import project_id_from_path
 from .repositories._exec import PathExec
-from .repositories.tickets_repo import TicketRepository
+from .repositories.tickets import TicketRepository
 import time
 import weakref
 from dataclasses import dataclass

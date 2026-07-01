@@ -1,7 +1,7 @@
 """Pure (no-DB) checks for AgentRepository — explicit project_id on every call (no getter/closure,
 so there's nothing to form a reference cycle)."""
 from software_factory.repositories._compile import to_sql
-from software_factory.repositories.agents_repo import AgentRepository
+from software_factory.repositories.agents import AgentRepository
 
 
 class FakeExec:

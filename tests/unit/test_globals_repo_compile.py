@@ -3,10 +3,10 @@ FakeExec mirrors GlobalExec's real contract exactly: fetchall/fetchone return ca
 execute() returns None — this is what caught the .execute(stmt).fetchone() bug (GlobalExec.execute
 discards rows; RETURNING writes must go through fetchone/fetchall directly)."""
 from software_factory.repositories._compile import to_sql
-from software_factory.repositories.blobs_repo import BlobRepository
-from software_factory.repositories.sow_repo import SowRepository
-from software_factory.repositories.agent_prompts_repo import AgentPromptRepository
-from software_factory.repositories.registries_repo import ToolRepository, AgentRegistryRepository
+from software_factory.repositories.blobs import BlobRepository
+from software_factory.repositories.sow import SowRepository
+from software_factory.repositories.agent_prompts import AgentPromptRepository
+from software_factory.repositories.registries import ToolRepository, AgentRegistryRepository
 
 
 class FakeExec:

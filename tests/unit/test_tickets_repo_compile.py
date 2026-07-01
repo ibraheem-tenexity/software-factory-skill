@@ -3,7 +3,7 @@ captures `to_sql(stmt)`. Confirms auto project-scoping, %s-positional params, RE
 the status/order clauses — without touching Postgres. The behavior-equivalence round-trip is covered
 by the existing DB tests (test_tickets.py / test_pg_stores.py), run in a serialized slot."""
 from software_factory.repositories._compile import to_sql
-from software_factory.repositories.tickets_repo import TicketRepository
+from software_factory.repositories.tickets import TicketRepository
 
 
 class _Cur:

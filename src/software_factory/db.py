@@ -25,7 +25,7 @@ from sqlalchemy import delete as _sa_delete
 from .constants import PROJECT_ID_RE as _PROJECT_ID_RE
 from .constants import PROJECT_ID_STRICT_RE as _PROJECT_ID_STRICT_RE
 from .repositories._exec import PathExec
-from .repositories.canvas_repo import (ProjectStateRepository, PhaseRepository, ArtifactRepository,
+from .repositories.canvas import (ProjectStateRepository, PhaseRepository, ArtifactRepository,
                                        BlockerRepository, GateRepository, VerificationRepository,
                                        DeploymentRepository)
 

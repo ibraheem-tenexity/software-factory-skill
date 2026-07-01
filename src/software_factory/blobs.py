@@ -4,13 +4,13 @@ org-scoped files. One Postgres table (`public.blobs`); schema owned by the SQLAl
 A row is metadata only (scope, scope_id, kind, storage_key, content_type, size, sha256); the bytes
 live in Supabase Storage (or the local fallback) addressed by `storage_key`.
 
-DATA ACCESS: all `blobs`/`blob_uses` SQL lives in `repositories.blobs_repo.BlobRepository`
+DATA ACCESS: all `blobs`/`blob_uses` SQL lives in `repositories.blobs.BlobRepository`
 (SQLAlchemy Core); this store keeps only the scope validation.
 """
 from __future__ import annotations
 
 from .repositories._exec import GlobalExec
-from .repositories.blobs_repo import BlobRepository
+from .repositories.blobs import BlobRepository
 
 
 class BlobStore:

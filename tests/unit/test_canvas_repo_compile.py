@@ -5,7 +5,7 @@ is the existing DB tests (test_db.py), run once the flock queue is clear."""
 from sqlalchemy import delete
 
 from software_factory.repositories._compile import to_sql
-from software_factory.repositories.canvas_repo import (
+from software_factory.repositories.canvas import (
     ProjectStateRepository, PhaseRepository, GateRepository, VerificationRepository)
 from software_factory.models import tickets, agents, checkpoint
 

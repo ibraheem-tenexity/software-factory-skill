@@ -3,7 +3,7 @@ features (JSONB write via json.dumps + ::JSONB cast, ON CONFLICT DO NOTHING RETU
 incl. the empty case, LIKE 'ticket:%'). Behavior-equivalence round-trip is the existing DB tests
 (test_checkpoint.py / test_pg_stores.py), run in a serialized slot."""
 from software_factory.repositories._compile import to_sql
-from software_factory.repositories.checkpoint_repo import CheckpointRepository
+from software_factory.repositories.checkpoint import CheckpointRepository
 
 
 class FakeExec:
