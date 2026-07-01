@@ -68,6 +68,10 @@ export type DepsSubmitResponse = {
   deps_provided: string[]; deps_required: string[]; disposition: Record<string, string>;
   missing: string[]; satisfied: boolean;
 };
+// POST /api/projects/{id}/deps/provide — #107 post-deploy "provide your own key": pushes a real
+// value onto the ALREADY-LIVE app's Railway service (triggers a redeploy). Always 200; `ok`
+// carries success/failure so the UI can show a specific error, never a silent no-op.
+export type ProvideDepResponse = { ok: boolean; detail?: string; name?: string; disposition?: string };
 
 export type ProjectEvent = { ts: number; type: string; payload: Record<string, any> };
 export type Artifact = { path: string; content?: string; error?: string };
@@ -304,6 +308,8 @@ export const api = {
   deps: (id: string) => get<DepsResponse>(`/api/projects/${id}/deps`),
   submitDeps: (id: string, deps: DepSubmit) =>
     send<DepsSubmitResponse>(`/api/projects/${id}/deps`, "POST", { deps }),
+  provideDep: (id: string, name: string, value: string) =>
+    send<ProvideDepResponse>(`/api/projects/${id}/deps/provide`, "POST", { name, value }),
   events: (id: string) => get<{ events: ProjectEvent[] }>(`/api/projects/${id}/events`),
   artifact: (id: string, path: string) =>
     get<Artifact>(`/api/projects/${id}/artifact?path=${encodeURIComponent(path)}`),

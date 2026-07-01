@@ -1176,6 +1176,91 @@ def test_submit_deps_unsatisfied_when_provide_lacks_value(tmp_path):
     assert "OPENROUTER_API_KEY" in result["missing"]
 
 
+# ---------------------------------------------------------------------------------------
+# #107 post-deploy "provide your own key" flow — a user revisiting an already-live project
+# replaces a mocked provider dep with their own real value. Zero-touch (SPEC §3) is
+# untouched: classify_dep still defaults LLM keys to mock, this is a normal post-deploy
+# authed action, not a mid-build pause.
+# ---------------------------------------------------------------------------------------
+
+def _deployed_project(c, deps_required=("OPENROUTER_API_KEY",)):
+    project_id = c.start_project(ProjectRequest(description="x"))
+    state = c._load_state(project_id)
+    state.deps_required = list(deps_required)
+    state.deploy_url = "https://sf-" + project_id + ".up.railway.app"
+    state.save()
+    return project_id
+
+
+def test_provide_deployed_dep_rejects_project_with_no_live_deployment(tmp_path):
+    c = console(tmp_path, FakeLauncher())
+    project_id = c.start_project(ProjectRequest(description="x"))
+    result = c.provide_deployed_dep(project_id, "OPENROUTER_API_KEY", "sk-real")
+    assert result == {"ok": False, "detail": "project has no live deployment yet"}
+
+
+def test_provide_deployed_dep_rejects_unknown_dep_name(tmp_path):
+    c = console(tmp_path, FakeLauncher())
+    project_id = _deployed_project(c)
+    result = c.provide_deployed_dep(project_id, "SOME_OTHER_KEY", "sk-real")
+    assert result["ok"] is False and "SOME_OTHER_KEY" in result["detail"]
+
+
+def test_provide_deployed_dep_rejects_blank_value(tmp_path):
+    c = console(tmp_path, FakeLauncher())
+    project_id = _deployed_project(c)
+    result = c.provide_deployed_dep(project_id, "OPENROUTER_API_KEY", "   ")
+    assert result == {"ok": False, "detail": "value required"}
+
+
+def test_provide_deployed_dep_surfaces_railway_failure_without_touching_state(tmp_path, monkeypatch):
+    from software_factory import deploy_db
+    monkeypatch.setattr(deploy_db, "set_app_variable",
+                        lambda pid, name, value, service_id=None: {"ok": False, "detail": "service not found"})
+    c = console(tmp_path, FakeLauncher())
+    project_id = _deployed_project(c)
+    result = c.provide_deployed_dep(project_id, "OPENROUTER_API_KEY", "sk-real")
+    assert result == {"ok": False, "detail": "service not found"}
+    # A failed live push must never flip the disposition or mark it provided.
+    state = c._load_state(project_id)
+    assert state.deps_disposition.get("OPENROUTER_API_KEY") != "provide"
+    assert "OPENROUTER_API_KEY" not in (state.deps_provided or [])
+
+
+def test_provide_deployed_dep_success_flips_disposition_and_stores_vault_entry(tmp_path, monkeypatch):
+    from software_factory import deploy_db, vault as vault_module
+    monkeypatch.setattr(deploy_db, "set_app_variable",
+                        lambda pid, name, value, service_id=None: {"ok": True, "service_id": "svc-app123"})
+    monkeypatch.setattr(vault_module, "vault_store", lambda name, secret: "vault-uuid-1")
+    c = console(tmp_path, FakeLauncher())
+    project_id = _deployed_project(c)
+    result = c.provide_deployed_dep(project_id, "OPENROUTER_API_KEY", "sk-real")
+    assert result == {"ok": True, "name": "OPENROUTER_API_KEY", "disposition": "provide"}
+    state = c._load_state(project_id)
+    assert state.deps_disposition["OPENROUTER_API_KEY"] == "provide"
+    assert "OPENROUTER_API_KEY" in state.deps_provided
+    assert state.deps_satisfied is True
+    assert state.creds_vault_ids["OPENROUTER_API_KEY"] == "vault-uuid-1"
+
+
+def test_provide_deployed_dep_succeeds_even_if_vault_store_raises(tmp_path, monkeypatch):
+    # The live app already has the real key at this point (Railway push succeeded) — a vault
+    # write failure must not make the operator think the key never took effect.
+    from software_factory import deploy_db, vault as vault_module
+    monkeypatch.setattr(deploy_db, "set_app_variable",
+                        lambda pid, name, value, service_id=None: {"ok": True, "service_id": "svc-app123"})
+    def _boom(name, secret):
+        raise RuntimeError("vault unreachable")
+    monkeypatch.setattr(vault_module, "vault_store", _boom)
+    c = console(tmp_path, FakeLauncher())
+    project_id = _deployed_project(c)
+    result = c.provide_deployed_dep(project_id, "OPENROUTER_API_KEY", "sk-real")
+    assert result == {"ok": True, "name": "OPENROUTER_API_KEY", "disposition": "provide"}
+    state = c._load_state(project_id)
+    assert state.deps_disposition["OPENROUTER_API_KEY"] == "provide"
+    assert "OPENROUTER_API_KEY" not in state.creds_vault_ids
+
+
 def test_graph_includes_stage_gates_and_deps_node(tmp_path):
     """The graph always includes stage gates and a deps node."""
     c = console(tmp_path, FakeLauncher())

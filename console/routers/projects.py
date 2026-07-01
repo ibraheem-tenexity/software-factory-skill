@@ -15,8 +15,8 @@ from software_factory.deps import extract_env_creds
 import console.state as state
 from console.deps import require_authed, authorize_project, _can_see
 from console.schemas import (ProjectCreateIn, DraftCreateIn, ProjectPatchIn, MaterialScopeIn, OrgDocIn,
-                             ContinueIn, DepsIn, Stage3In, BudgetIn, RetryIn, RetryNodeIn, RewindIn,
-                             DraftPatchIn, AttachIn, PromoteIn, CredsIn)
+                             ContinueIn, DepsIn, ProvideDepIn, Stage3In, BudgetIn, RetryIn, RetryNodeIn,
+                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn)
 
 router = APIRouter()
 
@@ -290,6 +290,15 @@ def project_submit_deps(pid: str, body: DepsIn, v: tuple = Depends(authorize_pro
     if result.get("satisfied"):
         state.console.start_stage3(pid, extra_creds=extract_env_creds(body.deps))
     return result
+
+
+@router.post("/api/projects/{pid}/deps/provide")
+def project_provide_deployed_dep(pid: str, body: ProvideDepIn, v: tuple = Depends(authorize_project)):
+    """#107 post-deploy flow: a user revisiting a live project replaces one mocked provider dep
+    (e.g. OPENROUTER_API_KEY) with their own real value. Pushes it onto the deployed app's Railway
+    service (triggers a redeploy) — see `Console.provide_deployed_dep`. Always 200; the body's
+    `ok` field carries success/failure so the UI can show a specific error, never a silent no-op."""
+    return state.console.provide_deployed_dep(pid, body.name, body.value)
 
 
 @router.post("/api/projects/{pid}/stage2")

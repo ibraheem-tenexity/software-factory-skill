@@ -86,6 +86,11 @@ class DepsIn(BaseModel):
     deps: dict = {}
 
 
+class ProvideDepIn(BaseModel):
+    name: str = ""
+    value: str = ""
+
+
 class ContinueIn(BaseModel):
     gate: str = ""
 

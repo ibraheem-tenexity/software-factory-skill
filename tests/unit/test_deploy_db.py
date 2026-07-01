@@ -675,3 +675,108 @@ def test_runapp_railway_environment_id_returns_none_when_multiple(monkeypatch):
     from software_factory import env as _env
     monkeypatch.setattr(_env, "_RUNAPP_RAILWAY_ENVIRONMENT_IDS", {"env-1", "env-2"})
     assert _env.runapp_railway_environment_id() is None
+
+
+# ---------------------------------------------------------------------------------------
+# #107 post-deploy "provide your own key" flow — set_app_variable pushes a value onto the
+# run-app's OWN Railway service (never the deploy-DB service) and triggers a redeploy.
+# Unlike the deploy-DB service (Railway auto-names it, e.g. "Postgres-RNK8" — the exact scar
+# above), the app's service name IS deterministic: stage-3's SKILL always creates it as
+# f"sf-{project_id}" — so an exact-name GraphQL lookup here is not the same guess.
+# ---------------------------------------------------------------------------------------
+
+_SERVICES_PAGE = {
+    "data": {"project": {"services": {"edges": [
+        {"node": {"id": "svc-other", "name": "sf-project-other"}},
+        {"node": {"id": "svc-app123", "name": "sf-project-app123"}},
+    ]}}}
+}
+
+
+def _configure_runapp(monkeypatch, project_id="runapp-proj", env_id="runapp-env"):
+    from software_factory import env as _env
+    monkeypatch.setattr(_env, "runapp_railway_project_id", lambda: project_id)
+    monkeypatch.setattr(_env, "runapp_railway_environment_id", lambda: env_id)
+    monkeypatch.setenv("RAILWAY_TOKEN", "tok-xyz")
+
+
+def test_find_service_by_name_exact_match_only(monkeypatch):
+    monkeypatch.setattr(deploy_db, "_graphql", lambda q, v, t: _SERVICES_PAGE)
+    assert deploy_db._graphql_find_service_by_name("p", "sf-project-app123", "tok") == "svc-app123"
+    assert deploy_db._graphql_find_service_by_name("p", "sf-project-app123-extra", "tok") is None
+    assert deploy_db._graphql_find_service_by_name("p", "sf-project-app", "tok") is None  # no partial match
+
+
+def test_find_service_by_name_returns_none_on_graphql_error(monkeypatch):
+    def _boom(q, v, t):
+        raise RuntimeError("network down")
+    monkeypatch.setattr(deploy_db, "_graphql", _boom)
+    assert deploy_db._graphql_find_service_by_name("p", "sf-x", "tok") is None
+
+
+def test_set_app_variable_fails_loud_with_no_token(monkeypatch):
+    monkeypatch.delenv("RAILWAY_TOKEN", raising=False)
+    res = deploy_db.set_app_variable("proj-app123", "OPENROUTER_API_KEY", "sk-real")
+    assert res == {"ok": False, "detail": "RAILWAY_TOKEN not set on the console"}
+
+
+def test_set_app_variable_fails_loud_when_runapp_project_unconfigured(monkeypatch):
+    from software_factory import env as _env
+    monkeypatch.setenv("RAILWAY_TOKEN", "tok-xyz")
+    monkeypatch.setattr(_env, "runapp_railway_project_id", lambda: None)
+    monkeypatch.setattr(_env, "runapp_railway_environment_id", lambda: None)
+    res = deploy_db.set_app_variable("proj-app123", "OPENROUTER_API_KEY", "sk-real")
+    assert res["ok"] is False and "not configured" in res["detail"]
+
+
+def test_set_app_variable_fails_loud_when_service_not_found(monkeypatch):
+    _configure_runapp(monkeypatch)
+    monkeypatch.setattr(deploy_db, "_graphql", lambda q, v, t: {"data": {"project": {"services": {"edges": []}}}})
+    res = deploy_db.set_app_variable("proj-nope", "OPENROUTER_API_KEY", "sk-real")
+    assert res["ok"] is False
+    assert "sf-proj-nope" in res["detail"]
+
+
+def test_set_app_variable_upserts_and_returns_resolved_service_id(monkeypatch):
+    _configure_runapp(monkeypatch)
+    calls = []
+
+    def _fake_graphql(query, variables, token):
+        calls.append((query, variables))
+        if "project(id:" in query or "services" in query:
+            return _SERVICES_PAGE
+        return {"data": {"variableUpsert": True}}
+    monkeypatch.setattr(deploy_db, "_graphql", _fake_graphql)
+    res = deploy_db.set_app_variable("project-app123", "OPENROUTER_API_KEY", "sk-real")
+    assert res == {"ok": True, "service_id": "svc-app123"}
+    # The upsert call carried the resolved serviceId + the run-app project/env, never a guess.
+    upsert_call = [c for c in calls if "variableUpsert" in c[0]][0]
+    assert upsert_call[1]["input"] == {
+        "projectId": "runapp-proj", "environmentId": "runapp-env",
+        "serviceId": "svc-app123", "name": "OPENROUTER_API_KEY", "value": "sk-real",
+    }
+
+
+def test_set_app_variable_skips_lookup_when_service_id_given(monkeypatch):
+    _configure_runapp(monkeypatch)
+    calls = []
+
+    def _fake_graphql(query, variables, token):
+        calls.append(query)
+        return {"data": {"variableUpsert": True}}
+    monkeypatch.setattr(deploy_db, "_graphql", _fake_graphql)
+    res = deploy_db.set_app_variable("project-app123", "OPENROUTER_API_KEY", "sk-real", service_id="svc-known")
+    assert res == {"ok": True, "service_id": "svc-known"}
+    assert len(calls) == 1  # no name-lookup query at all — the explicit id short-circuits it
+
+
+def test_set_app_variable_fails_loud_on_graphql_errors(monkeypatch):
+    _configure_runapp(monkeypatch)
+
+    def _fake_graphql(query, variables, token):
+        if "services" in query:
+            return _SERVICES_PAGE
+        return {"errors": [{"message": "variable value too large"}]}
+    monkeypatch.setattr(deploy_db, "_graphql", _fake_graphql)
+    res = deploy_db.set_app_variable("project-app123", "OPENROUTER_API_KEY", "x" * 999999)
+    assert res["ok"] is False and "too large" in res["detail"]

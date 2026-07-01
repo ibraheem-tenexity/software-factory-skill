@@ -4,7 +4,7 @@
 // GET /api/projects/{id}/documents (the materials + produced LISTS). Every panel degrades to an
 // empty/"—" state until the data is live.
 import { useEffect, useRef, useState } from "react";
-import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact } from "../../api";
+import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact, DepsResponse } from "../../api";
 import { openArtifact } from "../factory/Artifacts";
 import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, TextInput, TextArea, Markdown } from "../onboarding/design";
 import { PanelBodySkel } from "../skeleton";
@@ -76,10 +76,93 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div style={{ font: `400 12px/1.4 ${T.sans}`, color: T.tertiary }}>{children}</div>;
 }
 
+// #107 — post-deploy "provide your own key": a mocked provider dep (e.g. OPENROUTER_API_KEY)
+// is visible here (it never pauses the build — SPEC §3 zero-touch), so the operator can find
+// out AFTER the fact and swap in their own real value; that pushes onto the LIVE app's Railway
+// service (server-side, triggers a redeploy) via POST /api/projects/{id}/deps/provide.
+const DISPOSITION_PILL: Record<string, [Tone, string]> = {
+  mock: ["warning", "Mocked ⚠️"],
+  provide: ["success", "Provided ✓"],
+  mcp: ["info", "Self-handled ✓"],
+  "deploy-db": ["info", "Factory-provided ✓"],
+};
+
+function DependenciesPanel({ projectId, deps, onProvided }:
+  { projectId: string; deps: DepsResponse; onProvided: () => void }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [value, setValue] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  if (!deps.deps_required.length) return null;
+
+  const submit = async (name: string) => {
+    if (!value.trim()) return;
+    setSubmitting(true);
+    try {
+      const r = await api.provideDep(projectId, name, value);
+      if (r.ok) {
+        setEditing(null); setValue("");
+        setErrors((e) => ({ ...e, [name]: "" }));
+        onProvided();
+      } else {
+        setErrors((e) => ({ ...e, [name]: r.detail || "Failed to apply key" }));
+      }
+    } catch {
+      setErrors((e) => ({ ...e, [name]: "Failed to apply key" }));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Panel title="Dependencies" count={deps.deps_required.length} span={2}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {deps.deps_required.map((name) => {
+          const disp = deps.disposition[name] || "mock";
+          const [tone, label] = DISPOSITION_PILL[disp] || ["neutral", disp];
+          const canReplace = disp === "mock" || disp === "provide";
+          return (
+            <div key={name} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "9px 11px", borderRadius: T.rLg, border: `1px solid ${T.borderSubtle}`, background: T.bg }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ font: `500 12px/1.2 ${T.mono}`, color: T.fg, wordBreak: "break-all" }}>{name}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <StatusPill tone={tone}>{label}</StatusPill>
+                  {canReplace && editing !== name && (
+                    <button onClick={() => { setEditing(name); setValue(""); }}
+                      style={{ font: `500 11.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>
+                      {disp === "mock" ? "Provide key" : "Replace"}
+                    </button>
+                  )}
+                </div>
+              </div>
+              {disp === "mock" && (
+                <p style={{ margin: 0, font: `400 11.5px/1.4 ${T.sans}`, color: T.tertiary }}>
+                  Using a placeholder — provide your key to enable live AI.
+                </p>
+              )}
+              {editing === name && (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input type="password" value={value} onChange={(e) => setValue(e.target.value)} placeholder="paste your real key"
+                    style={{ flex: 1, height: 30, padding: "0 9px", borderRadius: T.rMd, border: `1px solid ${T.borderDefault}`, background: T.raised, color: T.fg, font: `400 12px/1 ${T.mono}`, outline: "none" }} />
+                  <Btn size="sm" variant="primary" disabled={!value.trim() || submitting} onClick={() => submit(name)}>{submitting ? "Applying…" : "Apply"}</Btn>
+                  <Btn size="sm" variant="ghost" onClick={() => { setEditing(null); setValue(""); }}>Cancel</Btn>
+                </div>
+              )}
+              {errors[name] && <span style={{ font: `500 11.5px/1.3 ${T.sans}`, color: T.danger }}>{errors[name]}</span>}
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
 export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResume, onDiscard }:
   { projectId: string; onOpenFactory: () => void; onOpenDocuments?: () => void; onResume?: () => void; onDiscard?: () => void }) {
   const [ov, setOv] = useState<ProjectOverview | null>(null);
   const [docs, setDocs] = useState<ProjectDocuments | null>(null);
+  const [deps, setDeps] = useState<DepsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [goalDraft, setGoalDraft] = useState("");
@@ -90,6 +173,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
 
   const loadDocs = () => api.documents(projectId).then(setDocs).catch(() => setDocs(null));
   const loadOverview = () => api.overview(projectId).then(setOv).catch(() => setOv(null));
+  const loadDeps = () => api.deps(projectId).then(setDeps).catch(() => setDeps(null));
   useEffect(() => {
     setLoading(true);
     Promise.allSettled([
@@ -100,6 +184,8 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
 
   const brief = ov?.brief || {};
   const build = ov?.build || {};
+  // Dependencies panel (#107) is a post-deploy concern — only fetch/show once the build is done.
+  useEffect(() => { if (build.done) loadDeps(); }, [projectId, build.done]);
   const services = ov?.services || [];
   const agents = ov?.agents || [];
   const org = ov?.org || {};
@@ -341,6 +427,9 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
               </div>
             ) : <Empty>{isDraft ? "The factory produces PRDs, architecture, designs, and tickets here once the build starts." : "The factory hasn't produced documents yet."}</Empty>}
           </Panel>
+
+          {/* dependencies — #107, post-deploy only: replace a mocked provider key with a real one */}
+          {build.done && deps && <DependenciesPanel projectId={projectId} deps={deps} onProvided={loadDeps} />}
 
           {/* inherited org context */}
           <Panel title="Inherited org context">
