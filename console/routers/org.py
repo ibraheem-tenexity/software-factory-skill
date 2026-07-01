@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 import console.state as state
 from console.deps import require_authed, require_admin
 from console.schemas import (OrgIn, OrgPatchIn, OrgDocIn, OrgDocPatchIn, OrgDocUseIn, OrgMemberIn,
-                             OrgMemberPatchIn, OrgBillingIn)
+                             OrgMemberPatchIn, OrgBillingIn, SecretCreateIn, SecretRotateIn)
 
 router = APIRouter()
 
@@ -87,3 +87,29 @@ def org_usage(v: tuple = Depends(require_authed)):
 @router.patch("/api/org/billing")
 def org_billing(body: OrgBillingIn, v: tuple = Depends(require_admin)):
     return state.org_service.update_billing(v[0], body)
+
+
+# Secrets vault -----------------------------------------------------------------------------------
+@router.get("/api/org/secrets")
+def list_secrets(v: tuple = Depends(require_admin)):
+    return {"secrets": state.secrets_svc.list(v[0])}
+
+
+@router.post("/api/org/secrets", status_code=201)
+def create_secret(body: SecretCreateIn, v: tuple = Depends(require_admin)):
+    return {"secret": state.secrets_svc.create(v[0], body.name, body.value, body.kind)}
+
+
+@router.patch("/api/org/secrets/{name}")
+def rotate_secret(name: str, body: SecretRotateIn, v: tuple = Depends(require_admin)):
+    return {"secret": state.secrets_svc.rotate(v[0], name, body.value)}
+
+
+@router.delete("/api/org/secrets/{name}", status_code=204)
+def delete_secret(name: str, v: tuple = Depends(require_admin)):
+    state.secrets_svc.delete(v[0], name)
+
+
+@router.get("/api/org/secrets/{name}/ref")
+def secret_ref(name: str, v: tuple = Depends(require_authed)):
+    return state.secrets_svc.get_ref(v[0], name)

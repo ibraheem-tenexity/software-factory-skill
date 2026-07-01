@@ -264,3 +264,25 @@ class SowPatchIn(BaseModel):
     status: str | None = None
     body: str | None = None
 
+
+# ── Org Secrets vault (§2.3) ────────────────────────────────────────────────────────────────────
+from pydantic import Field  # noqa: E402
+
+
+class SecretCreateIn(BaseModel):
+    name: str = Field(pattern=r"^[A-Z][A-Z0-9_]{0,63}$")
+    value: str
+    kind: str = "api_key"
+
+
+class SecretRotateIn(BaseModel):
+    value: str
+
+
+class SecretOut(BaseModel):
+    name: str
+    kind: str
+    last4: str
+    used_by: int
+    updated_at: str
+
