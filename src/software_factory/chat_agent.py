@@ -430,22 +430,6 @@ class ChatAgentRunner:
             metadata={"project_id": project_id} if project_id else None,
         )
 
-    def _log_usage_diagnostic(self, result) -> None:
-        """SOF-43 TEMPORARY diagnostic — remove once the zero-token-usage root cause is
-        confirmed. Logs the Agents SDK's OWN view of usage (context_wrapper.usage aggregates
-        the whole run; raw_responses carries the per-model-call breakdown), independent of
-        whatever OpenInference/Langfuse then does with it. If this is ALSO zero, the SDK/API
-        never returned usage for this call — not an export-layer bug. If this is non-zero but
-        Langfuse still shows zero, the bug is downstream of the SDK."""
-        try:
-            logger.info(
-                "[langfuse-diag] context_wrapper.usage=%r raw_responses_usage=%r",
-                result.context_wrapper.usage,
-                [r.usage for r in result.raw_responses],
-            )
-        except Exception:
-            logger.warning("[langfuse-diag] failed to read usage from result", exc_info=True)
-
     def _flush_langfuse(self) -> None:
         """SOF-43: explicit flush at the turn boundary so a trace can't be lost to the SDK's
         background auto-flush interval never firing before an abrupt process exit. Best-effort —
@@ -518,7 +502,6 @@ class ChatAgentRunner:
             self._pending_draft_id = ""
             self._pending_interview_md = ""
 
-        self._log_usage_diagnostic(result)
         self._flush_langfuse()
 
         response_msgs = []
@@ -651,7 +634,6 @@ class ChatAgentRunner:
             self._pending_draft_id = ""
             self._pending_interview_md = ""
 
-        self._log_usage_diagnostic(result)
         self._flush_langfuse()
 
         response_msgs = []
