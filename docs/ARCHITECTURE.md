@@ -298,6 +298,22 @@ key (a one-time `SUPABASE_AT` setup step), and the full write-through of inputs/
   personal-org `software-factory-state`). **Secrets** are Railway service env vars (Anthropic,
   OpenRouter, OpenAI, Resend, Langfuse, Google client id, service token, `DATABASE_URL`).
 
+**How Python deps reach the deploy image (SOF-48).** `pyproject.toml`'s `dependencies` list is the
+single source of truth for everything `software_factory`/`console` actually imports — the
+Dockerfile installs directly from it (`pip3 install "/app[postgres]"`, the `postgres` extra pulling
+`psycopg[binary]` since the image has no system `libpq-dev`), copying only `pyproject.toml` + `src/`
+for that layer so unrelated `console/`/`docs/` changes don't invalidate it. There is no second,
+hand-maintained dependency list to drift out of sync — that drift (pgvector landed in `pyproject.toml`
+but not a separate Dockerfile `pip3` line) crash-looped prod once (#237). A small number of stage-
+workspace CLI/npm tools (Claude Code, OpenCode, opencode-swarm, Playwright browsers, `gh`) are
+**not** Python dependencies and stay pinned directly in the Dockerfile as before.
+`scripts/verify_deps.py` runs at build time right after the Python install: it imports every
+`software_factory`/`console` submodule plus a short explicit list of known *lazily* (function-
+local) imported third-party packages that a plain module walk can't see (`markitdown`, `pypandoc`,
+`mammoth`, `markdownify` — used inside `pdf_extract.py`/`docx_extract.py`). Any import failure fails
+the **build**, not a live deploy. Add a new lazy import to that list whenever one is introduced,
+alongside its `pyproject.toml` declaration.
+
 ---
 
 ## 9. Key request flows
