@@ -1,62 +1,37 @@
 """Statement-of-Work store (PRD §2.x SOW editor, wsp0uq99 FE task).
 
-Direct Postgres CRUD over the `public.sow` table. Same dbshim pattern as
-registries.py — no ORM, plain psycopg3 via _pg_connect.
+DATA ACCESS: all `sow` SQL lives in `repositories.sow_repo.SowRepository` (SQLAlchemy Core); this
+store keeps only the status validation + the allowed-fields filter.
 """
 from __future__ import annotations
 
-import os
-import time
 from typing import Optional
 
-from . import dbshim
+from .repositories._exec import GlobalExec
+from .repositories.sow_repo import SowRepository
 
 SOW_STATUSES = ("Template", "Draft", "In review", "Sent", "Signed")
-
-
-def _conn():
-    return dbshim._pg_connect(os.environ["DATABASE_URL"])
-
-
-def _exec(sql: str, params=()):
-    conn = _conn()
-    with conn.cursor() as cur:
-        cur.execute(sql, params)
-        conn.commit()
-
-
-def _rows(sql: str, params=()):
-    conn = _conn()
-    with conn.cursor() as cur:
-        cur.execute(sql, params)
-        return [dict(r) for r in cur.fetchall()]
-
-
-def _row(sql: str, params=()):
-    rows = _rows(sql, params)
-    return rows[0] if rows else None
 
 
 class SowStore:
     """CRUD store for the sow table. Staff-only; no per-user ownership."""
 
+    def __init__(self):
+        self._repo = SowRepository(GlobalExec())
+
     def list_all(self) -> list[dict]:
-        return _rows("SELECT * FROM public.sow ORDER BY id DESC")
+        return self._repo.list_all()
 
     def get(self, sow_id: int) -> Optional[dict]:
-        return _row("SELECT * FROM public.sow WHERE id=%s", (sow_id,))
+        return self._repo.by_id(sow_id)
 
     def create(self, title: str, *, org: str = None, project: str = None,
                value: str = None, file: str = None, version: int = 1,
                status: str = "Draft", body: str = None) -> dict:
         if status not in SOW_STATUSES:
             raise ValueError(f"invalid status {status!r}; must be one of {SOW_STATUSES}")
-        row = _row(
-            "INSERT INTO public.sow (title,org,project,value,file,version,status,body) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
-            (title, org, project, value, file, version, status, body),
-        )
-        return row
+        return self._repo.insert(title=title, org=org, project=project, value=value, file=file,
+                                 version=version, status=status, body=body)
 
     def update(self, sow_id: int, fields: dict) -> Optional[dict]:
         allowed = {"title", "org", "project", "value", "file", "version", "status", "body"}
@@ -65,9 +40,4 @@ class SowStore:
             return self.get(sow_id)
         if "status" in updates and updates["status"] not in SOW_STATUSES:
             raise ValueError(f"invalid status {updates['status']!r}")
-        sets = ", ".join(f"{k}=%s" for k in updates)
-        vals = list(updates.values()) + [sow_id]
-        return _row(
-            f"UPDATE public.sow SET {sets}, updated_at=now() WHERE id=%s RETURNING *",
-            vals,
-        )
+        return self._repo.update_fields(sow_id, **updates)

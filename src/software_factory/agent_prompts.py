@@ -3,12 +3,13 @@
 Operator-editable, versioned prompts keyed by agent callsign. The main orchestrator prompts
 (STAGE-1/2/3 and CONCIERGE) are applied by the live pipeline; role-agent prompts are still
 stored/served for editing without being applied to spawned subagents yet.
+
+DATA ACCESS: all SQL lives in `repositories.agent_prompts_repo.AgentPromptRepository`.
 """
 from __future__ import annotations
 
-import os
-
-from . import dbshim
+from .repositories._exec import GlobalExec
+from .repositories.agent_prompts_repo import AgentPromptRepository
 
 
 def override_key(callsign: str, runtime: str | None = None) -> str:
@@ -24,59 +25,21 @@ def override_key(callsign: str, runtime: str | None = None) -> str:
 
 class PromptStore:
     def __init__(self):
-        pass
-
-    def _conn(self):
-        return dbshim._pg_connect(os.environ["DATABASE_URL"])
+        self._repo = AgentPromptRepository(GlobalExec())
 
     def get(self, callsign: str) -> dict | None:
-        conn = self._conn()
-        try:
-            with conn.transaction():
-                cur = conn.cursor()
-                cur.execute(
-                    "SELECT callsign, prompt, version, updated_by, "
-                    "extract(epoch from updated_at) AS updated_at "
-                    "FROM public.agent_prompts WHERE callsign=%s", (callsign,))
-                row = cur.fetchone()
-                return dict(row) if row else None
-        finally:
-            conn.close()
+        row = self._repo.by_callsign(callsign)
+        return dict(row) if row else None
 
     def all(self) -> dict:
         """{callsign: {version, prompt, updated_by, updated_at}} — for the roster merge."""
-        conn = self._conn()
-        try:
-            with conn.transaction():
-                cur = conn.cursor()
-                cur.execute(
-                    "SELECT callsign, prompt, version, updated_by, "
-                    "extract(epoch from updated_at) AS updated_at FROM public.agent_prompts")
-                return {r["callsign"]: dict(r) for r in cur.fetchall()}
-        finally:
-            conn.close()
+        return {r["callsign"]: dict(r) for r in self._repo.all()}
 
     def set(self, callsign: str, prompt: str, by: str = "") -> dict:
         """Upsert the prompt, bumping its version; returns the new row."""
-        conn = self._conn()
-        try:
-            with conn.transaction():
-                conn.cursor().execute(
-                    "INSERT INTO public.agent_prompts (callsign, prompt, version, updated_by, "
-                    "updated_at) VALUES (%s,%s,1,%s, now()) "
-                    "ON CONFLICT (callsign) DO UPDATE SET prompt=EXCLUDED.prompt, "
-                    "version=public.agent_prompts.version+1, updated_by=EXCLUDED.updated_by, "
-                    "updated_at=now()",
-                    (callsign, prompt, by))
-        finally:
-            conn.close()
+        self._repo.upsert(callsign, prompt, by)
         return self.get(callsign)
 
     def delete(self, callsign: str) -> None:
         """Drop a stored prompt (revert-to-default for the editable orchestrator overrides)."""
-        conn = self._conn()
-        try:
-            with conn.transaction():
-                conn.cursor().execute("DELETE FROM public.agent_prompts WHERE callsign=%s", (callsign,))
-        finally:
-            conn.close()
+        self._repo.delete(callsign)
