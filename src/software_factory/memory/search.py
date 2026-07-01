@@ -10,6 +10,13 @@ Written as a single SELECT with subqueries in FROM, not a `WITH` CTE: `PgConn.ex
 `WITH ...` CTE query fails that check and silently returns zero rows every time (confirmed by
 reading dbshim.py; no existing caller uses a CTE, so this never surfaced before). Subqueries in
 FROM are equivalent for a query with no recursion, and this avoids touching dbshim.py at all.
+
+`dense <=> ?::vector` — the explicit cast is required (found against a real seeded DB, review
+by y96ilz0o): a bare `?` binds the query vector as a generic param with no column-type context,
+and Postgres has no `vector <=> double precision[]` operator, so the comparison raises
+`UndefinedFunction` at runtime. An INSERT into a `vector` column gets pgvector's assignment cast
+automatically; a raw operator comparison like this one does not — first time this codebase has
+done the latter.
 """
 from __future__ import annotations
 
@@ -59,10 +66,10 @@ def search(scope: str, scope_id: str, query: str, k: int = 8, *, connect=None, e
     FROM chunk c
     JOIN blobs b ON b.id = c.blob_id
     LEFT JOIN (
-      SELECT id, row_number() OVER (ORDER BY dense <=> ?) AS rnk
+      SELECT id, row_number() OVER (ORDER BY dense <=> ?::vector) AS rnk
       FROM chunk
       WHERE {scope_sql}
-      ORDER BY dense <=> ? LIMIT {_CHANNEL_LIMIT}
+      ORDER BY dense <=> ?::vector LIMIT {_CHANNEL_LIMIT}
     ) AS dense ON dense.id = c.id
     LEFT JOIN (
       SELECT id, row_number() OVER (
