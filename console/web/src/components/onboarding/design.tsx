@@ -493,6 +493,11 @@ export function Composer({ placeholder = "Reply…", onSend, value, onChange, lo
 
 // Up-to-4 single-select answers for a Concierge question. Clicking a choice submits it as the
 // user's reply (via onPick). Disabled once answered / while a turn is in flight.
+//
+// SOF-40: this is the OLD `{message, choices, done}` contract's renderer — kept as-is, still the
+// live call site's shape until the backend swap to ConciergeTurn/suggested_responses lands (see
+// SuggestedResponseList below, which is the NEW contract's renderer, built standalone and not
+// yet wired into OnboardingScreen.tsx pending that swap).
 export function ChoiceList({ options, onPick, disabled }:
   { options: string[]; onPick: (o: string) => void; disabled?: boolean }) {
   return (
@@ -506,6 +511,70 @@ export function ChoiceList({ options, onPick, disabled }:
           <span style={{ flex: 1 }}>{o}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+export type SuggestedResponseOption = { response: string; type: "single select" | "multi select" };
+
+// SOF-40: renders a ConciergeTurn's `suggested_responses` — the NEW contract. A turn's list is
+// treated as one homogeneous "question" (rendered by the FIRST item's `type`); the schema allows
+// a per-item type, but mixing radio-submits-immediately with checkbox-then-confirm within one
+// list has no coherent UI, so a single turn is expected to use one mode throughout. `onSubmit`
+// always receives an array — one item for a single-select click, the ticked set (in list order)
+// for multi-select's Confirm. No 4-item cap here (unlike the old ChoiceList) — the new contract's
+// spec doesn't state one; flag if product wants one added.
+export function SuggestedResponseList({ options, onSubmit, disabled }:
+  { options: SuggestedResponseOption[]; onSubmit: (values: string[]) => void; disabled?: boolean }) {
+  const isMulti = options[0]?.type === "multi select";
+  const [picked, setPicked] = React.useState<Set<string>>(new Set());
+
+  if (!options.length) return null;
+
+  if (!isMulti) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {options.map((o) => (
+          <button key={o.response} onClick={() => { if (!disabled) onSubmit([o.response]); }} disabled={disabled}
+            style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", boxSizing: "border-box", textAlign: "left",
+              cursor: disabled ? "default" : "pointer", padding: "9px 11px", borderRadius: T.rMd, font: `500 13px/1.3 ${T.sans}`,
+              border: `1px solid ${T.borderDefault}`, background: T.raised, color: T.fg, opacity: disabled ? 0.55 : 1, transition: "all .12s" }}>
+            <span style={{ width: 16, height: 16, flexShrink: 0, borderRadius: "50%", border: `1.5px solid ${T.borderDefault}` }} />
+            <span style={{ flex: 1 }}>{o.response}</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  const toggle = (response: string) => setPicked((prev) => {
+    const next = new Set(prev);
+    if (next.has(response)) next.delete(response); else next.add(response);
+    return next;
+  });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {options.map((o) => {
+        const checked = picked.has(o.response);
+        return (
+          <button key={o.response} onClick={() => { if (!disabled) toggle(o.response); }} disabled={disabled}
+            style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", boxSizing: "border-box", textAlign: "left",
+              cursor: disabled ? "default" : "pointer", padding: "9px 11px", borderRadius: T.rMd, font: `500 13px/1.3 ${T.sans}`,
+              border: `1px solid ${checked ? T.brand : T.borderDefault}`, background: T.raised, color: T.fg,
+              opacity: disabled ? 0.55 : 1, transition: "all .12s" }}>
+            <span style={{ width: 16, height: 16, flexShrink: 0, borderRadius: 4, border: `1.5px solid ${checked ? T.brand : T.borderDefault}`,
+              background: checked ? T.brand : "transparent", display: "grid", placeItems: "center" }}>
+              {checked && <Icon name="check" size={11} color="#fff" />}
+            </span>
+            <span style={{ flex: 1 }}>{o.response}</span>
+          </button>
+        );
+      })}
+      <Btn variant="primary" size="sm" disabled={disabled || picked.size === 0}
+        onClick={() => onSubmit(options.filter((o) => picked.has(o.response)).map((o) => o.response))}>
+        Confirm
+      </Btn>
     </div>
   );
 }

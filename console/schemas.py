@@ -86,10 +86,18 @@ class ConverseIn(BaseModel):
     message: str = ""
 
 
+class SuggestedResponseOut(BaseModel):
+    response: str
+    type: str   # "single select" | "multi select"
+
+
 class ConverseOut(BaseModel):
-    message: str
-    choices: list[str] = []   # ≤4 single-select options; empty = a plain-text turn
-    done: bool = False        # the agent has no more questions and is inviting hand-off
+    # T2.2: {response, suggested_responses[]} — no `choices`/`done`. Empty suggested_responses
+    # means a plain-text turn; the FE derives single/multi-select purely from each item's `type`.
+    response: str
+    suggested_responses: list[SuggestedResponseOut] = []
+    message_id: str = ""
+    session_id: str = ""
 
 
 class TranscribeIn(BaseModel):

@@ -2,7 +2,7 @@
 """Measure concierge prompt fetch latency.
 
 Reports direct PromptStore.get latency when DATABASE_URL is available, plus the cached resolver path
-used by ChatAgentRunner. This is intentionally read-only.
+used by the concierge agent. This is intentionally read-only.
 """
 from __future__ import annotations
 

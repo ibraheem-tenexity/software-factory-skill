@@ -362,10 +362,12 @@ export const api = {
       `/api/projects/${id}/reflection/${questionId}`, "PATCH", { action, answer: answer || "" }),
   chat: (body: Record<string, unknown>, signal?: AbortSignal) =>
     send<{ project_id: string; messages: any[] }>("/api/chat", "POST", body, signal),
-  // Onboarding Concierge conversation turn (mock backend for now): one user message →
-  // the agent's reply as plain text or up to 4 choices, plus `done` when it invites hand-off.
+  // Onboarding Concierge conversation turn: one user message -> the agent's ConciergeTurn reply
+  // (T2.2) — plain text when suggested_responses is empty, else selectable options whose `type`
+  // drives single/multi-select render. No `choices`/`done`.
   converse: (projectId: string, message: string) =>
-    send<{ message: string; choices: string[]; done: boolean }>(`/api/projects/${projectId}/converse`, "POST", { message }),
+    send<{ response: string; suggested_responses: { response: string; type: "single select" | "multi select" }[];
+          message_id?: string; session_id?: string }>(`/api/projects/${projectId}/converse`, "POST", { message }),
   chatStream: async (body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> => {
     const r = await fetch("/api/chat", {
       method: "POST",
