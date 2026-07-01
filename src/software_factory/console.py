@@ -2216,11 +2216,15 @@ class Console:
     def reap_github_repos(self, org: str, dry_run: bool = False) -> dict:
         """Sweep factory-created repos in `org` and reap those whose project is confirmed dead.
 
-        SAFETY: only repos matching <name>-[0-9a-f]{8,16} AND whose suffix maps to a known
-        factory project row are eligible. Repos with an unrecognized suffix are LOG-ONLY
-        (returned in report["unknown_repos"], never auto-deleted). Reap policy mirrors the
-        deploy-DB reaper: archived | stopped-without-deploy → reap; everything else → keep.
-        Disarmed by default (SF_GITHUB_REPO_REAPER=on to arm). dry_run=True forces preview."""
+        SAFETY: prefers an EXACT match — the repo Stage 3 itself recorded via
+        `record-artifact("GitHub Repo", <clean url>, kind="repo")` (read through
+        `project_links`, #95/SOF-8) — over the old suffix-pattern guess. Falls back to the
+        <name>-[0-9a-f]{8,16} suffix heuristic only for projects with no exact record (older
+        runs that predate this convention, or a run whose Stage 3 skipped that step). Repos
+        matching neither are LOG-ONLY (returned in report["unknown_repos"], never
+        auto-deleted). Reap policy mirrors the deploy-DB reaper: archived |
+        stopped-without-deploy → reap; everything else → keep. Disarmed by default
+        (SF_GITHUB_REPO_REAPER=on to arm). dry_run=True forces preview."""
         from . import github_repo_reaper as _ghr
         all_repos = _ghr.list_org_repos(org)
         local = [n for n in os.listdir(self._projects_dir)
@@ -2228,35 +2232,44 @@ class Console:
         seen = set(local)
         all_pids = local + [r["project_id"] for r in dbshim.registry_projects()
                             if PROJECT_ID_RE.fullmatch(r["project_id"]) and r["project_id"] not in seen]
-        # Build suffix → (project_id, state) map. The factory names repos with the first
-        # FACTORY_REPO_SUFFIX_LENGTH (8) hex chars of the project_id hex part, so we index
-        # by that 8-char prefix. We also index by longer suffixes for forward-compat.
+        # Exact index (preferred): repo full name -> (project_id, state), from Stage 3's own
+        # recorded "GitHub Repo" artifact. Suffix index (fallback): the first
+        # FACTORY_REPO_SUFFIX_LENGTH (8) hex chars of the project_id hex part, for projects
+        # with no exact record. One _load_state per project, shared by both indexes.
+        exact_by_repo: dict[str, tuple[str, object]] = {}
         pid_by_suffix: dict[str, tuple[str, object]] = {}
         for pid in all_pids:
+            st = self._load_state(pid)
+            exact = _ghr.org_repo_from_url(self.project_links(pid).get("repo"))
+            if exact and exact not in exact_by_repo:
+                exact_by_repo[exact] = (pid, st)
             hex_part = pid[len("project-"):]         # strip "project-" prefix
             for length in (_ghr.FACTORY_REPO_SUFFIX_LENGTH, len(hex_part)):
                 key = hex_part[:length]
                 if key and key not in pid_by_suffix:
-                    pid_by_suffix[key] = (pid, self._load_state(pid))
+                    pid_by_suffix[key] = (pid, st)
         records, unknown_repos = [], []
         for repo in all_repos:
             name = repo.get("name", "")
-            m = _ghr.FACTORY_REPO_SUFFIX_RE.search(name)
-            if not m:
-                continue
-            suffix = m.group(1)
-            # Try exact suffix match first, then its 8-char prefix as a fallback.
-            match = pid_by_suffix.get(suffix) or pid_by_suffix.get(suffix[:_ghr.FACTORY_REPO_SUFFIX_LENGTH])
+            full_name = f"{org}/{name}"
+            match = exact_by_repo.get(full_name)
             if not match:
-                # Suffix has no DB match — log-only, never auto-delete.
-                unknown_repos.append({"repo": f"{org}/{name}", "suffix": suffix})
-                logger.warning("[github-reaper] UNKNOWN suffix %r on %s/%s — surfaced for manual review",
-                               suffix, org, name)
-                continue
+                m = _ghr.FACTORY_REPO_SUFFIX_RE.search(name)
+                if not m:
+                    continue
+                suffix = m.group(1)
+                # Try exact suffix match first, then its 8-char prefix as a fallback.
+                match = pid_by_suffix.get(suffix) or pid_by_suffix.get(suffix[:_ghr.FACTORY_REPO_SUFFIX_LENGTH])
+                if not match:
+                    # Suffix has no DB match — log-only, never auto-delete.
+                    unknown_repos.append({"repo": full_name, "suffix": suffix})
+                    logger.warning("[github-reaper] UNKNOWN suffix %r on %s/%s — surfaced for manual review",
+                                   suffix, org, name)
+                    continue
             pid, st = match
             records.append(_ghr.ReapRecord(
                 project_id=pid,
-                repo_full_name=f"{org}/{name}",
+                repo_full_name=full_name,
                 archived=bool(getattr(st, "archived", False)),
                 phase=getattr(st, "phase", "") or "",
                 has_verified_deploy=bool(getattr(st, "deploy_url", None)),

@@ -237,3 +237,27 @@ def test_reap_records_failure_without_raising(monkeypatch):
     report = reap(records, run=run, log=lambda m: None)
     assert report["failed"][0]["project_id"] == "project-abcd1234"
     assert report["reaped"] == []
+
+
+# ---------------------------------------------------------------------------
+# #95/SOF-8: org_repo_from_url — the exact-match input, parsed from the CLEAN url Stage 3
+# itself records via record-artifact("GitHub Repo", <url>, kind="repo").
+# ---------------------------------------------------------------------------
+
+def test_org_repo_from_url_parses_clean_github_url():
+    assert _ghr.org_repo_from_url("https://github.com/acme/guestbook") == "acme/guestbook"
+
+
+def test_org_repo_from_url_strips_trailing_slash_and_dot_git():
+    assert _ghr.org_repo_from_url("https://github.com/acme/guestbook/") == "acme/guestbook"
+    assert _ghr.org_repo_from_url("https://github.com/acme/guestbook.git") == "acme/guestbook"
+
+
+def test_org_repo_from_url_rejects_non_github_urls():
+    assert _ghr.org_repo_from_url("https://gitlab.com/acme/guestbook") is None
+    assert _ghr.org_repo_from_url("https://github.com/acme/guestbook/pulls/3") is None
+
+
+def test_org_repo_from_url_handles_none_and_blank():
+    assert _ghr.org_repo_from_url(None) is None
+    assert _ghr.org_repo_from_url("") is None
