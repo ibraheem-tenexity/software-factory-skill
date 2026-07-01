@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import select, insert, func, and_, or_, cast, Text
+from sqlalchemy import select, insert, func, and_, or_, cast, Text, Float
 
 from ..models import conversation
 
@@ -16,6 +16,12 @@ from ..models import conversation
 # repositories/users.py's existing cast(..., Text) convention for its own UUID columns — bind-
 # parameter comparisons (WHERE/INSERT VALUES) don't need this (Postgres infers the type from
 # context there); only SELECT-list/RETURNING output does.
+#
+# created_at is DateTime(timezone=True) — a bare column in the SELECT list comes back as a raw
+# Python `datetime`, not the epoch float the rest of the app uses everywhere (SOF-55). Extracted +
+# cast to match repositories/users.py's corrected reference pattern (a bare
+# func.extract("epoch", ...) alone isn't enough either — Postgres's EXTRACT returns numeric, which
+# psycopg3 decodes to Decimal, not float).
 _COLS = (cast(conversation.c.id, Text).label("id"),
          cast(conversation.c.session_id, Text).label("session_id"),
          conversation.c.seq,
@@ -25,7 +31,7 @@ _COLS = (cast(conversation.c.id, Text).label("id"),
          conversation.c.tool_name, conversation.c.tool_call_id, conversation.c.tool_result,
          conversation.c.referenced_artifact, conversation.c.model, conversation.c.provider,
          conversation.c.input_tokens, conversation.c.output_tokens, conversation.c.cost_usd,
-         conversation.c.created_at)
+         cast(func.extract("epoch", conversation.c.created_at), Float).label("created_at"))
 
 
 class ConversationRepository:
@@ -78,8 +84,14 @@ class ConversationRepository:
 
         `cursor`, if given, is (last_activity, session_id) from a previous page's last row — keyset
         pagination ordered by (last_activity DESC, session_id DESC), stable under concurrent inserts
-        (unlike OFFSET, which can skip/duplicate rows as new messages land)."""
-        last_activity = func.max(conversation.c.created_at)
+        (unlike OFFSET, which can skip/duplicate rows as new messages land).
+
+        last_activity is cast the same way _COLS's created_at is (SOF-55) — MAX() of a
+        timestamptz column is itself a timestamptz/raw-datetime leak, and the cast must be
+        applied to the SAME shared expression used in SELECT/HAVING/ORDER BY, not just the
+        output: a cursor read from a previous page's (already epoch-float) last_activity is
+        compared against this expression in HAVING, so both sides must be the same type."""
+        last_activity = cast(func.extract("epoch", func.max(conversation.c.created_at)), Float)
         conds = []
         if org_id is not None:
             conds.append(conversation.c.org_id == org_id)
