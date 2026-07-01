@@ -60,7 +60,7 @@ Smaller operating-system-stage change (the md-editor), from `vr3lprd8`. Held alo
 
 ---
 
-### #129 — Completed Stage-1 wedges when the claude process exits into a zombie 🔴
+### #129 — Completed Stage-1 wedges when the claude process exits into a zombie 🟢✅
 **Symptom.** A run finishes Stage 1 successfully but never advances — sits idle for hours with
 `stage1_done=false`, `phase` stale at `"provision"`, 0 tickets, no Stage 2. Observed on
 `project-1bd88040d75846e9`: Stage 1 emitted a clean terminal `result:success`, committed
@@ -68,25 +68,32 @@ Smaller operating-system-stage change (the md-editor), from `vr3lprd8`. Held alo
 (uvicorn, PID 1) had been up 2d22h with **no restart**, and showed **two zombie
 `[claude] <defunct>`** children (the original stage-1 proc + a later failed auto-resume kick).
 
-**Root cause.** `detect_stage1_done()` (`console.py:1493`) only flips when `stage_finished()`
-is true. `stage_finished()` (`console.py:351-359`) returns **False** for a `claude` run whose
-in-memory handle still reads not-exited — but the stage-1 `claude` had actually **exited into a
-zombie** that was never reaped, so the accounting is stuck on "process still running." The #104
-watchdog `reap_completed_zombie()` (`console.py:694`) only fires on a **live tracked handle**
-and reaps via `_kill_stage_process` — it cannot clear a reparented/defunct zombie, so the wedge
-persists indefinitely (the two un-reaped zombies are the proof).
+**Root cause.** `detect_stage1_done()` only flips when `stage_finished()` is true.
+`stage_finished()` returns **False** for a `claude` run whose in-memory handle still reads
+not-exited — but the stage-1 `claude` had actually **exited into a zombie** that was never
+reaped, so the accounting is stuck on "process still running." `p.poll()` was observed to
+persistently report "not exited" for hours for a process `ps` independently showed as
+`<defunct>` — a stuck/stale Popen handle can't be the only signal.
 
 **Relationship to #104/#108.** New variant. #104 assumed a *live, hung* handle (exa remote-MCP
-teardown hang); #129 is the *cleanly-exited-into-zombie* case — the process is gone but the
-console still blocks the advance and the reaper can't reap it.
+teardown hang, fixable by SIGTERM→SIGKILL); #129 is the *cleanly-exited-into-zombie* case — the
+process is already dead, no kill needed, it just needs an OS-level check + a real reap.
 
-**Fix.** Make `stage_finished` zombie-aware: treat a defunct/`Z`-state stage process (or one
-whose `project.log` ends in a terminal `result` and is idle past the grace) as finished even
-with no live handle, and reap it. Broaden `reap_completed_zombie` to reap reparented zombies,
-not only live tracked handles.
+**Fix.** Added `_proc_state(pid)` — reads `/proc/{pid}/stat`'s state char directly ('Z' = zombie,
+`None` = pid already fully gone) as an independent, OS-level signal alongside `Popen.poll()`.
+New `Console._reap_if_os_zombie(p)` cross-checks it whenever `poll()` says "still running" and,
+if the OS disagrees, reaps via the real `Popen.wait()` (not a raw `os.waitpid` — keeps that same
+object's internal bookkeeping consistent for every other caller that later calls `.poll()`/`.wait()`
+on it). Wired into both `stage_finished()` and `_stage_process_alive()` so the fix also protects
+the "never two stage orchestrators" guard on `start_stage2`/`start_stage3`, not just the
+detect_stageN_done path. Left `reap_completed_zombie` (#104) unchanged — it's a genuinely
+different mechanism (kill a still-alive-but-hung process) for a different symptom; this fix
+reaps an already-dead one, no kill required.
 
-**Immediate unwedge.** Stage 1 is genuinely complete (PRD committed) — the run can be advanced
-by reaping the zombie / manually launching Stage 2; no rework needed.
+**Immediate unwedge (historical).** Stage 1 was genuinely complete (PRD committed) — the run
+was advanced by reaping the zombie / manually launching Stage 2; no rework needed. Going
+forward, `stage_finished` self-heals this within one poller tick (~3s) instead of needing a
+manual unwedge.
 
 ---
 
