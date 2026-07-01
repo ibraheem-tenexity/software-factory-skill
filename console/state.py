@@ -32,6 +32,7 @@ from software_factory.repositories.org_secrets_repo import OrgSecretsRepository 
 from software_factory.repositories._exec import GlobalExec  # noqa: E402
 from software_factory.services.conversation import Conversation, DbConversation  # noqa: E402
 from software_factory.services.admin_service import AdminService  # noqa: E402
+from software_factory.repositories.conversation_repo import ConversationRepository  # noqa: E402
 from software_factory.services.files import doc_kind as _doc_kind  # noqa: E402,F401
 
 from console.throttle import LoginThrottle  # noqa: E402
@@ -89,7 +90,11 @@ def reset():
     # existing deploys stay on the in-memory mock until the flag is flipped.
     conversation_svc = (DbConversation(users=users) if os.environ.get("SF_CONVERSATION_DB") == "1"
                         else Conversation())
-    admin_service = AdminService(console, users, agent_store, tool_store, prompts, sow_store)
+    # Admin history table (SOF-34/T1.5) reads the conversation table directly — independent of
+    # conversation_svc/SF_CONVERSATION_DB, since it's a cross-tenant query surface, not the
+    # onboarding Concierge's own storage path.
+    admin_service = AdminService(console, users, agent_store, tool_store, prompts, sow_store,
+                                 ConversationRepository(GlobalExec()))
     # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
     _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
     _chat_runner = ChatAgentRunner(console, users) if _has_chat_key else None

@@ -212,6 +212,7 @@ export type AdminClient = {
 };
 
 export type AdminAccessUser = {
+  id: string;
   email: string;
   type: "New org" | "Tenexity";
   org: string;
@@ -234,6 +235,64 @@ export type AdminOverview = {
 };
 
 export type AdminProjectMode = "all" | "real" | "demo";
+
+// SOF-34/T1.5 — cross-tenant conversation history (Tenexity OS).
+export type AdminConversationSession = {
+  session_id: string;
+  org_id: string | null;
+  org_name: string | null;
+  project_id: string | null;
+  project_name: string | null;
+  user_id: string | null;
+  user_email: string | null;
+  turn_count: number;
+  last_activity: string;
+  total_cost: number;
+};
+
+export type AdminConversationsResponse = {
+  sessions: AdminConversationSession[];
+  next_cursor: string | null;
+};
+
+export type AdminConversationMessage = {
+  id: string;
+  session_id: string;
+  seq: number;
+  user_id: string | null;
+  project_id: string | null;
+  org_id: string | null;
+  role: string;
+  input: string | null;
+  json_blob: unknown[];
+  tool_name: string | null;
+  tool_call_id: string | null;
+  tool_result: unknown | null;
+  referenced_artifact: number | null;
+  model: string | null;
+  provider: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  created_at: string;
+};
+
+export type AdminConversationTranscript = {
+  session_id: string;
+  messages: AdminConversationMessage[];
+};
+
+export type AdminConversationsFilter = {
+  org_id?: string;
+  project_id?: string;
+  user_id?: string;
+  session_id?: string;
+  role?: string;
+  date_from?: string;
+  date_to?: string;
+  cursor?: string;
+  limit?: number;
+};
 
 export type AdminSow = {
   id: number;
@@ -383,6 +442,14 @@ export const api = {
   adminSowGet: (id: number) => get<AdminSow>(`/api/admin/sow/${id}`),
   adminSowCreate: (body: { title: string; org?: string; project?: string; value?: string; file?: string; version?: number; status?: string; body?: string }) => send<AdminSow>("/api/admin/sow", "POST", body),
   adminSowUpdate: (id: number, body: { title?: string; org?: string; project?: string; value?: string; file?: string; version?: number; status?: string; body?: string }) => send<AdminSow>(`/api/admin/sow/${id}`, "PATCH", body),
+  // SOF-34/T1.5 — cross-tenant conversation history.
+  adminConversations: (filter: AdminConversationsFilter = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(filter).forEach(([k, v]) => { if (v !== undefined && v !== "") params.set(k, String(v)); });
+    const qs = params.toString();
+    return get<AdminConversationsResponse>(`/api/admin/conversations${qs ? `?${qs}` : ""}`);
+  },
+  adminConversationTranscript: (sessionId: string) => get<AdminConversationTranscript>(`/api/admin/conversations/${encodeURIComponent(sessionId)}`),
   // ── Onboarding draft model (docs/plans/concierge-onboarding-api.md) ──
   // runtime ("claude"|"opencode") + model ("kimi"|"glm") are persisted by the backend (DraftCreateIn
   // → projectstate). BYOK keys: when keySource="byok", the FE POSTs the runtime-specific runner key
