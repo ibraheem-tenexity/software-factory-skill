@@ -150,3 +150,6 @@ That is the design system contain prototypes of all screens and tokens and
 (armed once by an operator running `scripts/enable-auto-deploy.sh`) — this is the norm, not a
 manual step. `scripts/deploy.sh` (preflight → bake `SF_GIT_SHA` → `railway up`) is the **fallback**
 for a hand-driven deploy (hotfix, re-deploy without a new commit, or if auto-deploy is disconnected). 
+
+## Python Imports
+Python imports should be at the top of a file unless you want to stop something from inadvertantly executing. 
