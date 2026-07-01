@@ -112,6 +112,24 @@ function ReflectionQuestionRow({ question, onResolve }: {
   );
 }
 
+// SOF-49: "continue in background" affordance for the ingest-progress SSE stream. The upload
+// form is never actually blocked while files process (the Dropzone list already renders inline,
+// same scroll as everything else) — this banner exists so that's not left implicit, per the
+// ticket's explicit ask for the affordance. Renders nothing once nothing is running: no props to
+// pass for "dismiss" (there's nothing paused to resume), just a fact stated while it's true.
+function ProcessingBanner({ files }: { files: { ingestStatus?: "running" | "ready" | "failed" }[] }) {
+  const running = files.filter((f) => f.ingestStatus === "running").length;
+  if (!running) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: T.rMd, background: T.sunken, border: `1px solid ${T.borderSubtle}` }}>
+      <Icon name="upload" size={13} color={T.tertiary} />
+      <span style={{ font: `400 12px/1.4 ${T.sans}`, color: T.secondary }}>
+        Processing {running} document{running === 1 ? "" : "s"} in the background — keep going, nothing here waits on it.
+      </span>
+    </div>
+  );
+}
+
 // One cell of the returning "on file" org grid: label + value, or an inline input in Manage mode.
 // MODULE-SCOPE (never define inside render — that remounts the <input> on each keystroke → focus loss).
 function OrgCell({ label, value, editing, onChange }: { label: string; value: string; editing: boolean; onChange: (v: string) => void }) {
@@ -335,7 +353,12 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const budgetRef = useRef<number | null>(null);
   useEffect(() => { budgetRef.current = budget; }, [budget]);
   // Real uploaded filenames per material slot (drives the Dropzone list — no dummy data).
-  const [mats, setMats] = useState<{ video: { name: string; size?: string; uploading?: boolean }[]; docs: { name: string; size?: string; uploading?: boolean }[] }>({ video: [], docs: [] });
+  // SOF-49: blobId/ingestStage/ingestPct/ingestStatus are populated once ingestion starts
+  // (see the ingest-progress SSE subscription below) — absent (SF_MEMORY off, or the file's
+  // just-attached and no event has landed yet) means Dropzone renders today's plain "Uploaded".
+  type MatFile = { name: string; size?: string; uploading?: boolean; blobId?: number;
+    ingestStage?: string; ingestPct?: number; ingestStatus?: "running" | "ready" | "failed" };
+  const [mats, setMats] = useState<{ video: MatFile[]; docs: MatFile[] }>({ video: [], docs: [] });
   const setProj = (k: string, v: any) => setP((x) => ({ ...x, [k]: v }));
 
   // SOF-37: reflection surface — reference-backed facts learned from uploaded materials, and
@@ -430,6 +453,30 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     if (!draftId || budget == null) return;
     api.patchDraft(draftId, { budget }).catch(() => {});
   }, [draftId, budget]);
+
+  // SOF-49: real per-file ingestion progress, over T3.2's dedicated SSE channel (separate from
+  // the chat stream — see console/state.py's _push_ingest_sse). One subscription per draft, for
+  // its whole lifetime — matches every file attached across both Dropzones, not just the batch
+  // that was in flight when it opened. Malformed/unrelated frames are ignored, never thrown.
+  useEffect(() => {
+    if (!draftId) return;
+    const applyEvent = (data: { blob_id: number; stage: string; pct: number; status: string }) => {
+      const patch = (list: MatFile[]): MatFile[] =>
+        list.map((f) => f.blobId === data.blob_id
+          ? { ...f, ingestStage: data.stage, ingestPct: data.pct,
+              ingestStatus: data.status === "ready" || data.status === "failed" ? data.status : "running" }
+          : f);
+      setMats((m) => ({ video: patch(m.video), docs: patch(m.docs) }));
+    };
+    const es = new EventSource(`/api/projects/${draftId}/ingest/stream`);
+    es.onmessage = (ev) => {
+      // Keepalive frames are bare `:` comment lines (SSE spec) — EventSource never fires
+      // onmessage for those at all, so this only ever sees real progress payloads; the
+      // try/catch is defensive against any other malformed frame, not the keepalive itself.
+      try { applyEvent(JSON.parse(ev.data)); } catch { /* malformed — skip */ }
+    };
+    return () => es.close();
+  }, [draftId]);
 
   // BYOK key submission: when the user brings their own key, POST it to /creds (Vault-stored; promote
   // threads creds_vault_ids into the runner env, BYOK wins over the platform key). The key NAME is
@@ -545,8 +592,20 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       const files = await Promise.all(picked.map(async (file) => ({ name: file.name, content_b64: await fileToB64(file) })));
       await api.attach(draftId, files);
       setProj(kind, true);
+      // SOF-49: resolve each just-attached file's blob_id so the ingest-progress SSE subscription
+      // (below) can match incoming {blob_id, ...} events back onto this row. Best-effort — a
+      // failed/slow /documents call just means this batch shows the plain "Uploaded" state
+      // (today's behavior) instead of live progress; it never blocks the upload itself.
+      let added: MatFile[] = picked.map((f) => ({ name: f.name, size: fmtBytes(f.size) }));
+      try {
+        const docs = await api.documents(draftId);
+        const byName = new Map((docs.uploaded || []).map((d) => [d.name, d]));
+        added = added.map((f) => {
+          const d = byName.get(f.name);
+          return d?.id != null ? { ...f, blobId: Number(d.id) } : f;
+        });
+      } catch { /* degrade to plain "Uploaded" — see comment above */ }
       // Replace only this batch’s uploading tokens with confirmed entries.
-      const added = picked.map((f) => ({ name: f.name, size: fmtBytes(f.size) }));
       setMats((m) => ({ ...m, [kind]: kind === "video" ? added.slice(-1) : [...m[kind].filter((f) => !(f.uploading && inFlight.has(f.name))), ...added] }));
     } catch (e: any) {
       // Remove only this batch’s optimistic tokens on failure.
@@ -724,6 +783,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <OrgImportPicker />
                       <Field label="Walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} /></Field>
                       <Field label="Supporting documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
+                      <ProcessingBanner files={mats.video.concat(mats.docs)} />
                     </div>
                   </Card>
                   <ReflectionPanel cat="Your first project" learnedFacts={learnedFacts} openQuestions={openQuestions} onResolve={resolveQuestion} />
@@ -821,6 +881,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <OrgImportPicker />
                       <Field label="Project walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} /></Field>
                       <Field label="Extra documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
+                      <ProcessingBanner files={mats.video.concat(mats.docs)} />
                     </div>
                   </Card>
                   <ReflectionPanel cat="This project" learnedFacts={learnedFacts} openQuestions={openQuestions} onResolve={resolveQuestion} />

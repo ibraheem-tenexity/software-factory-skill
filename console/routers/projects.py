@@ -235,7 +235,7 @@ def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authori
     blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=body.name, tag=body.tag,
                  kind=state._doc_kind(body.name), content_type=body.content_type,
                  size_bytes=len(raw), sha256=storage.sha256(raw))
-    maybe_ingest_async(blob_id, state.console)
+    maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
     return _project_documents(pid)
 
 
@@ -506,7 +506,7 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
             # — the /materials route below is a separate, any-phase path. Missing this hook here
             # means real user uploads during the interview never get ingested at all, which is
             # exactly when SOF-37's reflection step needs facts to already exist.
-            maybe_ingest_async(blob_id, state.console)
+            maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
     return {"attached": written}
 
 

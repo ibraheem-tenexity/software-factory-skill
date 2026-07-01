@@ -238,9 +238,18 @@ export function IndustryTile({ item, selected, onClick, compact }:
   );
 }
 
+// SOF-49: real per-file ingestion progress (T3.2's SSE stream), once the transport upload
+// itself finishes. `ingestStage`/`ingestPct` absent (or `ingestStatus` "ready"/undefined) falls
+// back to today's plain "Uploaded" checkmark — SF_MEMORY off, or the event just hasn't arrived
+// yet, both degrade to the exact prior behavior, never a stuck/broken-looking row.
+const INGEST_STAGE_LABEL: Record<string, string> = {
+  parsing: "Parsing", chunking: "Chunking", embedding: "Embedding", summarizing: "Summarizing",
+};
+
 export function Dropzone({ kind, filled, onToggle, compact, files = [] }:
   { kind: "video" | "docs"; filled?: boolean; onToggle?: () => void; compact?: boolean;
-    files?: { name: string; size?: string; uploading?: boolean }[] }) {
+    files?: { name: string; size?: string; uploading?: boolean; ingestStage?: string;
+      ingestPct?: number; ingestStatus?: "running" | "ready" | "failed" }[] }) {
   const isVideo = kind === "video";
   // The list reflects what the user ACTUALLY uploaded (passed in by the caller) — no dummy data.
   const has = files.length > 0 || !!filled;
@@ -273,6 +282,19 @@ export function Dropzone({ kind, filled, onToggle, compact, files = [] }:
               {f.uploading ? (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4, font: `400 12px/1 ${T.sans}`, color: T.tertiary }}>
                   {!reduceMotion && <Spinner size={13} color={T.tertiary} />}Uploading…
+                </span>
+              ) : f.ingestStatus === "failed" ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, font: `400 12px/1 ${T.sans}`, color: T.danger }}>
+                  <Icon name="x" size={13} color={T.danger} /> Processing failed
+                </span>
+              ) : f.ingestStatus === "running" ? (
+                <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, minWidth: 90 }}>
+                  <span style={{ font: `400 11px/1 ${T.mono}`, color: T.tertiary }}>
+                    {INGEST_STAGE_LABEL[f.ingestStage || ""] || "Processing"}{typeof f.ingestPct === "number" ? ` · ${f.ingestPct}%` : ""}
+                  </span>
+                  <span style={{ width: 70, height: 3, borderRadius: 2, background: T.sunken, overflow: "hidden" }}>
+                    <span style={{ display: "block", height: "100%", width: `${f.ingestPct ?? 0}%`, background: T.brand, transition: "width .3s ease" }} />
+                  </span>
                 </span>
               ) : (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4, font: `400 12px/1 ${T.sans}`, color: T.success }}>
