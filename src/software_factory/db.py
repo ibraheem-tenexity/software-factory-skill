@@ -25,7 +25,7 @@ from sqlalchemy import delete as _sa_delete
 from .constants import PROJECT_ID_RE as _PROJECT_ID_RE
 from .constants import PROJECT_ID_STRICT_RE as _PROJECT_ID_STRICT_RE
 from .repositories._exec import PathExec
-from .repositories.canvas_repo import (ProjectStateRepository, PhaseRepository, ArtifactRepository,
+from .repositories.canvas import (ProjectStateRepository, PhaseRepository, ArtifactRepository,
                                        BlockerRepository, GateRepository, VerificationRepository,
                                        DeploymentRepository)
 
@@ -65,7 +65,7 @@ class ProjectStore:
     def __init__(self, path: str):
         os.makedirs(path or ".", exist_ok=True)
         self._project_id = project_id_from_path(path)
-        # Postgres; schema owned by Alembic (prod) / tests. All SQL is in repositories/canvas_repo.py.
+        # Postgres; schema owned by Alembic (prod) / tests. All SQL is in repositories/canvas.py.
         self._exec = PathExec(path)
         self._conn = self._exec._conn  # back-compat: a diagnostic test reads the raw PgConn directly
         # Live getter via a WEAKREF, not a closure over `self` directly: a closure capturing `self`

@@ -28,11 +28,11 @@ from software_factory.registries import ToolStore, AgentRegistryStore, MEMORY_MC
 from software_factory.sow import SowStore  # noqa: E402
 from software_factory.services.org_service import OrgService  # noqa: E402
 from software_factory.services.secrets import Secrets  # noqa: E402
-from software_factory.repositories.org_secrets_repo import OrgSecretsRepository  # noqa: E402
+from software_factory.repositories.org_secrets import OrgSecretsRepository  # noqa: E402
 from software_factory.repositories._exec import GlobalExec  # noqa: E402
 from software_factory.services.conversation import Conversation, DbConversation  # noqa: E402
 from software_factory.services.admin_service import AdminService  # noqa: E402
-from software_factory.repositories.conversation_repo import ConversationRepository  # noqa: E402
+from software_factory.repositories.conversation import ConversationRepository  # noqa: E402
 from software_factory.services.files import doc_kind as _doc_kind  # noqa: E402,F401
 
 from console.throttle import LoginThrottle  # noqa: E402

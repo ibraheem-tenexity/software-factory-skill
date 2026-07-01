@@ -4,12 +4,12 @@ Operator-editable, versioned prompts keyed by agent callsign. The main orchestra
 (STAGE-1/2/3 and CONCIERGE) are applied by the live pipeline; role-agent prompts are still
 stored/served for editing without being applied to spawned subagents yet.
 
-DATA ACCESS: all SQL lives in `repositories.agent_prompts_repo.AgentPromptRepository`.
+DATA ACCESS: all SQL lives in `repositories.agent_prompts.AgentPromptRepository`.
 """
 from __future__ import annotations
 
 from .repositories._exec import GlobalExec
-from .repositories.agent_prompts_repo import AgentPromptRepository
+from .repositories.agent_prompts import AgentPromptRepository
 
 
 def override_key(callsign: str, runtime: str | None = None) -> str:

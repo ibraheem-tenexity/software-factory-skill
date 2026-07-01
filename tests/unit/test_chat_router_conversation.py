@@ -26,7 +26,7 @@ def _chat_history_from_rows(rows: list[dict]) -> list[dict]:
     out = []
     for r in rows:
         block = next((b for b in (r["json_blob"] or []) if b.get("type") == "text"), {})
-        ts = r["created_at"]   # #267: conversation_repo.py now selects created_at as epoch float
+        ts = r["created_at"]   # #267: conversation.py now selects created_at as epoch float
         out.append({
             "role": _from_conversation_role(r["role"]),
             "content": r["input"] or block.get("text", ""),

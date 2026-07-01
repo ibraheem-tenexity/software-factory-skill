@@ -15,7 +15,7 @@ from __future__ import annotations
 import time
 
 from .repositories._exec import GlobalExec
-from .repositories.checkpoint_repo import CheckpointRepository
+from .repositories.checkpoint import CheckpointRepository
 
 # All `checkpoint` SQL lives in CheckpointRepository (SQLAlchemy Core, global lane). This module keeps
 # the pipeline ordering + invalidation logic and the thin function API its callers already use.

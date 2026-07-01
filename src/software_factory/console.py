@@ -37,8 +37,8 @@ from .projectstate import ProjectState
 from .db import ProjectStore
 from . import dbshim
 from .repositories._exec import PathExec
-from .repositories.canvas_repo import ProjectStateRepository, PhaseRepository, BlockerRepository, ArtifactRepository
-from .repositories.agents_repo import AgentRepository
+from .repositories.canvas import ProjectStateRepository, PhaseRepository, BlockerRepository, ArtifactRepository
+from .repositories.agents import AgentRepository
 from .tickets import TicketStore
 from .workspace_setup import prepare_workspace
 from .log import get_logger

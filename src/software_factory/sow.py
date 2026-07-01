@@ -1,6 +1,6 @@
 """Statement-of-Work store (PRD §2.x SOW editor, wsp0uq99 FE task).
 
-DATA ACCESS: all `sow` SQL lives in `repositories.sow_repo.SowRepository` (SQLAlchemy Core); this
+DATA ACCESS: all `sow` SQL lives in `repositories.sow.SowRepository` (SQLAlchemy Core); this
 store keeps only the status validation + the allowed-fields filter.
 """
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .repositories._exec import GlobalExec
-from .repositories.sow_repo import SowRepository
+from .repositories.sow import SowRepository
 
 SOW_STATUSES = ("Template", "Draft", "In review", "Sent", "Signed")
 

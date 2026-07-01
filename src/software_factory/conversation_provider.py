@@ -26,7 +26,7 @@ import json
 
 from . import storage
 from .repositories._exec import GlobalExec
-from .repositories.blobs_repo import BlobRepository
+from .repositories.blobs import BlobRepository
 from .conversation_blocks import TEXT, IMAGE, TOOL_USE, TOOL_RESULT
 
 

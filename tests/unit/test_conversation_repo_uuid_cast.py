@@ -8,7 +8,7 @@ Pure SQL-compilation checks — `to_sql()` never opens a connection (matches the
 test_conversation_repo_rollup.py), so this is DB-free and safe on this box."""
 from sqlalchemy import insert
 
-from software_factory.repositories.conversation_repo import ConversationRepository, _COLS
+from software_factory.repositories.conversation import ConversationRepository, _COLS
 from software_factory.repositories._compile import to_sql
 from software_factory.models import conversation
 

@@ -1,5 +1,5 @@
 """Pure CRUD for `conversation` (SQLAlchemy Core). Global table — no project-path scoping;
-callers pass session_id/scope values explicitly (mirrors blobs_repo.py, see #212)."""
+callers pass session_id/scope values explicitly (mirrors blobs.py, see #212)."""
 from __future__ import annotations
 
 from sqlalchemy import select, insert, func, and_, or_
@@ -54,7 +54,7 @@ class ConversationRepository:
         another writer already took this (session_id, seq) — the caller (ConversationStore.append)
         retries with a fresh seq on that specific exception.
 
-        JSONB columns are passed as `json.dumps(...)` strings, matching checkpoint_repo.py's
+        JSONB columns are passed as `json.dumps(...)` strings, matching checkpoint.py's
         convention — this codebase's `_exec.py` compiles Core statements to raw SQL + params and
         hands them straight to psycopg3, bypassing SQLAlchemy's own bind_processor, so a plain
         Python list/dict is never auto-serialized on the way in (Postgres auto-decodes JSONB back

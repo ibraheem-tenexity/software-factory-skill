@@ -4,14 +4,14 @@ Real datastore replacing the former code constants — both tables are SEEDED wi
 canonical defaults the first time they're read (so the data is durable + CRUD-able, not hardcoded in
 the response). Mirrors the dbshim pattern used by `users`/`blobs`.
 
-DATA ACCESS: all SQL lives in `repositories.registries_repo` (ToolRepository / AgentRegistryRepository).
+DATA ACCESS: all SQL lives in `repositories.registries` (ToolRepository / AgentRegistryRepository).
 """
 from __future__ import annotations
 
 import os
 
 from .repositories._exec import GlobalExec
-from .repositories.registries_repo import ToolRepository, AgentRegistryRepository
+from .repositories.registries import ToolRepository, AgentRegistryRepository
 
 # Canonical seeds (durable defaults, inserted once into an empty table — not returned from code).
 SEED_TOOLS = [

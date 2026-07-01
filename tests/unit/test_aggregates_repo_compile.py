@@ -2,7 +2,7 @@
 keep its original `.label(...)` alias, or callers' `r["runs"]`/`r["cost_usd"]` etc. break silently)
 and the `count(*) FILTER (WHERE ...)` rendering."""
 from software_factory.repositories._compile import to_sql
-from software_factory.repositories.aggregates_repo import AggregatesRepository
+from software_factory.repositories.aggregates import AggregatesRepository
 
 
 class FakeExec:

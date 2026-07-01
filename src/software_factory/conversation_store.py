@@ -9,7 +9,7 @@ from __future__ import annotations
 import psycopg
 
 from .repositories._exec import GlobalExec
-from .repositories.conversation_repo import ConversationRepository
+from .repositories.conversation import ConversationRepository
 from .conversation_blocks import validate_blocks, first_text, first_tool_result
 from .users import UserStore
 

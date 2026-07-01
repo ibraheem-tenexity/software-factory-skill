@@ -120,7 +120,7 @@ def test_default_image_resolver_prefers_signed_url_when_storage_enabled():
     # storage.url(scope_id, storage_key) here re-prefixed scope_id onto an already-full path
     # (FileNotFoundError on real re-fetch). Assert url_by_path is called with the RAW storage_key,
     # unmodified — that's the regression this test exists to catch.
-    from software_factory.repositories.blobs_repo import BlobRepository
+    from software_factory.repositories.blobs import BlobRepository
     from software_factory import storage
     with patch.object(BlobRepository, "by_id",
                       return_value={"scope_id": "project-abc", "storage_key": "project-abc/diagram.png"}), \
@@ -137,7 +137,7 @@ def test_default_image_resolver_prefers_signed_url_when_storage_enabled():
 def test_default_image_resolver_falls_back_to_base64_when_storage_disabled():
     """No raw bytes leak into a row — this only touches the OUTBOUND provider payload, never
     conversation.json_blob, which continues to hold only {type, blob_id, media_type, origin}."""
-    from software_factory.repositories.blobs_repo import BlobRepository
+    from software_factory.repositories.blobs import BlobRepository
     from software_factory import storage
     raw = b"\x89PNG\r\n\x1a\nfakepngbytes"
     with patch.object(BlobRepository, "by_id",
@@ -154,7 +154,7 @@ def test_default_image_resolver_falls_back_to_base64_when_storage_disabled():
 
 
 def test_default_image_resolver_raises_on_unknown_blob_id():
-    from software_factory.repositories.blobs_repo import BlobRepository
+    from software_factory.repositories.blobs import BlobRepository
     with patch.object(BlobRepository, "by_id", return_value=None):
         with pytest.raises(ValueError, match="unknown blob_id"):
             _default_resolve_image({"type": "image", "blob_id": 999, "media_type": "image/png"}, "openai")
