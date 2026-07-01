@@ -143,7 +143,10 @@ class UserRepository:
                    "WHERE email = ?", (email,))
 
     def update_user_columns(self, email: str, cols: dict) -> None:
-        """Patch the given user columns (+ updated_at). `cols` is {column: value}; values are bound."""
+        """Patch the given user columns (+ updated_at). `cols` is {column: value}: values are bound
+        parameters, but the column NAMES are interpolated into the SQL text. Callers MUST pass only
+        trusted, code-defined column names (never request-derived input) — this is not a general
+        key/value sink. All current callers pass a fixed allowlist built in `UserStore.set_profile`."""
         sets = ", ".join(f"{c}=?" for c in cols)
         self._exec(f"UPDATE public.users SET {sets}, updated_at = now() WHERE email=?",
                    (*cols.values(), email))
@@ -175,7 +178,10 @@ class UserRepository:
         return self._query(_ORG_SELECT + " ORDER BY name")
 
     def update_org_columns(self, org_id: str, cols: dict) -> None:
-        """Patch the given organization columns (no updated_at column on organizations)."""
+        """Patch the given organization columns (no updated_at column on organizations). `cols` is
+        {column: value}: values are bound, but column NAMES are interpolated into the SQL. Callers
+        MUST pass only trusted, code-defined column names (never request-derived input) — all current
+        callers pass the fixed `_ORG_COLS` allowlist built in `UserStore.update_org`."""
         sets = ", ".join(f"{c}=?" for c in cols)
         self._exec(f"UPDATE public.organizations SET {sets} WHERE id=?", (*cols.values(), org_id))
 
