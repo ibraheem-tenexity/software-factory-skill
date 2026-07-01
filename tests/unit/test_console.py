@@ -1835,8 +1835,12 @@ def test_status_model_reflects_opencode_alias(tmp_path):
 # ---- #104 watchdog: reap a completed-but-hung claude stage process -----------------------
 class _ZombieProc:
     """A claude orchestrator that emitted its terminal `result` then hung at teardown: poll()
-    keeps returning None until it's signalled."""
-    def __init__(self): self.exit_code = None; self.pid = 4242; self.signals = []
+    keeps returning None until it's signalled. pid is THIS test process's own real, live pid —
+    #129's OS-level zombie cross-check (_reap_if_os_zombie) must see a genuinely-alive process
+    here and leave it alone; a fake/nonexistent pid would look "fully gone" and misfire."""
+    def __init__(self):
+        import os
+        self.exit_code = None; self.pid = os.getpid(); self.signals = []
     def poll(self): return self.exit_code
     def terminate(self): self.signals.append("term"); self.exit_code = -15
     def wait(self, timeout=None): return self.exit_code
@@ -1865,7 +1869,7 @@ def test_reap_completed_zombie_kills_hung_claude_after_grace(tmp_path, monkeypat
     log = _write_log(c, rid, {"type": "assistant"}, {"type": "result", "total_cost_usd": 1.2})
     os.utime(log, (1, 1))                                            # mtime far in the past -> past grace
     assert c.stage_finished(rid) is False                           # live handle pins it
-    assert c.reap_completed_zombie(rid) == 4242                      # reaped, returns the pid
+    assert c.reap_completed_zombie(rid) == proc.pid                  # reaped, returns the pid
     assert "term" in proc.signals                                   # used the SIGTERM→kill path
     assert c.stage_finished(rid) is True                            # now exited -> existing detection advances
 
@@ -1911,8 +1915,100 @@ def test_reap_completed_zombie_default_grace_is_short_not_60s(tmp_path):
     rid = c.start_project(ProjectRequest(description="x"))
     log = _write_log(c, rid, {"type": "result", "total_cost_usd": 1.0})
     os.utime(log, (time.time() - 10, time.time() - 10))   # idle 10s — past a short default grace
-    assert c.reap_completed_zombie(rid) == 4242
+    assert c.reap_completed_zombie(rid) == proc.pid
     assert "term" in proc.signals
+
+
+# ---------------------------------------------------------------------------------------
+# #129 — a tracked Popen handle whose .poll() persistently reports "not exited" for a
+# process that's ACTUALLY a zombie (or fully gone) at the OS level. Uses a real fork+exit to
+# produce a genuine zombie deterministically, wrapped in a Popen-like double whose poll()
+# always returns None (reproducing the observed stuck-handle symptom) so we can prove
+# stage_finished/_stage_process_alive cross-check /proc rather than trusting poll() alone.
+# ---------------------------------------------------------------------------------------
+
+class _StuckPollProc:
+    """A Popen-like double whose poll() ALWAYS reports None, no matter what — simulating the
+    #129 symptom (ps showed <defunct> for hours while the tracked handle kept saying alive)."""
+    def __init__(self, pid):
+        self.pid = pid
+        self.wait_calls = []
+
+    def poll(self):
+        return None
+
+    def wait(self, timeout=None):
+        self.wait_calls.append(timeout)
+        return 0
+
+
+_LEAKED_TEST_PROCS = []  # pins real Popen refs so __del__ can't sneak a reap before a test asserts
+
+
+def _make_real_zombie():
+    """Runs a real, short-lived subprocess and deliberately never waits on it — a genuine
+    OS-level zombie, a real child of THIS test process (subprocess.Popen, not a raw os.fork —
+    forking a multi-threaded process like pytest risks a deadlock; Popen's exec-immediately
+    path doesn't). The Popen object is pinned in _LEAKED_TEST_PROCS so garbage collection can't
+    reap it via __del__ before the test gets to assert against the zombie state. Returns the pid."""
+    import subprocess
+    import time
+    real = subprocess.Popen(["true"])
+    _LEAKED_TEST_PROCS.append(real)
+    for _ in range(200):
+        with open(f"/proc/{real.pid}/stat", encoding="utf-8") as f:
+            if f.read().rsplit(")", 1)[-1].split()[0] == "Z":
+                break
+        time.sleep(0.01)
+    return real.pid
+
+
+def test_stage_finished_reaps_a_zombie_even_when_poll_lies(tmp_path):
+    pid = _make_real_zombie()
+    proc = _StuckPollProc(pid)
+    ids = iter(["project-zb2"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
+    rid = c.start_project(ProjectRequest(description="x"))
+    assert c.stage_finished(rid) is True          # not fooled by poll() persistently saying None
+    assert proc.wait_calls == [1]                 # reaped via the real Popen.wait() API, not a raw waitpid
+    import os
+    os.waitpid(pid, os.WNOHANG)  # test cleanup safety net; no-op if already reaped
+
+
+def test_stage_process_alive_is_false_for_a_zombie_even_when_poll_lies(tmp_path):
+    pid = _make_real_zombie()
+    proc = _StuckPollProc(pid)
+    ids = iter(["project-zb3"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
+    rid = c.start_project(ProjectRequest(description="x"))
+    assert c._stage_process_alive(rid) is False   # #129: must not block a Stage-2 launch forever
+    import os
+    os.waitpid(pid, os.WNOHANG)
+
+
+def test_reap_if_os_zombie_is_a_noop_for_a_genuinely_running_process(tmp_path):
+    # Guard against over-eager reaping: a real, still-alive process must be left alone.
+    import os
+    proc = _StuckPollProc(os.getpid())   # this very test process — definitely not a zombie
+    ids = iter(["project-alive"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
+    rid = c.start_project(ProjectRequest(description="x"))
+    assert c.stage_finished(rid) is False
+    assert proc.wait_calls == []
+
+
+def test_stage_finished_reaps_when_pid_is_already_fully_gone(tmp_path):
+    # A pid that's not merely a zombie but has vanished entirely (/proc/{pid} absent — already
+    # reaped by something else) must ALSO count as finished, not just the 'Z'-state case.
+    import subprocess
+    real = subprocess.Popen(["true"])
+    real.wait()   # fully reap it via the real Popen object right away — /proc/{pid} now gone
+    proc = _StuckPollProc(real.pid)
+    ids = iter(["project-gone"])
+    c = Console(str(tmp_path), launch=lambda *a, **k: proc, new_id=lambda: next(ids))
+    rid = c.start_project(ProjectRequest(description="x"))
+    assert c.stage_finished(rid) is True
+    assert proc.wait_calls == [1]
 
 
 def test_reap_completed_zombie_skips_opencode(tmp_path, monkeypatch):

@@ -271,6 +271,23 @@ def _make_drop_privileges(uid: int, gid: int):
     return _drop
 
 
+def _proc_state(pid: int) -> str | None:
+    """The process-state char from /proc/{pid}/stat ('Z' = zombie/defunct), or None if the pid
+    doesn't exist at all (already fully reaped by something else). An independent, OS-level
+    signal — #129: a tracked Popen handle's own .poll() was observed to persistently report
+    "not exited" for hours for a process `ps` showed as `<defunct>`, so it must never be the
+    ONLY signal of whether a stage process is actually still alive."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    # Format: "pid (comm) state ...". comm can itself contain spaces/parens, so split on the
+    # LAST ')' rather than the first.
+    after = text.rsplit(")", 1)[-1].split()
+    return after[0] if after else None
+
+
 def _default_launch(argv: list[str], env: dict, log_path: str | None = None, cwd: str | None = None) -> Any:
     """Launch a stage with stdout appended DIRECTLY to project.log — never through a pipe
     pumped by this server. A pump thread dies with the server, leaving the orchestrator
@@ -332,7 +349,27 @@ class Console:
     # ---- SPEC §1: stage process lifecycle ------------------------------------------------
     def _stage_process_alive(self, project_id: str) -> bool:
         p = self._procs.get(project_id)
-        return p is not None and hasattr(p, "poll") and p.poll() is None
+        if p is None or not hasattr(p, "poll") or p.poll() is not None:
+            return False
+        return not self._reap_if_os_zombie(p)
+
+    @staticmethod
+    def _reap_if_os_zombie(p) -> bool:
+        """#129: `p.poll()` was observed to persistently report "not exited" for HOURS for a
+        process `ps` independently showed as `<defunct>` — a stuck/stale Popen handle must never
+        be the ONLY signal. Cross-checks the OS-level state via /proc directly; if it says the
+        pid is a zombie ('Z') or already fully gone (None), reaps it via the real `Popen.wait()`
+        (not a raw os.waitpid — keeps this SAME object's internal bookkeeping consistent so every
+        future .poll()/.wait() caller on it agrees) and returns True. Returns False (no-op) for a
+        genuinely still-running process."""
+        pid = getattr(p, "pid", None)
+        if pid is None or _proc_state(pid) not in ("Z", None):
+            return False
+        try:
+            p.wait(timeout=1)
+        except Exception:
+            pass
+        return True
 
     def stage_finished(self, project_id: str) -> bool:
         """SPEC §1: the stage's orchestrator process has finished — the tracked process exited,
@@ -350,6 +387,8 @@ class Console:
         p = self._procs.get(project_id)
         if p is not None and hasattr(p, "poll"):
             if p.poll() is not None:
+                return True
+            if self._reap_if_os_zombie(p):
                 return True
             if (self._load_state(project_id).runtime == "opencode"
                     and os.path.exists(log)
