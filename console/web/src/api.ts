@@ -43,7 +43,12 @@ export type GraphEdge = { data: Record<string, any> };
 export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
 
 export type Brief = Record<string, string>;
-export type BriefResponse = { brief: Brief; coverage: Record<string, boolean> };
+// SOF-37: learned_facts are reference-backed (every entry links to a real source document +
+// section); reflection_questions are unreferenced candidates awaiting an answer/dismissal —
+// building cannot proceed while any is "open" (see the /promote route's 409).
+export type LearnedFact = { fact: string; document_blob_id: number; section_path: string | null; document_name: string };
+export type ReflectionQuestion = { id: string; fact: string; document_blob_id: number; section_path_claimed: string | null; status: "open" | "answered" | "dismissed"; answer: string | null; created_at: number };
+export type BriefResponse = { brief: Brief; coverage: Record<string, boolean>; learned_facts: LearnedFact[]; reflection_questions: ReflectionQuestion[] };
 
 export type Me = { email: string; role: string; auth: boolean; name?: string; is_internal?: boolean };
 
@@ -352,6 +357,9 @@ export const api = {
   tickets: (id: string) => get<TicketsResponse>(`/api/projects/${id}/tickets`),
   brief: (id: string) => get<BriefResponse>(`/api/projects/${id}/brief`),
   putBrief: (id: string, brief: Brief) => send<BriefResponse>(`/api/projects/${id}/brief`, "PUT", brief),
+  resolveReflection: (id: string, questionId: string, action: "answer" | "dismiss", answer?: string) =>
+    send<{ reflection_questions: ReflectionQuestion[] }>(
+      `/api/projects/${id}/reflection/${questionId}`, "PATCH", { action, answer: answer || "" }),
   chat: (body: Record<string, unknown>, signal?: AbortSignal) =>
     send<{ project_id: string; messages: any[] }>("/api/chat", "POST", body, signal),
   // Onboarding Concierge conversation turn (mock backend for now): one user message →

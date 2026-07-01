@@ -135,3 +135,27 @@ class MemoryStore:
             return json.loads(row["data"]).get("memory_overview")
         except (ValueError, TypeError):
             return None
+
+    # ---- learned facts (SOF-37: the reflection step's "What I learned" surface) -----------
+    def learned_facts(self, scope: str, scope_id: str) -> list[dict]:
+        """Every key_fact from every READY doc_summary in this scope, each enriched with its
+        source document's display name (via a blobs join) — the "links to a real source" AC.
+        Only ever returns facts that were already filtered as referenced at ingest time
+        (memory/ingest.py._filter_key_facts) — this method does no filtering of its own, it
+        just flattens + joins what's already trustworthy."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT ds.key_facts, b.id AS blob_id, b.name AS document_name "
+                "FROM doc_summary ds JOIN blobs b ON b.id = ds.blob_id "
+                "WHERE ds.scope = ? AND ds.scope_id = ? AND ds.status = ?",
+                (scope, scope_id, "ready"),
+            ).fetchall()
+        finally:
+            conn.close()
+        out = []
+        for row in rows:
+            facts = row["key_facts"] or []
+            for f in facts:
+                out.append({**f, "document_name": row["document_name"]})
+        return out
