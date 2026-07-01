@@ -31,7 +31,8 @@ def bugs_from(result: Optional[dict]) -> list[dict]:
     return bugs
 
 
-_SIGNIN_KEYWORDS = ("sign in", "signin", "log in", "login", "sign-in", "credential")
+_SIGNIN_KEYWORDS = ("sign in", "signin", "log in", "login", "sign-in", "credential",
+                    "authenticate", "auth", "sign up", "signup", "register")
 
 
 def has_signin_step(result: Optional[dict]) -> bool:

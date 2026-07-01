@@ -53,7 +53,8 @@ def test_no_bugs_when_all_pass():
 
 def test_has_signin_step_detects_common_patterns():
     for name in ("Sign in with demo credentials", "Log in", "signin", "Login as demo user",
-                 "Fill credentials", "sign-in"):
+                 "Fill credentials", "sign-in", "Authenticate as demo user", "auth check",
+                 "Sign up new account", "signup flow", "Register a demo account"):
         result = {"steps": [{"name": name, "ok": True}]}
         assert has_signin_step(result) is True, name
 
