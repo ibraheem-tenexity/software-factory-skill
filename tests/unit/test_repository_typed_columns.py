@@ -19,6 +19,7 @@ from software_factory import dbshim
 from software_factory.repositories._exec import GlobalExec
 from software_factory.repositories.agent_prompts_repo import AgentPromptRepository
 from software_factory.repositories.blobs_repo import BlobRepository
+from software_factory.repositories.conversation_repo import ConversationRepository
 from software_factory.repositories.sow_repo import SowRepository
 from software_factory.repositories.users import UserRepository
 
@@ -112,5 +113,40 @@ def test_users_repo_org_created_at_is_float_not_decimal():
         conn = dbshim.connect(".")
         try:
             conn.execute("DELETE FROM organizations WHERE id = ?", (org_id,))
+        finally:
+            conn.close()
+
+
+def test_conversation_repo_id_and_created_at_are_str_and_float_not_uuid_and_decimal():
+    """The UUID-cast fix landed on the Phase-2-concierge branch already (osweozhk) — but
+    created_at was still a leak (a bare column, no epoch extraction at all) discovered during
+    SOF-55's re-audit after that branch merged. Also covers rollup()'s last_activity, which
+    needed the SAME cast expression repeated in SELECT/HAVING/ORDER BY, not just the output —
+    a cursor read back from a previous page must compare against the identical type."""
+    import uuid
+    repo = ConversationRepository(GlobalExec())
+    session_id = str(uuid.uuid4())
+    org_id = "org-sof55-conv-typetest"
+    try:
+        mid = repo.insert(session_id=session_id, seq=0, role="user",
+                          json_blob=[{"type": "text", "text": "hi"}], org_id=org_id)
+        assert isinstance(mid, str)
+
+        rows = repo.all_for_session(session_id)
+        assert isinstance(rows[0]["id"], str)
+        assert isinstance(rows[0]["session_id"], str)
+        assert isinstance(rows[0]["created_at"], float)
+
+        rollup = repo.rollup(org_id=org_id)
+        assert isinstance(rollup[0]["last_activity"], float)
+
+        # the cursor/HAVING comparison must work with the SAME (float) type on both sides
+        last_activity, rollup_session_id = rollup[0]["last_activity"], rollup[0]["session_id"]
+        assert repo.rollup(org_id=org_id, cursor=(last_activity - 1, rollup_session_id)) == []
+        assert len(repo.rollup(org_id=org_id, cursor=(last_activity + 1, rollup_session_id))) == 1
+    finally:
+        conn = dbshim.connect(".")
+        try:
+            conn.execute("DELETE FROM conversation WHERE session_id = ?", (session_id,))
         finally:
             conn.close()
