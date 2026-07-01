@@ -69,15 +69,21 @@ def agents_projection(agents: list, tickets: list) -> list:
             for a in (agents or [])]
 
 
-def documents(blobs: list, artifacts: list) -> dict:
-    """Documents tab: user uploads (run blobs; display name = storage-key basename) + factory artifacts."""
+def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None) -> dict:
+    """Documents tab: user uploads (run blobs; display name = storage-key basename) + factory
+    artifacts. `doc_summaries` (SOF-36) is MemoryStore.list_doc_summaries's blob_id -> row map —
+    optional so this stays callable/testable with no memory data at all (SF_MEMORY off, or no
+    doc_summary rows yet); a blob with no entry just gets summary=None/summary_status=None."""
+    doc_summaries = doc_summaries or {}
     uploaded = []
     for b in blobs or []:
         key = b.get("storage_key") or ""
         name = os.path.basename(key) or key
+        ds = doc_summaries.get(b.get("id")) or {}
         uploaded.append({"id": b.get("id"), "name": name, "kind": _kind_for(name),
                          "size_bytes": b.get("size_bytes"), "content_type": b.get("content_type"),
-                         "storage_key": key, "created_at": b.get("created_at")})
+                         "storage_key": key, "created_at": b.get("created_at"),
+                         "summary": ds.get("summary_md"), "summary_status": ds.get("status")})
     produced = [{"id": a.get("id"), "title": a.get("title", ""), "path": a.get("path", ""),
                  "kind": a.get("kind", ""), "agent": a.get("agent", ""), "ts": a.get("ts")}
                 for a in (artifacts or [])]

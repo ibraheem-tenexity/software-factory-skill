@@ -17,6 +17,13 @@ Read the Stage 1 artifacts from `context/` (PRD.md and the design spec).
 > The **exa** web-search MCP is wired into your workspace — use its `web_search`-type tools whenever
 > live web results help (verifying libraries/APIs, current best practices).
 
+> The **memory** MCP (present when the operator enabled Project Memory) has whatever Stage 1 also
+> had access to — the customer's uploaded materials, not just the PRD. Call `get_project_overview`
+> first, then `search_memory("<specific question>")` for constraints/data hints the PRD may have
+> summarized away — every hit cites its source document + section. **Graceful fallback:** if a
+> memory tool errors, times out, or isn't offered this run, do NOT retry or block — design from
+> `context/PRD.md` and the design spec alone, exactly as before Project Memory existed.
+
 ## Record state in the datastore (there are NO events)
 
 ```bash

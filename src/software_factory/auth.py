@@ -110,6 +110,52 @@ def verify_session(cookie: str) -> dict | None:
     return payload
 
 
+# --- Memory MCP scope token (SOF-41) ------------------------------------------------------
+# Same signature scheme as the session cookie above (same secret, same encode/verify) — stateless,
+# no DB round-trip to validate. Its own `purpose` claim means verify_scope_token correctly rejects
+# a leaked session cookie outright (mismatched purpose). verify_session has no reciprocal check —
+# a scope token's valid signature DOES pass it — but that's harmless: the payload has no `uid`/
+# `tv`, so console/deps.py's user lookup from it can never resolve a real user.
+MEMORY_TOKEN_TTL = 24 * 3600   # spans a full stage run, not just a browser tab
+
+
+def sign_scope_token(project_id: str, ttl_seconds: int = MEMORY_TOKEN_TTL) -> str:
+    """A token scoping its bearer to exactly one project's memory. Minted once per stage launch
+    (console.py::_launch_stage) and handed to the stage subprocess as SF_MEMORY_TOKEN."""
+    payload = {"purpose": "memory", "pid": str(project_id), "exp": int(time.time()) + ttl_seconds}
+    raw = _b64u_encode(json.dumps(payload, separators=(",", ":")).encode())
+    sig = hmac.new(_secret(), raw.encode(), hashlib.sha256).digest()
+    return f"{raw}.{_b64u_encode(sig)}"
+
+
+def verify_scope_token(token: str) -> str | None:
+    """The project_id this token is scoped to, if the signature is valid, unexpired, and its
+    `purpose` claim is 'memory' — else None.
+
+    THIS is the enforcement point for the memory MCP's "an agent scoped to project A cannot read
+    project B's memory" requirement: the MCP's tool functions take no project_id argument at all —
+    every tool acts on whatever this returns for the request's bearer token, never a caller-
+    supplied value."""
+    if not token:
+        return None
+    try:
+        raw, sig = token.rsplit(".", 1)
+    except ValueError:
+        return None
+    try:
+        expected = hmac.new(_secret(), raw.encode(), hashlib.sha256).digest()
+        if not hmac.compare_digest(expected, _b64u_decode(sig)):
+            return None
+        payload = json.loads(_b64u_decode(raw))
+    except Exception:
+        return None
+    if payload.get("purpose") != "memory":
+        return None
+    if int(payload.get("exp", 0)) < int(time.time()):
+        return None
+    return payload.get("pid")
+
+
 # --- Service token -----------------------------------------------------------------------
 def service_token_ok(value) -> bool:
     """Machine-caller credential: header == SF_SERVICE_TOKEN env (babysitter sessions, scripts, CI).

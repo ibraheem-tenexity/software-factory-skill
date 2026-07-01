@@ -20,13 +20,18 @@ class BlobStore:
     def record(self, scope: str, scope_id: str, storage_key: str, *, kind: str | None = None,
                name: str | None = None, tag: str | None = None,
                content_type: str | None = None, size_bytes: int | None = None,
-               sha256: str | None = None) -> int:
+               sha256: str | None = None, source_blob_id: int | None = None,
+               source_page: int | None = None, provenance: dict | None = None) -> int:
         """Record one stored blob and return its id. `scope` is 'project' or 'org'; `name`/`tag` are
-        the display filename + category shown in the org knowledge base."""
+        the display filename + category shown in the org knowledge base. `source_blob_id`/
+        `source_page`/`provenance` (SOF-32) are set only when this blob is itself an asset
+        extracted FROM another blob (e.g. an image pulled out of a document page) — leave unset
+        for an original upload."""
         if scope not in ("project", "org"):
             raise ValueError(f"blob scope must be 'project' or 'org', got {scope!r}")
         return self._repo.insert(scope, scope_id, kind, name, tag, storage_key, content_type,
-                                 size_bytes, sha256)
+                                 size_bytes, sha256, source_blob_id=source_blob_id,
+                                 source_page=source_page, provenance=provenance)
 
     def list_for(self, scope: str, scope_id: str) -> list[dict]:
         return [dict(r) for r in self._repo.list_for(scope, scope_id)]

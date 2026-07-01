@@ -19,9 +19,10 @@ function fmtBytes(n?: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function FileTile({ label, kind, sub, tag, onOpen, scope, onScope }:
+function FileTile({ label, kind, sub, tag, onOpen, scope, onScope, summary, summarizing, onSummarize }:
   { label: string; kind?: string; sub?: string; tag?: string; onOpen?: () => void;
-    scope?: "project" | "org"; onScope?: (s: "project" | "org") => void }) {
+    scope?: "project" | "org"; onScope?: (s: "project" | "org") => void;
+    summary?: string; summarizing?: boolean; onSummarize?: () => void }) {
   const k = FILE_KIND[kind || "doc"] || FILE_KIND.doc;
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   return (
@@ -33,6 +34,18 @@ function FileTile({ label, kind, sub, tag, onOpen, scope, onScope }:
       </div>
       <span style={{ font: `600 13px/1.3 ${T.sans}`, color: T.fg, wordBreak: "break-word" }}>{label}</span>
       {sub && <span style={{ font: `400 11px/1 ${T.mono}`, color: T.tertiary }}>{sub}</span>}
+      {summary && (
+        <span style={{ font: `400 11.5px/1.4 ${T.sans}`, color: T.secondary, display: "-webkit-box",
+          WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{summary}</span>
+      )}
+      {onSummarize && (
+        <button onClick={(e) => { stop(e); onSummarize(); }} disabled={summarizing}
+          style={{ alignSelf: "flex-start", padding: "3px 8px", borderRadius: 9999, border: `1px solid ${T.borderDefault}`,
+            background: "transparent", color: summarizing ? T.tertiary : T.brandDeep, cursor: summarizing ? "default" : "pointer",
+            font: `500 10.5px/1 ${T.sans}` }}>
+          {summarizing ? "Summarizing…" : summary ? "Regenerate" : "Auto-summarize"}
+        </button>
+      )}
       {onScope && (
         <div onClick={stop} style={{ display: "flex", gap: 4, background: T.sunken, borderRadius: 9999, padding: 2 }}>
           {(["project", "org"] as const).map((s) => {
@@ -57,6 +70,23 @@ export function DocumentsTab({ projectId }: { projectId: string }) {
   // Material scope toggle (project↔org-wide). PATCH /api/projects/{id}/materials/{materialId} (graceful).
   const setScope = async (materialId: string, scope: "project" | "org") => {
     try { const d = await api.setMaterialScope(projectId, materialId, scope); setDocs(d); } catch { await loadDocs(); }
+  };
+
+  // Auto-summarize / Regenerate (SOF-36/T3.3). One in flight at a time per tile — summarizingId
+  // gates just that tile's button, the rest of the grid stays interactive.
+  const [summarizingId, setSummarizingId] = useState<string | null>(null);
+  const [summarizeErr, setSummarizeErr] = useState("");
+  const summarize = async (materialId: string) => {
+    setSummarizingId(materialId);
+    setSummarizeErr("");
+    try {
+      const d = await api.summarizeDocument(projectId, materialId);
+      setDocs(d);
+    } catch {
+      setSummarizeErr("Summarize isn’t available right now.");
+    } finally {
+      setSummarizingId(null);
+    }
   };
 
   // Post-promote material upload (POST /api/projects/{id}/materials NEW — graceful until live).
@@ -90,6 +120,7 @@ export function DocumentsTab({ projectId }: { projectId: string }) {
           <Btn variant="primary" size="sm" onClick={() => inputRef.current?.click()}><Icon name="upload" size={14} color="#fff" /> Upload material</Btn>
         </div>
         {err && <div style={{ font: `500 12px/1.4 ${T.sans}`, color: T.tertiary, marginBottom: 10 }}>{err}</div>}
+        {summarizeErr && <div style={{ font: `500 12px/1.4 ${T.sans}`, color: T.tertiary, marginBottom: 10 }}>{summarizeErr}</div>}
         {loading && (
           <>
             <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Uploaded by you</h3>
@@ -107,7 +138,7 @@ export function DocumentsTab({ projectId }: { projectId: string }) {
           <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Uploaded by you</h3>
           {uploaded.length ? (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 22 }}>
-              {uploaded.map((d, i) => <FileTile key={(d.id || d.name) + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} scope={d.scope} onScope={d.id ? (s) => setScope(d.id!, s) : undefined} />)}
+              {uploaded.map((d, i) => <FileTile key={(d.id || d.name) + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} scope={d.scope} onScope={d.id ? (s) => setScope(d.id!, s) : undefined} summary={d.summary} summarizing={!!d.id && summarizingId === d.id} onSummarize={d.id ? () => summarize(d.id!) : undefined} />)}
             </div>
           ) : <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "20px", textAlign: "center", font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary, marginBottom: 22 }}>Nothing uploaded for this project.</div>}
 

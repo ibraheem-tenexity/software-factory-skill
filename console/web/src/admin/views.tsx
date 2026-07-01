@@ -194,7 +194,7 @@ export function AdminFilter({ children, w = 150 }: { children: React.ReactNode; 
   );
 }
 
-function FilterSelect({
+export function FilterSelect({
   label,
   options,
   value,

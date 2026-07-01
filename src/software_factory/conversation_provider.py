@@ -31,18 +31,21 @@ from .conversation_blocks import TEXT, IMAGE, TOOL_USE, TOOL_RESULT
 
 
 def _default_resolve_image(block: dict, provider: str) -> dict:
-    """Real image resolution: blob_id -> blobs row -> storage.url() (signed URL) or, when Storage
-    isn't configured, storage.get()+base64 (the design doc's stated fallback)."""
+    """Real image resolution: blob_id -> blobs row -> storage.url_by_path() (signed URL) or, when
+    Storage isn't configured, storage.get_by_path()+base64 (the design doc's stated fallback).
+    `storage_key` is already the FULL bucket-relative path (every writer records it that way, see
+    storage.put's docstring) — the `_by_path` variants must be used here, not `url`/`get`, which
+    would re-prefix scope_id onto an already-full path (SOF-50: FileNotFoundError on re-fetch)."""
     row = BlobRepository(GlobalExec()).by_id(block["blob_id"])
     if row is None:
         raise ValueError(f"image block references unknown blob_id {block['blob_id']!r}")
     media_type = block["media_type"]
     if storage.enabled():
-        url = storage.url(row["scope_id"], row["storage_key"])
+        url = storage.url_by_path(row["storage_key"])
         if provider == "openai":
             return {"type": "image_url", "image_url": {"url": url}}
         return {"type": "image", "source": {"type": "url", "url": url}}
-    b64 = base64.b64encode(storage.get(row["scope_id"], row["storage_key"])).decode()
+    b64 = base64.b64encode(storage.get_by_path(row["storage_key"])).decode()
     if provider == "openai":
         return {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{b64}"}}
     return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}}

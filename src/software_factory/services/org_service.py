@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 
 from software_factory import storage, billing
+from ..memory.ingest import maybe_ingest_async
 from .errors import Invalid, NotFound
 from .files import doc_kind
 
@@ -89,7 +90,12 @@ class OrgService:
         self._org_doc_or_404(doc_id, org["id"])
         if not (project_id or "").strip():
             raise Invalid("project_id required")
-        return self.blobs.record_use(doc_id, project_id)
+        count = self.blobs.record_use(doc_id, project_id)
+        # SOF-32: org docs ingest lazily, on import into a project (not at KB-upload time) —
+        # idempotent via content_sha256 dedup in ingest_blob, so re-importing an already-ready
+        # doc into a second project is a safe no-op, not a re-ingest.
+        maybe_ingest_async(doc_id, self.console)
+        return count
 
     def update_doc(self, email: str, doc_id: int, name, tag) -> dict | None:
         org = self._require_org(email)

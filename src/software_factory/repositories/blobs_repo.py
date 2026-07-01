@@ -2,12 +2,15 @@
 so every method takes its filter values explicitly; no getter/closure, no cycle risk (see #212)."""
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import select, insert, update, delete, func, distinct
 
 from ..models import blobs, blob_uses
 
 _BLOB_COLS = (blobs.c.id, blobs.c.scope, blobs.c.scope_id, blobs.c.kind, blobs.c.name, blobs.c.tag,
-              blobs.c.storage_key, blobs.c.content_type, blobs.c.size_bytes, blobs.c.sha256)
+              blobs.c.storage_key, blobs.c.content_type, blobs.c.size_bytes, blobs.c.sha256,
+              blobs.c.source_blob_id, blobs.c.source_page, blobs.c.provenance)
 
 
 class BlobRepository:
@@ -15,10 +18,17 @@ class BlobRepository:
         self._x = exec_
 
     def insert(self, scope, scope_id, kind, name, tag, storage_key, content_type, size_bytes,
-              sha256) -> int:
+              sha256, *, source_blob_id=None, source_page=None, provenance=None) -> int:
+        # provenance is JSONB; this repo's GlobalExec compiles to raw SQL + a plain psycopg3
+        # cursor.execute (not a real SQLAlchemy Connection), so the JSONB Python-type adapter
+        # never runs — a bare dict must be pre-serialized, same as key_facts/outline in
+        # memory/store.py, or every blob insert (incl. the already-live upload routes, since
+        # provenance now defaults on every call) breaks.
         stmt = insert(blobs).values(scope=scope, scope_id=scope_id, kind=kind, name=name, tag=tag,
                                     storage_key=storage_key, content_type=content_type,
-                                    size_bytes=size_bytes, sha256=sha256).returning(blobs.c.id)
+                                    size_bytes=size_bytes, sha256=sha256,
+                                    source_blob_id=source_blob_id, source_page=source_page,
+                                    provenance=json.dumps(provenance or {})).returning(blobs.c.id)
         return self._x.fetchone(stmt)["id"]
 
     def list_for(self, scope, scope_id) -> list:

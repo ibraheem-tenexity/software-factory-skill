@@ -1,21 +1,24 @@
 """Projects (runs) + drafts: list/create, run-scoped GETs, Project View §2.5 aggregates,
 run-scoped actions, and the Option C draft write-through + handoff."""
+import asyncio
 import base64
 import mimetypes
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 
 from software_factory import storage, project_view
 from software_factory.console import ProjectRequest, project_paths
 from software_factory.db import artifact_by_id
 from software_factory.deps import extract_env_creds
+from software_factory.memory.ingest import maybe_ingest_async
 
 import console.state as state
 from console.deps import require_authed, authorize_project, _can_see
 from console.schemas import (ProjectCreateIn, DraftCreateIn, ProjectPatchIn, MaterialScopeIn, OrgDocIn,
                              ContinueIn, DepsIn, ProvideDepIn, Stage3In, BudgetIn, RetryIn, RetryNodeIn,
-                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn)
+                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, ReflectionAnswerIn)
 
 router = APIRouter()
 
@@ -100,10 +103,19 @@ def project_deployments(pid: str, v: tuple = Depends(authorize_project)):
 
 @router.get("/api/projects/{pid}/brief")
 def project_brief(pid: str, v: tuple = Depends(authorize_project)):
-    """The structured onboarding brief (shared by the chat interview and the brief form)."""
+    """The structured onboarding brief (shared by the chat interview and the brief form).
+    SOF-37: also carries the reflection surface — learned_facts (reference-backed, from ready
+    doc_summary rows) and reflection_questions (unreferenced candidates awaiting an answer/
+    dismissal — see the promote-route gate below)."""
     from software_factory.brief import coverage as _cov
+    from software_factory.memory.store import MemoryStore
     brief = state.console.draft_brief(pid)
-    return {"brief": brief, "coverage": _cov(brief)}
+    project_state = state.console._load_state(pid)
+    return {
+        "brief": brief, "coverage": _cov(brief),
+        "learned_facts": MemoryStore().learned_facts("project", pid),
+        "reflection_questions": project_state.reflection_questions,
+    }
 
 
 @router.put("/api/projects/{pid}/brief")
@@ -193,9 +205,19 @@ def project_overview(pid: str, v: tuple = Depends(authorize_project)):
     }
 
 
+def _project_documents(pid: str) -> dict:
+    """Documents tab payload, enriched with each doc's AI summary (SOF-36) when memory has one —
+    `list_doc_summaries` returns {} if SF_MEMORY is off or nothing's been ingested yet, so this
+    degrades gracefully either way."""
+    from software_factory.memory.store import MemoryStore
+    doc_summaries = MemoryStore().list_doc_summaries("project", pid)
+    return project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid),
+                                  doc_summaries)
+
+
 @router.get("/api/projects/{pid}/documents")
 def project_documents(pid: str, v: tuple = Depends(authorize_project)):
-    return project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid))
+    return _project_documents(pid)
 
 
 @router.post("/api/projects/{pid}/materials")
@@ -210,10 +232,56 @@ def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authori
         raise HTTPException(status_code=400, detail="data_b64 must be valid base64")
     key = f"materials/{body.name}"
     storage.put(pid, key, raw)
-    state.blobs.record("project", pid, f"{pid}/{key}", name=body.name, tag=body.tag,
+    blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=body.name, tag=body.tag,
                  kind=state._doc_kind(body.name), content_type=body.content_type,
                  size_bytes=len(raw), sha256=storage.sha256(raw))
-    return project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid))
+    maybe_ingest_async(blob_id, state.console)
+    return _project_documents(pid)
+
+
+@router.post("/api/projects/{pid}/documents/{blob_id}/summarize")
+def project_document_summarize(pid: str, blob_id: int, v: tuple = Depends(authorize_project)):
+    """Auto-summarize / Regenerate (SOF-36/T3.3): synchronously re-runs the T3.2 ingestion
+    pipeline for one document, bypassing the unchanged-content skip so a click always produces a
+    fresh summary. The user is waiting on this, unlike the upload path's fire-and-forget
+    maybe_ingest_async — small enough (one document) to just block on."""
+    from software_factory.memory import ingest as memory_ingest
+    if not memory_ingest.enabled():
+        raise HTTPException(status_code=404, detail="project memory is not enabled")
+    blob = state.blobs.get_blob(blob_id)
+    if not blob or blob["scope"] != "project" or blob["scope_id"] != pid:
+        raise HTTPException(status_code=404, detail="document not found")
+    result = memory_ingest.ingest_blob(blob_id, console=state.console, force=True)
+    if result.get("status") == "failed":
+        raise HTTPException(status_code=502, detail=result.get("error") or "summarization failed")
+    return _project_documents(pid)
+
+
+@router.get("/api/projects/{pid}/ingest/stream")
+async def project_ingest_stream(pid: str, v: tuple = Depends(authorize_project)):
+    """SOF-32: SSE for real-time ingestion progress — a channel SEPARATE from the chat stream
+    (see console/state.py's _push_ingest_sse docstring). Same drain/keepalive pattern as
+    chat_stream (console/routers/chat.py)."""
+    q: list[str] = []
+    with state._ingest_sse_lock:
+        state._ingest_sse_clients.setdefault(pid, []).append(q)
+
+    async def gen():
+        try:
+            while True:
+                if q:
+                    yield q.pop(0)
+                else:
+                    yield ": keepalive\n\n"
+                    await asyncio.sleep(2)
+        finally:
+            with state._ingest_sse_lock:
+                clients = state._ingest_sse_clients.get(pid, [])
+                if q in clients:
+                    clients.remove(q)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
 
 
 @router.patch("/api/projects/{pid}")
@@ -430,10 +498,15 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
             raw = open(file_path, "rb").read()
             key = f"materials/{name}"
             storage.put(pid, key, raw)
-            state.blobs.record("project", pid, f"{pid}/{key}", name=name,
+            blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=name,
                                kind=state._doc_kind(name),
                                content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
                                size_bytes=len(raw), sha256=storage.sha256(raw))
+            # SOF-32: this is the actual live onboarding upload path (draft-only, pre-promotion)
+            # — the /materials route below is a separate, any-phase path. Missing this hook here
+            # means real user uploads during the interview never get ingested at all, which is
+            # exactly when SOF-37's reflection step needs facts to already exist.
+            maybe_ingest_async(blob_id, state.console)
     return {"attached": written}
 
 
@@ -445,12 +518,45 @@ def store_draft_creds(pid: str, body: CredsIn, v: tuple = Depends(authorize_proj
     return state.console.store_draft_creds(pid, body.credentials)
 
 
+@router.patch("/api/projects/{pid}/reflection/{question_id}")
+def resolve_reflection_question(pid: str, question_id: str, body: ReflectionAnswerIn,
+                                v: tuple = Depends(authorize_project)):
+    """SOF-37: resolve one outstanding reflection question (an unreferenced key_facts
+    candidate) — "answer" records the supplied text, "dismiss" says it isn't needed. Either
+    way flips status off "open", which is what the promote-route gate below checks."""
+    if body.action not in ("answer", "dismiss"):
+        raise HTTPException(status_code=400, detail="action must be 'answer' or 'dismiss'")
+    project_state = state.console._load_state(pid)
+    questions = list(project_state.reflection_questions or [])
+    match = next((q for q in questions if q["id"] == question_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="reflection question not found")
+    match["status"] = "answered" if body.action == "answer" else "dismissed"
+    match["answer"] = body.answer if body.action == "answer" else None
+    project_state.reflection_questions = questions
+    project_state.save()
+    return {"reflection_questions": questions}
+
+
 @router.post("/api/projects/{pid}/promote")
 def promote_draft(pid: str, body: PromoteIn, v: tuple = Depends(authorize_project)):
     """Hand off to the factory: promote the draft into a real run and launch Stage 1. The composed
-    state.description + accumulated brief are the payload (description override optional)."""
+    state.description + accumulated brief are the payload (description override optional).
+
+    SOF-37 trust gate: refuses while any reflection question (an unreferenced key_facts
+    candidate from the ingested materials) is still open — the operator must answer or
+    dismiss it first. This is independent of (and does not touch) brief.enough()'s required-
+    section coverage check, which is not currently wired into this route at all — a separate,
+    pre-existing gap outside this ticket's scope."""
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
+    open_questions = [q for q in (state.console._load_state(pid).reflection_questions or [])
+                      if q["status"] == "open"]
+    if open_questions:
+        raise HTTPException(status_code=409, detail={
+            "error": "outstanding reflection questions must be answered or dismissed first",
+            "open_questions": open_questions,
+        })
     try:
         project_id = state.console.promote_draft(pid, description=body.description, target=body.target)
     except ValueError as e:                # duplicate project name

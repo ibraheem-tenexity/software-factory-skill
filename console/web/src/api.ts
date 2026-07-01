@@ -43,7 +43,12 @@ export type GraphEdge = { data: Record<string, any> };
 export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
 
 export type Brief = Record<string, string>;
-export type BriefResponse = { brief: Brief; coverage: Record<string, boolean> };
+// SOF-37: learned_facts are reference-backed (every entry links to a real source document +
+// section); reflection_questions are unreferenced candidates awaiting an answer/dismissal —
+// building cannot proceed while any is "open" (see the /promote route's 409).
+export type LearnedFact = { fact: string; document_blob_id: number; section_path: string | null; document_name: string };
+export type ReflectionQuestion = { id: string; fact: string; document_blob_id: number; section_path_claimed: string | null; status: "open" | "answered" | "dismissed"; answer: string | null; created_at: number };
+export type BriefResponse = { brief: Brief; coverage: Record<string, boolean>; learned_facts: LearnedFact[]; reflection_questions: ReflectionQuestion[] };
 
 export type Me = { email: string; role: string; auth: boolean; name?: string; is_internal?: boolean };
 
@@ -80,7 +85,7 @@ export type Artifact = { path: string; content?: string; error?: string };
 
 // Project view (§2.5) — Overview rollup + Documents, per tjyb5gmy's LOCKED shapes (PR #13).
 // Callers degrade to empty until live.
-export type ProjectMaterial = { id?: string; name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number; scope?: "project" | "org" };
+export type ProjectMaterial = { id?: string; name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number; scope?: "project" | "org"; summary?: string; summary_status?: "pending" | "ready" | "failed" };
 export type ProjectArtifact = { id?: number; title: string; path?: string; kind?: string; agent?: string; ts?: number };
 export type ProjectOverview = {
   brief?: { name?: string; description?: string; goal?: string; scope?: string[]; owner?: string; phase?: string; stage?: number; created?: number | string; runtime?: string; created_by?: string };
@@ -212,6 +217,7 @@ export type AdminClient = {
 };
 
 export type AdminAccessUser = {
+  id: string;
   email: string;
   type: "New org" | "Tenexity";
   org: string;
@@ -234,6 +240,64 @@ export type AdminOverview = {
 };
 
 export type AdminProjectMode = "all" | "real" | "demo";
+
+// SOF-34/T1.5 — cross-tenant conversation history (Tenexity OS).
+export type AdminConversationSession = {
+  session_id: string;
+  org_id: string | null;
+  org_name: string | null;
+  project_id: string | null;
+  project_name: string | null;
+  user_id: string | null;
+  user_email: string | null;
+  turn_count: number;
+  last_activity: string;
+  total_cost: number;
+};
+
+export type AdminConversationsResponse = {
+  sessions: AdminConversationSession[];
+  next_cursor: string | null;
+};
+
+export type AdminConversationMessage = {
+  id: string;
+  session_id: string;
+  seq: number;
+  user_id: string | null;
+  project_id: string | null;
+  org_id: string | null;
+  role: string;
+  input: string | null;
+  json_blob: unknown[];
+  tool_name: string | null;
+  tool_call_id: string | null;
+  tool_result: unknown | null;
+  referenced_artifact: number | null;
+  model: string | null;
+  provider: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  created_at: string;
+};
+
+export type AdminConversationTranscript = {
+  session_id: string;
+  messages: AdminConversationMessage[];
+};
+
+export type AdminConversationsFilter = {
+  org_id?: string;
+  project_id?: string;
+  user_id?: string;
+  session_id?: string;
+  role?: string;
+  date_from?: string;
+  date_to?: string;
+  cursor?: string;
+  limit?: number;
+};
 
 export type AdminSow = {
   id: number;
@@ -293,6 +357,9 @@ export const api = {
   tickets: (id: string) => get<TicketsResponse>(`/api/projects/${id}/tickets`),
   brief: (id: string) => get<BriefResponse>(`/api/projects/${id}/brief`),
   putBrief: (id: string, brief: Brief) => send<BriefResponse>(`/api/projects/${id}/brief`, "PUT", brief),
+  resolveReflection: (id: string, questionId: string, action: "answer" | "dismiss", answer?: string) =>
+    send<{ reflection_questions: ReflectionQuestion[] }>(
+      `/api/projects/${id}/reflection/${questionId}`, "PATCH", { action, answer: answer || "" }),
   chat: (body: Record<string, unknown>, signal?: AbortSignal) =>
     send<{ project_id: string; messages: any[] }>("/api/chat", "POST", body, signal),
   // Onboarding Concierge conversation turn: one user message -> the agent's ConciergeTurn reply
@@ -385,6 +452,14 @@ export const api = {
   adminSowGet: (id: number) => get<AdminSow>(`/api/admin/sow/${id}`),
   adminSowCreate: (body: { title: string; org?: string; project?: string; value?: string; file?: string; version?: number; status?: string; body?: string }) => send<AdminSow>("/api/admin/sow", "POST", body),
   adminSowUpdate: (id: number, body: { title?: string; org?: string; project?: string; value?: string; file?: string; version?: number; status?: string; body?: string }) => send<AdminSow>(`/api/admin/sow/${id}`, "PATCH", body),
+  // SOF-34/T1.5 — cross-tenant conversation history.
+  adminConversations: (filter: AdminConversationsFilter = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(filter).forEach(([k, v]) => { if (v !== undefined && v !== "") params.set(k, String(v)); });
+    const qs = params.toString();
+    return get<AdminConversationsResponse>(`/api/admin/conversations${qs ? `?${qs}` : ""}`);
+  },
+  adminConversationTranscript: (sessionId: string) => get<AdminConversationTranscript>(`/api/admin/conversations/${encodeURIComponent(sessionId)}`),
   // ── Onboarding draft model (docs/plans/concierge-onboarding-api.md) ──
   // runtime ("claude"|"opencode") + model ("kimi"|"glm") are persisted by the backend (DraftCreateIn
   // → projectstate). BYOK keys: when keySource="byok", the FE POSTs the runtime-specific runner key
@@ -429,6 +504,10 @@ export const api = {
   rewindTo: (id: string, node: string) => send<Record<string, any>>(`/api/projects/${id}/rewind`, "POST", { node }),
   uploadMaterial: (id: string, file: { name: string; tag?: string; content_type?: string; data_b64: string }) =>
     send<{ ok?: boolean }>(`/api/projects/${id}/materials`, "POST", file),
+  // Auto-summarize / Regenerate (SOF-36/T3.3) — synchronous, blocks until the fresh summary is
+  // persisted; 404s if project memory (SF_MEMORY) isn't enabled.
+  summarizeDocument: (id: string, blobId: string) =>
+    send<ProjectDocuments>(`/api/projects/${id}/documents/${blobId}/summarize`, "POST"),
   orgDocUpload: (body: { name: string; tag?: string; content_type?: string; data_b64: string }) =>
     send<{ doc?: OrgDoc }>("/api/org/docs", "POST", body),
   orgDocDelete: (docId: string) => send<{ ok?: boolean }>(`/api/org/docs/${docId}`, "DELETE"),

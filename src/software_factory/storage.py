@@ -53,12 +53,15 @@ def _as_bytes(data) -> bytes:
         return f.read()
 
 
-def url(scope_id: str, key: str) -> str:
-    """Signed retrieval URL for an object in the private bucket (does not upload).
+def url_by_path(obj: str) -> str:
+    """Signed retrieval URL for an object at its full bucket-relative path (does not upload).
+    For callers that already hold the full path — e.g. `blobs.storage_key`, which every writer
+    records as the complete `<scope_id>/<key>` path (see `put`) — so it must NOT be re-prefixed
+    with a scope_id a second time (that was SOF-50: FileNotFoundError on re-fetch). `url`/`get`
+    below are for callers that only have scope_id + key separately; they delegate here.
     POSTs to the Supabase sign endpoint to mint a long-lived bearer-token URL
     (TTL from SF_STORAGE_URL_TTL, default 10 years). Falls back to file:// when
     storage is not configured."""
-    obj = _object_path(scope_id, key)
     if enabled():
         base = os.environ["SUPABASE_URL"].rstrip("/")
         bucket = os.environ["SF_STORAGE_BUCKET"]
@@ -72,6 +75,12 @@ def url(scope_id: str, key: str) -> str:
             signed_path = json.loads(r.read())["signedURL"]
         return f"{base}/storage/v1{signed_path}"
     return "file://" + os.path.join(_local_root(), obj)
+
+
+def url(scope_id: str, key: str) -> str:
+    """Signed retrieval URL for an object addressed by scope_id + key (see `url_by_path` for the
+    full-path variant, which is what a stored `storage_key` needs)."""
+    return url_by_path(_object_path(scope_id, key))
 
 
 def put(scope_id: str, key: str, data) -> str:
@@ -94,11 +103,11 @@ def put(scope_id: str, key: str, data) -> str:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, "wb") as f:
             f.write(raw)
-    return url(scope_id, key)
+    return url_by_path(obj)
 
 
-def get(scope_id: str, key: str) -> bytes:
-    obj = _object_path(scope_id, key)
+def get_by_path(obj: str) -> bytes:
+    """Fetch an object's bytes at its full bucket-relative path — see `url_by_path`."""
     if enabled():
         base = os.environ["SUPABASE_URL"].rstrip("/")
         bucket = os.environ["SF_STORAGE_BUCKET"]
@@ -109,6 +118,12 @@ def get(scope_id: str, key: str) -> bytes:
             return r.read()
     with open(os.path.join(_local_root(), obj), "rb") as f:
         return f.read()
+
+
+def get(scope_id: str, key: str) -> bytes:
+    """Fetch an object's bytes addressed by scope_id + key (see `get_by_path` for the full-path
+    variant, which is what a stored `storage_key` needs)."""
+    return get_by_path(_object_path(scope_id, key))
 
 
 def listing(scope_id: str) -> list[str]:

@@ -7,7 +7,9 @@ runs the `require_staff` gate and calls one method here. Framework-free — rais
 """
 from __future__ import annotations
 
+import base64
 import datetime
+import json
 import os
 
 from software_factory import tenexity_os
@@ -21,14 +23,43 @@ def _midnight_epoch() -> float:
     return now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
 
+def _parse_date(label: str, value: str | None) -> datetime.datetime | None:
+    """ISO 8601 in, `None` through unchanged — the conversations filter's date_from/date_to are
+    optional query strings, not required to be present."""
+    if value is None:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value)
+    except ValueError:
+        raise Invalid(f"invalid {label} — expected ISO 8601")
+
+
+def _encode_cursor(last_activity: datetime.datetime, session_id: str) -> str:
+    """Opaque keyset-pagination cursor for admin_conversations: (last_activity, session_id) from
+    the previous page's last row. Base64 so it's a single URL-safe query-param token; no codebase
+    convention existed for this yet (checked — see SOF-34 research), so this one is it."""
+    raw = json.dumps([last_activity.isoformat(), session_id])
+    return base64.urlsafe_b64encode(raw.encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> tuple[datetime.datetime, str]:
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+        ts_str, session_id = json.loads(raw)
+        return datetime.datetime.fromisoformat(ts_str), session_id
+    except Exception:
+        raise Invalid("invalid cursor")
+
+
 class AdminService:
-    def __init__(self, console, users, agent_store, tool_store, prompts, sow_store):
+    def __init__(self, console, users, agent_store, tool_store, prompts, sow_store, conversation_repo):
         self.console = console
         self.users = users
         self.agent_store = agent_store
         self.tool_store = tool_store
         self.prompts = prompts
         self.sow_store = sow_store
+        self.conversation_repo = conversation_repo
 
     # ── cross-tenant context + dashboards ─────────────────────────────────────────────
     def _context(self):
@@ -198,7 +229,7 @@ class AdminService:
         for u in self.users.list_users():
             staff = u.get("is_internal") in (1, True)
             org = self.users.get_org(u["org_id"]) if u.get("org_id") else None
-            out.append({"email": u["email"], "type": "Tenexity" if staff else "New org",
+            out.append({"id": u["id"], "email": u["email"], "type": "Tenexity" if staff else "New org",
                         "org": "Tenexity" if staff else (org["name"] if org else None),
                         "role": u["role"], "status": u.get("status") or "active",
                         "name": u.get("name"), "designation": u.get("designation"),
@@ -310,3 +341,37 @@ class AdminService:
             return self.sow_store.update(sow_id, body.model_dump(exclude_none=True))
         except ValueError as e:
             raise Unprocessable(str(e))
+
+    # ── conversation history (SOF-34, T1.5) — cross-tenant, staff-only ─────────────────
+    def conversations(self, *, org_id=None, project_id=None, user_id=None, session_id=None,
+                      role=None, date_from=None, date_to=None, cursor=None, limit=50) -> dict:
+        """Sessions roll-up (§9 concierge-conversation-store.md): one row per session, aggregated
+        via a single grouped query (ConversationRepository.rollup — no N+1). org/project/user
+        names are resolved via the SAME batch context every other cross-tenant dashboard already
+        uses (`_context()` + `list_users()`) — one query per lookup table, not per session row."""
+        decoded_cursor = _decode_cursor(cursor) if cursor else None
+        rows = self.conversation_repo.rollup(
+            org_id=org_id, project_id=project_id, user_id=user_id, session_id=session_id,
+            role=role, date_from=_parse_date("date_from", date_from),
+            date_to=_parse_date("date_to", date_to), cursor=decoded_cursor, limit=limit)
+
+        runs, orgs, _members, _o2o = self._context()
+        org_names = {o["id"]: o["name"] for o in orgs}
+        project_names = {r["project_id"]: r["name"] for r in runs}
+        user_emails = {u["id"]: u["email"] for u in self.users.list_users()}
+
+        sessions = [{
+            "session_id": r["session_id"],
+            "org_id": r["org_id"], "org_name": org_names.get(r["org_id"]),
+            "project_id": r["project_id"], "project_name": project_names.get(r["project_id"]),
+            "user_id": r["user_id"], "user_email": user_emails.get(r["user_id"]),
+            "turn_count": r["turn_count"], "last_activity": r["last_activity"],
+            "total_cost": float(r["total_cost"]),
+        } for r in rows]
+        next_cursor = (_encode_cursor(rows[-1]["last_activity"], rows[-1]["session_id"])
+                      if len(rows) == limit else None)
+        return {"sessions": sessions, "next_cursor": next_cursor}
+
+    def conversation_transcript(self, session_id: str) -> dict:
+        """Messages drill-down for one session — a single scoped query, oldest-first."""
+        return {"session_id": session_id, "messages": self.conversation_repo.all_for_session(session_id)}

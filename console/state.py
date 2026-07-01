@@ -24,12 +24,15 @@ from software_factory import auth  # noqa: E402
 from software_factory.users import UserStore  # noqa: E402
 from software_factory.blobs import BlobStore  # noqa: E402
 from software_factory.agent_prompts import PromptStore  # noqa: E402
-from software_factory.registries import ToolStore, AgentRegistryStore  # noqa: E402
+from software_factory.registries import ToolStore, AgentRegistryStore, MEMORY_MCP_TOOL  # noqa: E402
 from software_factory.sow import SowStore  # noqa: E402
 from software_factory.services.org_service import OrgService  # noqa: E402
 from software_factory.services.secrets import Secrets  # noqa: E402
+from software_factory.repositories.org_secrets_repo import OrgSecretsRepository  # noqa: E402
+from software_factory.repositories._exec import GlobalExec  # noqa: E402
 from software_factory.services.conversation import Conversation, DbConversation  # noqa: E402
 from software_factory.services.admin_service import AdminService  # noqa: E402
+from software_factory.repositories.conversation_repo import ConversationRepository  # noqa: E402
 from software_factory.services.files import doc_kind as _doc_kind  # noqa: E402,F401
 
 from console.throttle import LoginThrottle  # noqa: E402
@@ -56,6 +59,12 @@ _has_chat_key = False
 _chat_runner = None
 _sse_clients: dict[str, list] = {}
 _sse_lock = threading.Lock()
+# SOF-32: a SEPARATE channel from _sse_clients/_push_sse — that one feeds the live chat
+# transcript (ChatPanel.tsx), which does not filter by msg_type, so piping ingest-progress
+# events through it would spam the visible chat with "processing chunk 3/12" noise. This is
+# its own stream for a future ProcessingScreen (SOF-49) to consume, with zero risk to chat.
+_ingest_sse_clients: dict[str, list] = {}
+_ingest_sse_lock = threading.Lock()
 _project_stages: dict[str, int] = {}
 login_throttle = None
 
@@ -66,6 +75,7 @@ def reset():
     global PROJECTS_DIR, console, users, blobs, prompts, tool_store, agent_store, sow_store
     global org_service, secrets_svc, conversation_svc, admin_service
     global _has_chat_key, _chat_runner, _sse_clients, _sse_lock, _project_stages, login_throttle
+    global _ingest_sse_clients, _ingest_sse_lock
 
     PROJECTS_DIR = os.environ.get("SF_PROJECTS_DIR", os.path.join(HERE, "..", ".projects"))
     console = Console(PROJECTS_DIR)
@@ -76,18 +86,27 @@ def reset():
     blobs = BlobStore()           # org KB docs + run-scoped uploaded materials (bytes live in storage)
     prompts = PromptStore()       # editable agent prompts (§3.4) — stored/served, not yet applied
     tool_store = ToolStore()      # tools/MCP registry (§3.5) — real datastore (seeded), CRUD-able
+    # SOF-41/T4.2: the Project Memory MCP row only ever shows up once the feature is actually
+    # wired (SF_MEMORY=1) — showing "connected" for an endpoint that isn't mounted would mislead
+    # the Tools & MCP registry.
+    if os.environ.get("SF_MEMORY") == "1":
+        tool_store.ensure_tool(MEMORY_MCP_TOOL)
     agent_store = AgentRegistryStore()   # agent identity registry (§3.4)
     sow_store = SowStore()               # statement-of-work CRUD
     # Service layer (business logic between routers and stores). Built AFTER the stores so it holds
     # the current instances; rebuilt each reset() so per-test TRUNCATE + re-seed is reflected.
     org_service = OrgService(users, blobs, console)
-    secrets_svc = Secrets()
+    secrets_svc = Secrets(OrgSecretsRepository(GlobalExec()))  # SOF-45: real Vault-backed store
     # DbConversation (SOF-31/T1.3) is the durable swap for the onboarding mock — same turn()/
     # history() contract, backed by ConversationStore. Opt-in via SF_CONVERSATION_DB so tests and
     # existing deploys stay on the in-memory mock until the flag is flipped.
     conversation_svc = (DbConversation(users=users) if os.environ.get("SF_CONVERSATION_DB") == "1"
                         else Conversation())
-    admin_service = AdminService(console, users, agent_store, tool_store, prompts, sow_store)
+    # Admin history table (SOF-34/T1.5) reads the conversation table directly — independent of
+    # conversation_svc/SF_CONVERSATION_DB, since it's a cross-tenant query surface, not the
+    # onboarding Concierge's own storage path.
+    admin_service = AdminService(console, users, agent_store, tool_store, prompts, sow_store,
+                                 ConversationRepository(GlobalExec()))
     # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
     _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
     # SOF-35 removed the OpenAI-Agents-SDK ChatAgentRunner; SOF-39/40 restores /api/chat on
@@ -96,6 +115,8 @@ def reset():
     _chat_runner = ChatDockRunner(console, users) if _has_chat_key else None
     _sse_clients = {}
     _sse_lock = threading.Lock()
+    _ingest_sse_clients = {}
+    _ingest_sse_lock = threading.Lock()
     _project_stages = {}
     login_throttle = LoginThrottle()   # brute-force/DoS guard for POST /api/auth/password (in-process)
 
@@ -115,6 +136,18 @@ def _push_sse(project_id: str, msgs):
         data = json.dumps(msg.to_dict())
         for q in clients:
             q.append(f"data: {data}\n\n")
+
+
+def _push_ingest_sse(project_id: str, event: dict):
+    """SOF-32: push one ingest-progress event (plain dict, no ChatMessage wrapper needed since
+    this channel has no chat-history contract to keep) to clients watching this project's
+    ingestion. Shape: {blob_id, doc_name, stage, pct, status}. Separate from _push_sse — see
+    the _ingest_sse_clients docstring for why."""
+    with _ingest_sse_lock:
+        clients = _ingest_sse_clients.get(project_id, [])
+    data = json.dumps(event)
+    for q in clients:
+        q.append(f"data: {data}\n\n")
 
 
 def _react_enabled() -> bool:
