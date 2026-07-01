@@ -266,7 +266,14 @@ def _provision_repo(projects_dir: str, project_id: str, slug: str) -> int:
     db = ProjectStore(base)
     state = ProjectState.load(project_id, db)
     if state.repo_url:
-        if not os.path.isdir(".git"):
+        # SOF-44: both create_repo's own --clone and clone_repo() (`gh repo clone <url>`) clone
+        # into a NEW ./<repo-name>/ subdirectory, never into cwd itself — checking os.path.isdir
+        # (".git") was always False after a real clone, so a retry from an already-cloned
+        # workspace re-attempted clone_repo unnecessarily every time (harmless — clone_repo
+        # doesn't check/raise on failure — but wasted work). Derive the actual clone target from
+        # the recorded repo_url instead of assuming cwd.
+        repo_name = state.repo_url.rstrip("/").rsplit("/", 1)[-1]
+        if not os.path.isdir(os.path.join(repo_name, ".git")):
             GitHub().clone_repo(state.repo_url)
         print(state.repo_url)
         return 0
