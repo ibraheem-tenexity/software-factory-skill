@@ -12,6 +12,7 @@ import time
 from fastapi import FastAPI
 
 from software_factory.chat_store import ChatStore, ChatMessage
+from software_factory import chat_agent
 from software_factory import notify
 from software_factory import env as _env
 
@@ -277,11 +278,9 @@ def _poll_transitions():
                 cur = st.get("stage", 1)
                 if cur != prev:
                     state._project_stages[pid] = cur
-                    if state._chat_runner:
-                        _append_notifications(pid, state._chat_runner.check_and_notify(pid, prev_stage=prev))
+                    _append_notifications(pid, chat_agent.check_and_notify(state.console, pid, prev_stage=prev))
                 if st.get("done") and prev > 0:
-                    if state._chat_runner:
-                        _append_notifications(pid, state._chat_runner.check_and_notify(pid, prev_stage=cur))
+                    _append_notifications(pid, chat_agent.check_and_notify(state.console, pid, prev_stage=cur))
                     state._project_stages.pop(pid, None)
         except Exception:
             pass
@@ -345,10 +344,12 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        # SOF-43: explicit flush at the PROCESS boundary (per-turn flush lives in
-        # ChatAgentRunner._flush_langfuse) — closes the narrow window where a trace from a
-        # request right before shutdown could be lost to the SDK's own background auto-flush
-        # interval never getting a chance to fire. Best-effort; must never block shutdown.
+        # SOF-43: explicit flush at the PROCESS boundary (per-turn flush lives on the concierge
+        # agent object itself) — closes the narrow window where a trace from a request right
+        # before shutdown could be lost to the SDK's own background auto-flush interval never
+        # getting a chance to fire. Best-effort; must never block shutdown. state._chat_runner is
+        # None during the SOF-35 Concierge rebuild (T2.0-T2.2), so this is a no-op until T2.1
+        # restores an agent object — safe either way via the getattr/None guards below.
         runner = getattr(state, "_chat_runner", None)
         client = getattr(runner, "_langfuse", None) if runner else None
         if client:
