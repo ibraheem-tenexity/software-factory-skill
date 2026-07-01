@@ -1,13 +1,18 @@
-"""Pure CRUD for `agent_prompts` (SQLAlchemy Core). Global table keyed by callsign."""
+"""Pure CRUD for `agent_prompts` (SQLAlchemy Core). Global table keyed by callsign.
+
+updated_at: cast(func.extract("epoch", col), Float) — a bare extract() returns Postgres `numeric`,
+which psycopg3 decodes to `Decimal`, not the `float` the rest of the app expects (see
+repositories/users.py's docstring, SOF-55)."""
 from __future__ import annotations
 
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, cast, Float
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..models import agent_prompts
 
 _COLS = (agent_prompts.c.callsign, agent_prompts.c.prompt, agent_prompts.c.version,
-         agent_prompts.c.updated_by, func.extract("epoch", agent_prompts.c.updated_at).label("updated_at"))
+         agent_prompts.c.updated_by,
+         cast(func.extract("epoch", agent_prompts.c.updated_at), Float).label("updated_at"))
 
 
 class AgentPromptRepository:
