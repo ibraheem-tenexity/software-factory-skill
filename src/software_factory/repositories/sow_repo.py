@@ -10,15 +10,16 @@ docstring for the SOF-55 fix). `cast(..., Float)` on top forces a real double-pr
 """
 from __future__ import annotations
 
-from sqlalchemy import select, insert, update, func, cast, Float
+from sqlalchemy import select, insert, update, func
 
 from ..models import sow
+from ._compile import epoch_cast
 
 _SOW_COLS = (
     sow.c.id, sow.c.title, sow.c.org, sow.c.project, sow.c.value, sow.c.file, sow.c.version,
     sow.c.status, sow.c.body,
-    cast(func.extract("epoch", sow.c.created_at), Float).label("created_at"),
-    cast(func.extract("epoch", sow.c.updated_at), Float).label("updated_at"),
+    epoch_cast(sow.c.created_at).label("created_at"),
+    epoch_cast(sow.c.updated_at).label("updated_at"),
 )
 
 

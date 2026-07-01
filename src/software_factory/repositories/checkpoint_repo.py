@@ -8,12 +8,11 @@ compiled `::JSONB` cast handles it), matching the previous raw-SQL behavior; rea
 """
 from __future__ import annotations
 
-import json
-
 from sqlalchemy import select, delete, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..models import checkpoint
+from ._compile import serialize_jsonb
 
 
 class CheckpointRepository:
@@ -24,7 +23,7 @@ class CheckpointRepository:
         """INSERT … ON CONFLICT (project_id, node) DO NOTHING RETURNING id. True if a new row was
         inserted, False if it already existed (idempotent)."""
         stmt = (pg_insert(checkpoint)
-                .values(project_id=project_id, node=node, output=json.dumps(output or {}),
+                .values(project_id=project_id, node=node, output=serialize_jsonb(output, default={}),
                         stamped_at=stamped_at)
                 .on_conflict_do_nothing(index_elements=["project_id", "node"])
                 .returning(checkpoint.c.id))

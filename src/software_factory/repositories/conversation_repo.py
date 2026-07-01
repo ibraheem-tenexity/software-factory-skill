@@ -2,11 +2,10 @@
 callers pass session_id/scope values explicitly (mirrors blobs_repo.py, see #212)."""
 from __future__ import annotations
 
-import json
-
-from sqlalchemy import select, insert, func, and_, or_, cast, Text, Float
+from sqlalchemy import select, insert, func, and_, or_
 
 from ..models import conversation
+from ._compile import epoch_cast, serialize_jsonb, uuid_str_cast
 
 # id/session_id/user_id are UUID columns. GlobalExec's raw-SQL path bypasses SQLAlchemy's own
 # UUID(as_uuid=False) type coercion (the compiled statement + params go straight to psycopg3),
@@ -22,16 +21,16 @@ from ..models import conversation
 # cast to match repositories/users.py's corrected reference pattern (a bare
 # func.extract("epoch", ...) alone isn't enough either — Postgres's EXTRACT returns numeric, which
 # psycopg3 decodes to Decimal, not float).
-_COLS = (cast(conversation.c.id, Text).label("id"),
-         cast(conversation.c.session_id, Text).label("session_id"),
+_COLS = (uuid_str_cast(conversation.c.id).label("id"),
+         uuid_str_cast(conversation.c.session_id).label("session_id"),
          conversation.c.seq,
-         cast(conversation.c.user_id, Text).label("user_id"),
+         uuid_str_cast(conversation.c.user_id).label("user_id"),
          conversation.c.project_id, conversation.c.org_id,
          conversation.c.role, conversation.c.input, conversation.c.json_blob,
          conversation.c.tool_name, conversation.c.tool_call_id, conversation.c.tool_result,
          conversation.c.referenced_artifact, conversation.c.model, conversation.c.provider,
          conversation.c.input_tokens, conversation.c.output_tokens, conversation.c.cost_usd,
-         cast(func.extract("epoch", conversation.c.created_at), Float).label("created_at"))
+         epoch_cast(conversation.c.created_at).label("created_at"))
 
 
 class ConversationRepository:
@@ -61,13 +60,13 @@ class ConversationRepository:
         Python list/dict is never auto-serialized on the way in (Postgres auto-decodes JSONB back
         to a Python object on the way OUT, via its own type OID — asymmetric by design)."""
         stmt = insert(conversation).values(
-            session_id=session_id, seq=seq, role=role, json_blob=json.dumps(json_blob),
+            session_id=session_id, seq=seq, role=role, json_blob=serialize_jsonb(json_blob),
             user_id=user_id, project_id=project_id, org_id=org_id, input=input_text,
             tool_name=tool_name, tool_call_id=tool_call_id,
-            tool_result=json.dumps(tool_result) if tool_result is not None else None,
+            tool_result=serialize_jsonb(tool_result),
             referenced_artifact=referenced_artifact, model=model, provider=provider,
             input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost_usd,
-        ).returning(cast(conversation.c.id, Text).label("id"))
+        ).returning(uuid_str_cast(conversation.c.id).label("id"))
         return self._x.fetchone(stmt)["id"]
 
     def all_for_session(self, session_id) -> list:
@@ -91,7 +90,7 @@ class ConversationRepository:
         applied to the SAME shared expression used in SELECT/HAVING/ORDER BY, not just the
         output: a cursor read from a previous page's (already epoch-float) last_activity is
         compared against this expression in HAVING, so both sides must be the same type."""
-        last_activity = cast(func.extract("epoch", func.max(conversation.c.created_at)), Float)
+        last_activity = epoch_cast(func.max(conversation.c.created_at))
         conds = []
         if org_id is not None:
             conds.append(conversation.c.org_id == org_id)
@@ -109,9 +108,9 @@ class ConversationRepository:
             conds.append(conversation.c.created_at <= date_to)
 
         stmt = (
-            select(cast(conversation.c.session_id, Text).label("session_id"),
+            select(uuid_str_cast(conversation.c.session_id).label("session_id"),
                    conversation.c.org_id, conversation.c.project_id,
-                   cast(conversation.c.user_id, Text).label("user_id"),
+                   uuid_str_cast(conversation.c.user_id).label("user_id"),
                    func.count().label("turn_count"),
                    last_activity.label("last_activity"),
                    func.coalesce(func.sum(conversation.c.cost_usd), 0).label("total_cost"))
