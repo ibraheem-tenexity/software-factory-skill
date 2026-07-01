@@ -114,8 +114,16 @@ Do not theorize. If you think you know why something is breaking, look at the co
 ~/software-factory-skill-bare is a bare clone of the software factory skill repository and worktree should be checked out there and not in the home dir.
 
 
+## PR Review Loop
+PRs are a two-way conversation, not a fire-and-forget hand-off:
+- **The integrator MUST leave review comments on every PR** — concrete, actionable suggested improvements (not a silent merge or a bare reject). Even when merging, note what could be better; when bouncing, say exactly what to change.
+- **The build agent that opened the PR MUST poll its own PR in a loop** until the PR is merged/closed, checking for the integrator's comments and suggested improvements, and address each one (push fixes, reply, re-request review). Do not consider the task done while the PR is open with unaddressed feedback. Use `gh pr view <n> --comments` / `gh pr checks` to poll.
+
 ## Edits by the operator
 Edits by the operator are authoritative. If in between sessions you realise that code has changed, check with the operator to make sure if the code was manually edited by the operator, if it was, then you MUST surface errors or assumptions inherent in those edits and make sure that they were explicitly and correctly made, or if the code is correct then defer to the operator. 
+
+## Task Tracking — Source of Truth
+The **Linear** project "Software Factory" (https://linear.app/tenexity/project/software-factory-f19bffa5f61f, team **Software Factory / SOF**, project id `2c6a2f7c-72db-4258-a98a-44b6757f2655`) is the **single source of truth for task status**. Keep it up to date: when work starts, advances, lands, or a new issue is found, reflect it in Linear (status + assignee). Every ticket is **assigned to Ibraheem**, and each carries an `existing` vs `new` classification. The internal task board and `docs/KNOWN_ISSUES.md` are working mirrors — Linear is authoritative.
 
 ## Design System: 
 Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
