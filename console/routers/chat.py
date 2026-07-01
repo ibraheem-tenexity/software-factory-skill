@@ -1,6 +1,7 @@
 """Concierge chat: /api/chat (send), /api/chat/{pid}/history, /api/chat/{pid}/deps, SSE stream."""
 import asyncio
 import json
+import os
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,15 +9,31 @@ from fastapi.responses import StreamingResponse
 
 from software_factory.chat_store import ChatStore, ChatMessage
 from software_factory.deps import extract_env_creds
+from software_factory.transcription import transcribe_audio, TranscriptionError
 
 import console.state as state
 from console.deps import require_authed, authorize_project, _can_see
-from console.schemas import ChatIn, ConverseIn, ConverseOut, DepsIn
+from console.schemas import ChatIn, ConverseIn, ConverseOut, DepsIn, TranscribeIn
 
 router = APIRouter()
 
 # Server-side backstop: FE 90 s AbortController fires first on real stalls; this is the fallback.
 _CHAT_TIMEOUT = 120
+
+
+@router.post("/api/transcribe")
+def transcribe(body: TranscribeIn, v: tuple = Depends(require_authed)):
+    """Dictate mic button (SOF-14): proxy recorded audio to OpenRouter Whisper Large v3. The
+    OPENROUTER_API_KEY never reaches the browser — the client only sends/receives audio + text."""
+    if not os.environ.get("OPENROUTER_API_KEY"):
+        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY not set — dictation unavailable")
+    if not body.audio_base64:
+        raise HTTPException(status_code=400, detail="audio_base64 is required")
+    try:
+        text = transcribe_audio(body.audio_base64, body.format, body.language)
+    except TranscriptionError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"text": text}
 
 
 @router.post("/api/chat")
