@@ -536,6 +536,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   // SOF-37 trust gate: the client-side disable mirrors the /promote route's own 409 (the real
   // enforcement point — this is only a proactive UX nicety, not the security boundary).
   const ready = (fresh ? !!(f.industry && f.name && f.size && projReady) : projReady) && openQuestions.length === 0;
+  const filesUploading = mats.video.concat(mats.docs).some((f) => f.uploading);
 
   // Returning org card: "Manage" seeds the inline editor from onFile; "Done" commits via PATCH /api/org
   // (the same org-patch the OrgAdmin screen uses) and refreshes the on-file card.
@@ -927,7 +928,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {onBack && <Btn variant="ghost" onClick={onBack}>Save & finish later</Btn>}
-              <Btn variant="primary" onClick={handoff} disabled={!ready || submitting || !draftId} title={ready ? "Hand off to the build factory" : (fresh ? "Set up your company & project to continue" : "Answer the project questions to continue")} style={ready ? { background: T.success } : undefined}>{submitting ? "Handing off…" : "Hand off to factory"} <Icon name="arrowRight" size={14} color="#fff" /></Btn>
+              <Btn variant="primary" onClick={handoff} disabled={!ready || submitting || !draftId || filesUploading} title={filesUploading ? "Wait for uploads to finish" : ready ? "Hand off to the build factory" : (fresh ? "Set up your company & project to continue" : "Answer the project questions to continue")} style={ready ? { background: T.success } : undefined}>{submitting ? "Handing off…" : "Hand off to factory"} <Icon name="arrowRight" size={14} color="#fff" /></Btn>
             </div>
           </div>
         </div>
