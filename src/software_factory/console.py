@@ -1052,6 +1052,20 @@ class Console:
         _runner_key = "OPENROUTER_API_KEY" if runtime == "opencode" else "ANTHROPIC_API_KEY"
         if not env.get(_runner_key) and os.environ.get(_runner_key):
             env = {**env, _runner_key: os.environ[_runner_key]}
+        # Project Memory MCP (SOF-41/T4.2): mint a fresh scope token for THIS project and point the
+        # stage at the console's own memory endpoint. Per-run (unlike EXA_API_KEY, which is a
+        # single factory-wide static key), so it's injected here rather than in
+        # env._STAGE_ESSENTIAL. Best-effort on a missing SF_APP_URL — same tolerance as
+        # admin_service.py's access_resend, which degrades rather than blocking a launch.
+        if os.environ.get("SF_MEMORY") == "1":
+            from . import auth as _auth
+            base_url = (os.environ.get("SF_APP_URL") or "").rstrip("/")
+            if base_url:
+                env = {**env, "SF_MEMORY_TOKEN": _auth.sign_scope_token(project_id),
+                      "SF_MEMORY_MCP_URL": f"{base_url}/mcp/memory"}
+            else:
+                logger.debug("[launch] %s SF_MEMORY on but SF_APP_URL unset — memory MCP not wired",
+                             project_id)
         # Operator override: if staff edited THIS stage's prompt for THIS runtime in the OS Agents
         # dashboard, that stored text drives the run (written as ws/SKILL.md); else the on-disk
         # default. Per-runtime + best-effort — a store hiccup must never block a launch.

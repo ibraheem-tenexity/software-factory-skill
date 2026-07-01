@@ -31,6 +31,13 @@ SEED_TOOLS = [
      "scope": "operator email", "status": "available", "auth": "service key"},
 ]
 
+# Added after the above were already seeded in prod (`_seed_if_empty` only fires on a fully empty
+# table, so appending here alone would never backfill it) — ensured idempotently instead, see
+# `ToolStore.ensure_tool` (SOF-41/T4.2).
+MEMORY_MCP_TOOL = {"name": "Project Memory MCP", "type": "MCP", "provider": "Software Factory",
+                   "scope": "per-project document/chunk memory · hybrid search", "status": "connected",
+                   "auth": "token"}
+
 # Legacy demo-roster callsigns — fake agents that "don't do anything" (the old seed-the-dashboard
 # convenience). PURGED on every store init so they can't reappear, and a delete STICKS. Scoped to this
 # EXACT list so a custom agent is never touched.
@@ -70,8 +77,8 @@ def _real_agent_model(agent: dict) -> str:
 
 
 class ToolStore:
-    def __init__(self):
-        self._repo = ToolRepository(GlobalExec())
+    def __init__(self, repo=None):
+        self._repo = repo if repo is not None else ToolRepository(GlobalExec())
 
     def _seed_if_empty(self):
         if not self._repo.any_row():
@@ -82,6 +89,17 @@ class ToolStore:
     def all(self) -> list[dict]:
         self._seed_if_empty()
         return [dict(r) for r in self._repo.all()]
+
+    def ensure_tool(self, entry: dict) -> None:
+        """Idempotently ensure ONE specific tool row exists, by name — for a tool added to the
+        registry after `_seed_if_empty` already ran (which only fires on a fully empty table).
+        No unique constraint on `name` to `ON CONFLICT` against, so this is a plain check-then-
+        insert; same race profile `_seed_if_empty` already accepts (rare, boot-time, low-
+        concurrency)."""
+        self._seed_if_empty()
+        if not any(t["name"] == entry["name"] for t in self.all()):
+            self._repo.insert(entry["name"], entry["type"], entry["provider"], entry["scope"],
+                              entry["status"], entry["auth"])
 
     def create(self, name, type=None, provider=None, scope=None, auth=None, status="available"):
         return dict(self._repo.insert_returning(name, type, provider, scope, status, auth))
