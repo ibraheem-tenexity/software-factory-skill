@@ -2321,7 +2321,8 @@ class Console:
             aid = "artifact:%d" % i
             nodes.append({"data": {"id": aid, "label": a.get("title") or "artifact", "kind": "artifact",
                                    "path": path, "status": status,
-                                   "url": path if path.startswith("http") else None}})
+                                   "url": path if path.startswith("http") else None,
+                                   "artifact_id": a.get("id")}})
             owner = ("agent:" + a["agent"]) if a.get("agent") and ("agent:" + a["agent"]) in agent_ids else "orchestrator"
             edges.append({"data": {"source": owner, "target": aid, "etype": "hierarchy"}})
 

@@ -26,7 +26,7 @@ function statusColor(s?: string): string { return (s && STATUS_COLOR[s]) || T.te
 
 // ── Tree view: walk hierarchy edges from the orchestrator down ──────────────────────────────
 export function TreeView({ graph, onOpenArtifact }:
-  { graph: Graph; onOpenArtifact: (path: string, label: string) => void }) {
+  { graph: Graph; onOpenArtifact: (path: string, label: string, id?: number) => void }) {
   const byId: Record<string, GraphNode> = {};
   for (const n of graph.nodes) byId[n.data.id] = n;
   const children: Record<string, string[]> = {};
@@ -46,7 +46,7 @@ export function TreeView({ graph, onOpenArtifact }:
     const isArtifact = d.kind === "artifact" && d.path;
     return (
       <>
-        <div onClick={isArtifact ? () => onOpenArtifact(d.path, d.label) : undefined}
+        <div onClick={isArtifact ? () => onOpenArtifact(d.path, d.label, d.artifact_id) : undefined}
           style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", paddingLeft: 8 + depth * 22,
             borderRadius: T.rMd, cursor: isArtifact ? "pointer" : "default",
             background: depth === 0 ? T.brandSoft + "66" : "transparent" }}>
