@@ -76,6 +76,7 @@ class ProjectRequest:
     name: str = ""            # operator-chosen project name (display label)
     gated: bool = False       # create held: registered + visible at $0, stage 1 launches on release
     owner: str = ""           # email of the creating user (multi-tenant: members see only their own)
+    owner_github_username: str = ""  # SOF-3: owner's GitHub handle, if on file — invites them onto the repo
 
 
 def project_paths(projects_dir: str, project_id: str) -> dict:
@@ -151,13 +152,31 @@ def make_prompt_stage1(req: ProjectRequest, project_id: str, projects_dir: str, 
     else:
         units = ("The named research sub-agents and the done-gate are in SKILL.md. Launch each as a "
                  "Task sub-agent.")
+    if req.owner_github_username:
+        owner_access = (
+            f"\n\nOWNER REPO ACCESS (SOF-3): the project owner's GitHub handle on file is "
+            f"'{req.owner_github_username}'. Right after creating the repo and recording the "
+            f"'GitHub Repo' artifact, invite them as a collaborator: `GitHub.add_collaborator(repo, "
+            f"'{req.owner_github_username}')` (i.e. `gh api -X PUT repos/<org>/<repo>/collaborators/"
+            f"{req.owner_github_username} -f permission=pull`). On success: `record-artifact "
+            f"'Owner Repo Access' <https-url> repo-shared` (same repo url as the 'GitHub Repo' "
+            f"artifact — this is the signal that keeps the repo-reaper from ever deleting it). On "
+            f"failure (bad username, API error): `add-blocker 'GitHub Access: invite to "
+            f"{req.owner_github_username} failed'` — do NOT silently skip."
+        )
+    else:
+        owner_access = (
+            "\n\nOWNER REPO ACCESS (SOF-3): no owner GitHub username is on file for this run. "
+            "Record a visible blocker so this is discoverable, do NOT silently skip: "
+            "`add-blocker 'GitHub Access: no owner GitHub username on file'`."
+        )
     return (
         _orchestration_preamble("Stage 1 — Research", project_id, projects_dir, req.budget, runtime)
         + "Goal: a validated PRD (PRD.md) that passes `artifacts.prd_is_complete` (≥3 real product "
           "URLs + acceptance criteria + ticket seeds). " + units + " THE MOMENT you create the "
           "GitHub repo, record it (CLEAN token-free https url): `record-artifact 'GitHub Repo' "
           "<https-url> repo` — the operator sees the repo link from the start. When the PRD passes, "
-          "STOP — the console launches Stage 2.\n"
+          "STOP — the console launches Stage 2." + owner_access + "\n"
           f"App: {req.description}{ctx}{brief}"
     )
 
@@ -1220,6 +1239,7 @@ class Console:
         state.opencode_model = req.model if req.model in _OPENCODE_MODEL_IDS else ""
         state.held = bool(gated)
         state.owner = (req.owner or state.owner or "").lower()
+        state.owner_github_username = (req.owner_github_username or state.owner_github_username or "").strip()
         # Immutable creator stamp — set ONCE (covers a direct start_project with no prior draft; a draft
         # already stamped it in create_draft, so this never overwrites). Falls back to owner.
         if not state.created_by:
@@ -1470,6 +1490,7 @@ class Console:
             impl_model=state.impl_model,
             model=state.opencode_model,
             owner=state.owner,
+            owner_github_username=source_state.owner_github_username,
         )
         return self._provision_and_launch(new_id, req, brief=state.brief)
 
@@ -1525,6 +1546,7 @@ class Console:
             planning_model=state.planning_model,
             impl_model=state.impl_model,
             name=state.name,
+            owner_github_username=state.owner_github_username,
         )
         prompt = make_prompt_stage1(req, project_id, self._projects_dir, runtime=state.runtime)
         self._launch_stage(project_id, 1, prompt, {})
@@ -1694,6 +1716,13 @@ class Console:
                 if content:
                     return content.strip()
         return None
+
+    def repo_shared_with_owner(self, project_id: str) -> bool:
+        """SOF-3: True once Stage 1 recorded a 'repo-shared' artifact — the owner successfully
+        received a real GitHub collaborator invite. This is the durable signal the repo-reaper
+        checks so it never deletes a repo the owner has actual access to."""
+        db = ProjectStore(self._paths(project_id)["db"])
+        return any((a.get("kind") or "").lower() == "repo-shared" for a in db.artifacts())
 
     def stage2_artifacts(self, project_id: str) -> dict:
         """Return Stage 2 artifact paths + parsed required tokens + default dispositions."""
@@ -2223,6 +2252,7 @@ class Console:
                 archived=bool(getattr(st, "archived", False)),
                 phase=getattr(st, "phase", "") or "",
                 has_verified_deploy=bool(getattr(st, "deploy_url", None)),
+                owner_repo_shared=self.repo_shared_with_owner(pid),
             ))
         report = _ghr.reap(records, log=logger.info, dry_run=dry_run)
         report["unknown_repos"] = unknown_repos

@@ -64,3 +64,31 @@ def test_merge_if_green_merges_on_green_checks_and_a_real_diff():
     gh = GitHub(run=runner)
     assert gh.merge_if_green(42, diff_lines=120) is True
     assert runner.ran("pr", "merge")
+
+
+def test_add_collaborator_success():
+    runner = FakeRunner({("api",): RunResult("", 0)})
+    gh = GitHub(run=runner)
+    assert gh.add_collaborator("acme/guestbook", "demo-owner") is True
+    assert runner.calls[0] == [
+        "api", "-X", "PUT", "repos/acme/guestbook/collaborators/demo-owner", "-f", "permission=pull",
+    ]
+
+
+def test_add_collaborator_custom_permission():
+    runner = FakeRunner({("api",): RunResult("", 0)})
+    gh = GitHub(run=runner)
+    assert gh.add_collaborator("acme/guestbook", "demo-owner", permission="push") is True
+    assert "-f" in runner.calls[0] and "permission=push" in runner.calls[0]
+
+
+def test_add_collaborator_unknown_username_fails():
+    runner = FakeRunner({("api",): RunResult("Not Found", 1)})
+    gh = GitHub(run=runner)
+    assert gh.add_collaborator("acme/guestbook", "no-such-user") is False
+
+
+def test_add_collaborator_unauthorized_fails():
+    runner = FakeRunner({("api",): RunResult("Unauthorized", 1)})
+    gh = GitHub(run=runner)
+    assert gh.add_collaborator("acme/guestbook", "demo-owner") is False

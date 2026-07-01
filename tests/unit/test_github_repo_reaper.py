@@ -105,6 +105,19 @@ def test_reap_reason_active_phase_keeps():
         assert _reap_reason(_rec(phase=phase)) is None
 
 
+def test_reap_reason_owner_shared_keeps_even_when_archived():
+    # SOF-3: an owner-shared repo must survive archival — the reaper's #1 guard, checked
+    # before the archived check that would otherwise reap it unconditionally.
+    assert _reap_reason(_rec(archived=True, owner_repo_shared=True)) is None
+
+def test_reap_reason_owner_shared_keeps_even_when_stopped_without_deploy():
+    assert _reap_reason(_rec(phase="stopped", has_verified_deploy=False, owner_repo_shared=True)) is None
+
+def test_reap_reason_not_owner_shared_still_reaps_archived():
+    # Guard against a vacuous test: without the flag, the same record still reaps as before.
+    assert _reap_reason(_rec(archived=True, owner_repo_shared=False)) == "archived"
+
+
 # ---------------------------------------------------------------------------
 # list_org_repos
 # ---------------------------------------------------------------------------

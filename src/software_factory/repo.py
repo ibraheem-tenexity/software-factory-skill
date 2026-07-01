@@ -31,6 +31,19 @@ class GitHub:
         args.append("--private" if private else "--public")
         return self._run(args).stdout.strip()
 
+    def add_collaborator(self, repo: str, username: str, permission: str = "pull") -> bool:
+        """Invite `username` as a collaborator on `repo` ('owner/repo'). GitHub's collaborator
+        API is username-only (no email-invite path exists for personal-account-owned repos,
+        confirmed against the REST docs) — `username` must be a real GitHub handle. Returns
+        True on success (invite created or already a collaborator); False on any failure
+        (unknown username, no permission, etc.) — never raises, so a failed invite can be
+        turned into a visible blocker instead of crashing the run."""
+        result = self._run(
+            ["api", "-X", "PUT", f"repos/{repo}/collaborators/{username}",
+             "-f", f"permission={permission}"]
+        )
+        return result.returncode == 0
+
     def open_pr(self, branch: str, title: str, body: str) -> int:
         out = self._run(
             ["pr", "create", "--head", branch, "--title", title, "--body", body]
