@@ -54,6 +54,7 @@ _PERSISTED = {
     "relaunched_from",
     "log_url",
     "owner_github_username",
+    "launch_attempted",
 }
 
 
@@ -76,6 +77,11 @@ class ProjectState:
     stage: int = 1
     stage1_done: bool = False
     stage2_done: bool = False
+    # SOF-23: set True the first time _launch_stage actually runs for this project (even if the
+    # launch is then refused by a guard, e.g. a transient MCP health hiccup) — distinguishes a
+    # real pipeline run from a project row seeded directly for a test/verify fixture, which never
+    # goes through _launch_stage at all. See Console.auto_resume_dead_stage.
+    launch_attempted: bool = False
     runtime: str = "claude"  # agent runtime for this run: claude | opencode; pinned at start_project
     # Operator-picked models, pinned at start_project (claude runtime; empty = stage defaults):
     # planning drives the S1/S2 orchestrators, impl drives S3.

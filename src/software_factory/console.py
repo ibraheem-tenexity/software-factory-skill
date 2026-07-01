@@ -823,6 +823,16 @@ class Console:
         status query after state loss) has no brief to build from — resuming it burns spend on
         an empty prompt (the run-b594a5f4/run-0eb69fdd double-ghost scar).
 
+        NEVER-ARMED GUARD (SOF-23): a project row seeded directly for a test/verify fixture (not
+        via create_draft, which the poller already ignores) can still pass the GHOST check above
+        if the seed also records an artifact — it then looks identical to a stage that "died
+        without passing its gate", because a project.log that was never created reads the same
+        as one that existed and finished (see stage_finished). Require independent proof this
+        project's CURRENT stage was actually launched at least once: either state.launch_attempted
+        (set unconditionally on every real _launch_stage call, even a refused one) or an existing
+        project.log on disk (covers every real run launched before this guard shipped). Neither
+        signal is ever true for a bare seeded row, since it never goes through _launch_stage.
+
         STAGE-3 GATE: a passing Playwright verification alone does NOT prove the stage is over;
         the real indicator is the health of the Claude Code process. The state machine mirrors
         Stages 1/2: detect_stage3_done only flips done once stage_finished() reports the process
@@ -838,6 +848,9 @@ class Console:
         if not self.is_pipeline_project(project_id):
             return False
         state = self._load_state(project_id)
+        log_path = os.path.join(self._paths(project_id)["base"], "project.log")
+        if not (state.launch_attempted or os.path.exists(log_path)):
+            return False   # never armed — nothing to resume (SOF-23)
         if state.phase in ("done", "stopped", "paused", "crashed") or not self.stage_finished(project_id):
             return False   # terminal or operator-controlled — never auto-resume
         stage = state.stage
@@ -1006,6 +1019,13 @@ class Console:
             return None
 
         state = self._load_state(project_id)
+        # SOF-23: stamp BEFORE the hard-gate MCP check below (which can still return None) — a
+        # seeded test/verify row never reaches this line at all, so this is a reliable "the
+        # pipeline actually attempted to launch this project" signal, unlike project.log (which
+        # only proves a process actually spawned, not that a launch was attempted and refused).
+        if not state.launch_attempted:
+            state.launch_attempted = True
+            state.save()
         vault_ids = getattr(state, "creds_vault_ids", {}) or {}
         if vault_ids:
             try:
