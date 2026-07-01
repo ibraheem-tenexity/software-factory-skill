@@ -15,13 +15,19 @@ from __future__ import annotations
 import json
 import os
 
-from . import dbshim
 import sys
 import time
+import weakref
 from typing import Optional
+
+from sqlalchemy import delete as _sa_delete
 
 from .constants import PROJECT_ID_RE as _PROJECT_ID_RE
 from .constants import PROJECT_ID_STRICT_RE as _PROJECT_ID_STRICT_RE
+from .repositories._exec import PathExec
+from .repositories.canvas_repo import (ProjectStateRepository, PhaseRepository, ArtifactRepository,
+                                       BlockerRepository, GateRepository, VerificationRepository,
+                                       DeploymentRepository)
 
 
 def db_path(projects_dir: str, project_id: str) -> str:
@@ -59,13 +65,28 @@ class ProjectStore:
     def __init__(self, path: str):
         os.makedirs(path or ".", exist_ok=True)
         self._project_id = project_id_from_path(path)
-        self._conn = dbshim.connect(path)  # Postgres; schema owned by Alembic (prod) / tests
+        # Postgres; schema owned by Alembic (prod) / tests. All SQL is in repositories/canvas_repo.py.
+        self._exec = PathExec(path)
+        self._conn = self._exec._conn  # back-compat: a diagnostic test reads the raw PgConn directly
+        # Live getter via a WEAKREF, not a closure over `self` directly: a closure capturing `self`
+        # and stored on an attribute `self` owns (self._phase_repo, etc.) is a reference CYCLE — CPython
+        # won't return the pooled connection to dbshim's pool until the cyclic GC eventually runs,
+        # which exhausts the pool under any call site that constructs many short-lived ProjectStores
+        # (e.g. gates.py's per-call `_db_for()`). weakref.ref breaks the cycle; the store always
+        # outlives its own repos, so the ref is never dead when the getter is actually called.
+        _self_ref = weakref.ref(self)
+        get_pid = lambda: _self_ref()._project_id
+        self._projectstate_repo = ProjectStateRepository(self._exec)
+        self._phase_repo = PhaseRepository(self._exec, get_pid)
+        self._artifact_repo = ArtifactRepository(self._exec, get_pid)
+        self._blocker_repo = BlockerRepository(self._exec, get_pid)
+        self._gate_repo = GateRepository(self._exec, get_pid)
+        self._verification_repo = VerificationRepository(self._exec, get_pid)
+        self._deployment_repo = DeploymentRepository(self._exec, get_pid)
 
     # ---- ProjectState Store protocol (the projectstate table) --------------------------------
     def read(self, project_id: str) -> Optional[dict]:
-        row = self._conn.execute(
-            "SELECT data, name, summary FROM projectstate WHERE project_id = ?", (project_id,)
-        ).fetchone()
+        row = self._projectstate_repo.by_project(project_id)
         if not row:
             return None
         data = json.loads(row["data"])
@@ -79,13 +100,7 @@ class ProjectStore:
         blob = dict(data)
         name = blob.pop("name", None)
         summary = blob.pop("summary", None)
-        self._conn.execute(
-            "INSERT INTO projectstate (project_id, data, name, summary) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(project_id) DO UPDATE SET data = excluded.data, "
-            "name = excluded.name, summary = excluded.summary",
-            (project_id, json.dumps(blob), name, summary),
-        )
-        self._conn.commit()
+        self._projectstate_repo.upsert(project_id, json.dumps(blob), name, summary)
 
     def delete_project(self, project_id: str) -> None:
         """Permanently remove every flat-schema row for this run (projectstate + the per-project
@@ -93,111 +108,72 @@ class ProjectStore:
         (dbshim.registry_projects reads that table). Idempotent — deleting a gone run is a no-op."""
         from .models import FLAT_TABLES
         for table in FLAT_TABLES:
-            self._conn.execute(f"DELETE FROM {table.name} WHERE project_id = ?", (project_id,))
-        self._conn.commit()
+            self._exec.execute(_sa_delete(table).where(table.c.project_id == project_id))
 
     # ---- canvas-state writes (used by the CLI the orchestrator calls) ----------------
     def set_phase(self, name: str, status: str = "active", stage: Optional[int] = None) -> None:
-        self._conn.execute(
-            "INSERT INTO phases (project_id, name, status, stage, ts) VALUES (?, ?, ?, ?, ?)",
-            (self._project_id, name, status, stage, time.time()),
-        )
-        self._conn.commit()
+        self._phase_repo.insert(name, status, stage, time.time())
 
     def record_artifact(self, title: str, path: str, kind: Optional[str] = None,
                         agent: Optional[str] = None) -> None:
-        self._conn.execute(
-            "INSERT INTO artifacts (project_id, title, path, kind, agent, ts) VALUES (?, ?, ?, ?, ?, ?)",
-            (self._project_id, title, path, kind, agent, time.time()),
-        )
-        self._conn.commit()
+        self._artifact_repo.insert(title, path, kind, agent, time.time())
 
     def add_blocker(self, what: str, blocks: Optional[str] = None) -> None:
-        self._conn.execute(
-            "INSERT INTO blockers (project_id, what, blocks, ts) VALUES (?, ?, ?, ?)",
-            (self._project_id, what, blocks, time.time()),
-        )
-        self._conn.commit()
+        self._blocker_repo.insert(what, blocks, time.time())
 
     def clear_blocker(self, what: str) -> None:
-        self._conn.execute("UPDATE blockers SET cleared = 1 WHERE project_id = ? AND what = ?",
-                           (self._project_id, what))
-        self._conn.commit()
+        self._blocker_repo.clear(what)
 
     def set_gate(self, name: str, status: str) -> None:
-        self._conn.execute(
-            "INSERT INTO gates (project_id, name, status, ts) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(project_id, name) DO UPDATE SET status = excluded.status, ts = excluded.ts",
-            (self._project_id, name, status, time.time()),
-        )
-        self._conn.commit()
+        self._gate_repo.upsert(name, status, time.time())
 
     def record_verification(self, url: str, passed: bool, result) -> None:
-        self._conn.execute(
-            "INSERT INTO verifications (project_id, url, passed, result, ts) VALUES (?, ?, ?, ?, ?)",
-            (self._project_id, url, 1 if passed else 0,
-             result if isinstance(result, str) else json.dumps(result), time.time()),
-        )
-        self._conn.commit()
+        self._verification_repo.insert(
+            url, 1 if passed else 0, result if isinstance(result, str) else json.dumps(result),
+            time.time())
 
     def record_deployment(self, app: str, url: str, status: str = "live",
                           service_name: Optional[str] = None, verified: bool = False) -> None:
         """Record one deliverable's deployment. A run ships 1..N deliverables (mobile-web/web/api),
         so deploy state is per-app, not a single run-level deploy_url."""
-        self._conn.execute(
-            "INSERT INTO deployments (project_id, app, service_name, url, status, verified, ts) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (self._project_id, app, service_name, url, status, 1 if verified else 0, time.time()),
-        )
-        self._conn.commit()
+        self._deployment_repo.insert(app, service_name, url, status, 1 if verified else 0, time.time())
 
     # ---- projection reads (scoped to this run) ---------------------------------------
     def phase_status(self) -> dict:
         """Latest status per phase name (rows are append-only; last write wins)."""
         out: dict = {}
-        for r in self._conn.execute(
-                "SELECT name, status FROM phases WHERE project_id = ? ORDER BY ts, id",
-                (self._project_id,)).fetchall():
+        for r in self._phase_repo.all_for_project():
             out[r["name"]] = r["status"]
         return out
 
     def phases(self) -> list[dict]:
-        return [dict(r) for r in self._conn.execute(
-            "SELECT * FROM phases WHERE project_id = ? ORDER BY ts, id", (self._project_id,)).fetchall()]
+        return [dict(r) for r in self._phase_repo.all_for_project()]
 
     def artifacts(self) -> list[dict]:
-        return [dict(r) for r in self._conn.execute(
-            "SELECT * FROM artifacts WHERE project_id = ? ORDER BY id", (self._project_id,)).fetchall()]
+        return [dict(r) for r in self._artifact_repo.all_for_project()]
 
     def blockers(self) -> list[dict]:
-        return [dict(r) for r in self._conn.execute(
-            "SELECT * FROM blockers WHERE project_id = ? ORDER BY id", (self._project_id,)).fetchall()]
+        return [dict(r) for r in self._blocker_repo.all_for_project()]
 
     def gate_status(self) -> dict:
-        return {r["name"]: r["status"] for r in self._conn.execute(
-            "SELECT name, status FROM gates WHERE project_id = ?", (self._project_id,)).fetchall()}
+        return {r["name"]: r["status"] for r in self._gate_repo.all_for_project()}
 
     def verifications(self) -> list[dict]:
-        return [dict(r) for r in self._conn.execute(
-            "SELECT * FROM verifications WHERE project_id = ? ORDER BY id", (self._project_id,)).fetchall()]
+        return [dict(r) for r in self._verification_repo.all_for_project()]
 
     def has_passing_verification(self) -> bool:
-        row = self._conn.execute(
-            "SELECT COUNT(*) AS n FROM verifications WHERE project_id = ? AND passed = 1",
-            (self._project_id,)).fetchone()
-        return row["n"] > 0
+        return self._verification_repo.passing_count() > 0
 
     def deployments(self) -> list[dict]:
-        return [dict(r) for r in self._conn.execute(
-            "SELECT * FROM deployments WHERE project_id = ? ORDER BY id", (self._project_id,)).fetchall()]
+        return [dict(r) for r in self._deployment_repo.all_for_project()]
 
 
 def artifact_by_id(artifact_id: int) -> Optional[dict]:
     """Look up a single artifact row by its primary-key id (cross-project).
     Returns None when the id is unknown. Used by GET /api/artifacts/{id}."""
-    conn = dbshim.connect(os.environ["SF_RUNS_DIR"])
-    rows = conn.execute("SELECT * FROM artifacts WHERE id = ?", (artifact_id,)).fetchall()
-    return dict(rows[0]) if rows else None
+    repo = ArtifactRepository(PathExec(os.environ["SF_RUNS_DIR"]), lambda: None)  # id lookup, unscoped
+    row = repo.by_id_global(artifact_id)
+    return dict(row) if row else None
 
 
 # --- CLI the headless orchestrator uses instead of emitting events --------------------
