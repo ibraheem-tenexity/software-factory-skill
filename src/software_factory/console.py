@@ -1437,8 +1437,26 @@ class Console:
     def promote_draft(self, project_id: str, description: str = "",
                       interview_md: str | None = None, target: str = "railway") -> str:
         """Promote a draft into a real run: launch Stage 1 against the EXISTING draft id, threading
-        the accumulated brief + interview transcript into the Stage-1 input. No new id is minted."""
+        the accumulated brief + interview transcript into the Stage-1 input. No new id is minted.
+
+        SOF-52: the trust gate lives HERE, not just at the HTTP router (SOF-51/SOF-37) — every
+        caller (the promote route, the concierge's hand_off_to_factory tool, any future one) goes
+        through this method, so raising here gates by construction instead of by each caller
+        remembering to check first. Raises Conflict (409, same wire shape the router used to
+        build inline — app.py's global ServiceError handler serializes exc.detail verbatim) when
+        the brief is missing a required section or a reflection question is still open."""
+        from .brief import enough as _enough
+        from .services.errors import Conflict
         state = self._load_state(project_id)
+        ready, missing_sections = _enough(state.brief or {})
+        open_questions = [q for q in (state.reflection_questions or []) if q["status"] == "open"]
+        if not ready or open_questions:
+            detail = {"error": "project is not ready to promote"}
+            if not ready:
+                detail["missing_sections"] = missing_sections
+            if open_questions:
+                detail["open_questions"] = open_questions
+            raise Conflict(detail)
         brief = dict(state.brief or {})
         # The description anchors the prompt; prefer an explicit one, else the brief's goals.
         desc = (description or state.description or brief.get("goals") or "").strip()

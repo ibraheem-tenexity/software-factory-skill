@@ -482,7 +482,11 @@ def test_promote_draft_threads_glm_alias_to_launch(tmp_path, monkeypatch):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
     pid = c.create_draft(owner="a@b.com", runtime="opencode", model="glm")
-    c.set_draft_project(pid, goal="a guestbook app")
+    c.set_draft_project(pid, goal="a guestbook app for friends and family")
+    c.update_draft_brief(pid, {
+        "success_metrics": "a visitor can leave and read a message on the guestbook",
+        "definition_of_done": "the guestbook screen is deployed and browser-verified",
+    })
     c.promote_draft(pid, description="a guestbook app")
     assert launcher.argv[launcher.argv.index("--model") + 1] == GLM
 

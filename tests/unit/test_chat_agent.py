@@ -128,6 +128,10 @@ class TestModelPickThreading:
     def test_promote_preserves_draft_runtime(self, tmp_path):
         c = self._real_console(tmp_path)
         rid = c.create_draft(owner="op@x.ai", runtime="opencode")
-        c.update_draft_brief(rid, {"goals": "a cargo screening prototype for ground handlers"})
+        c.update_draft_brief(rid, {
+            "goals": "a cargo screening prototype for ground handlers",
+            "success_metrics": "indistinguishable from the hand-built demo",
+            "definition_of_done": "all V1 screens deployed and browser-verified",
+        })
         c.promote_draft(rid, description="cargo screening")
         assert c._load_state(rid).runtime == "opencode"
