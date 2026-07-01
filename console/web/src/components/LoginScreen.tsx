@@ -3,14 +3,14 @@
 //
 // FUNCTIONAL sign-in paths: GOOGLE (GIS ID token → POST /api/auth/google) and EMAIL+PASSWORD
 // (POST /api/auth/password — both set the same sf_session cookie → the App.tsx Gate re-resolves
-// /api/me → dashboard). Microsoft + org-SSO remain rendered-but-mocked ("coming soon"). The SSO
+// /api/me → dashboard). Org-SSO remains rendered-but-mocked ("coming soon"). The SSO
 // mode toggle + show/hide password are pure UI.
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { T, Icon, CategoryLabel, Field, TextInput, Btn } from "./onboarding/design";
 
 const GIS_SRC = "https://accounts.google.com/gsi/client";
-const MOCK_NOTICE = "Microsoft, email, and SSO sign-in are coming soon — continue with Google.";
+const MOCK_NOTICE = "Email and SSO sign-in are coming soon — continue with Google.";
 
 // Load Google Identity Services once; resolve when the global is ready.
 function loadGis(): Promise<void> {
@@ -42,17 +42,6 @@ function GoogleLogo({ size = 17 }: { size?: number }) {
     </svg>
   );
 }
-function MicrosoftLogo({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 21 21" aria-hidden="true">
-      <rect x="1" y="1" width="9" height="9" fill="#F25022" />
-      <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
-      <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
-      <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
-    </svg>
-  );
-}
-
 function ProviderButton({ logo, children, onClick }:
   { logo: React.ReactNode; children: React.ReactNode; onClick?: () => void }) {
   return (
@@ -187,7 +176,6 @@ export function LoginScreen({ clientId, onAuthed }: { clientId: string; onAuthed
                   <ProviderButton logo={<GoogleLogo />} onClick={() => setNotice("Loading Google sign-in…")}>Continue with Google</ProviderButton>
                   <div ref={gisRef} aria-label="Google sign-in" style={{ position: "absolute", inset: 0, opacity: 0, overflow: "hidden", colorScheme: "light" }} />
                 </div>
-                <ProviderButton logo={<MicrosoftLogo />} onClick={mock}>Continue with Microsoft</ProviderButton>
               </div>
 
               <Divider>or</Divider>

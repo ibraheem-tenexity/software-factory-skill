@@ -148,6 +148,7 @@ digraph SchemaERD {
       <tr><td align="left">kind, name, tag</td></tr>
       <tr><td align="left">storage_key, content_type</td></tr>
       <tr><td align="left">size_bytes, sha256, created_at</td></tr>
+      <tr><td align="left"><b>FK</b> source_blob_id (self); source_page, provenance</td></tr>
     </table>>];
 
   blob_uses [label=<
@@ -158,6 +159,45 @@ digraph SchemaERD {
       <tr><td align="left"><b>FK</b> project_id</td></tr>
       <tr><td align="left">created_at</td></tr>
       <tr><td align="left"><font color="#64748b" point-size="10">org KB doc used by a project</font></td></tr>
+    </table>>];
+
+  // ---- Project Memory (SOF-26) ---------------------------------------------------------
+  doc_summary [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#ecfdf5" port="t"><b>doc_summary</b></td></tr>
+      <tr><td align="left"><b>PK/FK</b> blob_id → blobs (cascade)</td></tr>
+      <tr><td align="left">scope, scope_id</td></tr>
+      <tr><td align="left">summary_md, key_facts jsonb</td></tr>
+      <tr><td align="left">outline jsonb, embedding vector(1024)</td></tr>
+      <tr><td align="left">token_count, content_sha256, status</td></tr>
+      <tr><td align="left"><font color="#64748b" point-size="10">per-document "2,000-ft view"; key_facts carry</font></td></tr>
+      <tr><td align="left"><font color="#64748b" point-size="10">source refs, never bare confidence scores</font></td></tr>
+    </table>>];
+
+  chunk [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#ecfdf5" port="t"><b>chunk</b></td></tr>
+      <tr><td align="left"><b>PK</b> id</td></tr>
+      <tr><td align="left"><b>FK</b> blob_id → blobs (cascade)</td></tr>
+      <tr><td align="left">scope, scope_id, ordinal, section_path</td></tr>
+      <tr><td align="left">content, dense vector(1024)</td></tr>
+      <tr><td align="left">fts tsvector (generated), token_count</td></tr>
+      <tr><td align="left"><font color="#64748b" point-size="10">leaf retrieval unit; hybrid dense+keyword</font></td></tr>
+    </table>>];
+
+  // ---- Conversation store (SOF-26) -----------------------------------------------------
+  conversation [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#fef9c3" port="t"><b>conversation</b></td></tr>
+      <tr><td align="left"><b>PK</b> id (uuid) — the message_id</td></tr>
+      <tr><td align="left">session_id (uuid), seq — unique(session_id, seq)</td></tr>
+      <tr><td align="left"><b>FK</b> user_id → users; project_id, org_id</td></tr>
+      <tr><td align="left">role : user | agent | tool | system</td></tr>
+      <tr><td align="left">input, json_blob jsonb (canonical blocks)</td></tr>
+      <tr><td align="left">tool_name, tool_call_id, tool_result jsonb</td></tr>
+      <tr><td align="left"><b>FK</b> referenced_artifact → blobs</td></tr>
+      <tr><td align="left">model, provider, *_tokens, cost_usd</td></tr>
+      <tr><td align="left">created_at, updated_at</td></tr>
     </table>>];
 
   // ---- relationships ------------------------------------------------------------------
@@ -179,4 +219,11 @@ digraph SchemaERD {
   blob_uses:t -> blobs:t;
   blob_uses:t -> projectstate:t [style=dashed, color="#64748b"];
   users:t -> projectstate:t [style=dashed, color="#64748b", label=<<font point-size="9">owner (in JSON)</font>>];
+
+  blobs:t -> blobs:t [style=dashed, color="#64748b", label=<<font point-size="9">source_blob_id</font>>];
+  doc_summary:t -> blobs:t;
+  chunk:t -> blobs:t;
+  conversation:t -> users:t [label=<<font point-size="9">user_id</font>>];
+  conversation:t -> blobs:t [style=dashed, color="#64748b", label=<<font point-size="9">referenced_artifact</font>>];
+  conversation:t -> projectstate:t [style=dashed, color="#64748b", label=<<font point-size="9">project_id</font>>];
 }

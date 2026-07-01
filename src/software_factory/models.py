@@ -11,9 +11,10 @@ Flat schema: one set of tables, every per-project table keyed by `project_id`. `
 """
 from __future__ import annotations
 
-from sqlalchemy import (Boolean, CheckConstraint, Column, DateTime, Float, ForeignKey,
-                        Integer, MetaData, Table, Text, UniqueConstraint, func, text)
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import (Boolean, CheckConstraint, Column, Computed, DateTime, Float,
+                        ForeignKey, Integer, MetaData, Table, Text, UniqueConstraint, func, text)
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 
 metadata = MetaData()
 
@@ -218,6 +219,82 @@ blobs = Table(
     Column("size_bytes", Integer),
     Column("sha256", Text),
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
+    # Provenance (SOF-26/T0.1): set when this blob is itself an asset extracted FROM another blob
+    # (e.g. an image pulled out of a document page) — never set for an original upload.
+    Column("source_blob_id", Integer, ForeignKey("blobs.id")),
+    Column("source_page", Integer),             # 1-based source page/slide, when extracted
+    Column("provenance", JSONB, server_default=text("'{}'::jsonb")),  # extractor, bbox, etc.
+)
+
+# Project Memory (SOF-26/T0.1): the per-document "2,000-ft view", keyed 1:1 on the document's
+# `blobs` row. `scope`/`scope_id` mirror `blobs` so project- and org-scoped memory share one
+# app-layer filter shape (this system isolates at the app layer + credential-scoped MCP, not
+# Postgres RLS — ARCHITECTURE §7). See docs/project-memory-concierge/project-memory-integration.md §1.
+doc_summary = Table(
+    "doc_summary", metadata,
+    Column("blob_id", Integer, ForeignKey("blobs.id", ondelete="CASCADE"), primary_key=True),
+    Column("scope", Text, nullable=False),          # 'project' | 'org'  (mirrors blobs)
+    Column("scope_id", Text, nullable=False),
+    Column("summary_md", Text),                     # map-reduce summary -> PRD "AI auto-summarize"
+    Column("key_facts", JSONB, server_default=text("'{}'::jsonb")),  # -> PRD "What I learned"; each
+    # entry carries its own source reference (document_blob_id + section_path/page) -- no
+    # confidence scores (product-spec decision): an unreferenced inference is never stored here.
+    Column("outline", JSONB, server_default=text("'[]'::jsonb")),    # section titles + one-line gist
+    Column("embedding", Vector(1024)),
+    Column("token_count", Integer),
+    Column("content_sha256", Text),                 # staleness vs blobs.sha256
+    Column("status", Text, nullable=False, server_default="pending"),  # pending|ready|failed
+    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
+)
+
+# The leaf level: one row per chunk of a document, hybrid-searchable (dense vector + Postgres
+# native full-text as the sparse/keyword channel -- see project-memory-stack-2026.md). A learned-
+# sparse `sparse` column is intentionally NOT added here -- deferred, per SOF-26 scope.
+chunk = Table(
+    "chunk", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("blob_id", Integer, ForeignKey("blobs.id", ondelete="CASCADE"), nullable=False),
+    Column("scope", Text, nullable=False),
+    Column("scope_id", Text, nullable=False),
+    Column("ordinal", Integer, nullable=False),      # position within the document
+    Column("section_path", Text),                    # e.g. "2 / 2.3 Auth" -- hierarchical nav
+    Column("content", Text, nullable=False),
+    Column("dense", Vector(1024)),                   # OpenRouter dense embedding
+    # Generated in Postgres from `content` -- defined here (not just in the migration) so
+    # `metadata.create_all` in tests builds the identical column the Alembic migration does;
+    # otherwise prod and tests would drift on exactly this column.
+    Column("fts", TSVECTOR, Computed("to_tsvector('english', content)", persisted=True)),
+    Column("token_count", Integer),
+)
+
+# Durable, provider-agnostic conversation store (SOF-26/T0.1; replaces the in-memory mock and the
+# volume-only chat.jsonl -- see docs/project-memory-concierge/concierge-conversation-store.md).
+# One row per message/turn; `id` is the message_id returned to the FE. `json_blob` is the
+# canonical content-block list (source of truth for provider replay); `input`/`tool_result` are
+# denormalized conveniences for display/query, never the source of truth.
+conversation = Table(
+    "conversation", metadata,
+    Column("id", _UUID, primary_key=True, server_default=text("gen_random_uuid()")),
+    Column("session_id", _UUID, nullable=False),      # groups one conversation/thread
+    Column("seq", Integer, nullable=False),           # monotonic order within session (replay key)
+    Column("user_id", _UUID, ForeignKey("users.id")),  # who sent it; null for agent/tool/system
+    Column("project_id", Text),                        # -> projectstate; null for org-level chat
+    Column("org_id", Text),                             # -> organizations.id
+    Column("role", Text, nullable=False),               # user | agent | tool | system
+    Column("input", Text),                               # plaintext, denormalized from json_blob
+    Column("json_blob", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("tool_name", Text),
+    Column("tool_call_id", Text),                        # correlates tool_use <-> tool_result
+    Column("tool_result", JSONB),                        # convenience mirror of the result block
+    Column("referenced_artifact", Integer, ForeignKey("blobs.id")),
+    Column("model", Text),
+    Column("provider", Text),                            # 'openai' | 'anthropic' | 'openrouter' | ...
+    Column("input_tokens", Integer, server_default="0"),
+    Column("output_tokens", Integer, server_default="0"),
+    Column("cost_usd", Float, server_default="0"),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("session_id", "seq", name="uq_conversation_session_seq"),
 )
 
 # A project (run) drawing on an org-scoped knowledge-base doc. One row per (blob, run); the
@@ -301,5 +378,6 @@ checkpoint = Table(
 PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
 FLAT_TABLES = PROJECTDB + (tickets, agents, checkpoint)
 GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
-                 agent_prompts, mcp_tools, agent_registry, sow)
+                 agent_prompts, mcp_tools, agent_registry, sow,
+                 doc_summary, chunk, conversation)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES

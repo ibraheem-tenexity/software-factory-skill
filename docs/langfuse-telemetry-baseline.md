@@ -52,21 +52,30 @@ window existed: the **turn boundary** (`ChatAgentRunner._flush_langfuse()`, call
 `lifespan`, flushed in a `finally` around `yield` on graceful shutdown). Both are best-effort — a
 flush failure never fails a chat turn or blocks shutdown.
 
-**Still open — zero token usage (SOF-43, most impactful gap, not yet root-caused):** every
-"Factory Concierge" generation span in Langfuse reports `usage = {input:0, output:0, total:0}`.
-Ruled out: `openinference-instrumentation-openai-agents` is already at the latest published version
-(`1.6.1`, no pre-release ceiling either) — there is no newer version to bump to. Ruled out: a
-hypothesized Chat-Completions/Kimi dict-key-naming mismatch (`prompt_tokens` vs `input_tokens`) —
-verified via source (`agents/usage.py`, `openai_chatcompletions.py`) that the SDK always normalizes
-usage to `input_tokens`/`output_tokens`/`total_tokens` regardless of backend, so this is not a real
-bug on that path. `ModelSettings.include_usage` is a red herring for the canary's actual path
-(Responses API, `gpt-5.4`) — its own docstring scopes it to Chat Completions only. A temporary
-diagnostic (`ChatAgentRunner._log_usage_diagnostic`, logs `[langfuse-diag]` with
-`result.context_wrapper.usage` and each `raw_responses[*].usage`) is now live to determine whether
-the Agents SDK itself ever sees non-zero usage for this call pattern (implying an
-OpenInference/export-layer bug) or whether it's zero even there (implying the Responses API isn't
-returning usage for this pattern at all). Remove this diagnostic once the root cause is confirmed
-and fixed — it is not a permanent addition.
+**Fixed in SOF-43 (2026-07-01) — zero token usage.** Every "Factory Concierge" generation span
+used to report `usage = {input:0, output:0, total:0}`. Confirmed fixed via a fresh canary pulled
+from the Langfuse API post-deploy: real per-generation usage now lands (e.g. `{input:1328,
+output:15, total:1343}`).
+
+Ruled out before landing on the real cause: bumping `openinference-instrumentation-openai-agents`
+(`1.6.1` is already latest, no pre-release ceiling); a hypothesized Chat-Completions/Kimi dict-key
+mismatch (`prompt_tokens` vs `input_tokens` — verified via source that the SDK always normalizes to
+`input_tokens`/`output_tokens`/`total_tokens` regardless of backend, not a real bug);
+`ModelSettings.include_usage` (Chat-Completions-only per its own docstring, irrelevant to the
+canary's Responses-API path); a Langfuse-side OTel-ingestion/semantic-convention mismatch (local
+repros using the real Agents SDK + real OpenInference instrumentor, with only the network call
+mocked, proved the client-side chain emits correct non-zero `llm.token_count.*` attributes given a
+populated response — both for `Runner.run()` and for the exact prod streaming path). A temporary
+`[langfuse-diag]` log (now removed) confirmed the SDK/API itself always saw real usage
+(`context_wrapper.usage`/`raw_responses[*].usage` non-zero on every canary, streaming included) —
+the streaming-opt-in theory was refuted too.
+
+**Actual fix:** the explicit flush added for gap #3 below. Without it, spans were reaching Langfuse
+with zero usage even though the SDK held the real numbers the whole time; with the flush, the same
+numbers land intact. The precise export-timing mechanism wasn't fully pinned down at the OTel layer
+(span attributes are set on `span_data` synchronously before the span's `with`-block exits, i.e.
+before `on_span_end`/export can run for that span) — but the fix is empirically verified via a live
+Langfuse API pull on a fresh canary, which is the bar that matters here.
 
 ### Cheap re-verification recipe — run this after every console deploy
 
@@ -92,6 +101,17 @@ to trigger a fresh one:
 - **Sent message:** `"SOF-25 Langfuse telemetry canary — please ignore, no action needed."`
 - **Agent's reply (confirmed received):** `"Understood — no action needed."`
 - Search the dashboard around that timestamp for a "Factory Concierge" trace containing that text.
+
+**Post-SOF-43 canary (session/project tagging + non-zero usage confirmed):**
+- **UTC timestamp:** `2026-07-01T07:49:28Z`
+- **project_id:** `project-06c8e063f4ae4677`
+- Verified via Langfuse API pull: generation spans show real `usage` (`{input:1328, output:15,
+  total:1343}` and `{input:1360, output:13, total:1373}` across the turn's two model calls).
+- `project_id` tagging is always populated for real traffic: `POST /api/chat` (`console/routers/chat.py`)
+  auto-creates a draft project **before** calling `handle_message`/`handle_message_streamed` when the
+  request doesn't already carry one (`if not project_id: project_id = console.create_draft(...)`), so
+  the `project_id` argument `_langfuse_trace_context` tags the trace with is never empty for a real
+  request — confirmed by this canary itself, which sent no `project_id` and still got one back.
 
 ## Surface 2 — Stage-run transcript tracing (spot-check only, not the canary)
 
@@ -156,9 +176,11 @@ Spot-check **Surface 2** whenever a real stage run happens anyway, and always af
 - A real, authenticated concierge turn was fired against production and returned the expected
   agent reply (proves the request path works end-to-end up to the point tracing would capture it).
 
-**Needs the operator (Langfuse dashboard access, per the ticket's own credential boundary):**
-- Confirm the live canary trace (timestamp/message above) actually **appears** in
-  `us.cloud.langfuse.com`, with the expected shape (Factory Concierge run, nested generation span,
-  token usage populated).
+**Confirmed via the operator's Langfuse API access (SOF-43, 2026-07-01):** the post-fix canary
+trace appears with the expected shape (Factory Concierge run, nested generation spans, real
+non-zero token usage on each) — all three SOF-25 follow-up gaps (session/project tagging, explicit
+flush, zero token usage) are closed.
+
+**Still open (low priority, no urgency):**
 - Lock in the exact OpenInference trace/span naming observed (Surface 1's naming isn't fully
   determined by this codebase — see "Expected trace shape" above) as an addendum to this doc.
