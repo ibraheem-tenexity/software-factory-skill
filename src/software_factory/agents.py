@@ -3,12 +3,16 @@
 Postgres source of truth (queryable, resumable). Every lifecycle event
 is also pushed to a pluggable sink so an external dashboard can render the run in real time.
 The headline health metric is the no-op rate: agents that produced no real change.
+
+DATA ACCESS: all `agents` SQL lives in `repositories.agents_repo.AgentRepository` (SQLAlchemy Core);
+this store keeps only the outcome-status mapping and the markdown rendering.
 """
 from __future__ import annotations
 
 
-from . import dbshim
 from .db import project_id_from_path
+from .repositories._exec import PathExec
+from .repositories.agents_repo import AgentRepository
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
@@ -56,41 +60,28 @@ class AgentRecord:
 class AgentRegistry:
     def __init__(self, path: str, sink: Sink = NullSink(), clock: Callable[[], float] = time.time):
         self._project_id = project_id_from_path(path)
-        self._conn = dbshim.connect(path)  # Postgres; schema owned by Alembic (prod) / tests
+        # Postgres; schema owned by Alembic (prod) / tests. All SQL is in AgentRepository.
+        self._repo = AgentRepository(PathExec(path))
         self._sink = sink
         self._clock = clock
 
     def spawn(self, agent_id: str, project_id: str, ticket_id: Optional[int], role: str,
               model: str, phase: Optional[str] = None) -> None:
         now = self._clock()
-        self._conn.execute(
-            "INSERT INTO agents (agent_id, project_id, ticket_id, role, model, phase, started_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (agent_id, project_id, ticket_id, role, model, phase, now),
-        )
-        self._conn.commit()
+        self._repo.insert(agent_id, project_id, ticket_id, role, model, phase, now)
         self._sink.emit(
             {"event": "spawn", "agent_id": agent_id, "project_id": project_id,
              "ticket_id": ticket_id, "role": role, "model": model, "phase": phase, "at": now}
         )
 
     def agents_for(self, project_id: str) -> list[AgentRecord]:
-        rows = self._conn.execute(
-            "SELECT * FROM agents WHERE project_id=? ORDER BY started_at, agent_id", (project_id,)
-        ).fetchall()
-        return [AgentRecord(**dict(r)) for r in rows]
+        return [AgentRecord(**dict(r)) for r in self._repo.all_for_project(project_id)]
 
     def finalize_orphans(self, project_id: str, stage_ok: bool) -> int:
         """SPEC §5 (no phantom agents): when a stage exits, close any still-running rows the
         orchestrator forgot to finish — outcome 'unreported'; status done if the stage's gate
         passed (its work evidently materialized), failed otherwise. Returns rows closed."""
-        cur = self._conn.execute(
-            "UPDATE agents SET status=?, outcome='unreported', ended_at=? "
-            "WHERE project_id=? AND status='running'",
-            ("done" if stage_ok else "failed", self._clock(), project_id),
-        )
-        self._conn.commit()
-        return cur.rowcount
+        return self._repo.finalize_orphans(project_id, "done" if stage_ok else "failed", self._clock())
 
     def record(
         self,
@@ -106,36 +97,27 @@ class AgentRegistry:
         now = self._clock()
         if provenance is not None and provenance_type is None:
             provenance_type = "pr" if str(provenance).isdigit() else "commit"
-        self._conn.execute(
-            "UPDATE agents SET status=?, outcome=?, cost_usd=?, input_tokens=?, cached_tokens=?, "
-            "output_tokens=?, reasoning_tokens=?, provenance=?, provenance_type=?, diff_lines=?, ended_at=? "
-            "WHERE agent_id=? AND project_id=?",
-            (_STATUS_FOR.get(outcome, "failed"), outcome, cost_usd, u.input_tokens, u.cached_tokens,
-             u.output_tokens, u.reasoning_tokens, provenance, provenance_type, diff_lines, now, agent_id, self._project_id),
-        )
-        self._conn.commit()
+        self._repo.set_outcome(
+            agent_id, self._project_id, status=_STATUS_FOR.get(outcome, "failed"), outcome=outcome,
+            cost_usd=cost_usd, input_tokens=u.input_tokens, cached_tokens=u.cached_tokens,
+            output_tokens=u.output_tokens, reasoning_tokens=u.reasoning_tokens, provenance=provenance,
+            provenance_type=provenance_type, diff_lines=diff_lines, ended_at=now)
         self._sink.emit(
             {"event": "record", "agent_id": agent_id, "outcome": outcome, "cost_usd": cost_usd,
              "provenance": provenance, "provenance_type": provenance_type, "diff_lines": diff_lines, "at": now}
         )
 
     def get(self, agent_id: str) -> AgentRecord:
-        row = self._conn.execute(
-            "SELECT * FROM agents WHERE agent_id=? AND project_id=?", (agent_id, self._project_id)).fetchone()
+        row = self._repo.by_agent_id(agent_id, self._project_id)
         if row is None:
             raise KeyError(agent_id)
         return AgentRecord(**dict(row))
 
     def active(self) -> list[AgentRecord]:
-        rows = self._conn.execute(
-            "SELECT * FROM agents WHERE project_id=? AND status='running' ORDER BY started_at",
-            (self._project_id,)).fetchall()
-        return [AgentRecord(**dict(r)) for r in rows]
+        return [AgentRecord(**dict(r)) for r in self._repo.running_for_project(self._project_id)]
 
     def counts(self, project_id: str) -> dict:
-        rows = self._conn.execute(
-            "SELECT status, outcome FROM agents WHERE project_id=?", (project_id,)
-        ).fetchall()
+        rows = self._repo.status_outcome_rows(project_id)
         c = {"spawned": len(rows), "running": 0, "done": 0, "failed": 0, "blocked": 0, "no_op": 0}
         for r in rows:
             c[r["status"]] = c.get(r["status"], 0) + 1
@@ -144,25 +126,18 @@ class AgentRegistry:
         return c
 
     def no_op_rate(self, project_id: str) -> float:
-        rows = self._conn.execute(
-            "SELECT outcome FROM agents WHERE project_id=? AND outcome IS NOT NULL", (project_id,)
-        ).fetchall()
+        rows = self._repo.outcome_rows(project_id)
         if not rows:
             return 0.0
         no_ops = sum(1 for r in rows if r["outcome"] == "no_op")
         return no_ops / len(rows)
 
     def cost_by_ticket(self, project_id: str) -> dict:
-        rows = self._conn.execute(
-            "SELECT ticket_id, SUM(cost_usd) AS c FROM agents WHERE project_id=? GROUP BY ticket_id",
-            (project_id,),
-        ).fetchall()
+        rows = self._repo.cost_sum_by_ticket(project_id)
         return {r["ticket_id"]: r["c"] for r in rows}
 
     def render_markdown(self, project_id: str) -> str:
-        rows = self._conn.execute(
-            "SELECT * FROM agents WHERE project_id=? ORDER BY started_at", (project_id,)
-        ).fetchall()
+        rows = self._repo.all_for_project(project_id)
         c = self.counts(project_id)
         lines = [
             f"# Agents — run `{project_id}`",
