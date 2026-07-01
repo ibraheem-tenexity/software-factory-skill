@@ -225,10 +225,14 @@ def _build_rollup(doc_summaries: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, dict], None] | None = None) -> dict:
+def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, dict], None] | None = None,
+                force: bool = False) -> dict:
     """The pipeline for one document. Never raises — a parse/summarize/embed failure marks
     this doc `failed` and returns a clean dict, so a caller looping over N blobs is never
-    killed by one bad file (SOF-32 AC)."""
+    killed by one bad file (SOF-32 AC).
+
+    `force=True` (SOF-36's Regenerate button) bypasses the unchanged-content dedup skip below —
+    a user who explicitly asks for a fresh summary wants one even if the file hasn't changed."""
     push_progress = push_progress or _noop_progress
     blobs_store = BlobStore()
     memory_store = MemoryStore()
@@ -241,7 +245,8 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
     doc_name = blob.get("name") or f"blob-{blob_id}"
 
     existing = memory_store.get_doc_summary(blob_id)
-    if existing and existing.get("status") == "ready" and existing.get("content_sha256") == blob.get("sha256"):
+    if (not force and existing and existing.get("status") == "ready"
+            and existing.get("content_sha256") == blob.get("sha256")):
         return {"blob_id": blob_id, "status": "ready", "skipped": "unchanged (content_sha256 dedup)"}
 
     push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "parsing", "pct": 5, "status": "running"})

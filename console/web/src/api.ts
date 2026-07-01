@@ -80,7 +80,7 @@ export type Artifact = { path: string; content?: string; error?: string };
 
 // Project view (§2.5) — Overview rollup + Documents, per tjyb5gmy's LOCKED shapes (PR #13).
 // Callers degrade to empty until live.
-export type ProjectMaterial = { id?: string; name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number; scope?: "project" | "org" };
+export type ProjectMaterial = { id?: string; name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number; scope?: "project" | "org"; summary?: string; summary_status?: "pending" | "ready" | "failed" };
 export type ProjectArtifact = { id?: number; title: string; path?: string; kind?: string; agent?: string; ts?: number };
 export type ProjectOverview = {
   brief?: { name?: string; description?: string; goal?: string; scope?: string[]; owner?: string; phase?: string; stage?: number; created?: number | string; runtime?: string; created_by?: string };
@@ -494,6 +494,10 @@ export const api = {
   rewindTo: (id: string, node: string) => send<Record<string, any>>(`/api/projects/${id}/rewind`, "POST", { node }),
   uploadMaterial: (id: string, file: { name: string; tag?: string; content_type?: string; data_b64: string }) =>
     send<{ ok?: boolean }>(`/api/projects/${id}/materials`, "POST", file),
+  // Auto-summarize / Regenerate (SOF-36/T3.3) — synchronous, blocks until the fresh summary is
+  // persisted; 404s if project memory (SF_MEMORY) isn't enabled.
+  summarizeDocument: (id: string, blobId: string) =>
+    send<ProjectDocuments>(`/api/projects/${id}/documents/${blobId}/summarize`, "POST"),
   orgDocUpload: (body: { name: string; tag?: string; content_type?: string; data_b64: string }) =>
     send<{ doc?: OrgDoc }>("/api/org/docs", "POST", body),
   orgDocDelete: (docId: string) => send<{ ok?: boolean }>(`/api/org/docs/${docId}`, "DELETE"),

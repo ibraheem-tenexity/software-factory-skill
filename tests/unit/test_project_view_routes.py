@@ -99,6 +99,72 @@ def test_documents_lists_uploaded_and_produced(auth_mod, auth_client, monkeypatc
     assert j["produced"][0]["title"] == "Arch" and j["produced"][0]["kind"] == "plan"
 
 
+# ── SOF-36/T3.3: Auto-summarize / Regenerate ────────────────────────────────────────────────────
+
+def test_summarize_404s_when_memory_is_disabled(auth_mod, auth_client, monkeypatch):
+    _login(auth_mod, auth_client, monkeypatch)
+    _wire(auth_mod, monkeypatch)
+    monkeypatch.delenv("SF_MEMORY", raising=False)
+    r = auth_client.post("/api/projects/project-abc/documents/1/summarize")
+    assert r.status_code == 404
+
+
+def test_summarize_404s_on_unknown_blob(auth_mod, auth_client, monkeypatch):
+    _login(auth_mod, auth_client, monkeypatch)
+    _wire(auth_mod, monkeypatch)
+    monkeypatch.setenv("SF_MEMORY", "1")
+    monkeypatch.setattr(auth_mod.blobs, "get_blob", lambda bid: None)
+    r = auth_client.post("/api/projects/project-abc/documents/999/summarize")
+    assert r.status_code == 404
+
+
+def test_summarize_404s_when_blob_belongs_to_a_different_project(auth_mod, auth_client, monkeypatch):
+    # The blob exists, but not under THIS project — authorize_project only checks the {pid} in the
+    # URL owns the project; the blob_id itself could belong to anyone without this extra check.
+    _login(auth_mod, auth_client, monkeypatch)
+    _wire(auth_mod, monkeypatch)
+    monkeypatch.setenv("SF_MEMORY", "1")
+    monkeypatch.setattr(auth_mod.blobs, "get_blob",
+                        lambda bid: {"id": bid, "scope": "project", "scope_id": "some-other-project"})
+    r = auth_client.post("/api/projects/project-abc/documents/1/summarize")
+    assert r.status_code == 404
+
+
+def test_summarize_calls_ingest_blob_with_force_and_returns_documents(auth_mod, auth_client, monkeypatch):
+    _login(auth_mod, auth_client, monkeypatch)
+    _wire(auth_mod, monkeypatch)
+    monkeypatch.setenv("SF_MEMORY", "1")
+    monkeypatch.setattr(auth_mod.blobs, "get_blob",
+                        lambda bid: {"id": bid, "scope": "project", "scope_id": "project-abc"})
+    calls = {}
+
+    def fake_ingest_blob(blob_id, *, console, force=False, push_progress=None):
+        calls["blob_id"] = blob_id
+        calls["force"] = force
+        return {"blob_id": blob_id, "status": "ready"}
+
+    from software_factory.memory import ingest as memory_ingest
+    monkeypatch.setattr(memory_ingest, "ingest_blob", fake_ingest_blob)
+    r = auth_client.post("/api/projects/project-abc/documents/1/summarize")
+    assert r.status_code == 200
+    assert calls == {"blob_id": 1, "force": True}
+    assert r.json()["uploaded"][0]["name"] == "rfq.pdf"   # still the full documents() payload
+
+
+def test_summarize_502s_when_ingest_reports_failed(auth_mod, auth_client, monkeypatch):
+    _login(auth_mod, auth_client, monkeypatch)
+    _wire(auth_mod, monkeypatch)
+    monkeypatch.setenv("SF_MEMORY", "1")
+    monkeypatch.setattr(auth_mod.blobs, "get_blob",
+                        lambda bid: {"id": bid, "scope": "project", "scope_id": "project-abc"})
+
+    from software_factory.memory import ingest as memory_ingest
+    monkeypatch.setattr(memory_ingest, "ingest_blob",
+                        lambda blob_id, **kw: {"blob_id": blob_id, "status": "failed", "error": "parse boom"})
+    r = auth_client.post("/api/projects/project-abc/documents/1/summarize")
+    assert r.status_code == 502
+
+
 def test_overview_requires_session(auth_client):
     assert auth_client.get("/api/projects/project-abc/overview").status_code == 401
 
