@@ -271,9 +271,16 @@ class ConciergeAgent:
         if context not in CONCIERGE_CONTEXTS:
             raise ValueError(f"unknown concierge context: {context!r} (expected one of {CONCIERGE_CONTEXTS})")
         from langchain.agents import create_agent
+        from langchain.agents.structured_output import ToolStrategy
         system_prompt = f"{resolve_concierge_instructions()}\n\n## Current focus: {context}"
+        # SOF-58: a bare Pydantic response_format resolves to LangChain's native ProviderStrategy
+        # for OpenAI models -- confirmed live, gpt-5.4 under that strategy returns the SAME valid
+        # JSON object concatenated 2-3x in one completion, which chokes create_agent's own
+        # json.loads("Extra data: line 2 column 1...") on effectively every turn. ToolStrategy
+        # forces structured output through a function-call argument (OpenAI's own tool-calling
+        # schema validation) instead of raw native JSON text, sidestepping the triplication.
         return create_agent(self._model, self._tools, system_prompt=system_prompt,
-                            response_format=ConciergeTurn)
+                            response_format=ToolStrategy(ConciergeTurn))
 
     def run(self, context: str, messages: list) -> ConciergeTurn:
         """`messages`: a LangChain-shaped message list (the conversation-store's to_provider()
