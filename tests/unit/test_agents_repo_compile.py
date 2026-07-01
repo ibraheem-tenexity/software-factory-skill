@@ -63,3 +63,11 @@ def test_cost_sum_by_ticket_groups():
     AgentRepository(fx).cost_sum_by_ticket("p1")
     assert "sum(agents.cost_usd)" in fx.sql.lower()
     assert "GROUP BY agents.ticket_id" in fx.sql
+
+
+def test_batch_roles_in_clause_and_order():
+    fx = FakeExec()
+    AgentRepository(fx).batch_roles(["p1", "p2"])
+    _clean(fx.sql)
+    assert "agents.project_id IN (%s, %s)" in fx.sql
+    assert "ORDER BY agents.started_at, agents.agent_id" in fx.sql

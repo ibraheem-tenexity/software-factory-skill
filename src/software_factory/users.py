@@ -15,11 +15,12 @@ Role lookups happen on every request, so the directory is cached in-process with
 invalidated on every write — a status/role/token_version change shows within seconds (and immediately
 for changes made through this process) without a DB round-trip per request.
 
-LAYERING (CRUD/app-logic separation): `UserRepository` holds the pure, parameterized SQL (no cache,
-no normalization, no lifecycle decisions) — it becomes SQLAlchemy Core in a later phase. `UserStore`
-is the business layer: it owns the read cache + fallback-to-stale, email normalization, the
-invited→active lifecycle, RBAC validation, cold-start seeding, and org orchestration, delegating every
-query/write to the repository. `UserStore`'s public surface is unchanged (callers + tests untouched).
+LAYERING (CRUD/app-logic separation): `UserRepository` (repositories/users_repo.py) holds the pure,
+parameterized SQL as SQLAlchemy Core constructs (no cache, no normalization, no lifecycle decisions).
+`UserStore` is the business layer: it owns the read cache + fallback-to-stale, email normalization,
+the invited→active lifecycle, RBAC validation, cold-start seeding, and org orchestration, delegating
+every query/write to the repository. `UserStore`'s public surface is unchanged (callers + tests
+untouched).
 
 This is the sanctioned "Store already encapsulates the logic" shape of the CRUD/app-logic split
 (vs. the "logic was inlined in a router → extract a Service" shape used for org — see
@@ -34,162 +35,24 @@ import os
 import time
 import uuid
 
-from . import dbshim
 from . import auth
+from .repositories._exec import GlobalExec
+from .repositories.users_repo import UserRepository
 
 _CACHE_TTL = 20.0
 # Canonical internal organization — every Tenexity staff member links to it (so "Your organization"
 # resolves + the admin-dashboard card, gated on isAdmin && org, shows). Seeded at boot, idempotently.
 TENEXITY_ORG_ID = "org-tenexity"
 
-# The full user row the console reads — role resolved to its NAME via the roles join; uuid columns
-# surfaced as plain strings (clean for JSON responses and the session cookie).
-# NOTE: password_hash is deliberately NOT selected here — this row feeds /api/users etc., so the hash
-# must never ride along. It's read only by authenticate_password's dedicated query.
-_USER_SELECT = (
-    "SELECT u.id::text AS id, u.google_sub, u.email, r.name AS role, "
-    "u.is_internal, u.status, u.token_version, u.org_id, u.designation, u.role_description, "
-    "u.name AS name, u.sign_in_method, inv.email AS invited_by, "
-    "extract(epoch from u.created_at) AS created_at, "
-    "extract(epoch from u.onboarded_at) AS onboarded_at, "
-    "extract(epoch from u.last_active) AS last_active "
-    "FROM public.users u JOIN public.roles r ON r.id = u.role_id "
-    "LEFT JOIN public.users inv ON inv.id = u.invited_by")
-
 # organizations columns that hold JSON-encoded lists (decoded on read).
 _ORG_JSON_COLS = ("sub_focus", "connected_systems")
 _ORG_COLS = ("id", "name", "industry", "sub_focus", "headcount", "revenue",
              "location", "website", "connected_systems", "plan", "monthly_budget_cap",
              "created_at", "created_by")
-_ORG_SELECT = ("SELECT id, name, industry, sub_focus, headcount, revenue, location, website, "
-               "connected_systems, plan, monthly_budget_cap, "
-               "extract(epoch from created_at) AS created_at, created_by "
-               "FROM public.organizations")
 
 
 def _bootstrap_admin_email() -> str:
     return (os.environ.get("SF_BOOTSTRAP_ADMIN_EMAIL", "") or "").strip().lower()
-
-
-class UserRepository:
-    """Pure parameterized CRUD over public.users / roles / organizations. No cache, no input
-    normalization, no lifecycle/validation — callers pass clean values. Each method ≈ one statement
-    (or read); this is the seam a later phase converts from raw SQL to SQLAlchemy Core."""
-
-    def _exec(self, sql: str, params: tuple = ()) -> None:
-        conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
-        try:
-            with conn.transaction():
-                conn.cursor().execute(sql.replace("?", "%s"), params)
-        finally:
-            conn.close()
-
-    def _query(self, sql: str, params: tuple = ()) -> list:
-        conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
-        try:
-            with conn.transaction():
-                cur = conn.cursor()
-                cur.execute(sql.replace("?", "%s"), params)
-                return [dict(r) for r in cur.fetchall()]
-        finally:
-            conn.close()
-
-    # -- roles (RBAC) -------------------------------------------------------------------
-    def seed_role(self, rid: str, name: str, desc: str) -> None:
-        self._exec("INSERT INTO public.roles (id, name, description) VALUES (?::uuid, ?, ?) "
-                   "ON CONFLICT (name) DO NOTHING", (rid, name, desc))
-
-    def roles_rows(self) -> list:
-        return self._query("SELECT id::text AS id, name FROM public.roles")
-
-    # -- users --------------------------------------------------------------------------
-    def all_users(self) -> list:
-        return self._query(_USER_SELECT)
-
-    def users_where(self, where_sql: str, val) -> list:
-        return self._query(f"{_USER_SELECT} WHERE {where_sql}", (val,))
-
-    def upsert_user(self, uid: str, email: str, rid: str | None, inviter: str | None) -> None:
-        self._exec(
-            "INSERT INTO public.users (id, email, role_id, invited_by) VALUES (?::uuid, ?, ?::uuid, ?::uuid) "
-            "ON CONFLICT (email) DO UPDATE SET role_id = EXCLUDED.role_id, updated_at = now()",
-            (uid, email, rid, inviter))
-
-    def upsert_admin(self, uid: str, email: str, rid: str | None) -> None:
-        self._exec(
-            "INSERT INTO public.users (id, email, role_id, is_internal) VALUES (?::uuid, ?, ?::uuid, true) "
-            "ON CONFLICT (email) DO UPDATE SET role_id = EXCLUDED.role_id, is_internal = true, "
-            "updated_at = now()",
-            (uid, email, rid))
-
-    def set_identity(self, uid: str, google_sub: str) -> None:
-        self._exec("UPDATE public.users SET google_sub = ?, status = 'active', "
-                   "onboarded_at = COALESCE(onboarded_at, now()), updated_at = now() WHERE id = ?::uuid",
-                   (google_sub, uid))
-
-    def delete_user(self, email: str) -> None:
-        self._exec("DELETE FROM public.users WHERE email = ?", (email,))
-
-    def update_status(self, email: str, status: str) -> None:
-        self._exec("UPDATE public.users SET status = ?, updated_at = now() WHERE email = ?",
-                   (status, email))
-
-    def disable_user(self, email: str) -> None:
-        self._exec("UPDATE public.users SET status = 'disabled', token_version = token_version + 1, "
-                   "updated_at = now() WHERE email = ?", (email,))
-
-    def bump_token_version(self, email: str) -> None:
-        self._exec("UPDATE public.users SET token_version = token_version + 1, updated_at = now() "
-                   "WHERE email = ?", (email,))
-
-    def update_user_columns(self, email: str, cols: dict) -> None:
-        """Patch the given user columns (+ updated_at). `cols` is {column: value}: values are bound
-        parameters, but the column NAMES are interpolated into the SQL text. Callers MUST pass only
-        trusted, code-defined column names (never request-derived input) — this is not a general
-        key/value sink. All current callers pass a fixed allowlist built in `UserStore.set_profile`."""
-        sets = ", ".join(f"{c}=?" for c in cols)
-        self._exec(f"UPDATE public.users SET {sets}, updated_at = now() WHERE email=?",
-                   (*cols.values(), email))
-
-    def set_password_hash(self, email: str, password_hash: str) -> None:
-        self._exec("UPDATE public.users SET password_hash = ?, sign_in_method = 'password', "
-                   "updated_at = now() WHERE email = ?", (password_hash, email))
-
-    def credentials(self, email: str) -> list:
-        return self._query(
-            "SELECT id::text AS id, status, password_hash FROM public.users WHERE email = ?", (email,))
-
-    def touch_last_active(self, uid: str) -> None:
-        self._exec("UPDATE public.users SET last_active = now() WHERE id = ?::uuid", (uid,))
-
-    # -- organizations ------------------------------------------------------------------
-    def insert_org(self, oid: str, name: str, industry, sub_focus_json: str, headcount,
-                   revenue, location, website, connected_systems_json: str, by: str) -> None:
-        self._exec(
-            "INSERT INTO public.organizations (id, name, industry, sub_focus, headcount, revenue, "
-            "location, website, connected_systems, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (oid, name, industry, sub_focus_json, headcount, revenue, location, website,
-             connected_systems_json, by))
-
-    def org_by_id(self, org_id: str) -> list:
-        return self._query(_ORG_SELECT + " WHERE id=?", (org_id,))
-
-    def all_orgs(self) -> list:
-        return self._query(_ORG_SELECT + " ORDER BY name")
-
-    def update_org_columns(self, org_id: str, cols: dict) -> None:
-        """Patch the given organization columns (no updated_at column on organizations). `cols` is
-        {column: value}: values are bound, but column NAMES are interpolated into the SQL. Callers
-        MUST pass only trusted, code-defined column names (never request-derived input) — all current
-        callers pass the fixed `_ORG_COLS` allowlist built in `UserStore.update_org`."""
-        sets = ", ".join(f"{c}=?" for c in cols)
-        self._exec(f"UPDATE public.organizations SET {sets} WHERE id=?", (*cols.values(), org_id))
-
-    def unlink_org_members(self, org_id: str) -> None:
-        self._exec("UPDATE public.users SET org_id = NULL, updated_at = now() WHERE org_id = ?", (org_id,))
-
-    def delete_org_row(self, org_id: str) -> None:
-        self._exec("DELETE FROM public.organizations WHERE id = ?", (org_id,))
 
 
 class UserStore:
@@ -197,7 +60,7 @@ class UserStore:
     the invited→active lifecycle, RBAC validation, cold-start seeding, and org orchestration."""
 
     def __init__(self):
-        self._repo = UserRepository()
+        self._repo = UserRepository(GlobalExec())
         self._cache: dict | None = None
         self._cache_ts = 0.0
         self._roles: dict | None = None        # {role name -> id} cache
@@ -271,17 +134,17 @@ class UserStore:
         email = (email or "").strip().lower()
         row = None
         if google_sub:
-            row = self._fetch_one("u.google_sub = ?", google_sub)
+            row = self._first(self._repo.by_google_sub(google_sub))
         if row is None and email:
-            row = self._fetch_one("u.email = ?", email)
+            row = self._first(self._repo.by_email(email))
         if row is None or row["status"] == "disabled":
             return None
         self._repo.set_identity(row["id"], google_sub)
         self._cache = None
         return self.get_by_id(row["id"])
 
-    def _fetch_one(self, where_sql: str, val) -> dict | None:
-        rows = self._repo.users_where(where_sql, val)
+    @staticmethod
+    def _first(rows) -> dict | None:
         return rows[0] if rows else None
 
     # -- writes (invalidate cache) ------------------------------------------------------

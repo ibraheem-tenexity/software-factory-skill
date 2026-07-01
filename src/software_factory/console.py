@@ -36,6 +36,9 @@ from .mcp_health import check_mcp
 from .projectstate import ProjectState
 from .db import ProjectStore
 from . import dbshim
+from .repositories._exec import PathExec
+from .repositories.canvas_repo import ProjectStateRepository, PhaseRepository, BlockerRepository, ArtifactRepository
+from .repositories.agents_repo import AgentRepository
 from .tickets import TicketStore
 from .workspace_setup import prepare_workspace
 from .log import get_logger
@@ -620,15 +623,11 @@ class Console:
         out: dict[str, ProjectState] = {}
         if not project_ids:
             return out
-        placeholders = ",".join("?" for _ in project_ids)
-        conn = dbshim.connect(self._projects_dir)
+        exec_ = PathExec(self._projects_dir)
         try:
-            rows = conn.execute(
-                f"SELECT project_id, data, name, summary FROM projectstate WHERE project_id IN ({placeholders})",
-                tuple(project_ids),
-            ).fetchall()
+            rows = ProjectStateRepository.batch_by_projects(exec_, project_ids)
         finally:
-            conn.close()
+            exec_.close()
         for row in rows:
             data = json.loads(row["data"])
             data["name"] = row["name"]
@@ -645,16 +644,11 @@ class Console:
         out = {pid: {} for pid in project_ids}
         if not project_ids:
             return out
-        placeholders = ",".join("?" for _ in project_ids)
-        conn = dbshim.connect(self._projects_dir)
+        exec_ = PathExec(self._projects_dir)
         try:
-            rows = conn.execute(
-                f"SELECT project_id, name, status FROM phases WHERE project_id IN ({placeholders}) "
-                "ORDER BY ts, id",
-                tuple(project_ids),
-            ).fetchall()
+            rows = PhaseRepository.batch_statuses(exec_, project_ids)
         finally:
-            conn.close()
+            exec_.close()
         for row in rows:
             out[row["project_id"]][row["name"]] = row["status"]
         return out
@@ -664,15 +658,11 @@ class Console:
         out = {pid: [] for pid in project_ids}
         if not project_ids:
             return out
-        placeholders = ",".join("?" for _ in project_ids)
-        conn = dbshim.connect(self._projects_dir)
+        exec_ = PathExec(self._projects_dir)
         try:
-            rows = conn.execute(
-                f"SELECT project_id, blocks, cleared FROM blockers WHERE project_id IN ({placeholders})",
-                tuple(project_ids),
-            ).fetchall()
+            rows = BlockerRepository.batch_by_projects(exec_, project_ids)
         finally:
-            conn.close()
+            exec_.close()
         for row in rows:
             out[row["project_id"]].append(
                 {"blocks": row.get("blocks"), "cleared": row["cleared"]}
@@ -684,16 +674,11 @@ class Console:
         out = {pid: [] for pid in project_ids}
         if not project_ids:
             return out
-        placeholders = ",".join("?" for _ in project_ids)
-        conn = dbshim.connect(self._projects_dir)
+        exec_ = PathExec(self._projects_dir)
         try:
-            rows = conn.execute(
-                f"SELECT project_id, role FROM agents WHERE project_id IN ({placeholders}) "
-                "ORDER BY started_at, agent_id",
-                tuple(project_ids),
-            ).fetchall()
+            rows = AgentRepository(exec_).batch_roles(project_ids)
         finally:
-            conn.close()
+            exec_.close()
         seen = {pid: set() for pid in project_ids}
         for row in rows:
             pid, role = row["project_id"], row.get("role")
@@ -2199,16 +2184,11 @@ class Console:
         shared: set[str] = set()
         if not project_ids:
             return repo_urls, shared
-        placeholders = ",".join("?" for _ in project_ids)
-        conn = dbshim.connect(self._projects_dir)
+        exec_ = PathExec(self._projects_dir)
         try:
-            rows = conn.execute(
-                f"SELECT project_id, title, kind, path FROM artifacts "
-                f"WHERE project_id IN ({placeholders}) ORDER BY project_id, id",
-                tuple(project_ids),
-            ).fetchall()
+            rows = ArtifactRepository.batch_for_projects(exec_, project_ids)
         finally:
-            conn.close()
+            exec_.close()
         for row in rows:
             pid = row["project_id"]
             kind = (row.get("kind") or "").lower()

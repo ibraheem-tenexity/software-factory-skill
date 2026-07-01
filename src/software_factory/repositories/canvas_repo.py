@@ -32,6 +32,13 @@ class ProjectStateRepository:
             select(projectstate.c.data, projectstate.c.name, projectstate.c.summary)
             .where(projectstate.c.project_id == project_id))
 
+    @staticmethod
+    def batch_by_projects(exec_, project_ids: list) -> list:
+        """Batch-load projectstate rows for many runs in one round-trip (console.py's dashboard)."""
+        return exec_.fetchall(
+            select(projectstate.c.project_id, projectstate.c.data, projectstate.c.name,
+                  projectstate.c.summary).where(projectstate.c.project_id.in_(project_ids)))
+
 
 class PhaseRepository:
     def __init__(self, exec_, project_id):
@@ -44,6 +51,14 @@ class PhaseRepository:
     def all_for_project(self) -> list:
         return self._x.fetchall(select(phases).where(phases.c.project_id == self._pid())
                                 .order_by(phases.c.ts, phases.c.id))
+
+    @staticmethod
+    def batch_statuses(exec_, project_ids: list) -> list:
+        """Latest name/status rows across many projects in one round-trip (console.py's dashboard,
+        N+1 prevention)."""
+        return exec_.fetchall(
+            select(phases.c.project_id, phases.c.name, phases.c.status)
+            .where(phases.c.project_id.in_(project_ids)).order_by(phases.c.ts, phases.c.id))
 
 
 class ArtifactRepository:
@@ -63,6 +78,14 @@ class ArtifactRepository:
         project_id (mirrors the original: a fresh global connection, not this store's path)."""
         return self._x.fetchone(select(artifacts).where(artifacts.c.id == artifact_id))
 
+    @staticmethod
+    def batch_for_projects(exec_, project_ids: list) -> list:
+        """Artifacts across many projects in one round-trip (console.py's repo-url lookup)."""
+        return exec_.fetchall(
+            select(artifacts.c.project_id, artifacts.c.title, artifacts.c.kind, artifacts.c.path)
+            .where(artifacts.c.project_id.in_(project_ids))
+            .order_by(artifacts.c.project_id, artifacts.c.id))
+
 
 class BlockerRepository:
     def __init__(self, exec_, project_id):
@@ -79,6 +102,13 @@ class BlockerRepository:
     def all_for_project(self) -> list:
         return self._x.fetchall(select(blockers).where(blockers.c.project_id == self._pid())
                                 .order_by(blockers.c.id))
+
+    @staticmethod
+    def batch_by_projects(exec_, project_ids: list) -> list:
+        """Blockers across many projects in one round-trip (console.py's dashboard, N+1 prevention)."""
+        return exec_.fetchall(
+            select(blockers.c.project_id, blockers.c.blocks, blockers.c.cleared)
+            .where(blockers.c.project_id.in_(project_ids)))
 
 
 class GateRepository:

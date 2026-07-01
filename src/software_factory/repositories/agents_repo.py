@@ -61,3 +61,11 @@ class AgentRepository:
         return self._x.fetchall(select(agents.c.ticket_id, func.sum(agents.c.cost_usd).label("c"))
                                 .where(agents.c.project_id == project_id)
                                 .group_by(agents.c.ticket_id))
+
+    def batch_roles(self, project_ids: list) -> list:
+        """Agent roles across many projects in one round-trip (console.py's dashboard, N+1
+        prevention); rows ordered so the caller can take first-seen-per-project distinct roles."""
+        return self._x.fetchall(
+            select(agents.c.project_id, agents.c.role)
+            .where(agents.c.project_id.in_(project_ids))
+            .order_by(agents.c.started_at, agents.c.agent_id))
