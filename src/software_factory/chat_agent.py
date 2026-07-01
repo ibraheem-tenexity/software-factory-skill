@@ -7,10 +7,13 @@ and its operator-override cache are unchanged and are reused by `ConciergeAgent`
 
 SOF-39/40: `ConciergeAgent` is the replacement — one context-parameterized LangChain agent
 (system prompt + empty/extensible tool belt) whose terminal turn is coerced to `ConciergeTurn`.
-It is NOT YET WIRED into `/api/chat` or `/converse` (`state._chat_runner` stays `None`,
-`services/conversation.py`'s mock is untouched) — that delegation lands once the conversation-
-store shape (T1.3, a parallel track) is confirmed, per the PR notes. `ConciergeAgent` is fully
-standalone and testable on its own in the meantime.
+Both surfaces now delegate to it: `/converse` (onboarding) via `DbConversation`
+(`services/conversation.py`), `/api/chat` (the persistent in-project dock) via `ChatDockRunner`
+below, assigned to `state._chat_runner`. Persistence stays where it was pre-rip-out —
+`DbConversation` uses `ConversationStore`, `ChatDockRunner` still uses `chat.jsonl`/`ChatStore`
+(folding `/api/chat` onto the conversation table is T1.4, a deliberate later follow-up, not
+pulled forward here). The tool belt is empty for both, so neither surface can yet take actions
+(hand off, request creds, etc.) via chat — that returns once real tools are bound (spec §5).
 
 Uses `langchain.agents.create_agent` (LangChain/LangGraph 1.x) — NOT the deprecated
 `langgraph.prebuilt.create_react_agent` the original design note assumed; the installed version
@@ -20,6 +23,8 @@ no-loop mode, so there's no capability gap — just a newer import path.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import time
 from typing import Callable, Literal
@@ -297,3 +302,80 @@ class ConciergeAgent:
             except (ValidationError, ValueError, StructuredOutputError):
                 continue
         return ConciergeTurn(response=_SAFE_FALLBACK_RESPONSE, suggested_responses=[])
+
+
+# Phase -> context inference for the persistent dock (no per-screen signal exists in ChatIn
+# today, so this is the coarsest reasonable proxy for "what is the user looking at"). Operator
+# call: infer from phase, "build" as the fallback for anything not explicitly mapped (draft/
+# unknown/pre-build phases included) — refine later if a real per-screen signal is threaded in.
+_PHASE_CONTEXT = {"done": "overview"}
+
+
+def _context_for_project(console: Console, project_id: str) -> str:
+    try:
+        phase = (console.status(project_id).get("phase") or "").lower()
+    except Exception:
+        return "build"
+    return _PHASE_CONTEXT.get(phase, "build")
+
+
+class ChatDockRunner:
+    """Serves `/api/chat` (the persistent, in-project concierge dock) via `ConciergeAgent` — the
+    restored replacement for the removed OpenAI-Agents-SDK `ChatAgentRunner` (SOF-35). Only
+    `handle_message_streamed` is implemented; the route (`console/routers/chat.py`) never called
+    the old class's non-streaming `handle_message`.
+
+    Persistence stays on `chat.jsonl`/`ChatStore` — the route itself appends after streaming
+    completes, unchanged from the pre-rip-out contract. Folding `/api/chat` onto the conversation
+    table is T1.4, a deliberate later follow-up, not pulled forward here.
+
+    History is kept in an in-memory per-process dict, matching the removed `ChatAgentRunner`'s
+    own behavior (a restart loses in-flight context same as before — not a new regression).
+
+    Tool belt is empty (spec §5), so this cannot yet hand off / request creds / take any action
+    via chat — pure conversation, same as `DbConversation`, until real tools are bound later."""
+
+    def __init__(self, console: Console, users=None, agent=None):
+        self._console = console
+        self._agent = agent
+        self._conversations: dict[str, list] = {}
+
+    def _get_agent(self):
+        if self._agent is None:
+            self._agent = ConciergeAgent()
+        return self._agent
+
+    async def handle_message_streamed(
+        self, project_id: str | None, user_msg: str,
+        files: list, images: list,
+        runtime: str = "", planning_model: str = "",
+        impl_model: str = "", project_name: str = "",
+        gated: bool = False, owner: str = "", role: str = "member",
+    ):
+        """Async generator yielding NDJSON lines. `ConciergeAgent.run()` is a single blocking call
+        (no real token-by-token stream), so this yields exactly one `done` event with the full
+        reply rather than fabricating `delta` events — an honest simplification, not a silent
+        pretense of streaming that isn't happening."""
+        content = user_msg or ""
+        if files:
+            content += "\n" + "\n".join(f"[Attached file: {f.get('name', 'file')}]" for f in files)
+        if images:
+            content += "\n" + "\n".join(f"[Attached image: {i.get('name', 'image')}]" for i in images)
+
+        conv_key = project_id or "__new__"
+        history = self._conversations.setdefault(conv_key, [])
+        history.append({"role": "user", "content": content})
+
+        context = _context_for_project(self._console, project_id) if project_id else "build"
+        try:
+            turn = await asyncio.to_thread(self._get_agent().run, context, list(history))
+        except Exception as e:
+            yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
+            return
+
+        history.append({"role": "assistant", "content": turn.response})
+
+        now = time.time()
+        messages = [{"role": "assistant", "content": turn.response, "msg_type": "text",
+                    "ts": now, "metadata": {}}]
+        yield json.dumps({"type": "done", "project_id": project_id, "messages": messages}) + "\n"
