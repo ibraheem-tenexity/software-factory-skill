@@ -1,20 +1,20 @@
-"""OpenAI Agents SDK concierge — gathers user requirements and drives the pipeline."""
+"""Factory Concierge — model selection + system prompt.
+
+SOF-35: the OpenAI Agents SDK runtime (`Agent`/`Runner`) and its 14 tools (`make_tools`) are
+removed — they didn't work reliably and were not being fixed (see
+docs/project-memory-concierge/concierge-agent-spec.md §1). `/api/chat` is a stub
+(`state._chat_runner = None`, console/state.py) until the LangChain rebuild (T2.1/T2.2) lands.
+Model selection, the system prompt, and its operator-override cache are unchanged and are
+reused as-is by the new agent.
+"""
 from __future__ import annotations
 
-import json
 import os
 import time
 from typing import Callable
 
-from agents import Agent, FunctionTool, ItemHelpers
-from agents.items import MessageOutputItem, ToolCallItem
-from openai.types.responses import ResponseFunctionToolCall
-
 from software_factory.chat_store import ChatMessage
 from software_factory.console import Console
-from software_factory.log import get_logger
-
-logger = get_logger(__name__)
 
 
 _DEFAULT_OPENAI_CHAT_MODEL = "gpt-5.4"   # concierge default (was gpt-4o); SF_CHAT_MODEL overrides it
@@ -146,602 +146,49 @@ def reset_concierge_prompt_cache() -> None:
     _CONCIERGE_PROMPT_CACHE.reset()
 
 
-def make_tools(console: Console, users=None, attachments=lambda: [],
-               runtime=lambda: "", models=lambda: ("", ""),
-               project_name=lambda: "", gated=lambda: False,
-               owner=lambda: "", viewer=lambda: ("", "admin"),
-               draft_id=lambda: "", interview=lambda: "") -> list[FunctionTool]:
-    """The 14-tool concierge set (Option C onboarding). Tools delegate to Console (draft/run)
-    and the UserStore (company org). `users` is the UserStore; `owner`/`viewer` give the signed-in
-    email + role; `draft_id` is the canonical run-<8hex> of the in-progress onboarding draft (the form
-    eagerly creates it and shares the id); `interview` is the rendered transcript threaded into Stage 1
-    on hand-off; `attachments` is the files on the current message (auto-persisted by the server).
-    """
-    from .brief import enough
+def check_and_notify(console: Console, project_id: str, prev_stage: int = 0) -> list[ChatMessage]:
+    """Check pipeline status and generate notification messages for stage transitions.
 
-    def _email() -> str:
-        return (owner() or "").strip().lower()
+    Extracted from the removed ChatAgentRunner (SOF-35): pure Console-status logic with no
+    dependency on the agent runtime, so it survives the OpenAI-Agents-SDK rip-out unchanged."""
+    status = console.status(project_id)
+    msgs: list[ChatMessage] = []
+    now = time.time()
 
-    def _allowed(project_id: str) -> bool:
-        """Ownership check for run-scoped tools. Admins bypass; members must own the run."""
-        email, role = viewer()
-        if role == "admin":
-            return True
-        return bool(project_id) and (console.project_owner(project_id) or "").lower() == (email or "").lower()
+    if status.get("stage1_done") and prev_stage < 2:
+        msgs.append(ChatMessage(
+            role="system",
+            content="Research complete — Design & Architecture stage starting.",
+            msg_type="status_update", ts=now,
+            metadata={"project_id": project_id, "stage": 2},
+        ))
 
-    # ── Company / org (first-time setup; editable when returning) ──────────────────────────────
-    async def _get_company_profile() -> str:
-        if not users:
-            return json.dumps({"org": None})
-        return json.dumps({"org": users.org_for_user(_email())})
-
-    async def _set_company_profile(name: str = "", industry: str = None, sub_focus: list = None,
-                                   headcount: str = None, revenue: str = None, website: str = None,
-                                   role: str = None, role_description: str = None) -> str:
-        if not users:
-            return json.dumps({"error": "no user store"})
-        email = _email()
-        if not email:
-            return json.dumps({"error": "no signed-in user"})
-        org = users.org_for_user(email)
-        if org:
-            fields = {k: v for k, v in {"name": (name or None), "industry": industry,
-                      "sub_focus": sub_focus, "headcount": headcount, "revenue": revenue,
-                      "website": website}.items() if v is not None}
-            if fields:
-                users.update_org(org["id"], **fields)
-            oid = org["id"]
-        else:
-            if not (name or "").strip():
-                return json.dumps({"error": "company name required to create the profile"})
-            oid = users.create_org(name, industry=industry, sub_focus=sub_focus, headcount=headcount,
-                                   revenue=revenue, website=website, by=email)
-        if role is not None or role_description is not None:
-            users.set_profile(email, org_id=oid, designation=role, role_description=role_description)
-        return json.dumps({"org": users.get_org(oid)})
-
-    async def _set_connected_systems(ids: list) -> str:
-        if not users:
-            return json.dumps({"error": "no user store"})
-        org = users.org_for_user(_email())
-        if not org:
-            return json.dumps({"error": "set the company profile first"})
-        users.update_org(org["id"], connected_systems=ids or [])
-        return json.dumps({"org": users.get_org(org["id"])})
-
-    # ── Project (writes to the draft; description composed server-side) ────────────────────────
-    async def _set_project_basics(name: str = "", goal: str = "") -> str:
-        pid = draft_id()
-        if not pid:
-            return json.dumps({"error": "no active draft"})
-        return json.dumps(console.set_draft_project(pid, name=(name or None), goal=(goal or None)))
-
-    async def _set_project_scope(scope: list) -> str:
-        pid = draft_id()
-        if not pid:
-            return json.dumps({"error": "no active draft"})
-        return json.dumps(console.set_draft_project(pid, scope=(scope or [])))
-
-    async def _attach_project_materials() -> str:
-        # Files arrive with the chat message and the server auto-persists them to the draft's input/.
-        # This tool just lets the agent acknowledge what came in this turn.
-        names = [f.get("name", "file") for f in (attachments() or [])]
-        return json.dumps({"attached_this_turn": names})
-
-    async def _request_materials(what: str = "", why: str = "") -> str:
-        return json.dumps({"type": "materials_request", "what": what, "why": why})
-
-    async def _get_intake_state() -> str:
-        # READ-ONLY. The frontend OWNS the checklist + ready gate; this is for the agent's own
-        # reasoning, it must NOT compute or push completion to the UI.
-        pid = draft_id()
-        org = users.org_for_user(_email()) if users else None
-        project = console.draft_project(pid) if pid else {}
-        return json.dumps({"company": org, "project": project})
-
-    async def _validate_intake_complete() -> str:
-        pid = draft_id()
-        brief = console.draft_brief(pid) if pid else {}
-        ready, missing = enough(brief)
-        return json.dumps({"ready": ready, "missing": missing})
-
-    async def _hand_off_to_factory(target: str = "railway") -> str:
-        pid = draft_id()
-        if not pid:
-            return json.dumps({"error": "no active draft to promote"})
-        try:
-            project_id = console.promote_draft(pid, interview_md=interview(), target=target)
-        except ValueError as e:               # duplicate project name — tell the user
-            return json.dumps({"error": str(e)})
-        return json.dumps({"project_id": project_id, "status": "started"})
-
-    async def _check_status(project_id: str) -> str:
-        if not _allowed(project_id):
-            return json.dumps({"error": "forbidden"})
-        return json.dumps(console.status(project_id))
-
-    async def _restart_pipeline(project_id: str) -> str:
-        if not _allowed(project_id):
-            return json.dumps({"error": "forbidden"})
-        st = console.status(project_id)
-        phase = st.get("phase") or ""
-        if phase in ("stopped", "done"):
-            # Stopped/done runs are terminal — relaunch as a fresh sibling run from the same spec.
-            try:
-                new_id = console.relaunch_project(project_id, owner=st.get("owner") or "")
-            except Exception as e:
-                return json.dumps({"error": "cannot relaunch", "reason": str(e), "status": st})
-            return json.dumps({"relaunched": True, "new_project_id": new_id,
-                               "relaunched_from": project_id,
-                               "status": console.status(new_id)})
-        stage = st.get("stage") or 1
-        result = console.retry_stage(project_id, stage)
-        if result is None:
-            return json.dumps({"error": "cannot restart", "reason":
-                               "run is already running or prerequisites not met",
-                               "status": st})
-        return json.dumps({"restarted": True, "stage": stage, "status": console.status(project_id)})
-
-    async def _request_dep_input(project_id: str, dep_names: list) -> str:
-        if not _allowed(project_id):
-            return json.dumps({"error": "forbidden"})
-        return json.dumps({"type": "dep_request", "project_id": project_id, "dep_names": dep_names})
-
-    async def _get_result(project_id: str) -> str:
-        if not _allowed(project_id):
-            return json.dumps({"error": "forbidden"})
-        return json.dumps(console.evidence(project_id))
-
-    def _tool(name, desc, props, required, fn):
-        return FunctionTool(name=name, description=desc,
-                            params_json_schema={"type": "object", "properties": props,
-                                                "required": required, "additionalProperties": False},
-                            on_invoke_tool=lambda ctx, inp, _fn=fn: _fn(**json.loads(inp or "{}")))
-
-    _str = {"type": "string"}
-    _strs = {"type": "array", "items": {"type": "string"}}
-    return [
-        _tool("get_company_profile",
-              "Read the company/org already on file for the signed-in user (null if first-time). "
-              "Call this first to tell returning users from first-time users.",
-              {}, [], lambda: _get_company_profile()),
-        _tool("set_company_profile",
-              "Create or update the user's company profile (first-time setup, or edits). Persists to "
-              "the org. industry/headcount/revenue are stored as LABELS (e.g. '51–200', '$10M–$50M').",
-              {"name": _str, "industry": _str, "sub_focus": _strs, "headcount": _str,
-               "revenue": _str, "website": _str, "role": _str, "role_description": _str},
-              [], _set_company_profile),
-        _tool("set_connected_systems",
-              "Record which systems the company uses (ids: epicor|sap|netsuite|qb|sf|site). Optional; "
-              "lets the factory pull real SKUs/customers/pricing. Requires a company profile first.",
-              {"ids": _strs}, ["ids"], _set_connected_systems),
-        _tool("set_project_basics",
-              "Set the project NAME and the GOAL (what they're building / the outcome). Persists to the "
-              "draft; the server composes the canonical description from goal + scope.",
-              {"name": _str, "goal": _str}, [], _set_project_basics),
-        _tool("set_project_scope",
-              "Set the scope-of-work areas this project touches (e.g. 'Quoting / RFQ', 'Order entry'). "
-              "Persists to the draft and is appended to the project description server-side.",
-              {"scope": _strs}, ["scope"], _set_project_scope),
-        _tool("attach_project_materials",
-              "Acknowledge materials the user attached this turn (walkthrough video / documents). Files "
-              "auto-persist to the draft; this confirms what arrived.",
-              {}, [], lambda: _attach_project_materials()),
-        _tool("request_materials",
-              "Ask the user to provide a specific high-signal material you don't have yet (e.g. a "
-              "walkthrough video). Use for missing inputs, not for tokens (use request_dep_input).",
-              {"what": _str, "why": _str}, ["what"], _request_materials),
-        _tool("get_intake_state",
-              "READ-ONLY snapshot of what's captured: company org + project {name, goal, scope, "
-              "description, brief}. For your reasoning only — the on-screen checklist owns completion.",
-              {}, [], lambda: _get_intake_state()),
-        _tool("validate_intake_complete",
-              "Check whether enough is captured to proceed. Returns {ready, missing}. Advisory — the "
-              "user decides when to hand off.",
-              {}, [], lambda: _validate_intake_complete()),
-        _tool("hand_off_to_factory",
-              "Promote the draft into a real run and launch the build. Call when the user is ready (or "
-              "says 'just build it').",
-              {"target": {"type": "string", "enum": ["railway", "vercel"], "default": "railway"}},
-              [], _hand_off_to_factory),
-        _tool("check_status",
-              "Check current pipeline status — phase, stage, cost — after handoff.",
-              {"project_id": _str}, ["project_id"], _check_status),
-        _tool("restart_pipeline",
-              "Restart a run. For paused/crashed runs: resumes the current stage in place. "
-              "For stopped/done runs: mints a fresh run from the same spec (new project_id, "
-              "full pipeline from stage 1). Use when the user says the build crashed, stalled, "
-              "stopped, or they want to run it again.",
-              {"project_id": _str}, ["project_id"], _restart_pipeline),
-        _tool("request_dep_input",
-              "Signal the frontend to show secure input fields for dependency tokens. Use this instead "
-              "of asking the user to paste tokens in chat.",
-              {"project_id": _str, "dep_names": _strs}, ["project_id", "dep_names"], _request_dep_input),
-        _tool("get_result",
-              "Get final artifacts and deployment URL(s) after the pipeline completes.",
-              {"project_id": _str}, ["project_id"], _get_result),
-    ]
-
-
-def _render_interview(history: list[dict]) -> str:
-    """Render the conversation so far as a plain-text transcript for the Stage-1 input."""
-    lines = []
-    for turn in history:
-        role = (turn.get("role") or "").upper()
-        content = turn.get("content")
-        if isinstance(content, str) and content.strip():
-            lines.append(f"{role}: {content.strip()}")
-    return "\n\n".join(lines)
-
-
-class ChatAgentRunner:
-    """Manages the concierge agent and translates between chat and Console."""
-
-    def __init__(self, console: Console, users=None):
-        self._console = console
-        self._users = users
-        # Export concierge runs (Agent + tool calls + generations) to Langfuse when configured.
-        # No-op without LANGFUSE_* keys; idempotent across runner constructions.
-        from . import langfuse_tracing
-        self._langfuse = langfuse_tracing.setup_langfuse()
-        self._pending_files: list = []
-        self._pending_runtime: str = ""
-        self._pending_models: tuple = ("", "")
-        self._pending_name: str = ""
-        self._pending_gated: bool = False
-        self._pending_owner: str = ""
-        self._pending_viewer: tuple[str, str] = ("", "admin")
-        self._pending_draft_id: str = ""
-        self._pending_interview_md: str = ""
-        tools = make_tools(console, users=users, attachments=lambda: self._pending_files,
-                           runtime=lambda: self._pending_runtime,
-                           models=lambda: self._pending_models,
-                           project_name=lambda: self._pending_name,
-                           gated=lambda: self._pending_gated,
-                           owner=lambda: self._pending_owner,
-                           viewer=lambda: self._pending_viewer,
-                           draft_id=lambda: self._pending_draft_id,
-                           interview=lambda: self._pending_interview_md)
-        # Operator override: a staff edit to the CONCIERGE prompt in the OS Agents dashboard drives
-        # new concierge sessions. The DB read is TTL-cached and best-effort so prompt editability
-        # never adds meaningful per-turn latency or breaks chat when Postgres is briefly unavailable.
-        instructions = resolve_concierge_instructions()
-        self._agent = Agent(
-            name="Factory Concierge",
-            instructions=instructions,
-            tools=tools,
-            model=select_chat_model(),
-        )
-        self._conversations: dict[str, list] = {}
-
-    def _langfuse_trace_context(self, conv_key: str, project_id: str | None):
-        """SOF-43: a context manager that tags every span created within it with a session_id
-        (so a trace is findable by project, not only by timestamp+content) — or a no-op when
-        Langfuse tracing is disabled. Must be entered BEFORE the agent run starts and stay open
-        for its full duration (including streaming), since propagate_attributes only tags spans
-        created while it's active — per its own docs, it does not retroactively tag existing ones.
-        """
-        if not self._langfuse:
-            import contextlib
-            return contextlib.nullcontext()
-        from langfuse import propagate_attributes
-        return propagate_attributes(
-            session_id=conv_key,
-            metadata={"project_id": project_id} if project_id else None,
-        )
-
-    def _log_usage_diagnostic(self, result) -> None:
-        """SOF-43 TEMPORARY diagnostic — remove once the zero-token-usage root cause is
-        confirmed. Logs the Agents SDK's OWN view of usage (context_wrapper.usage aggregates
-        the whole run; raw_responses carries the per-model-call breakdown), independent of
-        whatever OpenInference/Langfuse then does with it. If this is ALSO zero, the SDK/API
-        never returned usage for this call — not an export-layer bug. If this is non-zero but
-        Langfuse still shows zero, the bug is downstream of the SDK."""
-        try:
-            logger.info(
-                "[langfuse-diag] context_wrapper.usage=%r raw_responses_usage=%r",
-                result.context_wrapper.usage,
-                [r.usage for r in result.raw_responses],
-            )
-        except Exception:
-            logger.warning("[langfuse-diag] failed to read usage from result", exc_info=True)
-
-    def _flush_langfuse(self) -> None:
-        """SOF-43: explicit flush at the turn boundary so a trace can't be lost to the SDK's
-        background auto-flush interval never firing before an abrupt process exit. Best-effort —
-        must never fail a chat turn."""
-        if not self._langfuse:
-            return
-        try:
-            self._langfuse.flush()
-        except Exception:
-            logger.warning("[langfuse] flush failed", exc_info=True)
-
-    async def handle_message(self, project_id: str | None, user_msg: str,
-                              files: list, images: list,
-                              runtime: str = "", planning_model: str = "",
-                              impl_model: str = "",
-                              project_name: str = "",
-                              gated: bool = False,
-                              owner: str = "", role: str = "admin") -> tuple[str | None, list[ChatMessage]]:
-        """Process a user message through the agent. Returns (project_id, response_messages)."""
-        from agents import Runner
-
-        conv_key = project_id or "__new__"
-        history = self._conversations.get(conv_key, [])
-
-        content_parts = []
-        if user_msg:
-            content_parts.append({"type": "input_text", "text": user_msg})
-        for f in (files or []):
-            content_parts.append({"type": "input_text",
-                                  "text": f"[Attached file: {f.get('name', 'file')}]"})
-        for img in (images or []):
-            content_parts.append({"type": "input_text",
-                                  "text": f"[Attached image: {img.get('name', 'image')}]"})
-
-        if len(content_parts) == 1 and content_parts[0]["type"] == "input_text":
-            user_input = content_parts[0]["text"]
-        else:
-            user_input = "\n".join(p.get("text", "") for p in content_parts)
-
-        history.append({"role": "user", "content": user_input})
-
-        # Make attachments + the picked runtime available to start_pipeline, which fires
-        # inside Runner.run. The draft id (canonical run-<8hex>, minted by the server before the
-        # interview) is what record_brief_section / propose_proceed / start_pipeline act on; the
-        # transcript so far is threaded into Stage 1 on promote.
-        self._pending_files = files or []
-        self._pending_runtime = runtime or ""
-        self._pending_models = (planning_model or "", impl_model or "")
-        self._pending_name = project_name or ""
-        self._pending_gated = bool(gated)
-        self._pending_owner = owner or ""
-        self._pending_viewer = (owner or "", role or "admin")
-        self._pending_draft_id = project_id or ""
-        self._pending_interview_md = _render_interview(history)
-        # SOF-43: tag every span this run creates with session_id (so a trace is findable by
-        # project rather than only by timestamp+content) — must wrap the run itself, since
-        # OpenAIAgentsInstrumentor creates the root span inside Runner.run.
-        trace_ctx = self._langfuse_trace_context(conv_key, project_id)
-        try:
-            with trace_ctx:
-                result = await Runner.run(self._agent, input=history)
-        finally:
-            self._pending_files = []
-            self._pending_runtime = ""
-            self._pending_models = ("", "")
-            self._pending_name = ""
-            self._pending_gated = False
-            self._pending_owner = ""
-            self._pending_viewer = ("", "admin")
-            self._pending_draft_id = ""
-            self._pending_interview_md = ""
-
-        self._log_usage_diagnostic(result)
-        self._flush_langfuse()
-
-        response_msgs = []
-        text_parts: list[str] = []
-        now = time.time()
-
-        for item in result.new_items:
-            if isinstance(item, MessageOutputItem):
-                # raw_item is a ResponseOutputMessage; ItemHelpers walks its
-                # ResponseOutputText parts and concatenates the text. The SDK can emit MORE THAN
-                # ONE MessageOutputItem in a single turn (the model pausing around tool calls, or
-                # just being chatty) — surfacing each as its own bubble showed the user two
-                # questions in a row. Collapse all of a turn's assistant text into ONE message.
-                text = ItemHelpers.text_message_output(item)
-                if text:
-                    text_parts.append(text)
-            elif isinstance(item, ToolCallItem) and isinstance(item.raw_item, ResponseFunctionToolCall):
-                call = item.raw_item  # typed: .name and .arguments (JSON str) always present
-                # Required params are schema-validated by the SDK against OpenAI, but a
-                # ChatCompletions-compat proxy (Kimi via OpenRouter) can emit malformed
-                # arguments — degrade to a plain reply rather than 500ing the chat endpoint.
-                if call.name == "hand_off_to_factory":
-                    # The draft was promoted in-place; project_id is already the canonical draft id
-                    # (set by the server before the interview). No slug minting.
-                    if not project_id:
-                        continue
-                    response_msgs.append(ChatMessage(
-                        role="system", content="Pipeline started.",
-                        msg_type="pipeline_started", ts=now,
-                        metadata={"project_id": project_id},
-                    ))
-                elif call.name == "request_dep_input":
-                    try:
-                        dep_names = json.loads(call.arguments)["dep_names"]
-                    except (ValueError, TypeError, KeyError):
-                        continue
-                    response_msgs.append(ChatMessage(
-                        role="assistant",
-                        content="The architecture requires these credentials. Please provide them below.",
-                        msg_type="dep_request", ts=now,
-                        metadata={"project_id": project_id, "dep_names": dep_names},
-                    ))
-
-        # One assistant bubble per turn: the reply (joined text) goes first, then any
-        # tool-driven system messages (pipeline_started / dep_request).
-        if text_parts:
-            response_msgs.insert(0, ChatMessage(
-                role="assistant", content="\n\n".join(text_parts), msg_type="text", ts=now,
-            ))
-
-        if result.final_output and not response_msgs:
-            response_msgs.append(ChatMessage(
-                role="assistant", content=str(result.final_output),
-                msg_type="text", ts=now,
-            ))
-
-        history.extend([{"role": "assistant", "content": m.content} for m in response_msgs
-                        if m.role == "assistant"])
-        self._conversations[project_id or conv_key] = history
-
-        return project_id, response_msgs
-
-    async def handle_message_streamed(
-        self, project_id: str | None, user_msg: str,
-        files: list, images: list,
-        runtime: str = "", planning_model: str = "",
-        impl_model: str = "",
-        project_name: str = "",
-        gated: bool = False,
-        owner: str = "", role: str = "admin",
-    ):
-        """Async generator yielding NDJSON lines.
-
-        Yields ``{"type":"delta","content":"..."}`` for each text token, then
-        ``{"type":"done","project_id":...,"messages":[...]}`` once the turn is
-        complete. The caller owns ChatStore persistence and SSE push.
-        """
-        from agents import Runner
-        from openai.types.responses import ResponseTextDeltaEvent
-
-        conv_key = project_id or "__new__"
-        history = self._conversations.get(conv_key, [])
-
-        content_parts = []
-        if user_msg:
-            content_parts.append({"type": "input_text", "text": user_msg})
-        for f in (files or []):
-            content_parts.append({"type": "input_text",
-                                  "text": f"[Attached file: {f.get('name', 'file')}]"})
-        for img in (images or []):
-            content_parts.append({"type": "input_text",
-                                  "text": f"[Attached image: {img.get('name', 'image')}]"})
-
-        if len(content_parts) == 1 and content_parts[0]["type"] == "input_text":
-            user_input = content_parts[0]["text"]
-        else:
-            user_input = "\n".join(p.get("text", "") for p in content_parts)
-
-        history.append({"role": "user", "content": user_input})
-
-        self._pending_files = files or []
-        self._pending_runtime = runtime or ""
-        self._pending_models = (planning_model or "", impl_model or "")
-        self._pending_name = project_name or ""
-        self._pending_gated = bool(gated)
-        self._pending_owner = owner or ""
-        self._pending_viewer = (owner or "", role or "admin")
-        self._pending_draft_id = project_id or ""
-        self._pending_interview_md = _render_interview(history)
-        # SOF-43: the trace context must stay open for the FULL stream consumption, not just the
-        # initial Runner.run_streamed() call — spans are created as events are iterated, and
-        # propagate_attributes only tags spans created while the context is still active.
-        trace_ctx = self._langfuse_trace_context(conv_key, project_id)
-        try:
-            with trace_ctx:
-                result = Runner.run_streamed(self._agent, input=history)
-                async for event in result.stream_events():
-                    if (event.type == "raw_response_event"
-                            and isinstance(event.data, ResponseTextDeltaEvent)
-                            and event.data.delta):
-                        yield json.dumps({"type": "delta", "content": event.data.delta}) + "\n"
-        finally:
-            self._pending_files = []
-            self._pending_runtime = ""
-            self._pending_models = ("", "")
-            self._pending_name = ""
-            self._pending_gated = False
-            self._pending_owner = ""
-            self._pending_viewer = ("", "admin")
-            self._pending_draft_id = ""
-            self._pending_interview_md = ""
-
-        self._log_usage_diagnostic(result)
-        self._flush_langfuse()
-
-        response_msgs = []
-        text_parts: list[str] = []
-        now = time.time()
-        for item in result.new_items:
-            if isinstance(item, MessageOutputItem):
-                text = ItemHelpers.text_message_output(item)
-                if text:
-                    text_parts.append(text)
-            elif isinstance(item, ToolCallItem) and isinstance(item.raw_item, ResponseFunctionToolCall):
-                call = item.raw_item
-                if call.name == "hand_off_to_factory":
-                    if not project_id:
-                        continue
-                    response_msgs.append(ChatMessage(
-                        role="system", content="Pipeline started.",
-                        msg_type="pipeline_started", ts=now,
-                        metadata={"project_id": project_id},
-                    ))
-                elif call.name == "request_dep_input":
-                    try:
-                        dep_names = json.loads(call.arguments)["dep_names"]
-                    except (ValueError, TypeError, KeyError):
-                        continue
-                    response_msgs.append(ChatMessage(
-                        role="assistant",
-                        content="The architecture requires these credentials. Please provide them below.",
-                        msg_type="dep_request", ts=now,
-                        metadata={"project_id": project_id, "dep_names": dep_names},
-                    ))
-        if text_parts:
-            response_msgs.insert(0, ChatMessage(
-                role="assistant", content="\n\n".join(text_parts), msg_type="text", ts=now,
-            ))
-        if result.final_output and not response_msgs:
-            response_msgs.append(ChatMessage(
-                role="assistant", content=str(result.final_output), msg_type="text", ts=now,
-            ))
-
-        history.extend([{"role": "assistant", "content": m.content} for m in response_msgs
-                        if m.role == "assistant"])
-        self._conversations[project_id or conv_key] = history
-
-        yield json.dumps({
-            "type": "done",
-            "project_id": project_id,
-            "messages": [m.to_dict() for m in response_msgs],
-        }) + "\n"
-
-    def check_and_notify(self, project_id: str, prev_stage: int = 0) -> list[ChatMessage]:
-        """Check pipeline status and generate notification messages for transitions."""
-        status = self._console.status(project_id)
-        msgs: list[ChatMessage] = []
-        now = time.time()
-
-        if status.get("stage1_done") and prev_stage < 2:
-            msgs.append(ChatMessage(
-                role="system",
-                content="Research complete — Design & Architecture stage starting.",
-                msg_type="status_update", ts=now,
-                metadata={"project_id": project_id, "stage": 2},
-            ))
-
-        if status.get("stage2_done") and prev_stage < 3:
-            deps = status.get("deps_required", [])
-            if deps and not status.get("deps_satisfied"):
-                msgs.append(ChatMessage(
-                    role="assistant",
-                    content="The architecture requires these credentials to proceed. "
-                            "Please provide them in the secure fields below.",
-                    msg_type="dep_request", ts=now,
-                    metadata={"project_id": project_id, "dep_names": deps},
-                ))
-            else:
-                msgs.append(ChatMessage(
-                    role="system",
-                    content="Design complete — Build stage starting.",
-                    msg_type="status_update", ts=now,
-                    metadata={"project_id": project_id, "stage": 3},
-                ))
-
-        if status.get("done"):
-            url = status.get("deploy_url", "")
-            spent = status.get("spent_usd", 0)
+    if status.get("stage2_done") and prev_stage < 3:
+        deps = status.get("deps_required", [])
+        if deps and not status.get("deps_satisfied"):
             msgs.append(ChatMessage(
                 role="assistant",
-                content=f"Build complete! Deployed to {url} — total cost ${spent:.2f}.",
-                msg_type="complete", ts=now,
-                metadata={"project_id": project_id, "url": url, "spent_usd": spent},
+                content="The architecture requires these credentials to proceed. "
+                        "Please provide them in the secure fields below.",
+                msg_type="dep_request", ts=now,
+                metadata={"project_id": project_id, "dep_names": deps},
+            ))
+        else:
+            msgs.append(ChatMessage(
+                role="system",
+                content="Design complete — Build stage starting.",
+                msg_type="status_update", ts=now,
+                metadata={"project_id": project_id, "stage": 3},
             ))
 
-        return msgs
+    if status.get("done"):
+        url = status.get("deploy_url", "")
+        spent = status.get("spent_usd", 0)
+        msgs.append(ChatMessage(
+            role="assistant",
+            content=f"Build complete! Deployed to {url} — total cost ${spent:.2f}.",
+            msg_type="complete", ts=now,
+            metadata={"project_id": project_id, "url": url, "spent_usd": spent},
+        ))
+
+    return msgs
