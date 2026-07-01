@@ -387,6 +387,25 @@ export function Composer({ placeholder = "Reply…", onSend, value, onChange, lo
   );
 }
 
+// Up-to-4 single-select answers for a Concierge question. Clicking a choice submits it as the
+// user's reply (via onPick). Disabled once answered / while a turn is in flight.
+export function ChoiceList({ options, onPick, disabled }:
+  { options: string[]; onPick: (o: string) => void; disabled?: boolean }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {options.slice(0, 4).map((o) => (
+        <button key={o} onClick={() => { if (!disabled) onPick(o); }} disabled={disabled}
+          style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", boxSizing: "border-box", textAlign: "left",
+            cursor: disabled ? "default" : "pointer", padding: "9px 11px", borderRadius: T.rMd, font: `500 13px/1.3 ${T.sans}`,
+            border: `1px solid ${T.borderDefault}`, background: T.raised, color: T.fg, opacity: disabled ? 0.55 : 1, transition: "all .12s" }}>
+          <span style={{ width: 16, height: 16, flexShrink: 0, borderRadius: "50%", border: `1.5px solid ${T.borderDefault}` }} />
+          <span style={{ flex: 1 }}>{o}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function OrgImportPicker({ docs = [] }:
   { docs?: { id: string; name: string }[] }) {
   const [open, setOpen] = React.useState(false);

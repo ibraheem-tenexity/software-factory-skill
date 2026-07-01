@@ -296,6 +296,10 @@ export const api = {
   putBrief: (id: string, brief: Brief) => send<BriefResponse>(`/api/projects/${id}/brief`, "PUT", brief),
   chat: (body: Record<string, unknown>, signal?: AbortSignal) =>
     send<{ project_id: string; messages: any[] }>("/api/chat", "POST", body, signal),
+  // Onboarding Concierge conversation turn (mock backend for now): one user message →
+  // the agent's reply as plain text or up to 4 choices, plus `done` when it invites hand-off.
+  converse: (projectId: string, message: string) =>
+    send<{ message: string; choices: string[]; done: boolean }>(`/api/projects/${projectId}/converse`, "POST", { message }),
   chatStream: async (body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> => {
     const r = await fetch("/api/chat", {
       method: "POST",

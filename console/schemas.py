@@ -82,6 +82,16 @@ class ChatIn(BaseModel):
     gated: bool = False
 
 
+class ConverseIn(BaseModel):
+    message: str = ""
+
+
+class ConverseOut(BaseModel):
+    message: str
+    choices: list[str] = []   # ≤4 single-select options; empty = a plain-text turn
+    done: bool = False        # the agent has no more questions and is inviting hand-off
+
+
 class DepsIn(BaseModel):
     deps: dict = {}
 
