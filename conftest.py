@@ -1,3 +1,4 @@
+import fcntl
 import os
 import sys
 from urllib.parse import urlsplit, urlunsplit
@@ -13,6 +14,36 @@ import pytest
 # contamination that made the suite flaky under any concurrency.
 os.environ.setdefault("SF_ENVIRONMENT", "test")
 os.environ.setdefault("SF_DB", "postgres")
+
+# #197: per-process DB naming (below) already prevents cross-run schema collisions — that part was
+# never broken. The REAL fleet-wide hang was concurrent pytest processes each loading the full app
+# into RAM at once, exhausting machine memory (observed: 7 procs swap-thrashing at ~79% CPU for up
+# to 4.7h). Fix: a machine-wide, blocking flock so only ONE pytest process runs at a time, fleet-wide
+# — later invocations queue instead of piling up. The lock path is FIXED under /tmp, not repo/worktree
+# -relative: different worktrees are different directories, so a repo-local lock would never see each
+# other. xdist workers (PYTEST_XDIST_WORKER set) skip it — the invoking/controller process already
+# holds it for the whole session, so xdist's OWN internal parallelism isn't defeated if ever used.
+_FLEET_LOCK_PATH = "/tmp/sf-pytest-fleet.lock"
+_fleet_lock_fh = None
+
+
+def _acquire_fleet_lock() -> None:
+    global _fleet_lock_fh
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        return
+    _fleet_lock_fh = open(_FLEET_LOCK_PATH, "w")
+    fcntl.flock(_fleet_lock_fh, fcntl.LOCK_EX)   # blocks here until the previous run releases it
+
+
+def _release_fleet_lock() -> None:
+    global _fleet_lock_fh
+    if _fleet_lock_fh is not None:
+        fcntl.flock(_fleet_lock_fh, fcntl.LOCK_UN)
+        _fleet_lock_fh.close()
+        _fleet_lock_fh = None
+
+
+_acquire_fleet_lock()
 
 _SERVER_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5434/postgres")
 # Unique per process: xdist worker id (gw0/gw1/… or "main") + PID isolates both xdist workers and
@@ -68,9 +99,39 @@ def _create_private_db() -> None:
         conn.close()
 
 
+def _sweep_orphaned_dbs() -> None:
+    """Drop every OTHER sftest_* database. Only ever runs while this process holds the fleet lock
+    (see _acquire_fleet_lock above) — no other pytest process can be legitimately alive without
+    holding that same lock, so any sftest_* db found here is provably orphaned (a crashed/killed
+    prior run that never reached its own _drop_private_db). Best-effort per-db: one failure must
+    not block the sweep or this run's own setup."""
+    try:
+        conn = _maintenance()
+    except Exception:
+        return
+    try:
+        rows = conn.execute(
+            "SELECT datname FROM pg_database WHERE datname LIKE 'sftest\\_%'").fetchall()
+        for (name,) in rows:
+            if name == _PRIVATE_DB:
+                continue
+            try:
+                conn.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = %s AND pid <> pg_backend_pid()", (name,))
+                conn.execute(f'DROP DATABASE IF EXISTS "{name}"')
+            except Exception:
+                pass
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
 # Provision the private DB + schema AT IMPORT — before any app code reads DATABASE_URL (the console
 # singletons hit Postgres the moment they're constructed during collection) — then point the whole
-# process at it.
+# process at it. The orphan sweep runs first (see its docstring for why it's safe here specifically).
+_sweep_orphaned_dbs()
 _create_private_db()
 os.environ["DATABASE_URL"] = _PRIVATE_URL
 
@@ -88,8 +149,12 @@ _build_schema()
 
 def pytest_unconfigure(config):
     # Always runs at process exit (incl. --collect-only / the xdist controller) — guarantees the
-    # throwaway database is removed even if the session fixture never ran.
+    # throwaway database is removed even if the session fixture never ran. Release the fleet lock
+    # LAST so the next queued run's sweep+create only starts once our own db is fully gone. A
+    # SIGKILL'd run releases the lock automatically (flock is tied to the fd/process) even though
+    # this function never gets to run — a hung/killed run can never deadlock the fleet.
     _drop_private_db()
+    _release_fleet_lock()
 
 
 @pytest.fixture(scope="session", autouse=True)
