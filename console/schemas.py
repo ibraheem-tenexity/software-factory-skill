@@ -92,6 +92,12 @@ class ConverseOut(BaseModel):
     done: bool = False        # the agent has no more questions and is inviting hand-off
 
 
+class TranscribeIn(BaseModel):
+    audio_base64: str = ""
+    format: str = "webm"
+    language: str | None = None
+
+
 class DepsIn(BaseModel):
     deps: dict = {}
 

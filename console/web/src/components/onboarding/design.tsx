@@ -6,6 +6,7 @@ import React from "react";
 import { Spinner } from "../skeleton";
 // SOF-11: T used to be a byte-for-byte duplicate of admin/tokens.ts; both now share one source.
 import { T } from "../../theme";
+import { api } from "../../api";
 export { T };
 
 type CSS = React.CSSProperties;
@@ -373,6 +374,84 @@ export function Message({ who, persona, text, anim, badge }:
   );
 }
 
+// Reads a recorded Blob as base64 (no "data:...;base64," prefix — the backend wants raw bytes).
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(((reader.result as string) || "").split(",")[1] || "");
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Dictate (SOF-14): mic -> MediaRecorder -> POST /api/transcribe (OpenRouter Whisper Large v3,
+// server-side key) -> transcript appends to the draft. No dead click: hidden where getUserMedia
+// isn't available; a denied/failed permission just cancels back to idle, no crash.
+const MIC_SUPPORTED = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+
+function DictateButton({ value, onChange, disabled }:
+  { value?: string; onChange?: (v: string) => void; disabled?: boolean }) {
+  const [recording, setRecording] = React.useState(false);
+  const [transcribing, setTranscribing] = React.useState(false);
+  const recorderRef = React.useRef<MediaRecorder | null>(null);
+  const chunksRef = React.useRef<Blob[]>([]);
+
+  if (!MIC_SUPPORTED) return null;
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm" : "";
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        const format = (recorder.mimeType || "audio/webm").split("/")[1]?.split(";")[0] || "webm";
+        setTranscribing(true);
+        try {
+          const b64 = await blobToBase64(blob);
+          const { text } = await api.transcribe(b64, format);
+          if (text && onChange) onChange(value ? `${value} ${text}` : text);
+        } catch {
+          // transcription failed (network/upstream) — draft is untouched, user can retype or retry
+        }
+        setTranscribing(false);
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch {
+      setRecording(false);   // permission denied / no device — stay idle, no crash
+    }
+  };
+
+  const stopRecording = () => {
+    recorderRef.current?.stop();
+    setRecording(false);
+  };
+
+  if (transcribing) {
+    return (
+      <span title="Transcribing…" style={{ width: 30, height: 30, display: "grid", placeItems: "center" }}>
+        <Spinner size={15} color={T.tertiary} />
+      </span>
+    );
+  }
+
+  return (
+    <button title={recording ? "Stop dictating" : "Dictate"} disabled={disabled}
+      onClick={recording ? stopRecording : startRecording}
+      style={{ width: 30, height: 30, display: "grid", placeItems: "center", borderRadius: T.rMd, border: "none",
+        background: recording ? T.dangerSoft : "transparent", color: recording ? T.danger : T.tertiary, cursor: "pointer",
+        animation: recording ? "sfPulse 1.4s ease-in-out infinite" : "none" }}>
+      <Icon name="mic" size={15} />
+    </button>
+  );
+}
+
 export function Composer({ placeholder = "Reply…", onSend, value, onChange, loading }:
   { placeholder?: string; onSend?: () => void; value?: string; onChange?: (v: string) => void; loading?: boolean }) {
   return (
@@ -381,7 +460,7 @@ export function Composer({ placeholder = "Reply…", onSend, value, onChange, lo
         readOnly={loading}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); !loading && onSend && onSend(); } }}
         style={{ flex: 1, minWidth: 0, resize: "none", border: "none", outline: "none", background: "transparent", padding: "6px", font: `400 13px/1.4 ${T.sans}`, color: T.fg }} />
-      <button title="Dictate" style={{ width: 30, height: 30, display: "grid", placeItems: "center", borderRadius: T.rMd, border: "none", background: "transparent", color: T.tertiary, cursor: "pointer" }}><Icon name="mic" size={15} /></button>
+      <DictateButton value={value} onChange={onChange} disabled={loading} />
       <Btn variant="primary" size="sm" onClick={loading ? undefined : onSend} disabled={loading} style={{ height: 30 }}>{loading ? "Working…" : <><Icon name="send" size={13} color="#fff" /> Send</>}</Btn>
     </div>
   );

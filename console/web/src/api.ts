@@ -312,6 +312,8 @@ export const api = {
     return r;
   },
   chatHistory: (id: string) => get<{ messages: any[] }>(`/api/chat/${id}/history`),
+  transcribe: (audio_base64: string, format: string) =>
+    send<{ text: string }>("/api/transcribe", "POST", { audio_base64, format }),
   deployments: (id: string) => get<DeploymentsResponse>(`/api/projects/${id}/deployments`),
   deps: (id: string) => get<DepsResponse>(`/api/projects/${id}/deps`),
   submitDeps: (id: string, deps: DepSubmit) =>
