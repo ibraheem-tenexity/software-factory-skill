@@ -99,44 +99,18 @@ def project_paths(projects_dir: str, project_id: str) -> dict:
 
 def _orchestration_preamble(stage_title: str, project_id: str, projects_dir: str, budget: float,
                             runtime: str = "claude") -> str:
-    db = "python3 -m software_factory.db"
-    if runtime == "opencode":
-        # Monolithic: one agent does the work itself, but records one LOGICAL agent per unit
-        # of work so the done-gates (detect_stage3_done: spawned>0, tickets traceable) and the
-        # canvas agent graph keep their per-unit accounting.
-        work_model = (
-            f"MONOLITHIC: you do ALL the work yourself, sequentially — there is no Task tool and no "
-            f"sub-agents. For accounting, record one LOGICAL agent per unit of work (research unit / "
-            f"ticket / bugfix): `spawn-agent` BEFORE you start the unit, `finish-agent` when it's done.\n"
-        )
-        spawn_line = f"  spawn-agent <id> <role> <model> <phase>   — before each unit of work you start\n"
-        finish_line = (
-            f"  finish-agent <id> <outcome> [cost] [pr] [diff_lines]  — when the unit is done; outcome MUST be one of\n"
-        )
-    else:
-        work_model = (
-            f"ORCHESTRATOR-ONLY: you coordinate; the actual work is done by sub-agents you launch with the "
-            f"native **Task** tool (one per unit of work). Do NOT do the work in the main session.\n"
-        )
-        spawn_line = f"  spawn-agent <id> <role> <model> <phase>   — when you launch a Task sub-agent\n"
-        finish_line = (
-            f"  finish-agent <id> <outcome> [cost] [pr] [diff_lines]  — when it returns; outcome MUST be one of\n"
-        )
+    """The per-run VARIABLE context block. ALL instructions live in the stage's SKILL.md (the
+    agent's contract, loaded from its cwd); this supplies ONLY the run-specific data SKILL.md
+    references — no instructions. Kept per-runtime signature for callers; runtime doesn't change
+    the variables (the claude/opencode work-model is stated in the SKILL.md variant)."""
     return (
-        f"Use the **software-factory** skill ({stage_title}), FULLY AUTONOMOUSLY — never wait on a human.\n"
-        f"**Your contract is SKILL.md in this workspace (your cwd). Read it and follow it exactly.** "
-        f"Prior-stage artifacts are in context/.\n"
-        f"project_id={project_id}. projects_dir={projects_dir}. Run base: {os.path.join(projects_dir, project_id)} "
-        f"(your cwd is its workspace/). Budget ${budget:.0f} (HARD cutoff).\n\n"
-        + work_model
-        + f"RECORD canvas state in the datastore (there are NO events): `{db} <verb> {projects_dir} {project_id} ...`\n"
-        f"  set-phase <name> [status]            — at each phase you enter\n"
-        + spawn_line
-        + finish_line
-        + f"      real_diff|success (worked) · no_op (empty turn) · blocked · failed — anything else records as failed\n"
-        f"  record-artifact <title> <path> [kind] [agent]  — for each file produced\n"
-        f"  add-blocker <what> [blocks] / clear-blocker <what>\n"
-        f"Tickets go in the TicketStore; projectstate is written by the host.\n"
+        f"software-factory {stage_title}. Run this fully autonomously per SKILL.md (your cwd).\n"
+        f"THIS RUN:\n"
+        f"  project_id   = {project_id}\n"
+        f"  projects_dir = {projects_dir}\n"
+        f"  run base     = {os.path.join(projects_dir, project_id)}  (your cwd is its workspace/; prior-stage artifacts in context/)\n"
+        f"  budget       = ${budget:.0f} (HARD cutoff)\n"
+        f"  db-verb call = python3 -m software_factory.db <verb> {projects_dir} {project_id} ...\n"
     )
 
 
@@ -149,57 +123,28 @@ def make_prompt_stage1(req: ProjectRequest, project_id: str, projects_dir: str, 
     brief = (f"\n\nThe user was interviewed; the structured brief follows (also at input/brief.md; "
              f"full transcript at input/interview.md). Treat it as authoritative project context:\n"
              f"{brief_block.strip()}") if brief_block.strip() else ""
-    if runtime == "opencode":
-        units = ("The named research units and the done-gate are in SKILL.md. Do each unit yourself, "
-                 "in order, recording each as a logical agent.")
-    else:
-        units = ("The named research sub-agents and the done-gate are in SKILL.md. Launch each as a "
-                 "Task sub-agent.")
     if req.owner_github_username:
-        owner_access = (
-            f"\n\nOWNER REPO ACCESS (SOF-3): the project owner's GitHub handle on file is "
-            f"'{req.owner_github_username}'. Right after creating the repo and recording the "
-            f"'GitHub Repo' artifact, invite them as a collaborator: `GitHub.add_collaborator(repo, "
-            f"'{req.owner_github_username}')` (i.e. `gh api -X PUT repos/<org>/<repo>/collaborators/"
-            f"{req.owner_github_username} -f permission=pull`). On success: `record-artifact "
-            f"'Owner Repo Access' <https-url> repo-shared` (same repo url as the 'GitHub Repo' "
-            f"artifact — this is the signal that keeps the repo-reaper from ever deleting it). On "
-            f"failure (bad username, API error): `add-blocker 'GitHub Access: invite to "
-            f"{req.owner_github_username} failed'` — do NOT silently skip."
-        )
+        owner_access = f"  owner_github = {req.owner_github_username}  (invite as collaborator per SKILL.md Phase 2)\n"
     else:
-        owner_access = (
-            "\n\nOWNER REPO ACCESS (SOF-3): no owner GitHub username is on file for this run. "
-            "Record a visible blocker so this is discoverable, do NOT silently skip: "
-            "`add-blocker 'GitHub Access: no owner GitHub username on file'`."
-        )
+        owner_access = "  owner_github = <none on file>  (record the no-owner blocker per SKILL.md Phase 2)\n"
     return (
         _orchestration_preamble("Stage 1 — Research", project_id, projects_dir, req.budget, runtime)
-        + "Goal: a validated PRD (PRD.md) that passes `artifacts.prd_is_complete` (≥3 real product "
-          "URLs + acceptance criteria + ticket seeds). " + units + " THE MOMENT you create the "
-          "GitHub repo, record it (CLEAN token-free https url): `record-artifact 'GitHub Repo' "
-          "<https-url> repo` — the operator sees the repo link from the start. When the PRD passes, "
-          "STOP — the console launches Stage 2." + owner_access + "\n"
-          f"App: {req.description}{ctx}{brief}"
+        + owner_access
+        + f"  app          = {req.description}{ctx}{brief}"
     )
 
 
 def make_prompt_stage2(req: ProjectRequest, project_id: str, projects_dir: str, runtime: str = "claude") -> str:
     return (
         _orchestration_preamble("Stage 2 — Design & Plan", project_id, projects_dir, req.budget, runtime)
-        + "Goal (per SKILL.md): architecture.md + architecture.svg (fewest services; data model; a "
-          "`## Required Tokens` section, UPPER_SNAKE_CASE) AND PERSISTED buildable tickets — "
-          "`TicketStore.create_ticket` with real acceptance + DoD (an empty store dead-ends Stage 3). "
-          "The app's DATABASE is provisioned BY THE FACTORY (a per-project Postgres handed to Stage 3 as "
-          "context/deploy-db.json) — design the data model on plain Postgres via DATABASE_URL; do NOT "
-          "design around Supabase (Stage 3 has no Supabase access). Use demo/mock auth, not a real IdP; "
-          "route every LLM/AI feature via OpenRouter (OPENROUTER_API_KEY). When PRD+architecture+svg exist and the store has buildable "
-          "tickets, STOP — the console collects deps + launches Stage 3.\n"
-          f"App: {req.description}"
+        + f"  app          = {req.description}"
     )
 
 
 def _disposition_guidance(dispositions: dict | None) -> str:
+    """The per-run VARIABLE lists of which tokens fall in each disposition. What MOCK/DEPLOY-DB/MCP
+    MEAN (and how to satisfy each) is instruction — it lives in SKILL.md Phase 1. This supplies only
+    the token names for THIS run."""
     disp = dispositions or {}
     # Legacy 'env' (pre-removal runs) degrades to mock: a built app NEVER inherits the
     # runner's own keys (operator security rule).
@@ -209,73 +154,20 @@ def _disposition_guidance(dispositions: dict | None) -> str:
     if not disp:
         return ""
     return (
-        f"\nDEPENDENCY DISPOSITIONS — satisfy each capability as marked:\n"
-        f"- **MOCK** (build a WORKING LOCAL FAKE wired into the real app so the happy-flow passes "
-        f"end-to-end — e.g. a 'sign in as demo admin' session for SSO, seeded DB rows for ERP/HR "
-        f"data, emails written to a table/log for mail; NOT a dead stub): {mock or 'none'}\n"
-        f"- **DEPLOY-DB** (run `python3 -m software_factory.db provision-db <projects_dir> <project_id>` "
-        f"ONCE to create this run's Railway Postgres; on failure add-blocker + STOP, never loop; then "
-        f"read DATABASE_URL from context/deploy-db.json and point the app at it — you have NO Supabase "
-        f"access and must NEVER provision a database any other way): {dbtok or 'none'}\n"
-        f"- **SELF/MCP** (generate it yourself / via the Railway MCP — e.g. NEXTAUTH_SECRET; set "
-        f"NEXTAUTH_URL from the deploy URL): {mcp or 'none'}\n"
-        f"- Operator-PROVIDED tokens ride in your environment with real values; NEVER copy any "
-        f"other key from your own environment into the app (your keys are not the app's keys).\n"
-        f"Do NOT block on a real third-party integration when its token is marked MOCK — build the fake.\n"
+        f"  dispositions (see SKILL.md Phase 1 for what each means):\n"
+        f"    MOCK     = {', '.join(mock) or 'none'}\n"
+        f"    DEPLOY-DB= {', '.join(dbtok) or 'none'}\n"
+        f"    SELF/MCP = {', '.join(mcp) or 'none'}\n"
     )
 
 
 def make_prompt_stage3(req: ProjectRequest, project_id: str, projects_dir: str, dispositions: dict | None = None,
                        runtime: str = "claude") -> str:
-    service = f"sf-{project_id}"
-    if runtime == "opencode":
-        build_line = (
-            f"BUILD: work ONE ticket at a time yourself, recording each as a logical agent "
-            f"(spawn-agent before, finish-agent after) and claiming it (`TicketStore.claim`) with that "
-            f"same agent id; merge only via `merge_if_green`; `TicketStore.mark_done`. Serialize per wave.\n"
-        )
-        fix_one = "fix it yourself (recorded as a logical fix agent)"
-        fix_bug = "a logical fix agent per bug"
-    else:
-        build_line = (
-            f"BUILD: one native Task sub-agent PER ticket (orchestrator-only — never edit app code yourself); "
-            f"merge only via `merge_if_green`; `TicketStore.mark_done`. Serialize per wave.\n"
-        )
-        fix_one = "fix it (one Task sub-agent)"
-        fix_bug = "a Task sub-agent per bug"
     return (
         _orchestration_preamble("Stage 3 — Build & Ship", project_id, projects_dir, req.budget, runtime)
+        + f"  deploy target= {req.target}  (own service sf-{project_id}[-<app>]; deploy per SKILL.md)\n"
         + _disposition_guidance(dispositions)
-        + f"Deploy target: {req.target}. DEPLOY VIA THE **Railway MCP**: your RAILWAY_TOKEN is scoped to "
-          f"the `software-factory-projects` project and you have FULL latitude with any Railway MCP capability "
-          f"within it — proactively INSPECT what's already deployed (`list_services`/`list_deployments`/"
-          f"`environment_status`/`get_logs`) and reuse/repair/redeploy rather than blindly recreate. The token "
-          f"scope is the guardrail. Operate on this run's own service '{service}': `create_service` '{service}' "
-          f"(reuse if it already exists) → `set_variables` (all runtime env) → `deploy` → `generate_domain` (the app "
-          f"has NO public url until you do this; derive the health url from it). If `environment_status` ever shows a "
-          f"project OTHER than software-factory-projects, STOP + add-blocker. NEVER deploy to the console service.\n"
-          f"DEPLOY PREFLIGHT (Railway blocks the build otherwise): run `npm audit` and bump HIGH/CRITICAL deps to "
-          f"patched versions + regen the lockfile; give module-load clients (e.g. a Postgres pool) BUILD-TIME placeholder env "
-          f"in the Dockerfile so `next build` doesn't throw (runtime values override); ship a Dockerfile. The build runs "
-          f"REMOTELY on Railway — do NOT run `npm run build` locally (it OOM-kills the shared container).\n"
-          f"HEALTH: use a FINITE health-wait (bounded attempts, never an infinite loop). On failure call the Railway MCP "
-          f"`get_logs` (build AND deploy), read the real error, {fix_one}, redeploy.\n"
-          f"Record the source repo (CLEAN url, strip any token): `record-artifact 'GitHub Repo' <https-url> repo`.\n"
-          f"PHASE 0 — PLAN FIRST: before building, write `build-plan.md` (approach, wave/ticket order, "
-          f"mock/MCP decisions, the happy-flow you will verify) and `record-artifact 'Build Plan' build-plan.md plan`. "
-          f"THEN execute (no human approval — this is autonomous).\n"
-          + build_line
-          + f"GATE (mandatory — the ONLY definition of done): after deploy, drive the LIVE url with the "
-          f"**Playwright MCP** through the primary journey, pass the structured result to "
-          f"`gate.happy_flow_passed`, and record it: `record-verification <url> <0|1> <result-json>`. "
-          f"A GREEN Playwright happy-flow on the live url is done; deploying/merging is NOT done. "
-          f"Red → fix ({fix_bug}) → redeploy → re-test. See SKILL.md for the full contract.\n"
-          f"DEMO LOGIN (how the operator demos the app): if the app has ANY sign-in, seed a demo "
-          f"account (throwaway values — e.g. demo@example.com / a generated phrase, NEVER a real "
-          f"secret), write it to `demo_credentials.md` (user + password, one per line), record it "
-          f"(`record-artifact 'Demo credentials' demo_credentials.md demo-creds`), and run the "
-          f"Playwright happy-flow signed in WITH those credentials.\n"
-          f"App: {req.description}"
+        + f"  app          = {req.description}"
     )
 
 

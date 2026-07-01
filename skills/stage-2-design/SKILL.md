@@ -31,6 +31,7 @@ python3 -m software_factory.db <verb> <projects_dir> <project_id> ...
 `<projects_dir> <project_id>` ALWAYS come first, before the verb's own args:
 `set-phase <projects_dir> <project_id> <name>` per phase; `spawn-agent <projects_dir> <project_id> <id> <role> <model> <phase>` / `finish-agent <projects_dir> <project_id> <id> <outcome>`
 per Task sub-agent; `record-artifact <projects_dir> <project_id> <title> <path> <kind> [agent]` per file. No events — the datastore is the source of truth.
+`<outcome>` MUST be one of: `real_diff` / `success` (it worked) · `no_op` (empty turn — nothing produced) · `blocked` · `failed`. Anything else is recorded as `failed`.
 
 ## Phase 1: architect  (`set-phase architect`)
 

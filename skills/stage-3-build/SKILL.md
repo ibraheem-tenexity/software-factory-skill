@@ -28,6 +28,7 @@ python3 -m software_factory.db <verb> <projects_dir> <project_id> ...
 `set-phase <projects_dir> <project_id> <name>`; `spawn-agent <projects_dir> <project_id> <id> <role> <model> <phase>` / `finish-agent <projects_dir> <project_id> <id> <outcome> [cost] [pr] [diff_lines]`
 per Task sub-agent; `record-artifact <projects_dir> <project_id> <title> <path> <kind> [agent]`; `record-verification <projects_dir> <project_id> <url> <0|1> <result-json>`
 for the Playwright gate; `add-blocker`/`clear-blocker`. No events — the datastore is the source of truth.
+`<outcome>` MUST be one of: `real_diff` / `success` (it worked) · `no_op` (empty turn — nothing produced) · `blocked` · `failed`. Anything else is recorded as `failed`.
 
 ## Phase 0: plan FIRST  (`set-phase plan`)
 
@@ -167,6 +168,12 @@ false is a failed flow like any other: fix, redeploy, re-test.
 - **Red** → `gate.bugs_from(result)` → one fix Task sub-agent per failed flow → redeploy → re-test.
 
 A deploy with NO recorded passing Playwright verification is NOT done — the host refuses it.
+
+**Demo login (how the operator demos the app):** if the app has ANY sign-in, seed a demo account
+(throwaway values — e.g. `demo@example.com` / a generated phrase, NEVER a real secret), write it to
+`demo_credentials.md` (user + password, one per line), record it
+(`record-artifact "Demo credentials" demo_credentials.md demo-creds`), and run the Playwright
+happy-flow signed in WITH those credentials.
 
 ## Phase 3b: QA loop — per-ticket approval (`set-phase qa`)
 

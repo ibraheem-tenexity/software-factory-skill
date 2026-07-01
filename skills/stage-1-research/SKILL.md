@@ -20,7 +20,7 @@ python3 -m software_factory.db <verb> <projects_dir> <project_id> ...
 ```
 `<projects_dir>` and `<project_id>` ALWAYS come first (right after the verb), THEN the verb's own args:
 - entering a phase → `python3 -m software_factory.db set-phase <projects_dir> <project_id> <name>`
-- launching a Task sub-agent → `python3 -m software_factory.db spawn-agent <projects_dir> <project_id> <id> <role> <model> <phase>`; when it returns → `python3 -m software_factory.db finish-agent <projects_dir> <project_id> <id> <outcome>`
+- launching a Task sub-agent → `python3 -m software_factory.db spawn-agent <projects_dir> <project_id> <id> <role> <model> <phase>`; when it returns → `python3 -m software_factory.db finish-agent <projects_dir> <project_id> <id> <outcome>`. `<outcome>` MUST be one of: `real_diff` / `success` (it worked) · `no_op` (empty turn — nothing produced) · `blocked` · `failed`. Anything else is recorded as `failed`.
 - a file produced → `python3 -m software_factory.db record-artifact <projects_dir> <project_id> <title> <path> <kind> [agent-id]`
 - a blocker → `python3 -m software_factory.db add-blocker <projects_dir> <project_id> <what> [blocks]`; when resolved → `python3 -m software_factory.db clear-blocker <projects_dir> <project_id> <what>`
 
