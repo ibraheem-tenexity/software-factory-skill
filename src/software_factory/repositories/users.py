@@ -1,13 +1,23 @@
 """Pure CRUD for `users` / `roles` / `organizations` (SQLAlchemy Core). Global tables.
 
-UUID columns (users.id, users.role_id, users.invited_by, roles.id) are compared/bound without an
-explicit ::uuid cast — Postgres infers the bind parameter's type from the comparison/insert context
-against the typed column, the standard behavior for parameterized queries (no prior raw SQL cast
-needed, unlike the old `?::uuid` strings this replaces).
+This repo is the reference pattern for two GlobalExec type-decode gotchas (SOF-55) — both apply
+because Core statements here execute over a raw psycopg3 connection (repositories/_exec.py), so
+SQLAlchemy's own bind/result processors never run; only psycopg3's own default adapters do:
+
+  1. UUID columns (users.id, users.role_id, users.invited_by, roles.id): psycopg3 auto-decodes a
+     bare UUID column to a Python `uuid.UUID` object, not the plain string the rest of the app
+     expects everywhere (JSON responses, string equality). Cast to Text on SELECT —
+     `cast(users.c.id, Text)` — to get a string back. Bound as INSERT/WHERE parameters, plain
+     strings work fine without a cast (Postgres infers the bind type from the typed column).
+
+  2. DateTime columns (created_at/onboarded_at/last_active, etc.): `func.extract("epoch", col)`
+     alone isn't enough to get a `float` — Postgres's EXTRACT returns `numeric`, which psycopg3
+     decodes to `decimal.Decimal`, not `float`. Wrap it in `cast(..., Float)` too:
+     `cast(func.extract("epoch", col), Float)`.
 """
 from __future__ import annotations
 
-from sqlalchemy import select, insert, update, delete, func, cast, Text
+from sqlalchemy import select, insert, update, delete, func, cast, Text, Float
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..models import users, roles, organizations
@@ -28,9 +38,9 @@ _USER_COLS = (
     users.c.name.label("name"),
     users.c.sign_in_method,
     _inv.c.email.label("invited_by"),
-    func.extract("epoch", users.c.created_at).label("created_at"),
-    func.extract("epoch", users.c.onboarded_at).label("onboarded_at"),
-    func.extract("epoch", users.c.last_active).label("last_active"),
+    cast(func.extract("epoch", users.c.created_at), Float).label("created_at"),
+    cast(func.extract("epoch", users.c.onboarded_at), Float).label("onboarded_at"),
+    cast(func.extract("epoch", users.c.last_active), Float).label("last_active"),
 )
 # password_hash is deliberately NOT in _USER_COLS — this row feeds /api/users etc., so the hash must
 # never ride along. It's read only by `credentials()`'s dedicated query.
@@ -42,7 +52,8 @@ _ORG_COLS = (
     organizations.c.headcount, organizations.c.revenue, organizations.c.location,
     organizations.c.website, organizations.c.connected_systems, organizations.c.plan,
     organizations.c.monthly_budget_cap,
-    func.extract("epoch", organizations.c.created_at).label("created_at"), organizations.c.created_by,
+    cast(func.extract("epoch", organizations.c.created_at), Float).label("created_at"),
+    organizations.c.created_by,
 )
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import select, insert, update, delete, func, distinct
+from sqlalchemy import select, insert, update, delete, func, distinct, cast, Float
 
 from ..models import blobs, blob_uses
 
@@ -44,7 +44,9 @@ class BlobRepository:
         j = blobs.outerjoin(blob_uses, blob_uses.c.blob_id == blobs.c.id)
         stmt = (select(blobs.c.id, blobs.c.name, blobs.c.tag, blobs.c.kind, blobs.c.content_type,
                       blobs.c.size_bytes,
-                      func.extract("epoch", blobs.c.created_at).label("updated"),
+                      # cast(..., Float): a bare extract() returns Postgres numeric, which
+                      # psycopg3 decodes to Decimal, not float (repositories/users.py, SOF-55)
+                      cast(func.extract("epoch", blobs.c.created_at), Float).label("updated"),
                       func.count(distinct(blob_uses.c.project_id)).label("used_count"))
                .select_from(j)
                .where(blobs.c.scope == "org", blobs.c.scope_id == org_id)
