@@ -1,4 +1,5 @@
-"""Factory-side provisioning of a run's DEPLOY DATABASE.
+"""Factory-side provisioning of a run's DEPLOY DATABASE, plus direct Railway GraphQL operations
+on a run's OWN app service (`set_app_variable` — post-deploy provider-key replacement, #107).
 
 Stage-3 agents have NO Supabase access and must never provision a database themselves. Instead
 the FACTORY provisions a per-project Railway Postgres and writes its connection details into the
@@ -94,6 +95,68 @@ def _graphql_get_database_url(service_id: str, project_id: str,
     data = (resp.get("data") or {}).get("variables") or {}
     url = data.get("DATABASE_URL") or data.get("DATABASE_PUBLIC_URL")
     return url.rstrip("/") if url else None
+
+
+def _graphql_find_service_by_name(project_id: str, service_name: str, token: str) -> str | None:
+    """Resolve a run-app's Railway serviceId by an EXACT name match within a project — a live API
+    lookup, never CLI-output text-parsing (the exact scar that made variables-read move to GraphQL
+    above). Returns None on any error or no exact match; never partial-matches or guesses."""
+    try:
+        resp = _graphql(
+            """query Services($projectId: String!) {
+                 project(id: $projectId) { services { edges { node { id name } } } }
+               }""",
+            {"projectId": project_id},
+            token,
+        )
+    except Exception:
+        return None
+    edges = (((resp.get("data") or {}).get("project") or {}).get("services") or {}).get("edges") or []
+    for e in edges:
+        node = e.get("node") or {}
+        if node.get("name") == service_name:
+            return node.get("id")
+    return None
+
+
+def set_app_variable(project_id: str, name: str, value: str, service_id: str | None = None) -> dict:
+    """Set one environment variable on a run-app's OWN deployed Railway service (never the deploy
+    -DB service) and trigger a redeploy so the live app picks it up — the #107 "provide your own
+    key" flow: an operator revisiting a deployed project replaces a mocked provider dep (e.g.
+    OPENROUTER_API_KEY) with their real value.
+
+    Resolution order: an explicit `service_id` wins (once a caller has one on record — not
+    populated by anything today, kept for when record-deployment reliably captures it); otherwise
+    resolve by the deterministic exact name `sf-{project_id}` (the same convention stage-3's SKILL
+    uses at `create_service`) via a live GraphQL exact-name lookup.
+
+    FAILS LOUD: every failure returns {"ok": False, "detail": ...} — never a silent no-op. Never
+    raises."""
+    token = os.environ.get("RAILWAY_TOKEN")
+    if not token:
+        return {"ok": False, "detail": "RAILWAY_TOKEN not set on the console"}
+    railway_project_id = env.runapp_railway_project_id()
+    railway_env_id = env.runapp_railway_environment_id()
+    if not railway_project_id or not railway_env_id:
+        return {"ok": False, "detail": "run-app Railway project/environment not configured "
+                                        "(SF_RUNAPP_RAILWAY_PROJECT_IDS / _ENVIRONMENT_IDS)"}
+    sid = service_id or _graphql_find_service_by_name(railway_project_id, f"sf-{project_id}", token)
+    if not sid:
+        return {"ok": False, "detail": f"could not locate the deployed app's Railway service "
+                                        f"('sf-{project_id}') — has it been deployed yet?"}
+    try:
+        resp = _graphql(
+            "mutation VariableUpsert($input: VariableUpsertInput!) { variableUpsert(input: $input) }",
+            {"input": {"projectId": railway_project_id, "environmentId": railway_env_id,
+                       "serviceId": sid, "name": name, "value": value}},
+            token,
+        )
+    except Exception as exc:
+        return {"ok": False, "detail": f"graphql error: {exc}"[:200]}
+    errors = resp.get("errors") or []
+    if errors:
+        return {"ok": False, "detail": str(errors)[:200]}
+    return {"ok": True, "service_id": sid}
 
 DEPLOY_DB_FILE = "deploy-db.json"
 

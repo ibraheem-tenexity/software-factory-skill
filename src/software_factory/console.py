@@ -1708,6 +1708,44 @@ class Console:
             "satisfied": state.deps_satisfied,
         }
 
+    def provide_deployed_dep(self, project_id: str, name: str, value: str) -> dict:
+        """#107 — a user REVISITING an already-deployed project replaces one mocked provider dep
+        (e.g. OPENROUTER_API_KEY) with their own real value. Unlike `submit_deps`/`start_stage3`
+        (the pre-build gate: value rides ephemerally into a fresh Stage-3 launch, never persisted),
+        this pushes the value onto the LIVE Railway service via `deploy_db.set_app_variable`
+        (triggers a redeploy) and only then records the disposition flip + vault entry — so a
+        failed live push never silently marks the dep as provided. FAILS LOUD: returns
+        {"ok": False, "detail": ...} on any failure, matching `deploy_db.set_app_variable`; never
+        raises, never no-ops silently. Zero-touch (SPEC §3) is unaffected — this is a normal
+        authed user action on a finished project, not a mid-build pause."""
+        state = self._load_state(project_id)
+        if not state.deploy_url:
+            return {"ok": False, "detail": "project has no live deployment yet"}
+        if name not in (state.deps_required or []):
+            return {"ok": False, "detail": f"{name!r} is not a known dependency for this project"}
+        if not (value or "").strip():
+            return {"ok": False, "detail": "value required"}
+        result = deploy_db.set_app_variable(project_id, name, value)
+        if not result.get("ok"):
+            return result
+        try:
+            uid = _vault.vault_store(f"byok-{project_id}-{name}", value)
+        except Exception:
+            uid = None
+            logger.warning("[vault] store failed for %s key %s after live app update",
+                           project_id, name, exc_info=True)
+        disposition = deps_mod.default_dispositions(state.deps_required)
+        disposition.update(state.deps_disposition or {})
+        disposition[name] = "provide"
+        state.deps_disposition = disposition
+        state.deps_provided = sorted({*(state.deps_provided or []), name})
+        state.deps_satisfied = deps_mod.resolve_satisfied(
+            state.deps_required, disposition, state.deps_provided)
+        if uid:
+            state.creds_vault_ids = {**(state.creds_vault_ids or {}), name: uid}
+        state.save()
+        return {"ok": True, "name": name, "disposition": "provide"}
+
     def start_stage3(self, project_id: str, extra_creds: dict | None = None) -> str | None:
         """Launch Stage 3. Returns project_id or None if blocked."""
         state = self._load_state(project_id)
