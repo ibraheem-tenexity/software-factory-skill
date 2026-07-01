@@ -27,7 +27,7 @@ from .constants import (
     RUNNER_KEYS as _RUNNER_KEYS,
 )
 from . import artifacts, checkpoint as ckpt, deploy_db, env as _env, gates, streamlog, vault as _vault
-from .agents import AgentRegistry
+from .runtime_agents import AgentRegistry
 from .evidence import build_evidence, verify_evidence
 from .input_pipeline import persist_and_compose
 from .pdf_extract import extract_to_markdown
@@ -38,7 +38,7 @@ from .db import ProjectStore
 from . import dbshim
 from .repositories._exec import PathExec
 from .repositories.canvas import ProjectStateRepository, PhaseRepository, BlockerRepository, ArtifactRepository
-from .repositories.agents import AgentRepository
+from .repositories.runtime_agents import AgentRepository
 from .tickets import TicketStore
 from .workspace_setup import prepare_workspace
 from .log import get_logger
@@ -1069,11 +1069,14 @@ class Console:
         # Operator override: if staff edited THIS stage's prompt for THIS runtime in the OS Agents
         # dashboard, that stored text drives the run (written as ws/SKILL.md); else the on-disk
         # default. Per-runtime + best-effort — a store hiccup must never block a launch.
+        # system_agents has ONE row per stage callsign (STAGE-1), no longer a per-runtime override
+        # key (was STAGE-1::claude / STAGE-1::opencode) — the claude & opencode SKILL.md variants now
+        # share the single stored prompt for this stage.
         override = None
         try:
-            from .agent_prompts import PromptStore, override_key
-            row = PromptStore().get(override_key(f"STAGE-{stage}", runtime))
-            override = row["prompt"] if row else None
+            from .system_agents import SystemAgentStore
+            row = SystemAgentStore().get(f"STAGE-{stage}")
+            override = row["prompt"] if row and (row.get("prompt") or "").strip() else None
         except Exception:
             logger.debug("[launch] %s prompt-override lookup failed — using on-disk default",
                          project_id, exc_info=True)

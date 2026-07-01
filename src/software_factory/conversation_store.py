@@ -35,7 +35,7 @@ class ConversationStore:
     def append(self, session_id: str, role: str, blocks: list, *,
               user_email: str | None = None, project_id: str | None = None,
               org_id: str | None = None, tool_name: str | None = None,
-              tool_call_id: str | None = None, referenced_artifact: int | None = None,
+              tool_call_id: str | None = None,
               model: str | None = None, provider: str | None = None,
               input_tokens: int = 0, output_tokens: int = 0, cost_usd: float = 0.0) -> str:
         """Append one message to `session_id`. `blocks` is a non-empty list of canonical content
@@ -59,7 +59,7 @@ class ConversationStore:
                     session_id=session_id, seq=seq, role=role, json_blob=blocks,
                     user_id=user_id, project_id=project_id, org_id=org_id,
                     input_text=input_text, tool_name=tool_name, tool_call_id=tool_call_id,
-                    tool_result=tool_result_block, referenced_artifact=referenced_artifact,
+                    tool_result=tool_result_block,
                     model=model, provider=provider, input_tokens=input_tokens,
                     output_tokens=output_tokens, cost_usd=cost_usd,
                 )

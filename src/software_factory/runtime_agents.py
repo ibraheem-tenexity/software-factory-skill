@@ -4,7 +4,7 @@ Postgres source of truth (queryable, resumable). Every lifecycle event
 is also pushed to a pluggable sink so an external dashboard can render the run in real time.
 The headline health metric is the no-op rate: agents that produced no real change.
 
-DATA ACCESS: all `agents` SQL lives in `repositories.agents.AgentRepository` (SQLAlchemy Core);
+DATA ACCESS: all `runtime_agents` SQL lives in `repositories.runtime_agents.AgentRepository` (SQLAlchemy Core);
 this store keeps only the outcome-status mapping and the markdown rendering.
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from .db import project_id_from_path
 from .repositories._exec import PathExec
-from .repositories.agents import AgentRepository
+from .repositories.runtime_agents import AgentRepository
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol

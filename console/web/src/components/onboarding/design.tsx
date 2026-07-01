@@ -139,26 +139,49 @@ export function Btn({ children, variant = "secondary", size = "md", onClick, dis
   );
 }
 
-export function TextInput({ value, onChange, placeholder, type = "text", style, mono, onKeyDown, size = "md" }:
+// Dictation (SOF-14's DictateButton) is wired into every text field here, matching the design's
+// shared.jsx TextInput/TextArea ("Shared across every text field") — previously only the
+// Concierge Composer had it, leaving the rest of the onboarding form silent.
+export function TextInput({ value, onChange, placeholder, type = "text", style, mono, onKeyDown, size = "md", noMic }:
   { value?: string; onChange?: (v: string) => void; placeholder?: string; type?: string; style?: CSS;
-    mono?: boolean; onKeyDown?: React.KeyboardEventHandler; size?: "sm" | "md" }) {
+    mono?: boolean; onKeyDown?: React.KeyboardEventHandler; size?: "sm" | "md"; noMic?: boolean }) {
   const h = size === "sm" ? 32 : 36;
-  return (
+  const showMic = !noMic && MIC_SUPPORTED && type !== "password";
+  const input = (
     <input type={type} value={value || ""} onChange={(e) => onChange && onChange(e.target.value)} placeholder={placeholder} onKeyDown={onKeyDown}
       style={{ width: "100%", boxSizing: "border-box", height: h, padding: "0 10px", borderRadius: T.rMd,
         border: `1px solid ${T.borderDefault}`, background: T.bg, color: T.fg,
-        font: `400 13px/1 ${mono ? T.mono : T.sans}`, outline: "none", ...style }} />
+        font: `400 13px/1 ${mono ? T.mono : T.sans}`, outline: "none", ...style, ...(showMic ? { paddingRight: h - 4 } : null) }} />
+  );
+  if (!showMic) return input;
+  return (
+    <div style={{ position: "relative", width: "100%" }}>
+      {input}
+      <span style={{ position: "absolute", right: 2, top: 0, height: h, display: "flex", alignItems: "center" }}>
+        <DictateButton value={value} onChange={onChange} />
+      </span>
+    </div>
   );
 }
 
-export function TextArea({ value, onChange, placeholder, rows = 4, style, onKeyDown }:
+export function TextArea({ value, onChange, placeholder, rows = 4, style, onKeyDown, noMic }:
   { value?: string; onChange?: (v: string) => void; placeholder?: string; rows?: number; style?: CSS;
-    onKeyDown?: React.KeyboardEventHandler }) {
-  return (
+    onKeyDown?: React.KeyboardEventHandler; noMic?: boolean }) {
+  const showMic = !noMic && MIC_SUPPORTED;
+  const ta = (
     <textarea value={value || ""} onChange={(e) => onChange && onChange(e.target.value)} placeholder={placeholder} rows={rows} onKeyDown={onKeyDown}
       style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: T.rMd, resize: "none",
         border: `1px solid ${T.borderDefault}`, background: T.bg, color: T.fg,
-        font: `400 13px/1.55 ${T.sans}`, outline: "none", ...style }} />
+        font: `400 13px/1.55 ${T.sans}`, outline: "none", ...style, ...(showMic ? { paddingRight: 38 } : null) }} />
+  );
+  if (!showMic) return ta;
+  return (
+    <div style={{ position: "relative", width: "100%" }}>
+      {ta}
+      <span style={{ position: "absolute", right: 6, top: 7 }}>
+        <DictateButton value={value} onChange={onChange} />
+      </span>
+    </div>
   );
 }
 
@@ -242,7 +265,7 @@ export function IndustryTile({ item, selected, onClick, compact }:
 // itself finishes. `ingestStage`/`ingestPct` absent (or `ingestStatus` "ready"/undefined) falls
 // back to today's plain "Uploaded" checkmark — SF_MEMORY off, or the event just hasn't arrived
 // yet, both degrade to the exact prior behavior, never a stuck/broken-looking row.
-const INGEST_STAGE_LABEL: Record<string, string> = {
+export const INGEST_STAGE_LABEL: Record<string, string> = {
   parsing: "Parsing", chunking: "Chunking", embedding: "Embedding", summarizing: "Summarizing",
 };
 
@@ -414,7 +437,7 @@ function blobToBase64(blob: Blob): Promise<string> {
 // isn't available; a denied/failed permission just cancels back to idle, no crash.
 const MIC_SUPPORTED = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
 
-function DictateButton({ value, onChange, disabled }:
+export function DictateButton({ value, onChange, disabled }:
   { value?: string; onChange?: (v: string) => void; disabled?: boolean }) {
   const [recording, setRecording] = React.useState(false);
   const [transcribing, setTranscribing] = React.useState(false);

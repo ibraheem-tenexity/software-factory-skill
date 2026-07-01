@@ -58,6 +58,7 @@ _PERSISTED = {
     "ingestion_spent_usd",
     "memory_overview",
     "reflection_questions",
+    "concierge_notes",
 }
 
 
@@ -82,6 +83,10 @@ class ProjectState:
     # status: "open"|"answered"|"dismissed", answer, created_at}]. promote_draft's route
     # refuses to hand off while any entry here has status="open".
     reflection_questions: list = field(default_factory=list)
+    # Durable facts the Concierge saves during the interview via its write_to_project_memory tool
+    # (concierge-agent-spec.md §5). Persisted into the same projectstate.data JSON blob as
+    # memory_overview — the "no third table" pattern — and read back by get_from_project_memory.
+    concierge_notes: list = field(default_factory=list)
     repo_url: Optional[str] = None
     deploy_url: Optional[str] = None
     # Proof marker — stamped at provision so the run carries a receipt of which skill drove it.

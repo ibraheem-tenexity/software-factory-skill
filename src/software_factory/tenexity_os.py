@@ -2,7 +2,7 @@
 
 Three layers, kept apart for testability:
   • CONSTANTS — the stage-skill roster (STAGE-1/2/3 + CONCIERGE) + the real TOOLS registry.
-  • cross-run SQL — direct reads over the flat Postgres tables (`public.agents`, `public.tickets`)
+  • cross-run SQL — direct reads over the flat Postgres tables (`public.runtime_agents`, `public.tickets`)
     that no per-run accessor exposes (today's burn, per-role rollups, in-flight ticket counts).
   • pure assemblers — shape already-fetched data into the §3 section payloads (unit-testable, no DB).
 """
@@ -20,7 +20,7 @@ _aggregates = AggregatesRepository(GlobalExec())
 # The 3 stage-orchestrator prompts ARE the on-disk SKILL.md files the live pipeline reads per stage
 # (one per runtime: SKILL.md = claude, SKILL.opencode.md = opencode). We surface them as READ-ONLY
 # agent cards (kind:'stage_skill', prompt_applied:true) so the Agents dashboard shows the REAL live
-# orchestrator prompts — distinct from the editable-but-disconnected PromptStore. The skills/ dir ships
+# orchestrator prompts — distinct from the editable SystemAgentStore rows. The skills/ dir ships
 # to the container at /app/skills (Dockerfile `COPY . /app`); resolved here relative to this module.
 # Edits→pipeline + managed subagent prompts are Part 2 (deferred).
 _SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "skills")
@@ -120,7 +120,8 @@ def _concierge() -> tuple[str, str]:
     """(live instructions, model label). Graceful: a placeholder + default model if chat_agent can't
     import (keeps the dashboard from 500ing)."""
     try:
-        from .chat_agent import CONCIERGE_INSTRUCTIONS, chat_model_label
+        from .default_prompt import CONCIERGE_INSTRUCTIONS
+        from .chat_agent import chat_model_label
         return CONCIERGE_INSTRUCTIONS, chat_model_label()
     except Exception:
         return "(concierge instructions unavailable)", "gpt-5.4"
@@ -209,34 +210,36 @@ def owner_to_org(orgs: list, members_by_org: dict) -> dict:
     return out
 
 
-def agent_roster(registry: list, rollups: list, prompts: dict) -> list:
-    """Merge the agent_registry identity rows with live per-role rollups + stored prompt versions;
-    append any live role not in the registry as its own card (honest: a live agent not yet named)."""
+def agent_roster(system_agents: list, rollups: list) -> list:
+    """Merge the system_agents identity rows (callsign/name/prompt/model_id/version) with live
+    per-role rollups from the runtime_agents table; append any live role not in system_agents as its
+    own card (honest: a live agent not yet named). Roles are matched to rollups by callsign, since
+    the old per-role registry `role` column no longer exists on system_agents."""
     by_role = {(r.get("role") or "").lower(): r for r in rollups}
     used = set()
     out = []
 
-    def card(name, callsign, role, model, cost_tier, desc, roll):
-        pv = prompts.get(callsign)
+    def card(name, callsign, role, model, version, desc, roll):
         return {"name": name, "callsign": callsign, "sign": callsign, "role": role,
                 "desc": desc, "model": (roll.get("model") if roll else None) or model,
-                "cost_tier": cost_tier, "success": _success_rate(roll) if roll else None,
+                "cost_tier": None, "success": _success_rate(roll) if roll else None,
                 "runs": int(roll.get("runs") or 0) if roll else 0,
                 "on": bool(roll.get("active")) if roll else False,
-                "prompt_version": pv["version"] if pv else 0}
+                "prompt_version": version}
 
-    for e in registry:
+    for e in system_agents:
         roll = None
-        key = (e.get("role") or "").lower()
+        # system_agents has no `role` column; match a rollup by the callsign lowercased.
+        key = (e.get("callsign") or "").lower()
         if key and key in by_role and key not in used:
             roll = by_role[key]
             used.add(key)
-        out.append(card(e["name"], e["callsign"], e.get("role"), e.get("model"), e.get("cost_tier"),
-                        e.get("descr"), roll))
+        out.append(card(e["name"], e["callsign"], e.get("callsign"), e.get("model_id"),
+                        e.get("version") or 0, e.get("prompt"), roll))
     # live roles not claimed by any roster entry → their own cards
     for role, roll in by_role.items():
         if role and role not in used:
-            out.append(card(role.title(), role.upper(), role, None, None,
+            out.append(card(role.title(), role.upper(), role, None, 0,
                             "Live pipeline agent (not in the curated roster).", roll))
     return out
 

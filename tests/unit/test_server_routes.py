@@ -368,7 +368,7 @@ def test_stop_endpoint_wires_to_console(client, app_mod, monkeypatch):
 def test_push_sse_delivers_to_registered_client(app_mod):
     # The SSE mechanic: _push_sse fans a message out to every queue registered for the run
     # (the stream endpoint registers one such queue; the poller + chat/deps handlers push).
-    from software_factory.chat_store import ChatMessage
+    from software_factory.data_transfer_objects.chat_store import ChatMessage
     q: list = []
     with app_mod._sse_lock:
         app_mod._sse_clients.setdefault("project-1e17ea6a", []).append(q)

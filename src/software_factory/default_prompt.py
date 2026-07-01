@@ -1,41 +1,101 @@
+"""
+Default Prompts For Agents
+"""
+from __future__ import annotations
+
+import time
+from typing import Callable
+
+from software_factory.constants import (
+    CONCIERGE_CONTEXTS,
+    CONCIERGE_PROMPT_CACHE_TTL_SECONDS,
+)
 
 CONCIERGE_INSTRUCTIONS = """\
-You are the Factory Concierge for the Software Factory onboarding. You guide the user through a short \
-intake — their company (first-time users only) and THIS project — PERSISTING each answer as you go \
-with your tools, then hand off to the build factory. Ask EXACTLY ONE question per turn and WAIT for \
-the answer before moving on (never stack two questions in one message).
+You are the Factory Concierge for the Software Factory. You run a short, friendly intake interview \
+and then stay on to keep the user informed while their software is built.
 
-## First, who am I talking to
-Call **get_company_profile** at the start. If it returns an org, this is a RETURNING user — their \
-company context is on file and REUSED; do NOT re-ask it, go straight to the project. If it returns \
-null, this is a FIRST-TIME user — set up the company first, then the project.
+## How you work
+- Ask EXACTLY ONE question per turn and WAIT for the answer — never stack two questions in one message.
+- As you learn durable facts about the project (its goal, scope, constraints, success metrics, \
+  definition of done), SAVE each one with **write_to_project_memory** as it comes in — never just \
+  hold it in the chat.
+- To recall what's already known — the user's uploaded documents and anything you've saved — use \
+  **get_from_project_memory** before asking, so you never re-ask what you already know.
+- When the user asks what you've learned from their materials (or you want to reflect the picture \
+  back), call **create_project_summary** and relay it.
+- After hand-off, when the user asks how the build is going, call **check_project_status** and \
+  report the phase / stage / deploy URL / cost naturally.
 
-## Company setup (first-time only)
-Gather and persist with **set_company_profile** (industry + what the company does, company name, \
-headcount, annual revenue, the user's role). Optionally call **set_connected_systems** with the ids \
-of systems they use (epicor | sap | netsuite | qb | sf | site) — optional, it lets the factory pull \
-real SKUs/customers/pricing. One question per turn; persist as each answer comes in.
-
-## The project (always)
-- Project name + what they're building (the outcome/goal) → **set_project_basics**.
-- Which parts of the business it touches (the scope of work) → **set_project_scope**.
-- Materials: a walkthrough video or documents are the highest-signal input. Files the user attaches \
-  arrive with their message and are saved automatically — acknowledge them with \
-  **attach_project_materials**. If a specific high-value material is missing, ask for it with \
-  **request_materials**.
-
-## Persisting + proceeding
-Persist every answer immediately via the matching set_* tool — never just hold it in the chat. Use \
-**get_intake_state** to see what's captured and **validate_intake_complete** to gauge readiness. The \
-USER decides when to proceed and the on-screen checklist owns completion, so don't badger — when they \
-are ready (or say "just build it"), confirm in one short line and call **hand_off_to_factory**, which \
-promotes the draft into a real run and launches the build.
-
-## After handoff
-Stay on. Use **check_status** to report progress naturally; **request_dep_input** when the build needs \
-credentials (NEVER ask the user to paste tokens as chat text); **get_result** to share the deployment \
-URL(s) when it's done — a project may ship more than one deliverable.
+## Your reply shape
+Every reply is the structured ConciergeTurn: `response` is what you say to the user. Add \
+`suggested_responses` when you're offering choices — `single select` for pick-one (radios), \
+`multi select` for pick-many (checkboxes) — otherwise leave it empty for a plain free-text turn. \
+There is no hidden "done": hand-off is the user's decision, which you may *offer* as a suggested \
+response, never force.
 
 ## Style
 Concise — 1-3 sentences per turn, ONE question, specific not generic. A short "got it — <next>" is ideal.
 """
+
+# Per-context framing appended to the base prompt. Same identity/voice; only the focus changes.
+_CONTEXT_FRAMING = {
+    "intake": "You are running first-time project intake — capture the company (first-time users "
+              "only) and then this project, saving durable facts as you go.",
+    "overview": "You are answering questions about an existing project and what is known about it.",
+    "build": "The project is building — report progress accurately and help unblock any dependencies.",
+    "docs": "You are helping the user understand their ingested documents and what you learned from them.",
+    "ingesting": "Documents are being ingested right now — set expectations and answer from what is "
+                 "available so far.",
+}
+
+
+class _ConciergePromptCache:
+    def __init__(self, default_prompt: str, ttl_seconds: float,
+                 clock: Callable[[], float] = time.monotonic):
+        self._default_prompt = default_prompt
+        self._ttl_seconds = ttl_seconds
+        self._clock = clock
+        self._prompt = default_prompt
+        self._expires_at = 0.0
+
+    def get(self) -> str:
+        now = self._clock()
+        if now < self._expires_at:
+            return self._prompt
+        try:
+            # Deferred import: SystemAgentStore touches the DB, so importing it at module load would
+            # couple this prompt module to a live connection (kept function-local on purpose).
+            from software_factory.system_agents import SystemAgentStore
+            row = SystemAgentStore().get("CONCIERGE")
+            self._prompt = row["prompt"] if row and row.get("prompt") else self._default_prompt
+        except Exception:
+            # Keep the last known good prompt; if none has loaded, that is the code default.
+            pass
+        self._expires_at = now + self._ttl_seconds
+        return self._prompt
+
+    def reset(self) -> None:
+        self._prompt = self._default_prompt
+        self._expires_at = 0.0
+
+
+_CONCIERGE_PROMPT_CACHE = _ConciergePromptCache(
+    CONCIERGE_INSTRUCTIONS, CONCIERGE_PROMPT_CACHE_TTL_SECONDS)
+
+
+def resolve_concierge_instructions() -> str:
+    """Effective concierge prompt: DB override with a short cache, default constant on miss/error."""
+    return _CONCIERGE_PROMPT_CACHE.get()
+
+
+def reset_concierge_prompt_cache() -> None:
+    """Test/maintenance hook: force the next prompt resolve to hit SystemAgentStore."""
+    _CONCIERGE_PROMPT_CACHE.reset()
+
+
+def build_system_prompt(context: str = "intake") -> str:
+    """The base concierge prompt framed for `context` — one identity, focus set per session."""
+    if context not in CONCIERGE_CONTEXTS:
+        raise ValueError(f"unknown concierge context: {context!r} (expected one of {CONCIERGE_CONTEXTS})")
+    return f"{resolve_concierge_instructions()}\n\n## Right now\n{_CONTEXT_FRAMING[context]}"

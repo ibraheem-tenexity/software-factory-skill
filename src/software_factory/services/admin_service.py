@@ -13,7 +13,6 @@ import json
 import os
 
 from software_factory import tenexity_os
-from software_factory.agent_prompts import override_key
 from software_factory.users import TENEXITY_ORG_ID
 from .errors import Invalid, NotFound, Conflict, Unprocessable
 
@@ -52,12 +51,11 @@ def _decode_cursor(cursor: str) -> tuple[datetime.datetime, str]:
 
 
 class AdminService:
-    def __init__(self, console, users, agent_store, tool_store, prompts, sow_store, conversation_repo):
+    def __init__(self, console, users, agent_store, tool_store, sow_store, conversation_repo):
         self.console = console
         self.users = users
-        self.agent_store = agent_store
+        self.agent_store = agent_store   # SystemAgentStore — identity + prompt + model_id in one row
         self.tool_store = tool_store
-        self.prompts = prompts
         self.sow_store = sow_store
         self.conversation_repo = conversation_repo
 
@@ -73,7 +71,7 @@ class AdminService:
     def overview(self) -> dict:
         runs, orgs, _members, o2o = self._context()
         rollups = tenexity_os.agent_rollups()
-        roster = tenexity_os.agent_roster(self.agent_store.all(), rollups, self.prompts.all())
+        roster = tenexity_os.agent_roster(self.agent_store.all(), rollups)
         return tenexity_os.overview(orgs, runs, rollups, tenexity_os.agents_active_count(),
                                     tenexity_os.today_burn(_midnight_epoch()), roster, o2o)
 
@@ -92,37 +90,45 @@ class AdminService:
 
     # ── agents ─────────────────────────────────────────────────────────────────────────
     def agents(self) -> dict:
-        # The 4 REAL orchestrators (STAGE-1/2/3 + CONCIERGE) have BOTH a registry row AND a richer live
-        # card. Render each ONCE: the live card wins for those callsigns; the roster contributes only
-        # OTHER (custom) agents → no dupes.
+        # The 4 orchestrators (STAGE-1/2/3 + CONCIERGE) have BOTH a system_agents row AND a richer
+        # live card. Render each ONCE: the live card wins for those callsigns; the roster contributes
+        # only OTHER (custom) agents → no dupes.
         live = tenexity_os.live_agent_cards()
         live_cs = {c["callsign"] for c in live}
-        roster = tenexity_os.agent_roster(self.agent_store.all(), tenexity_os.agent_rollups(),
-                                          self.prompts.all())
+        roster = tenexity_os.agent_roster(self.agent_store.all(), tenexity_os.agent_rollups())
         return {"agents": [r for r in roster if r["callsign"] not in live_cs] + live}
 
     def sync_agents(self) -> dict:
-        agents = self.agent_store.sync_real_agents()
-        return {"synced": len(agents), "agents": agents}
+        # No-op: nothing is seeded from code anymore. The OS shows only the system_agents rows that
+        # actually exist, so there is no canonical roster to reconcile. Kept so the existing
+        # POST /api/admin/agents/sync route still returns cleanly.
+        agents = self.agent_store.all()
+        return {"synced": 0, "agents": agents}
 
     def agent(self, callsign: str, runtime: str = "claude") -> dict:
+        cs = callsign.upper()
+        row = self.agent_store.get(cs)
         live = tenexity_os.live_agent_detail(callsign, runtime)
         if live:
-            ov = self.prompts.get(override_key(callsign, live.get("runtime")))
-            if ov:
-                live = {**live, "prompt": ov["prompt"], "version": ov["version"], "is_default": False,
-                        "overridden": True, "updated_by": ov["updated_by"], "updated_at": ov["updated_at"]}
+            # The stored system_agents row (if any) supplies the operator-edited prompt + version +
+            # model; the live card supplies the read-only file/code-backed defaults. system_agents
+            # has ONE row per stage callsign (no per-runtime override key anymore).
+            if row and (row.get("prompt") or "").strip():
+                live = {**live, "prompt": row["prompt"], "version": row["version"], "is_default": False,
+                        "overridden": True, "updated_by": row["updated_by"], "updated_at": row["updated_at"]}
             else:
-                live = {**live, "version": 0, "is_default": True, "overridden": False}
+                live = {**live, "version": (row["version"] if row else 0), "is_default": True,
+                        "overridden": False}
+            if row and row.get("model_id"):
+                live = {**live, "model": row["model_id"]}
             return {**live, "tools": [t for t in self.tool_store.all() if t["status"] == "connected"],
                     "activity": []}
-        cs = callsign.upper()
-        card = next((a for a in tenexity_os.agent_roster(self.agent_store.all(), tenexity_os.agent_rollups(),
-                                                         self.prompts.all()) if a["callsign"] == cs), None)
+        card = next((a for a in tenexity_os.agent_roster(self.agent_store.all(),
+                                                         tenexity_os.agent_rollups())
+                     if a["callsign"] == cs), None)
         if not card:
             raise NotFound("unknown agent")
-        p = self.prompts.get(cs)
-        return {**card, "prompt": p["prompt"] if p else "",
+        return {**card, "prompt": row["prompt"] if row else "",
                 "prompt_applied": False,
                 "tools": [t for t in self.tool_store.all() if t["status"] == "connected"],
                 "activity": []}
@@ -133,15 +139,16 @@ class AdminService:
             raise Invalid("callsign + name required")
         if self.agent_store.get(cs):
             raise Conflict("callsign exists")
-        return {"agent": self.agent_store.create(cs, body.name, role=body.role, model=body.model,
-                                                 cost_tier=body.cost_tier, descr=body.descr)}
+        # system_agents has no role/cost_tier/descr columns; body.model maps to model_id.
+        return {"agent": self.agent_store.set(cs, name=body.name, model_id=body.model, by="")}
 
     def update_agent(self, callsign: str, body) -> dict:
         cs = callsign.upper()
         if not self.agent_store.get(cs):
             raise NotFound("unknown agent")
-        fields = {k: val for k, val in body.model_dump().items() if val is not None}
-        return {"agent": self.agent_store.update(cs, fields)}
+        # Only name + model_id are real system_agents columns; role/cost_tier/descr are ignored
+        # (those registry columns no longer exist). model → model_id.
+        return {"agent": self.agent_store.set(cs, name=body.name, model_id=body.model, by="")}
 
     def delete_agent(self, callsign: str) -> dict:
         cs = callsign.upper()
@@ -152,35 +159,24 @@ class AdminService:
         self.agent_store.delete(cs)
         return {"ok": True}
 
-    def _stage_runtime(self, cs: str, runtime: str | None) -> str | None:
-        """Validate + normalize the runtime for a prompt write/revert: required (claude|opencode) for
-        stage skills, ignored for the concierge."""
-        if not cs.startswith("STAGE-"):
-            return None
-        if runtime not in ("claude", "opencode"):
-            raise Invalid("runtime (claude|opencode) required for stage skills")
-        return runtime
-
     def set_prompt(self, callsign: str, body, by: str) -> dict:
+        # ONE row per callsign (the old per-runtime STAGE-1::claude override key is collapsed to the
+        # bare stage callsign). The save updates the prompt (and/or model_id) and bumps version.
         cs = callsign.upper()
-        if tenexity_os.is_editable_orchestrator(cs):
-            rt = self._stage_runtime(cs, body.runtime)
-            row = self.prompts.set(override_key(cs, rt), body.prompt or "", by=by or "")
-            return {"callsign": cs, "runtime": rt, "version": row["version"],
-                    "updated_by": row["updated_by"], "updated_at": row["updated_at"],
-                    "applied": True, "is_default": False}
-        row = self.prompts.set(cs, body.prompt or "", by=by or "")
-        return {"callsign": row["callsign"], "prompt": row["prompt"], "version": row["version"],
+        applied = tenexity_os.is_editable_orchestrator(cs)
+        row = self.agent_store.set(cs, prompt=body.prompt or "", by=by or "")
+        return {"callsign": cs, "prompt": row["prompt"], "version": row["version"],
                 "updated_by": row["updated_by"], "updated_at": row["updated_at"],
-                "applied": False}
+                "applied": applied, "is_default": False}
 
     def revert_prompt(self, callsign: str, runtime: str | None = None) -> dict:
         cs = callsign.upper()
         if not tenexity_os.is_editable_orchestrator(cs):
             raise NotFound("no editable override for this agent")
-        rt = self._stage_runtime(cs, runtime)
-        self.prompts.delete(override_key(cs, rt))
-        return {"callsign": cs, "runtime": rt, "version": 0, "is_default": True}
+        # Revert = clear the stored override so the on-disk/code default drives the run again. The
+        # whole system_agents row is the override, so dropping it is the revert.
+        self.agent_store.delete(cs)
+        return {"callsign": cs, "version": 0, "is_default": True}
 
     # ── tools / MCP registry ─────────────────────────────────────────────────────────
     def tools(self) -> dict:

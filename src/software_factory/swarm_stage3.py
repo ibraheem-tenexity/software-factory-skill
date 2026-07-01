@@ -23,7 +23,7 @@ import subprocess
 import sys
 import time
 
-from .agents import AgentRegistry
+from .runtime_agents import AgentRegistry
 from .swarm_adapter import (
     bridge_events,
     read_events,

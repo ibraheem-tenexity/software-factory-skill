@@ -109,8 +109,8 @@ tickets = Table(
     Column("description", Text, nullable=False, server_default=""),
 )
 
-agents = Table(
-    "agents", metadata,
+runtime_agents = Table(
+    "runtime_agents", metadata,
     Column("agent_id", Text, primary_key=True),
     Column("project_id", Text, primary_key=True),
     Column("ticket_id", Integer),
@@ -286,7 +286,8 @@ conversation = Table(
     Column("tool_name", Text),
     Column("tool_call_id", Text),                        # correlates tool_use <-> tool_result
     Column("tool_result", JSONB),                        # convenience mirror of the result block
-    Column("referenced_artifact", Integer, ForeignKey("blobs.id")),
+    # Artifact references live as blocks inside json_blob (a turn may reference several) — there is
+    # deliberately NO single referenced_artifact FK column: one prompt can cite many artifacts.
     Column("model", Text),
     Column("provider", Text),                            # 'openai' | 'anthropic' | 'openrouter' | ...
     Column("input_tokens", Integer, server_default="0"),
@@ -307,12 +308,16 @@ blob_uses = Table(
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
 )
 
-# Editable agent system prompts (Tenexity OS §3.4). One row per agent callsign; live orchestrator
-# overrides are applied, while role-agent prompts remain stored until subagent prompt wiring exists.
-agent_prompts = Table(
-    "agent_prompts", metadata,
-    Column("callsign", Text, primary_key=True),     # e.g. "ATLAS"
-    Column("prompt", Text, nullable=False),
+# System agents (Tenexity OS): the operator-configurable agents — the Concierge + the three skill
+# stages. One row per agent carrying its editable prompt AND the LLM it runs on. This table is the
+# ONLY source for what the OS shows/edits; nothing is seeded from code. Merges the former
+# agent_registry (identity) + agent_prompts (prompt) into one place.
+system_agents = Table(
+    "system_agents", metadata,
+    Column("callsign", Text, primary_key=True),      # CONCIERGE | STAGE-1 | STAGE-2 | STAGE-3
+    Column("name", Text, nullable=False),            # display name
+    Column("prompt", Text, nullable=False, server_default=""),
+    Column("model_id", Text),                        # the LLM this agent runs on
     Column("version", Integer, nullable=False, server_default="1"),
     Column("updated_by", Text),
     Column("updated_at", DateTime(timezone=True), server_default=func.now()),
@@ -329,19 +334,6 @@ mcp_tools = Table(
     Column("scope", Text),
     Column("status", Text, nullable=False, server_default="available"),  # connected | available
     Column("auth", Text),
-    Column("created_at", DateTime(timezone=True), server_default=func.now()),
-)
-
-# Agent registry (Tenexity OS §3.4 identity) — seeded from the canonical roster; live cost/success
-# are merged from `public.agents` at read time. Editable here so it's real datastore, not a constant.
-agent_registry = Table(
-    "agent_registry", metadata,
-    Column("callsign", Text, primary_key=True),
-    Column("name", Text, nullable=False),
-    Column("role", Text),
-    Column("model", Text),
-    Column("cost_tier", Integer, nullable=False, server_default="1"),
-    Column("descr", Text),
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
 )
 
@@ -393,8 +385,8 @@ org_secrets = Table(
 
 # Groupings: the flat per-project tables, the global directory tables, and everything (Alembic + tests).
 PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
-FLAT_TABLES = PROJECTDB + (tickets, agents, checkpoint)
+FLAT_TABLES = PROJECTDB + (tickets, runtime_agents, checkpoint)
 GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
-                 agent_prompts, mcp_tools, agent_registry, sow,
+                 system_agents, mcp_tools, sow,
                  doc_summary, chunk, conversation, org_secrets)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES

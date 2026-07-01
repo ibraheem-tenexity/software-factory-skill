@@ -337,13 +337,13 @@ def main(argv: list[str]) -> int:
             verified=(len(rest) > 4 and rest[4] in ("1", "true", "True")),
         )
     elif verb == "spawn-agent":
-        from .agents import AgentRegistry
+        from .runtime_agents import AgentRegistry
         agent_id, role, model = rest[0], rest[1], rest[2]
         phase = rest[3] if len(rest) > 3 and rest[3] not in ("", "-") else None
         ticket_id = int(rest[4]) if len(rest) > 4 and rest[4] not in ("", "-") else None
         AgentRegistry(db_path(projects_dir, project_id)).spawn(agent_id, project_id, ticket_id, role, model, phase=phase)
     elif verb == "finish-agent":
-        from .agents import AgentRegistry
+        from .runtime_agents import AgentRegistry
         agent_id, outcome = rest[0], rest[1]
         cost = float(rest[2]) if len(rest) > 2 and rest[2] not in ("", "-") else 0.0
         provenance = rest[3] if len(rest) > 3 and rest[3] not in ("", "-") else None

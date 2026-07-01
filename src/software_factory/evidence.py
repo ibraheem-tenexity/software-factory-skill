@@ -8,7 +8,7 @@ budget actually spent. A URL with no agents and no merged PRs is flagged as a fa
 """
 from __future__ import annotations
 
-from .agents import AgentRegistry
+from .runtime_agents import AgentRegistry
 from .projectstate import ProjectState
 from .tickets import TicketStore
 

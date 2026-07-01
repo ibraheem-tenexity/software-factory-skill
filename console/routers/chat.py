@@ -3,13 +3,12 @@ import asyncio
 import json
 import os
 import time
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from software_factory.chat_store import ChatStore, ChatMessage
-from software_factory.conversation_store import ConversationStore
+from software_factory.data_transfer_objects.chat_agent import ChatMessage
+from console.chat_persistence import chat_history as _chat_history, persist_chat_turn as _persist_chat_turn
 from software_factory.deps import extract_env_creds
 from software_factory.transcription import transcribe_audio, TranscriptionError
 
@@ -23,76 +22,9 @@ router = APIRouter()
 _CHAT_TIMEOUT = 120
 
 
-# ── T1.4: fold /api/chat's persistence off chat.jsonl onto the conversation table ──────────────
-# Two independent flags — either, both, or neither can be on:
-#   SF_CONVERSATION_DB     — write (and, once flipped, read) the durable conversation table.
-#                            Same flag /converse's DbConversation swap already uses.
-#   SF_CHAT_JSONL_MIRROR   — keep writing chat.jsonl too. Defaults ON: "chat.jsonl kept as a
-#                            debug mirror during migration, then retired" (ticket's own words) —
-#                            the safe initial rollout posture is BOTH paths active, flipped off
-#                            later via config once the new path is trusted, not forced off here.
-def _conversation_db_on() -> bool:
-    return os.environ.get("SF_CONVERSATION_DB") == "1"
-
-
-def _jsonl_mirror_on() -> bool:
-    return (os.environ.get("SF_CHAT_JSONL_MIRROR") or "1") == "1"
-
-
-def _chat_session_id(project_id: str) -> str:
-    """Deterministic session_id for /api/chat's (exactly one) durable dock conversation per
-    project. Deliberately DISTINCT from services/conversation.py's _onboarding_session_id —
-    unifying the dock chat and the onboarding interview into one Concierge thread is Phase 2/
-    T2.1's call, not this storage-layer swap's."""
-    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"chat:{project_id}"))
-
-
-# chat.jsonl/ChatMessage/the FE use "assistant" for AI turns; the conversation table's
-# established convention (services/conversation.py's DbConversation, T1.3) is "agent" — map at
-# this boundary so neither side needs to change its own vocabulary.
-def _to_conversation_role(role: str) -> str:
-    return "agent" if role == "assistant" else role
-
-
-def _from_conversation_role(role: str) -> str:
-    return "assistant" if role == "agent" else role
-
-
-def _persist_chat_turn(project_id: str, msg: ChatMessage, *, owner_email: str = "",
-                       model: str | None = None, provider: str | None = None,
-                       input_tokens: int = 0, output_tokens: int = 0,
-                       cost_usd: float | None = 0.0) -> None:
-    """Write one /api/chat turn to whichever store(s) are currently active."""
-    if _jsonl_mirror_on():
-        ChatStore(state._chat_path(project_id)).append(msg)
-    if _conversation_db_on():
-        # msg_type + the original metadata dict travel inside the block itself — the
-        # conversation table has no column for either, and conversation_blocks.validate_block
-        # only checks the fields IT requires, so extra keys pass through untouched.
-        block = {"type": "text", "text": msg.content, "msg_type": msg.msg_type,
-                "metadata": msg.metadata or {}}
-        ConversationStore().append(
-            _chat_session_id(project_id), _to_conversation_role(msg.role), [block],
-            user_email=(owner_email or None) if msg.role == "user" else None,
-            project_id=project_id, model=model, provider=provider,
-            input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost_usd,
-        )
-
-
-def _chat_history_from_conversation(project_id: str) -> list[dict]:
-    rows = ConversationStore().history(_chat_session_id(project_id))
-    out = []
-    for r in rows:
-        block = next((b for b in (r["json_blob"] or []) if b.get("type") == "text"), {})
-        ts = r["created_at"]   # #267: conversation.py now selects created_at as epoch float
-        out.append({
-            "role": _from_conversation_role(r["role"]),
-            "content": r["input"] or block.get("text", ""),
-            "msg_type": block.get("msg_type", "text"),
-            "ts": ts,
-            "metadata": block.get("metadata", {}),
-        })
-    return out
+# /api/chat persistence + history now live on the `conversation` table via console.chat_persistence
+# (imported above as _persist_chat_turn / _chat_history). The legacy chat.jsonl/ChatStore and its
+# SF_CHAT_JSONL_MIRROR / SF_CONVERSATION_DB flags are retired — the table is the single store.
 
 
 @router.post("/api/transcribe")
@@ -207,10 +139,7 @@ def converse(pid: str, body: ConverseIn, v: tuple = Depends(authorize_project)):
 
 @router.get("/api/chat/{pid}/history")
 def chat_history(pid: str, v: tuple = Depends(authorize_project)):
-    if _conversation_db_on():
-        return {"messages": _chat_history_from_conversation(pid)}
-    store = ChatStore(state._chat_path(pid))
-    return {"messages": [m.to_dict() for m in store.history()]}
+    return {"messages": _chat_history(pid)}
 
 
 @router.post("/api/chat/{pid}/deps")

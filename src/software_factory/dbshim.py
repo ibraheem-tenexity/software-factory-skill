@@ -152,7 +152,7 @@ class _StatePool:
 
     def _wrap(self, conn):
         # The raw psycopg3 Connection.close() tears down the TCP+TLS+auth we want to reuse. Swap it
-        # for a return-to-pool so the existing call sites (blobs.py / agent_prompts.py / PgConn all do
+        # for a return-to-pool so the existing call sites (blobs.py / _exec.py / PgConn all do
         # `try/finally conn.close()`) recycle the connection transparently. Original close preserved
         # as `_hard_close` for the idle-reaper / close_all path.
         #

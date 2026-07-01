@@ -11,12 +11,12 @@ import time
 
 from fastapi import FastAPI
 
-from software_factory.chat_store import ChatStore, ChatMessage
-from software_factory import chat_agent
+from software_factory.data_transfer_objects.chat_agent import ChatMessage
 from software_factory import notify
 from software_factory import env as _env
 
 import console.state as state
+from console import chat_persistence
 
 _stage2_launched: set = set()
 _stage3_launched: set = set()
@@ -56,36 +56,19 @@ def _auto_advance(pid: str):
         pass
 
 
-def _append_notifications(pid: str, msgs):
-    """Persist + push stage notifications, deduped against the persisted chat history —
-    a restarted server re-walks stage transitions and re-fired old notifications AFTER
-    newer messages, scrambling the chat panel's chronology (run-45b8c4d5)."""
-    store = ChatStore(state._chat_path(pid))
-    try:
-        seen = {m.content for m in store.history()}
-    except Exception:
-        seen = set()
-    fresh = [m for m in msgs if m.content not in seen]
-    for m in fresh:
-        store.append(m)
-    if fresh:
-        state._push_sse(pid, fresh)
-
-
 def _narrate(pid: str, key: str, text: str):
     """SPEC §6: deterministic chat-panel narration — one message per (run, event), no LLM.
     Dedup survives server restarts by checking the persisted chat history, not just memory."""
     if (pid, key) in _narrated:
         return
     _narrated.add((pid, key))
-    store = ChatStore(state._chat_path(pid))
     try:
-        if any(m.content == text for m in store.history()):
+        if any(m.get("content") == text for m in chat_persistence.chat_history(pid)):
             return  # already narrated in a previous server life
     except Exception:
         pass
     msg = ChatMessage(role="assistant", content=text)
-    store.append(msg)
+    chat_persistence.persist_chat_turn(pid, msg)
     state._push_sse(pid, [msg])
     # Operator email on the four operator-relevant events (done / depswait / budget / crash) —
     # placed AFTER the dedup so an email fires at most once per (run, event). Fire-and-forget:
@@ -278,9 +261,7 @@ def _poll_transitions():
                 cur = st.get("stage", 1)
                 if cur != prev:
                     state._project_stages[pid] = cur
-                    _append_notifications(pid, chat_agent.check_and_notify(state.console, pid, prev_stage=prev))
                 if st.get("done") and prev > 0:
-                    _append_notifications(pid, chat_agent.check_and_notify(state.console, pid, prev_stage=cur))
                     state._project_stages.pop(pid, None)
         except Exception:
             pass

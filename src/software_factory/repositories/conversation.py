@@ -28,7 +28,7 @@ _COLS = (uuid_str_cast(conversation.c.id).label("id"),
          conversation.c.project_id, conversation.c.org_id,
          conversation.c.role, conversation.c.input, conversation.c.json_blob,
          conversation.c.tool_name, conversation.c.tool_call_id, conversation.c.tool_result,
-         conversation.c.referenced_artifact, conversation.c.model, conversation.c.provider,
+         conversation.c.model, conversation.c.provider,
          conversation.c.input_tokens, conversation.c.output_tokens, conversation.c.cost_usd,
          epoch_cast(conversation.c.created_at).label("created_at"))
 
@@ -48,7 +48,7 @@ class ConversationRepository:
 
     def insert(self, *, session_id, seq, role, json_blob, user_id=None, project_id=None,
               org_id=None, input_text=None, tool_name=None, tool_call_id=None,
-              tool_result=None, referenced_artifact=None, model=None, provider=None,
+              tool_result=None, model=None, provider=None,
               input_tokens=0, output_tokens=0, cost_usd=0.0):
         """Insert one message row at the given seq. Raises psycopg.errors.UniqueViolation if
         another writer already took this (session_id, seq) — the caller (ConversationStore.append)
@@ -64,7 +64,7 @@ class ConversationRepository:
             user_id=user_id, project_id=project_id, org_id=org_id, input=input_text,
             tool_name=tool_name, tool_call_id=tool_call_id,
             tool_result=serialize_jsonb(tool_result),
-            referenced_artifact=referenced_artifact, model=model, provider=provider,
+            model=model, provider=provider,
             input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost_usd,
         ).returning(uuid_str_cast(conversation.c.id).label("id"))
         return self._x.fetchone(stmt)["id"]

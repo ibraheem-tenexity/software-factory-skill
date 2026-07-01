@@ -191,8 +191,8 @@ def prepare_workspace(
             _write_langfuse_hook(ws)
 
     # Stage contract → ws/SKILL.md (both the prompt and opencode.json `instructions` reference that
-    # one name). An operator's web edit (skill_override, resolved per-runtime by the caller from the
-    # PromptStore) WINS — written verbatim; otherwise copy the on-disk default (the opencode variant's
+    # one name). An operator's web edit (skill_override, resolved by the caller from the
+    # SystemAgentStore) WINS — written verbatim; otherwise copy the on-disk default (the opencode variant's
     # monolithic framing when it exists and the runtime asks for it, else the claude SKILL.md).
     if skill_override is not None:
         with open(os.path.join(ws, "SKILL.md"), "w") as f:

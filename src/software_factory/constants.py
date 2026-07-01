@@ -44,3 +44,19 @@ RUNNER_KEYS = {"opencode": "OPENROUTER_API_KEY", "claude": "ANTHROPIC_API_KEY"}
 # ── Caps ──────────────────────────────────────────────────────────────────────
 # Hard cap on deploy-db provision attempts per run — prevents unbounded orphan DB spawns on failure.
 DEPLOY_DB_MAX_ATTEMPTS = 2
+
+# ── Concierge chat model ────────────────────────────────────────────────────────
+# The LangChain Concierge chooses between OpenAI (default) and Kimi (Moonshot, served via
+# OpenRouter, which is OpenAI-wire-compatible — same client class, different base_url/key).
+# SF_CHAT_MODEL overrides; empty + no OPENAI_API_KEY + an OPENROUTER_API_KEY present ⇒ Kimi.
+CONCIERGE_DEFAULT_MODEL = "gpt-5.4"
+CONCIERGE_KIMI_MODEL = "moonshotai/kimi-k2.7-code"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+# The five focuses one Concierge takes on (concierge-agent-spec.md §2/§4.6) — same identity,
+# different framing per session.
+CONCIERGE_CONTEXTS = ("intake", "overview", "build", "docs", "ingesting")
+# Operator-override prompt cache TTL — a Tenexity OS prompt edit drives the next session within this window.
+CONCIERGE_PROMPT_CACHE_TTL_SECONDS = 60.0
+# Shown when a generation still fails to produce a valid ConciergeTurn after one retry (spec §3):
+# a bad generation must never 500 the turn.
+CONCIERGE_SAFE_FALLBACK = "Sorry, I didn't quite catch that — could you say that again?"
