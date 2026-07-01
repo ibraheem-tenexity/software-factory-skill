@@ -214,6 +214,8 @@ and `role_id`→`roles`, resolved per-request. `password_hash` (scrypt) backs em
 ### blobs
 Metadata for stored files (the bytes live in object storage, addressed by `storage_key`). `scope` is
 `'project'` or `'org'`; `scope_id` is the owning project/org id. `name`/`tag` are display labels.
+`source_blob_id`/`source_page`/`provenance` (SOF-26) are set only when this blob is itself an asset
+extracted FROM another blob (e.g. an image pulled out of a document page) — null for an original upload.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -228,6 +230,9 @@ Metadata for stored files (the bytes live in object storage, addressed by `stora
 | size_bytes | Integer | |
 | sha256 | Text | |
 | created_at | DateTime(tz) | server_default `now()` |
+| source_blob_id | Integer | FK → blobs.id; the document this asset was extracted from |
+| source_page | Integer | 1-based source page/slide, when extracted |
+| provenance | jsonb | not null default `'{}'`; extractor, bbox, etc. |
 
 ### blob_uses
 One row per (blob, project) — a project drawing on an org-scoped knowledge-base doc. The org-KB
@@ -239,6 +244,77 @@ One row per (blob, project) — a project drawing on an org-scoped knowledge-bas
 | blob_id | Integer | not null; FK → blobs.id |
 | project_id | Text | not null; FK → projectstate.project_id |
 | created_at | DateTime(tz) | server_default `now()` |
+
+### doc_summary
+Project Memory (SOF-26): the per-document "2,000-ft view", keyed 1:1 on the document's `blobs` row.
+`scope`/`scope_id` mirror `blobs` so project- and org-scoped memory share one app-layer filter shape
+(isolation is app-layer + credential-scoped MCP, not RLS — see ARCHITECTURE §7). `key_facts` entries
+each carry their own source reference (document + section/page) — no bare confidence scores.
+
+| Column | Type | Notes |
+|---|---|---|
+| blob_id | Integer | PK, FK → blobs.id (ON DELETE CASCADE) |
+| scope | Text | not null; `'project'` or `'org'` |
+| scope_id | Text | not null |
+| summary_md | Text | map-reduce summary of the whole document |
+| key_facts | jsonb | not null default `'{}'`; extracted facts, each with a source reference |
+| outline | jsonb | not null default `'[]'`; section titles + one-line gist each |
+| embedding | vector(1024) | pgvector; the document-level embedding |
+| token_count | Integer | |
+| content_sha256 | Text | staleness check vs `blobs.sha256` |
+| status | Text | not null default `'pending'` — `pending`\|`ready`\|`failed` |
+| updated_at | DateTime(tz) | server_default `now()` |
+
+### chunk
+Project Memory (SOF-26): the leaf retrieval unit — one row per chunk of a document, hybrid-searchable
+(dense `vector` + Postgres native `tsvector` as the sparse/keyword channel; no separate learned-sparse
+model yet — see `project-memory-stack-2026.md`). `fts` is Postgres-generated from `content`, defined in
+`models.py` via `Computed(...)` so `create_all` in tests builds the identical column the Alembic
+migration does.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | Integer | PK, autoincrement |
+| blob_id | Integer | not null; FK → blobs.id (ON DELETE CASCADE) |
+| scope | Text | not null |
+| scope_id | Text | not null |
+| ordinal | Integer | not null; position within the document |
+| section_path | Text | e.g. `"2 / 2.3 Auth"` — hierarchical nav |
+| content | Text | not null |
+| dense | vector(1024) | pgvector; OpenRouter dense embedding |
+| fts | tsvector | generated always as `to_tsvector('english', content)` stored |
+| token_count | Integer | |
+
+### conversation
+Durable, provider-agnostic conversation store (SOF-26; replaces the in-memory `/converse` mock and
+the volume-only `chat.jsonl` — see `concierge-conversation-store.md`). One row per message/turn; `id`
+is the message_id returned to the FE. `json_blob` is the canonical content-block list — the source of
+truth for provider replay; `input`/`tool_result` are denormalized display/query conveniences.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid | PK, `gen_random_uuid()` — the message_id |
+| session_id | uuid | not null; groups one conversation/thread |
+| seq | Integer | not null; monotonic order within session (replay key) |
+| user_id | uuid | FK → users.id; null for agent/tool/system turns |
+| project_id | Text | null for org-level chat |
+| org_id | Text | |
+| role | Text | not null — `user`\|`agent`\|`tool`\|`system` |
+| input | Text | plaintext, denormalized from `json_blob` |
+| json_blob | jsonb | not null default `'[]'`; canonical content blocks (source of truth) |
+| tool_name | Text | |
+| tool_call_id | Text | correlates `tool_use` ↔ `tool_result` |
+| tool_result | jsonb | convenience mirror of the result block |
+| referenced_artifact | Integer | FK → blobs.id |
+| model | Text | |
+| provider | Text | `'openai'` \| `'anthropic'` \| `'openrouter'` \| ... |
+| input_tokens | Integer | default `0` |
+| output_tokens | Integer | default `0` |
+| cost_usd | Float | default `0` |
+| created_at | DateTime(tz) | not null, server_default `now()` |
+| updated_at | DateTime(tz) | not null, server_default `now()` |
+
+Unique constraint `(session_id, seq)`; indexes on `project_id`, `org_id`, `user_id`.
 
 ## Files on the volume
 
@@ -261,3 +337,8 @@ without `DATABASE_URL`, idempotent, and safe to re-run.
 `_wipe_if_stale` (in `migrate.py`) ran once for the big-bang project rename: when the DB carried a
 pre-rename Alembic stamp it dropped the `public` schema so the baseline could rebuild from scratch. It
 is a no-op on a fresh DB or one already on the current chain.
+
+`0008_project_memory` adds `doc_summary`/`chunk` + the `vector` extension (pgvector) + `blobs`
+provenance columns; `0009_conversation` adds `conversation`. Both require the target Postgres to
+have pgvector available — `CREATE EXTENSION IF NOT EXISTS vector` fails loudly if it's absent
+rather than silently degrading.

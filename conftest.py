@@ -140,6 +140,10 @@ def _build_schema() -> None:
     from sqlalchemy import create_engine
     from software_factory import models
     engine = create_engine(_sa_url(_PRIVATE_URL), connect_args={"prepare_threshold": None})
+    # SOF-26: doc_summary.embedding / chunk.dense are pgvector Vector columns — the extension
+    # must exist before create_all issues their CREATE TABLE, or those two tables fail to build.
+    with engine.begin() as conn:
+        conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
     models.metadata.create_all(engine)
     engine.dispose()
 
