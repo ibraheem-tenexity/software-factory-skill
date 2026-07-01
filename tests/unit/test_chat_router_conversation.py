@@ -7,9 +7,7 @@ directly, matching the DB-free posture this whole memory/conversation track has 
 session (conftest.py bootstraps a real Postgres connection at collection time for every test
 file, unconditionally).
 """
-import time
 import uuid
-from datetime import datetime, timezone
 
 
 def _chat_session_id(project_id: str) -> str:
@@ -28,7 +26,7 @@ def _chat_history_from_rows(rows: list[dict]) -> list[dict]:
     out = []
     for r in rows:
         block = next((b for b in (r["json_blob"] or []) if b.get("type") == "text"), {})
-        ts = r["created_at"].timestamp() if hasattr(r["created_at"], "timestamp") else time.time()
+        ts = r["created_at"]   # #267: conversation_repo.py now selects created_at as epoch float
         out.append({
             "role": _from_conversation_role(r["role"]),
             "content": r["input"] or block.get("text", ""),
@@ -59,17 +57,17 @@ def test_role_mapping_round_trips_for_every_role():
 
 
 def test_chat_history_from_rows_maps_a_plain_text_turn():
-    now = datetime(2026, 7, 1, 10, 0, 0, tzinfo=timezone.utc)
+    now = 1782900000.0   # 2026-07-01T10:00:00Z — created_at now selects as epoch float (#267)
     rows = [{"role": "user", "input": "hello there",
             "json_blob": [{"type": "text", "text": "hello there", "msg_type": "text", "metadata": {}}],
             "created_at": now}]
     out = _chat_history_from_rows(rows)
     assert out == [{"role": "user", "content": "hello there", "msg_type": "text",
-                   "ts": now.timestamp(), "metadata": {}}]
+                   "ts": now, "metadata": {}}]
 
 
 def test_chat_history_from_rows_maps_agent_role_back_to_assistant():
-    now = datetime(2026, 7, 1, 10, 0, 0, tzinfo=timezone.utc)
+    now = 1782900000.0   # 2026-07-01T10:00:00Z — created_at now selects as epoch float (#267)
     rows = [{"role": "agent", "input": "hi, how can I help?",
             "json_blob": [{"type": "text", "text": "hi, how can I help?", "msg_type": "text", "metadata": {}}],
             "created_at": now}]
@@ -78,7 +76,7 @@ def test_chat_history_from_rows_maps_agent_role_back_to_assistant():
 
 
 def test_chat_history_from_rows_preserves_dep_submit_msg_type_and_metadata():
-    now = datetime(2026, 7, 1, 10, 0, 0, tzinfo=timezone.utc)
+    now = 1782900000.0   # 2026-07-01T10:00:00Z — created_at now selects as epoch float (#267)
     rows = [{"role": "user", "input": "Provided: RAILWAY_TOKEN",
             "json_blob": [{"type": "text", "text": "Provided: RAILWAY_TOKEN",
                           "msg_type": "dep_submit", "metadata": {"dep_names": ["RAILWAY_TOKEN"]}}],
@@ -89,7 +87,7 @@ def test_chat_history_from_rows_preserves_dep_submit_msg_type_and_metadata():
 
 
 def test_chat_history_from_rows_preserves_system_status_update():
-    now = datetime(2026, 7, 1, 10, 0, 0, tzinfo=timezone.utc)
+    now = 1782900000.0   # 2026-07-01T10:00:00Z — created_at now selects as epoch float (#267)
     rows = [{"role": "system", "input": "Dependencies received.",
             "json_blob": [{"type": "text", "text": "Dependencies received.",
                           "msg_type": "status_update",
