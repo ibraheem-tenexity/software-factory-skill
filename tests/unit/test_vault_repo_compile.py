@@ -2,7 +2,7 @@
 pipeline as Table-based Core statements, with the ANY(list) array-bind semantics preserved (a single
 bound param, not IN-expansion)."""
 from software_factory.repositories._compile import to_sql
-from software_factory.repositories.vault_repo import VaultRepository
+from software_factory.repositories.vault import VaultRepository
 
 
 class FakeExec:

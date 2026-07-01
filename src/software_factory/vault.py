@@ -7,14 +7,14 @@ vault_store   — encrypt and store a secret, returns UUID
 vault_retrieve_many — decrypt a set of secrets by UUID, returns {name: value}
 vault_delete_many   — delete stored secrets by UUID (called on archive/teardown)
 
-DATA ACCESS: the SQL lives in `repositories.vault_repo.VaultRepository` (SQLAlchemy Core `text()` —
+DATA ACCESS: the SQL lives in `repositories.vault.VaultRepository` (SQLAlchemy Core `text()` —
 the Vault extension's own internal objects have no `Table` definition in models.py; we don't own
 that schema).
 """
 from __future__ import annotations
 
 from .repositories._exec import GlobalExec
-from .repositories.vault_repo import VaultRepository
+from .repositories.vault import VaultRepository
 
 _repo = VaultRepository(GlobalExec())
 

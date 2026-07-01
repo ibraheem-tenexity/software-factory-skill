@@ -15,7 +15,7 @@ Role lookups happen on every request, so the directory is cached in-process with
 invalidated on every write — a status/role/token_version change shows within seconds (and immediately
 for changes made through this process) without a DB round-trip per request.
 
-LAYERING (CRUD/app-logic separation): `UserRepository` (repositories/users_repo.py) holds the pure,
+LAYERING (CRUD/app-logic separation): `UserRepository` (repositories/users.py) holds the pure,
 parameterized SQL as SQLAlchemy Core constructs (no cache, no normalization, no lifecycle decisions).
 `UserStore` is the business layer: it owns the read cache + fallback-to-stale, email normalization,
 the invited→active lifecycle, RBAC validation, cold-start seeding, and org orchestration, delegating
@@ -37,7 +37,7 @@ import uuid
 
 from . import auth
 from .repositories._exec import GlobalExec
-from .repositories.users_repo import UserRepository
+from .repositories.users import UserRepository
 
 _CACHE_TTL = 20.0
 # Canonical internal organization — every Tenexity staff member links to it (so "Your organization"

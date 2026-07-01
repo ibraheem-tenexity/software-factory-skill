@@ -2,7 +2,7 @@
 CONFLICT upserts targeting the `email`/`name` UNIQUE constraints, and the self-referencing
 token_version increment. Behavior-equivalence round-trip is test_users.py, run when the flock is free."""
 from software_factory.repositories._compile import to_sql
-from software_factory.repositories.users_repo import UserRepository
+from software_factory.repositories.users import UserRepository
 
 
 class FakeExec:
