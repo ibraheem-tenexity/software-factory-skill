@@ -8,34 +8,17 @@ share one app-layer filter shape (isolation is app-layer + credential-scoped MCP
 from __future__ import annotations
 
 from .. import dbshim
-from ..log import get_logger
-
-logger = get_logger(__name__)
-
-
-def _connect_with_vector_adapter():
-    """dbshim.connect(path)'s `path` argument is unused for the actual connection target (a
-    legacy artifact of the old per-project-sqlite convention) — the real target is
-    DATABASE_URL. psycopg3 has no built-in adapter for pgvector's `vector` type, so a raw
-    Python list passed for `dense`/`embedding` needs pgvector.psycopg.register_vector() on
-    the connection first, or the insert raises a "cannot adapt type 'list'" error. Registered
-    per-connection (not globally) since dbshim pools/recycles connections across call sites
-    that never touch vector columns. UNVERIFIED against a live pgvector-enabled DB (this
-    module was written under the memory-track's no-DB-connection sandbox constraint) — flagged
-    in the PR for the integrator's off-box run."""
-    conn = dbshim.connect(".")
-    try:
-        from pgvector.psycopg import register_vector
-        register_vector(conn._conn)
-    except Exception:
-        logger.debug("[memory.store] pgvector register_vector failed — vector inserts may "
-                     "fail if this connection ever writes dense/embedding", exc_info=True)
-    return conn
 
 
 class MemoryStore:
     def __init__(self, connect=None):
-        self._connect = connect or _connect_with_vector_adapter
+        # dbshim.connect(path)'s `path` argument is unused for the actual connection target
+        # (a legacy artifact of the old per-project-sqlite convention) — the real target is
+        # DATABASE_URL. `connect` is injectable for tests. pgvector's register_vector() is
+        # registered centrally in dbshim._StatePool._configure (see that module) — every
+        # connection this returns already has it, so dense/embedding reads come back as real
+        # arrays, not strings.
+        self._connect = connect or (lambda: dbshim.connect("."))
 
     # ---- doc_summary --------------------------------------------------------------------
     def upsert_doc_summary(
