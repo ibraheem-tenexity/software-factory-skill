@@ -21,6 +21,13 @@ from software_factory.chat_agent import (
 )
 
 
+class _FakeAIMessage:
+    """A minimal stand-in for langchain_core.messages.AIMessage — only the attribute
+    _extract_usage actually reads."""
+    def __init__(self, usage_metadata=None):
+        self.usage_metadata = usage_metadata
+
+
 class TestConciergeTurnContract:
     def test_response_is_required_and_non_empty(self):
         with pytest.raises(ValidationError):
@@ -153,6 +160,107 @@ class TestConciergeAgentRetryAndFallback:
             agent = ConciergeAgent(model=MagicMock())
             with pytest.raises(ConnectionError):
                 agent.run("intake", messages=[])
+
+
+class TestRunWithUsage:
+    """SOF-57: ConciergeAgent.run_with_usage() surfaces real token/cost data alongside the
+    ConciergeTurn, without changing run()'s existing single-return contract (still used
+    untouched by DbConversation/services/conversation.py)."""
+
+    def test_run_still_returns_only_the_turn(self):
+        fake_compiled = MagicMock()
+        fake_compiled.invoke.return_value = {"structured_response": ConciergeTurn(response="ok"),
+                                             "messages": []}
+        with patch("langchain.agents.create_agent", return_value=fake_compiled):
+            agent = ConciergeAgent(model=MagicMock())
+            turn = agent.run("intake", messages=[])
+        assert isinstance(turn, ConciergeTurn) and turn.response == "ok"
+
+    def test_run_with_usage_extracts_tokens_and_computes_real_cost(self):
+        ai_msg = _FakeAIMessage(usage_metadata={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120})
+        fake_compiled = MagicMock()
+        fake_compiled.invoke.return_value = {"structured_response": ConciergeTurn(response="ok"),
+                                             "messages": [ai_msg]}
+        with patch("langchain.agents.create_agent", return_value=fake_compiled), \
+             patch("software_factory.chat_agent.chat_model_label", return_value="gpt-5.4"), \
+             patch("software_factory.chat_agent.pricing.openrouter_price",
+                   return_value={"input": 0.00001, "output": 0.00003}) as mock_price:
+            agent = ConciergeAgent(model=MagicMock())
+            turn, usage = agent.run_with_usage("intake", messages=[])
+        assert turn.response == "ok"
+        assert usage == {"model": "gpt-5.4", "provider": "openai", "input_tokens": 100,
+                         "output_tokens": 20, "cost_usd": 100 * 0.00001 + 20 * 0.00003}
+        mock_price.assert_called_once_with("openai/gpt-5.4", kind="chat")
+
+    def test_run_with_usage_uses_openrouter_id_verbatim_for_kimi(self):
+        ai_msg = _FakeAIMessage(usage_metadata={"input_tokens": 10, "output_tokens": 5})
+        fake_compiled = MagicMock()
+        fake_compiled.invoke.return_value = {"structured_response": ConciergeTurn(response="ok"),
+                                             "messages": [ai_msg]}
+        with patch("langchain.agents.create_agent", return_value=fake_compiled), \
+             patch("software_factory.chat_agent.chat_model_label",
+                   return_value="moonshotai/kimi-k2.7-code"), \
+             patch("software_factory.chat_agent.pricing.openrouter_price",
+                   return_value={"input": 0.0, "output": 0.0}) as mock_price:
+            agent = ConciergeAgent(model=MagicMock())
+            _turn, usage = agent.run_with_usage("intake", messages=[])
+        assert usage["provider"] == "openrouter"
+        mock_price.assert_called_once_with("moonshotai/kimi-k2.7-code", kind="chat")
+
+    def test_run_with_usage_reports_none_cost_when_pricing_lookup_fails(self):
+        ai_msg = _FakeAIMessage(usage_metadata={"input_tokens": 10, "output_tokens": 5})
+        fake_compiled = MagicMock()
+        fake_compiled.invoke.return_value = {"structured_response": ConciergeTurn(response="ok"),
+                                             "messages": [ai_msg]}
+        with patch("langchain.agents.create_agent", return_value=fake_compiled), \
+             patch("software_factory.chat_agent.chat_model_label", return_value="gpt-5.4"), \
+             patch("software_factory.chat_agent.pricing.openrouter_price", return_value=None):
+            agent = ConciergeAgent(model=MagicMock())
+            _turn, usage = agent.run_with_usage("intake", messages=[])
+        assert usage["input_tokens"] == 10 and usage["cost_usd"] is None
+
+    def test_run_with_usage_returns_zero_tokens_when_no_message_has_usage_metadata(self):
+        fake_compiled = MagicMock()
+        fake_compiled.invoke.return_value = {"structured_response": ConciergeTurn(response="ok"),
+                                             "messages": [_FakeAIMessage(usage_metadata=None)]}
+        with patch("langchain.agents.create_agent", return_value=fake_compiled), \
+             patch("software_factory.chat_agent.chat_model_label", return_value="gpt-5.4"):
+            agent = ConciergeAgent(model=MagicMock())
+            _turn, usage = agent.run_with_usage("intake", messages=[])
+        assert usage["input_tokens"] == 0 and usage["output_tokens"] == 0 and usage["cost_usd"] is None
+
+    def test_run_with_usage_falls_back_to_zero_usage_when_both_attempts_fail_with_no_ai_message(self):
+        fake_compiled = MagicMock()
+        fake_compiled.invoke.return_value = {"structured_response": {"response": ""}, "messages": []}
+        with patch("langchain.agents.create_agent", return_value=fake_compiled), \
+             patch("software_factory.chat_agent.chat_model_label", return_value="gpt-5.4"):
+            agent = ConciergeAgent(model=MagicMock())
+            turn, usage = agent.run_with_usage("intake", messages=[])
+        assert turn.response == _SAFE_FALLBACK_RESPONSE
+        assert usage == {"model": "gpt-5.4", "provider": "openai", "input_tokens": 0,
+                         "output_tokens": 0, "cost_usd": None}
+
+    def test_run_with_usage_captures_real_tokens_from_a_failed_structured_output_attempt(self):
+        """Live-confirmed (SOF-57 verification): gpt-5.4's native structured-output mode can fail
+        StructuredOutputValidationError on a call that still really happened and really cost
+        tokens -- create_agent's own exception carries that call's `ai_message`
+        (`usage_metadata` included), so a fallback turn must still report the real usage rather
+        than 0/null just because the JSON coercion failed on top of it."""
+        from langchain.agents.structured_output import StructuredOutputValidationError
+
+        billed_ai_message = _FakeAIMessage(usage_metadata={"input_tokens": 80, "output_tokens": 30})
+        fake_compiled = MagicMock()
+        fake_compiled.invoke.side_effect = StructuredOutputValidationError(
+            "ConciergeTurn", ValueError("bad json"), billed_ai_message)
+        with patch("langchain.agents.create_agent", return_value=fake_compiled), \
+             patch("software_factory.chat_agent.chat_model_label", return_value="gpt-5.4"), \
+             patch("software_factory.chat_agent.pricing.openrouter_price",
+                   return_value={"input": 0.00001, "output": 0.00003}):
+            agent = ConciergeAgent(model=MagicMock())
+            turn, usage = agent.run_with_usage("intake", messages=[])
+        assert turn.response == _SAFE_FALLBACK_RESPONSE   # still degrades safely (spec §3)
+        assert usage["input_tokens"] == 80 * 2 and usage["output_tokens"] == 30 * 2  # both attempts billed
+        assert usage["cost_usd"] == (80 * 2) * 0.00001 + (30 * 2) * 0.00003
 
 
 class TestBuildChatModel:
