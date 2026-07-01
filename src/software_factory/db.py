@@ -17,6 +17,7 @@ import os
 
 import sys
 import time
+import weakref
 from typing import Optional
 
 from sqlalchemy import delete as _sa_delete
@@ -67,7 +68,14 @@ class ProjectStore:
         # Postgres; schema owned by Alembic (prod) / tests. All SQL is in repositories/canvas_repo.py.
         self._exec = PathExec(path)
         self._conn = self._exec._conn  # back-compat: a diagnostic test reads the raw PgConn directly
-        get_pid = lambda: self._project_id  # live getter — a caller may reassign self._project_id
+        # Live getter via a WEAKREF, not a closure over `self` directly: a closure capturing `self`
+        # and stored on an attribute `self` owns (self._phase_repo, etc.) is a reference CYCLE — CPython
+        # won't return the pooled connection to dbshim's pool until the cyclic GC eventually runs,
+        # which exhausts the pool under any call site that constructs many short-lived ProjectStores
+        # (e.g. gates.py's per-call `_db_for()`). weakref.ref breaks the cycle; the store always
+        # outlives its own repos, so the ref is never dead when the getter is actually called.
+        _self_ref = weakref.ref(self)
+        get_pid = lambda: _self_ref()._project_id
         self._projectstate_repo = ProjectStateRepository(self._exec)
         self._phase_repo = PhaseRepository(self._exec, get_pid)
         self._artifact_repo = ArtifactRepository(self._exec, get_pid)
