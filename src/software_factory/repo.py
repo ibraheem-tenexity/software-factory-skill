@@ -31,6 +31,11 @@ class GitHub:
         args.append("--private" if private else "--public")
         return self._run(args).stdout.strip()
 
+    def clone_repo(self, url: str) -> None:
+        """Clone an already-existing repo into the cwd (SOF-22: stage-3 reusing the repo stage-1
+        already created via create_repo's own --clone doesn't get that clone for free)."""
+        self._run(["repo", "clone", url])
+
     def add_collaborator(self, repo: str, username: str, permission: str = "pull") -> bool:
         """Invite `username` as a collaborator on `repo` ('owner/repo'). GitHub's collaborator
         API is username-only (no email-invite path exists for personal-account-owned repos,

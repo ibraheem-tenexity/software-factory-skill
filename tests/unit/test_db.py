@@ -192,6 +192,91 @@ def test_provision_db_verb_persists_service_id_and_records_artifact(tmp_path, mo
                and a["path"] == "context/" + dd.DEPLOY_DB_FILE for a in arts)
 
 
+# ── provision-repo verb (SOF-22) — one canonical repo per project, whichever stage calls it ──
+# first: both stage-1 and stage-3 call the SAME verb; only the first caller actually creates a
+# repo (and records it), so two independent SKILL-driven creation paths can never leave two
+# real repos + two duplicate "GitHub Repo" artifact rows for one project.
+
+def test_provision_repo_verb_creates_persists_and_records_once(tmp_path, monkeypatch):
+    from software_factory.db import main
+    from software_factory import repo as repo_mod
+    runs = str(tmp_path); pid = "project-aaaa1111bbbb2222"
+    ws = tmp_path / pid / "workspace"; ws.mkdir(parents=True)
+    monkeypatch.chdir(ws)
+    calls = []
+    monkeypatch.setattr(repo_mod.GitHub, "create_repo",
+                        lambda self, name, private=True: calls.append(name) or f"https://github.com/acme/{name}")
+    assert main(["provision-repo", runs, pid, "quote-follow-up"]) == 0
+    assert calls == ["quote-follow-up-aaaa1111"]           # host-computed <slug>-<8hex>, agent never picks the suffix
+    st = ProjectState.load(pid, ProjectStore(db_path(runs, pid)))
+    assert st.repo_url == "https://github.com/acme/quote-follow-up-aaaa1111"
+    arts = ProjectStore(db_path(runs, pid)).artifacts()
+    assert sum(1 for a in arts if a["kind"] == "repo") == 1
+    assert arts[0]["title"] == "GitHub Repo" and arts[0]["path"] == st.repo_url
+
+
+def test_provision_repo_verb_is_idempotent_second_caller_reuses_no_duplicate(tmp_path, monkeypatch):
+    """Simulates the real bug: stage-1 provisions, then stage-3 (a different workspace, same
+    project) calls the SAME verb. It must reuse stage-1's repo — no second create_repo call,
+    no second artifact row — and clone it into its own (fresh) cwd."""
+    from software_factory.db import main
+    from software_factory import repo as repo_mod
+    runs = str(tmp_path); pid = "project-cccc3333dddd4444"
+    stage1_ws = tmp_path / pid / "stage1-workspace"; stage1_ws.mkdir(parents=True)
+    stage3_ws = tmp_path / pid / "stage3-workspace"; stage3_ws.mkdir(parents=True)
+
+    create_calls, clone_calls = [], []
+    monkeypatch.setattr(repo_mod.GitHub, "create_repo",
+                        lambda self, name, private=True: create_calls.append(name) or f"https://github.com/acme/{name}")
+    monkeypatch.setattr(repo_mod.GitHub, "clone_repo", lambda self, url: clone_calls.append(url))
+
+    monkeypatch.chdir(stage1_ws)
+    assert main(["provision-repo", runs, pid, "quote-follow-up"]) == 0
+    assert len(create_calls) == 1
+    assert clone_calls == []          # first call: create_repo's own --clone covers it, no separate clone needed
+
+    monkeypatch.chdir(stage3_ws)
+    # stage-3 might pick a different slug (it doesn't matter — repo_url is already set, so the
+    # slug is ignored and the EXISTING repo is reused, not a second one under this new name).
+    assert main(["provision-repo", runs, pid, "sf-project"]) == 0
+    assert len(create_calls) == 1                          # still just the one repo — no second create_repo call
+    assert clone_calls == ["https://github.com/acme/quote-follow-up-cccc3333"]  # cloned into stage-3's fresh workspace
+
+    st = ProjectState.load(pid, ProjectStore(db_path(runs, pid)))
+    assert st.repo_url == "https://github.com/acme/quote-follow-up-cccc3333"
+    arts = ProjectStore(db_path(runs, pid)).artifacts()
+    assert sum(1 for a in arts if a["kind"] == "repo") == 1     # still exactly one "GitHub Repo" artifact
+
+
+def test_provision_repo_verb_reuse_skips_clone_when_already_checked_out(tmp_path, monkeypatch):
+    """A retry within the SAME workspace (repo already cloned there) must not re-clone."""
+    from software_factory.db import main
+    from software_factory import repo as repo_mod
+    runs = str(tmp_path); pid = "project-eeee5555ffff6666"
+    ws = tmp_path / pid / "workspace"; (ws / ".git").mkdir(parents=True)
+    monkeypatch.chdir(ws)
+    clone_calls = []
+    monkeypatch.setattr(repo_mod.GitHub, "clone_repo", lambda self, url: clone_calls.append(url))
+    st = ProjectState.load(pid, ProjectStore(db_path(runs, pid)))
+    st.repo_url = "https://github.com/acme/already-here-eeee5555"
+    st.save()
+    assert main(["provision-repo", runs, pid, "irrelevant"]) == 0
+    assert clone_calls == []
+
+
+def test_provision_repo_verb_exits_nonzero_when_create_repo_fails(tmp_path, monkeypatch):
+    from software_factory.db import main
+    from software_factory import repo as repo_mod
+    runs = str(tmp_path); pid = "project-11119999aaaa8888"
+    ws = tmp_path / pid / "workspace"; ws.mkdir(parents=True)
+    monkeypatch.chdir(ws)
+    monkeypatch.setattr(repo_mod.GitHub, "create_repo", lambda self, name, private=True: "")
+    assert main(["provision-repo", runs, pid, "quote-follow-up"]) == 1
+    st = ProjectState.load(pid, ProjectStore(db_path(runs, pid)))
+    assert not st.repo_url
+    assert ProjectStore(db_path(runs, pid)).artifacts() == []
+
+
 def test_provision_db_verb_salvages_partial_service_id_and_exits_nonzero(tmp_path, monkeypatch):
     """provision() writes the serviceId to disk then raises (e.g. variables read timed out): the
     verb salvages that partial id onto state (so the reaper can tear it down) and exits non-zero

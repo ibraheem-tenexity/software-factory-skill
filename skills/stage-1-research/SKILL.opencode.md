@@ -39,7 +39,13 @@ into usable scope. Do NOT re-record an input artifact — the console already di
 ## Phase 2: provision  (`set-phase provision`)
 
 - `creds.check_all(target, env)` — any failure is a hard block (`add-blocker`), recorded, never guessed.
-- `GitHub.create_repo(name)`; seed `ProjectState`; `workspace.create` (the repo clones into your cwd's workspace).
+- `workspace.create`, then from inside it: `python3 -m software_factory.db provision-repo <projects_dir>
+  <project_id> <slug>` — creates this project's ONE canonical GitHub repo (named `<slug>-<8-hex
+  project id prefix>`), clones it into your cwd, persists it to `ProjectState`, and records the
+  "GitHub Repo" artifact for you (SOF-22 — do NOT call `GitHub.create_repo` or `record-artifact
+  "GitHub Repo"` yourself; Stage 3 calls this SAME verb and must reuse your repo, not create a
+  second one). Pick `<slug>` as you would have picked the repo name before (short, human-readable,
+  derived from the project name).
 
 ## Phase 3: research COUNCIL — work the seats in order, then synthesize  (`set-phase research`)
 
