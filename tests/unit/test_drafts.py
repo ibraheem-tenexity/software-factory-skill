@@ -18,6 +18,15 @@ def _console(tmp_path, launcher):
                    new_id=lambda: next(ids), extract=lambda p: "# x")
 
 
+# SOF-52: promote_draft now gates on brief.enough() — any test that promotes but isn't itself
+# testing brief content needs a complete one first, or it hits Conflict instead of the launcher.
+_COMPLETE_BRIEF = {
+    "goals": "A cargo screening prototype for ground handlers to log screening events.",
+    "success_metrics": "A stakeholder cannot distinguish it from the hand-built demo.",
+    "definition_of_done": "All V1 screens deployed and browser-verified.",
+}
+
+
 def test_create_draft_mints_canonical_id_and_is_not_a_pipeline_run(tmp_path):
     c = _console(tmp_path, FakeLauncher())
     rid = c.create_draft(owner="op@tenexity.ai", name="Cargo", runtime="claude")
@@ -88,6 +97,7 @@ def test_set_draft_project_updates_runtime_so_promote_uses_the_picked_engine(tmp
     launcher = FakeLauncher()
     c = _console(tmp_path, launcher)
     rid = c.create_draft(owner="op@tenexity.ai", runtime="claude")
+    c.update_draft_brief(rid, _COMPLETE_BRIEF)
     assert c._load_state(rid).runtime == "claude"
     c.set_draft_project(rid, runtime="opencode")
     assert c._load_state(rid).runtime == "opencode"
@@ -254,6 +264,7 @@ def test_promote_draft_threads_draft_vault_ids_into_provision(tmp_path):
     c = Console(str(tmp_path), launch=launcher,
                 new_id=lambda: "project-00000001", extract=lambda p: "# x")
     rid = c.create_draft(owner="op@tenexity.ai")
+    c.update_draft_brief(rid, _COMPLETE_BRIEF)
 
     # Store a BYOK key via the draft-creds endpoint
     with patch.object(_v, "vault_store", return_value="vault-uuid-111"):
@@ -282,12 +293,12 @@ def test_promote_draft_carries_budget_ceiling(tmp_path):
     c = _console(tmp_path, launcher)
     rid = c.create_draft(owner="op@tenexity.ai", name="Cargo", runtime="claude", budget=99.0)
     c.update_draft_brief(rid, {
-        "goals": "A prototype.",
+        "goals": "A prototype for cargo screening at ground handlers.",
         "success_metrics": "Indistinguishable from the hand-built demo.",
-        "definition_of_done": "Deployed.",
+        "definition_of_done": "Deployed and browser-verified.",
         "constraints": "Web only.",
     })
-    c.set_draft_project(rid, name="Cargo", goal="A prototype.", scope=["web"])
+    c.set_draft_project(rid, name="Cargo", goal="A prototype for cargo screening at ground handlers.", scope=["web"])
     c.promote_draft(rid)
     # budget_ceiling must survive the promote; _provision_and_launch must not zero it
     state = c._load_state(rid)

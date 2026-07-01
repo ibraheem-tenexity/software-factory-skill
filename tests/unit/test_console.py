@@ -518,6 +518,11 @@ def test_created_by_stamped_at_draft_and_immutable_through_promote(tmp_path):
     # is promoted. owner stays the reassignable current owner.
     c = Console(str(tmp_path), launch=FakeLauncher(), new_id=lambda: "project-cb1")
     rid = c.create_draft(owner="alice@x.com", name="P")
+    c.update_draft_brief(rid, {
+        "goals": "a project to test created_by immutability",
+        "success_metrics": "created_by never changes after reassignment",
+        "definition_of_done": "the assertion below passes",
+    })
     st = c._load_state(rid)
     assert st.created_by == "alice@x.com" and st.created_at > 0
     st.owner = "bob@x.com"; st.save()                       # owner reassigned

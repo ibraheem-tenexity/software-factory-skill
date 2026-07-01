@@ -107,6 +107,11 @@ def test_promote_draft_twice_blocked(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key-x")
     c, launcher = _make_console(tmp_path, ["project-draft01", "project-draft02"])
     draft_id = c.create_draft(owner="u@x.com")
+    c.update_draft_brief(draft_id, {
+        "goals": "a todo app for personal task tracking",
+        "success_metrics": "a user can add, complete, and delete a task",
+        "definition_of_done": "the todo screen is deployed and browser-verified",
+    })
 
     # First promote: succeeds, stage-1 starts
     c.promote_draft(draft_id, description="todo app")

@@ -543,32 +543,15 @@ def promote_draft(pid: str, body: PromoteIn, v: tuple = Depends(authorize_projec
     """Hand off to the factory: promote the draft into a real run and launch Stage 1. The composed
     state.description + accumulated brief are the payload (description override optional).
 
-    SOF-51 trust gate: refuses to promote unless BOTH hold — the brief covers every
-    brief.REQUIRED_SECTIONS (goals/success_metrics/definition_of_done) AND no reflection
-    question (an unreferenced key_facts candidate from ingested materials, SOF-37) is still
-    open. Composed into ONE 409 when either or both fail, so the FE/operator sees everything
-    that's missing at once rather than fixing one and re-discovering the other on resubmit.
-
-    Known gap, not fixed here (flagging, not silently patching): this check is enforced only at
-    this HTTP layer. console.promote_draft() itself has no such gate, and the concierge's own
-    hand_off_to_factory tool (chat_agent.py) calls that method directly — so a user who talks
-    the concierge into promoting bypasses BOTH this check and SOF-37's, same as before this
-    ticket. Out of scope per the ticket's explicit "at the promote route" framing."""
+    SOF-52: the brief-completeness (SOF-51) + open-reflection-questions (SOF-37) trust gate now
+    lives in console.promote_draft() itself, not here — it raises services.errors.Conflict, which
+    app.py's global ServiceError handler serializes to the exact same 409 shape this route used
+    to build inline. Gate-by-construction: every caller of that method is covered, not just this
+    route (the concierge's hand_off_to_factory tool included — see chat_agent.py)."""
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
-    project_state = state.console._load_state(pid)
-    from software_factory.brief import enough as _enough
-    ready, missing_sections = _enough(project_state.brief or {})
-    open_questions = [q for q in (project_state.reflection_questions or []) if q["status"] == "open"]
-    if not ready or open_questions:
-        detail = {"error": "project is not ready to promote"}
-        if not ready:
-            detail["missing_sections"] = missing_sections
-        if open_questions:
-            detail["open_questions"] = open_questions
-        raise HTTPException(status_code=409, detail=detail)
     try:
         project_id = state.console.promote_draft(pid, description=body.description, target=body.target)
-    except ValueError as e:                # duplicate project name
-        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:                # duplicate project name (a separate, pre-existing
+        raise HTTPException(status_code=409, detail=str(e))  # check inside _provision_and_launch)
     return {"project_id": project_id, "status": "started"}

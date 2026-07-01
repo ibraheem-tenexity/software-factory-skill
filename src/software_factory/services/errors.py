@@ -12,7 +12,7 @@ class ServiceError(Exception):
     """Base for service-layer failures. `status_code` is the HTTP status the console maps it to."""
     status_code = 400
 
-    def __init__(self, detail: str):
+    def __init__(self, detail: str | dict):
         self.detail = detail
         super().__init__(detail)
 
