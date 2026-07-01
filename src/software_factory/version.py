@@ -1,9 +1,15 @@
 """Expose the running build's git SHA so a deploy can be verified against an expected commit.
 
-Sourced at runtime, in order: ``SF_GIT_SHA`` (baked onto the service by scripts/deploy.sh) →
-``RAILWAY_GIT_COMMIT_SHA`` (set by Railway for git-connected deploys) → ``git rev-parse HEAD``
-fallback (local / dev checkout) → ``"unknown"``. ``dirty`` reflects an uncommitted working tree
-and is only meaningful in a dev checkout; an env-baked deploy reports ``false``.
+Sourced at runtime, in order: ``RAILWAY_GIT_COMMIT_SHA`` (injected fresh by Railway on every
+git-connected deploy, auto or manual) → ``SF_GIT_SHA`` (a manual override; no longer baked
+persistently by scripts/deploy.sh as of SOF-24) → ``git rev-parse HEAD`` fallback (local / dev
+checkout) → ``"unknown"``. RAILWAY_GIT_COMMIT_SHA must win: it's the only source that's guaranteed
+current on every deploy. SF_GIT_SHA is a persistent Railway service variable — once set, it
+outlives the deploy that set it, so checking it first let a stale value from an old MANUAL deploy
+silently shadow newer commits shipped by a native git-source AUTO-deploy (which never runs
+deploy.sh and so never refreshes it) — SOF-24, follow-up to the SOF-16 auto-deploy rollout.
+``dirty`` reflects an uncommitted working tree and is only meaningful in a dev checkout; an
+env-provided deploy reports ``false``.
 
 Used by GET /api/version (console/routers/open_routes.py). Knowing the deployed SHA lets the
 verify step confirm it is exercising the commit it thinks it is — half of the TEN-151 /
@@ -33,7 +39,7 @@ def version_info(
     """Return ``{"sha", "short", "dirty"}`` for the running build. ``env``/``git`` are injectable
     for testing; in production both default to the live process environment and real git."""
     env = os.environ if env is None else env
-    baked = (env.get("SF_GIT_SHA") or env.get("RAILWAY_GIT_COMMIT_SHA") or "").strip()
+    baked = (env.get("RAILWAY_GIT_COMMIT_SHA") or env.get("SF_GIT_SHA") or "").strip()
 
     sha = baked or (git(["rev-parse", "HEAD"]) or "").strip()
 
