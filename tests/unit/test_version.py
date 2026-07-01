@@ -12,16 +12,27 @@ def _no_git(_args):
     return None
 
 
-def test_prefers_sf_git_sha():
-    info = version_info(env={"SF_GIT_SHA": _SHA}, git=_no_git)
+def test_prefers_railway_commit_sha_over_stale_sf_git_sha():
+    # SOF-24: RAILWAY_GIT_COMMIT_SHA (fresh on every git-source deploy) must win over SF_GIT_SHA
+    # (a persistent var that an earlier MANUAL deploy could have baked and left behind) — this is
+    # exactly the regression a native-git-source auto-deploy hit after a prior manual deploy.
+    stale = "b2c3d4e5f60718293a4b5c6d7e8f9001122334a1"
+    info = version_info(env={"RAILWAY_GIT_COMMIT_SHA": _SHA, "SF_GIT_SHA": stale}, git=_no_git)
     assert info == {"sha": _SHA, "short": _SHA[:7], "dirty": False}
 
 
-def test_falls_back_to_railway_commit_sha():
+def test_railway_commit_sha_alone():
     info = version_info(env={"RAILWAY_GIT_COMMIT_SHA": _SHA}, git=_no_git)
     assert info["sha"] == _SHA
     assert info["short"] == _SHA[:7]
     assert info["dirty"] is False
+
+
+def test_falls_back_to_sf_git_sha_when_no_railway_commit_sha():
+    # The only signal a manual `railway up` deploy has — Railway's git-metadata vars are only
+    # injected for GitHub-source-triggered deploys, never for `railway up`.
+    info = version_info(env={"SF_GIT_SHA": _SHA}, git=_no_git)
+    assert info == {"sha": _SHA, "short": _SHA[:7], "dirty": False}
 
 
 def test_git_fallback_clean_tree():
