@@ -14,7 +14,6 @@ ENV PUPPETEER_CACHE_DIR=/ms-puppeteer
 # (omit=optional / no network for the optional dep) and leaves an unrunnable text stub.
 # We install it via the official native installer below instead.
 RUN npm install -g @railway/cli @playwright/mcp playwright @mermaid-js/mermaid-cli @supabase/mcp-server-supabase
-RUN pip3 install --break-system-packages openai-agents 'markitdown[pdf,docx]' pypandoc_binary mammoth markdownify 'psycopg[binary]>=3.1' fastapi 'uvicorn[standard]' 'alembic>=1.13' 'google-auth>=2.28' 'python-dotenv>=1.0' 'langfuse>=4.12.0' 'openinference-instrumentation-openai-agents>=1.6.1' 'pgvector>=0.3.6' 'chonkie>=1.0'
 
 # Chromium + OS libs into a SHARED path so the non-root runtime user can use them.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
@@ -60,7 +59,27 @@ RUN mkdir -p /opt/swarm \
 ENV SF_SWARM_BIN=/opt/swarm/swarm OPENCODE_SWARM_PLUGIN=/opt/swarm/swarm-plugin.js
 
 WORKDIR /app
+
+# Python deps FROM pyproject.toml — the single source of truth (SOF-48). A separate hand-
+# maintained pip3 list here used to drift from pyproject.toml (a dependency could be added to one
+# and not the other) and silently crash-loop prod on the next deploy (#237: pgvector). Only
+# pyproject.toml + src/ copied at this point (not the full repo below) so an unrelated console/
+# or docs/ change doesn't invalidate this layer.
+COPY pyproject.toml /app/pyproject.toml
+COPY src /app/src
+# [postgres] extra pulls psycopg[binary] (prebuilt libpq, no system libpq-dev in this image —
+# apt-get above never installs one).
+RUN pip3 install --break-system-packages "/app[postgres]"
+
 COPY . /app
+
+# Import-smoke check: FAILS THE BUILD (not a live deploy) if any software_factory/console module,
+# or a known lazily-imported package (see scripts/verify_deps.py), doesn't actually resolve —
+# catches the case pip installing successfully but the code still not importing (e.g. an ABI
+# mismatch), which a dependency-list diff alone would miss. `console` lives at repo root, not
+# under src/, so it needs /app on the path too (matching how the entrypoint's `cd /app` +
+# uvicorn resolve it at runtime).
+RUN PYTHONPATH=/app/src:/app python3 /app/scripts/verify_deps.py
 
 # Build the React console SPA (served when SF_CONSOLE=react). Node is already in the base image,
 # so this is build-time only — the runtime is still uvicorn. Non-fatal: legacy index.html serves

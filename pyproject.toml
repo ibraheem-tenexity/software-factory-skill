@@ -17,6 +17,12 @@ dependencies = [
     "openinference-instrumentation-openai-agents>=1.6.1",
     "pgvector>=0.3.6",
     "chonkie>=1.0",
+    # doc extraction (pdf_extract.py / docx_extract.py) — lazily imported, so a plain top-level
+    # import-smoke check misses them; scripts/verify_deps.py imports them explicitly too.
+    "markitdown[pdf,docx]",
+    "pypandoc_binary",
+    "mammoth",
+    "markdownify",
 ]
 
 [project.optional-dependencies]
