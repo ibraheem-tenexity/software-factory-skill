@@ -129,4 +129,10 @@ The **Linear** project "Software Factory" (https://linear.app/tenexity/project/s
 Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
 https://claude.ai/design/p/b4af3934-9633-4d26-bade-e53b92d7cc49?file=Software+Factory+Onboarding.html
 
-That is the design system contain prototypes of all screens and tokens and 
+That is the design system contain prototypes of all screens and tokens and
+
+## Deploy (SOF-16)
+`factory-console` auto-deploys on push to `main` via Railway's native GitHub source connect
+(armed once by an operator running `scripts/enable-auto-deploy.sh`) — this is the norm, not a
+manual step. `scripts/deploy.sh` (preflight → bake `SF_GIT_SHA` → `railway up`) is the **fallback**
+for a hand-driven deploy (hotfix, re-deploy without a new commit, or if auto-deploy is disconnected). 
