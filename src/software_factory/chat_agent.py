@@ -1,17 +1,30 @@
-"""Factory Concierge — model selection + system prompt.
+"""Factory Concierge — model selection, system prompt, and the LangChain agent (T2.1/T2.2).
 
 SOF-35: the OpenAI Agents SDK runtime (`Agent`/`Runner`) and its 14 tools (`make_tools`) are
 removed — they didn't work reliably and were not being fixed (see
-docs/project-memory-concierge/concierge-agent-spec.md §1). `/api/chat` is a stub
-(`state._chat_runner = None`, console/state.py) until the LangChain rebuild (T2.1/T2.2) lands.
-Model selection, the system prompt, and its operator-override cache are unchanged and are
-reused as-is by the new agent.
+docs/project-memory-concierge/concierge-agent-spec.md §1). Model selection, the system prompt,
+and its operator-override cache are unchanged and are reused by `ConciergeAgent` below.
+
+SOF-39/40: `ConciergeAgent` is the replacement — one context-parameterized LangChain agent
+(system prompt + empty/extensible tool belt) whose terminal turn is coerced to `ConciergeTurn`.
+It is NOT YET WIRED into `/api/chat` or `/converse` (`state._chat_runner` stays `None`,
+`services/conversation.py`'s mock is untouched) — that delegation lands once the conversation-
+store shape (T1.3, a parallel track) is confirmed, per the PR notes. `ConciergeAgent` is fully
+standalone and testable on its own in the meantime.
+
+Uses `langchain.agents.create_agent` (LangChain/LangGraph 1.x) — NOT the deprecated
+`langgraph.prebuilt.create_react_agent` the original design note assumed; the installed version
+in this repo warns `create_react_agent` is deprecated in favor of `create_agent`, which has an
+equivalent `response_format=<PydanticModel>` structured-output parameter and an empty-`tools`
+no-loop mode, so there's no capability gap — just a newer import path.
 """
 from __future__ import annotations
 
 import os
 import time
-from typing import Callable
+from typing import Callable, Literal
+
+from pydantic import BaseModel, Field, ValidationError
 
 from software_factory.chat_store import ChatMessage
 from software_factory.console import Console
@@ -192,3 +205,94 @@ def check_and_notify(console: Console, project_id: str, prev_stage: int = 0) -> 
         ))
 
     return msgs
+
+
+# ── T2.2: the structured-output contract (concierge-agent-spec.md §3) ─────────────────────────
+# This is what drives the UI: suggested_responses empty => a plain-text turn; non-empty => the
+# FE renders selectable options, `type` deciding radio (single) vs checkbox (multi). No `choices`/
+# `done` -- the shape IS the state.
+
+class SuggestedResponse(BaseModel):
+    response: str = Field(min_length=1)
+    type: Literal["single select", "multi select"]
+
+
+class ConciergeTurn(BaseModel):
+    response: str = Field(min_length=1)   # required, non-empty -- the assistant's utterance
+    suggested_responses: list[SuggestedResponse] = Field(default_factory=list)
+
+
+# A bad generation must never 500 the turn (spec §3) -- this is what ConciergeAgent.run returns
+# after one retry still fails to produce a valid ConciergeTurn.
+_SAFE_FALLBACK_RESPONSE = "Sorry, I didn't quite catch that -- could you say it again?"
+
+
+# ── T2.1: one context-parameterized LangChain agent ────────────────────────────────────────────
+# Product spec Principle 2 / §4.6: ONE assistant, same identity/voice everywhere; only its focus
+# (`context`) changes. Deliberately minimal -- system prompt + agent loop + a tool belt that
+# starts empty. No multi-agent graphs, no chains-of-chains.
+CONCIERGE_CONTEXTS = ("intake", "overview", "build", "docs", "ingesting")
+
+
+def _build_chat_model():
+    """LangChain chat model honoring the SAME SF_CHAT_MODEL env selection as select_chat_model()
+    (OpenAI gpt-5.4 default, or Kimi K2.7 Code via OpenRouter's OpenAI-compatible endpoint) -- the
+    model choice logic is identical, only the returned object type differs (a LangChain
+    BaseChatModel here, vs the OpenAI-Agents-SDK model wrapper select_chat_model() returns)."""
+    from langchain_openai import ChatOpenAI
+
+    choice = os.environ.get("SF_CHAT_MODEL", "").strip().lower()
+    if _use_kimi(choice):
+        return ChatOpenAI(
+            model=_KIMI_MODEL,
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.environ.get("OPENROUTER_API_KEY", ""),
+        )
+    return ChatOpenAI(model=choice or _DEFAULT_OPENAI_CHAT_MODEL)
+
+
+class ConciergeAgent:
+    """One LangChain agent, reused across all five contexts (spec §4.6) -- only the system
+    prompt's focus changes, never the identity/voice. Tool belt starts empty (spec §5); real
+    tools are bound later, one at a time, only when backed by a working service.
+
+    `model`/`tools` are injectable for testing (a fake chat model, no live API calls)."""
+
+    def __init__(self, model=None, tools=None):
+        self._model = model if model is not None else _build_chat_model()
+        self._tools = list(tools) if tools else []
+
+    def _compiled_agent_for(self, context: str):
+        if context not in CONCIERGE_CONTEXTS:
+            raise ValueError(f"unknown concierge context: {context!r} (expected one of {CONCIERGE_CONTEXTS})")
+        from langchain.agents import create_agent
+        system_prompt = f"{resolve_concierge_instructions()}\n\n## Current focus: {context}"
+        return create_agent(self._model, self._tools, system_prompt=system_prompt,
+                            response_format=ConciergeTurn)
+
+    def run(self, context: str, messages: list) -> ConciergeTurn:
+        """`messages`: a LangChain-shaped message list (the conversation-store's to_provider()
+        output, T1.2). Returns a validated ConciergeTurn -- never raises on a structured-output
+        failure: retries once, then falls back to a safe {response, suggested_responses: []}
+        rather than 500ing the turn (spec §3).
+
+        NOTE ON EXCEPTION SCOPE: this catches ValidationError (pydantic) and ValueError (this
+        class's own "no structured_response" guard) as the retry-worthy failure modes. It has
+        NOT been verified against a live model call in this environment (no API key available,
+        and no live spend was authorized for this exploratory build) -- confirm the exact
+        exception LangChain 1.x's structured-output coercion actually raises on a malformed
+        generation before this ships, and widen/narrow this catch to match reality rather than
+        assumption."""
+        agent = self._compiled_agent_for(context)
+        for _attempt in range(2):
+            try:
+                result = agent.invoke({"messages": messages})
+                structured = result.get("structured_response")
+                if isinstance(structured, ConciergeTurn):
+                    return structured
+                if structured is None:
+                    raise ValueError("agent returned no structured_response")
+                return ConciergeTurn.model_validate(structured)
+            except (ValidationError, ValueError):
+                continue
+        return ConciergeTurn(response=_SAFE_FALLBACK_RESPONSE, suggested_responses=[])
