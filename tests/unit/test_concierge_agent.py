@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
+from langchain.agents.structured_output import ToolStrategy
+
 from software_factory.chat_agent import (
     CONCIERGE_CONTEXTS,
     ConciergeAgent,
@@ -66,13 +68,19 @@ class TestConciergeAgentConstruction:
             agent.run("overview", messages=[])
         assert "Current focus: overview" in mock_create.call_args.kwargs["system_prompt"]
 
-    def test_response_format_is_concierge_turn(self):
+    def test_response_format_is_concierge_turn_via_tool_strategy(self):
+        # SOF-58: a bare Pydantic response_format resolves to LangChain's native ProviderStrategy
+        # for OpenAI models -- confirmed live, gpt-5.4 under that strategy triplicates its JSON
+        # output on effectively every turn. ToolStrategy forces structured output through a
+        # function-call argument instead, sidestepping the triplication entirely.
         fake_compiled = MagicMock()
         fake_compiled.invoke.return_value = {"structured_response": ConciergeTurn(response="ok")}
         with patch("langchain.agents.create_agent", return_value=fake_compiled) as mock_create:
             agent = ConciergeAgent(model=MagicMock())
             agent.run("intake", messages=[])
-        assert mock_create.call_args.kwargs["response_format"] is ConciergeTurn
+        response_format = mock_create.call_args.kwargs["response_format"]
+        assert isinstance(response_format, ToolStrategy)
+        assert response_format.schema is ConciergeTurn
 
     def test_tools_passed_through_to_create_agent(self):
         fake_compiled = MagicMock()
