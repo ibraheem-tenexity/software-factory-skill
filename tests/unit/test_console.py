@@ -1235,7 +1235,7 @@ def test_provide_deployed_dep_success_flips_disposition_and_stores_vault_entry(t
     c = console(tmp_path, FakeLauncher())
     project_id = _deployed_project(c)
     result = c.provide_deployed_dep(project_id, "OPENROUTER_API_KEY", "sk-real")
-    assert result == {"ok": True, "name": "OPENROUTER_API_KEY", "disposition": "provide"}
+    assert result == {"ok": True, "name": "OPENROUTER_API_KEY", "disposition": "provide", "vault_saved": True}
     state = c._load_state(project_id)
     assert state.deps_disposition["OPENROUTER_API_KEY"] == "provide"
     assert "OPENROUTER_API_KEY" in state.deps_provided
@@ -1255,7 +1255,7 @@ def test_provide_deployed_dep_succeeds_even_if_vault_store_raises(tmp_path, monk
     c = console(tmp_path, FakeLauncher())
     project_id = _deployed_project(c)
     result = c.provide_deployed_dep(project_id, "OPENROUTER_API_KEY", "sk-real")
-    assert result == {"ok": True, "name": "OPENROUTER_API_KEY", "disposition": "provide"}
+    assert result == {"ok": True, "name": "OPENROUTER_API_KEY", "disposition": "provide", "vault_saved": False}
     state = c._load_state(project_id)
     assert state.deps_disposition["OPENROUTER_API_KEY"] == "provide"
     assert "OPENROUTER_API_KEY" not in state.creds_vault_ids
