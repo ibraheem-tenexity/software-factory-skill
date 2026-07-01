@@ -106,11 +106,23 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
 
 @router.post("/api/projects/{pid}/converse", response_model=ConverseOut)
 def converse(pid: str, body: ConverseIn, v: tuple = Depends(authorize_project)):
-    """One onboarding-Concierge turn: record the user's message, return the (mock) agent's reply —
-    plain text or up to 4 choices, plus `done` when it's inviting hand-off. Backed by the in-memory
-    mock `conversation_svc` for now; swaps to the real agent + DB-backed history later with no route
-    change. `authorize_project` gates cross-org access."""
-    return state.conversation_svc.turn(pid, body.message)
+    """One onboarding-Concierge turn: record the user's message, return the agent's reply as a
+    ConciergeTurn — {response, suggested_responses[]} (T2.2; no `choices`/`done`). Backed by the
+    in-memory mock `Conversation` or the DB-backed `DbConversation` (SF_CONVERSATION_DB) — the
+    latter delegates to the real LangChain ConciergeAgent (T2.1); the mock stays scripted.
+    `authorize_project` gates cross-org access."""
+    result = state.conversation_svc.turn(pid, body.message)
+    if "response" in result:
+        return result   # DbConversation already returns the new ConciergeTurn shape
+    # Conversation (the mock) still returns its ORIGINAL {message, choices, done} — untouched,
+    # per T1.3's hermetic-mock contract (its own tests assert this shape directly). Translate at
+    # the wire boundary so ConverseOut's new contract holds regardless of which service is active;
+    # `choices` (single-select strings) map to single-select suggested_responses, `done` becomes a
+    # hand-off invite suggested_response rather than a hidden boolean (spec §3).
+    suggested = [{"response": c, "type": "single select"} for c in result.get("choices", [])]
+    if result.get("done"):
+        suggested = [{"response": "Hand off to the factory", "type": "single select"}]
+    return {"response": result["message"], "suggested_responses": suggested}
 
 
 @router.get("/api/chat/{pid}/history")
