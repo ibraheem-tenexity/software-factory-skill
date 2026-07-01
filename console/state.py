@@ -28,7 +28,7 @@ from software_factory.registries import ToolStore, AgentRegistryStore  # noqa: E
 from software_factory.sow import SowStore  # noqa: E402
 from software_factory.services.org_service import OrgService  # noqa: E402
 from software_factory.services.secrets import Secrets  # noqa: E402
-from software_factory.services.conversation import Conversation  # noqa: E402
+from software_factory.services.conversation import Conversation, DbConversation  # noqa: E402
 from software_factory.services.admin_service import AdminService  # noqa: E402
 from software_factory.services.files import doc_kind as _doc_kind  # noqa: E402,F401
 
@@ -82,7 +82,11 @@ def reset():
     # the current instances; rebuilt each reset() so per-test TRUNCATE + re-seed is reflected.
     org_service = OrgService(users, blobs, console)
     secrets_svc = Secrets()
-    conversation_svc = Conversation()
+    # DbConversation (SOF-31/T1.3) is the durable swap for the onboarding mock — same turn()/
+    # history() contract, backed by ConversationStore. Opt-in via SF_CONVERSATION_DB so tests and
+    # existing deploys stay on the in-memory mock until the flag is flipped.
+    conversation_svc = (DbConversation(users=users) if os.environ.get("SF_CONVERSATION_DB") == "1"
+                        else Conversation())
     admin_service = AdminService(console, users, agent_store, tool_store, prompts, sow_store)
     # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
     _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))

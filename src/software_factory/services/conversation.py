@@ -1,13 +1,16 @@
-"""In-memory mock Concierge conversation — stands in until the real LangChain agent + the DB-backed
-chat-history store ship (see docs/concierge-agent-spec.md). Returns deterministic scripted turns so
-the frontend conversation loop (plain-text vs up-to-4-choice questions → hand off) can be built and
-demoed without a model key.
+"""In-memory mock Concierge conversation — stands in until the real LangChain agent ships (see
+docs/concierge-agent-spec.md). Returns deterministic scripted turns so the frontend conversation
+loop (plain-text vs up-to-4-choice questions → hand off) can be built and demoed without a model
+key.
 
 Framework-free (only `time` + `errors.py`); one in-memory transcript per project_id; resets on
-restart — expected for the mock. When the real agent lands, its class replaces this one in
-`console/state.py::reset()` with the SAME `turn()` contract, leaving the route + frontend untouched.
+restart — expected for the mock. `DbConversation` below (SOF-31/T1.3) is the durable swap: same
+`turn()`/`history()` contract, backed by `ConversationStore` instead of an in-memory dict.
+`console/state.py::reset()` picks one or the other behind `SF_CONVERSATION_DB` — this mock class
+and its own tests (`tests/unit/test_conversation.py`) are untouched, unconditionally hermetic.
 """
 import time
+import uuid
 
 from software_factory.services.errors import Invalid
 
@@ -55,3 +58,54 @@ class Conversation:
 
 def _now() -> float:
     return time.time()
+
+
+def _onboarding_session_id(project_id: str) -> str:
+    """Deterministic session_id for the (exactly one) onboarding conversation per project —
+    concierge-conversation-store.md §2. uuid5 over a fixed, standard namespace so this needs no
+    magic constant of its own and is stable across processes/deployments."""
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"onboarding:{project_id}"))
+
+
+class DbConversation:
+    """DB-backed Concierge conversation (SOF-31/T1.3) — the SAME turn()/history() contract as the
+    mock above, now durable via ConversationStore. Storage-only swap per the ticket's own scope:
+    the scripted `_SCRIPT` reply logic is preserved verbatim (not coupled to the agent rewrite —
+    that's T2.x), just re-homed to read "how many prior agent turns" from persisted history
+    instead of an in-memory list.
+
+    `choices`/`done` were never a persisted concept even in the mock — they're recomputed fresh
+    from script position on every `turn()` call. `history()` keeps that: it reports an empty
+    `choices` list per row (the existing test contract only asserts `role` values from
+    `history()`, never `choices`/`content`, so this is a safe, surgical simplification)."""
+
+    def __init__(self, users=None, store=None):
+        if store is not None:
+            self._store = store
+        else:
+            from software_factory.conversation_store import ConversationStore
+            self._store = ConversationStore(users=users)
+
+    def history(self, project_id: str) -> list[dict]:
+        """The full transcript for a project (oldest first). Empty if none yet."""
+        rows = self._store.history(_onboarding_session_id(project_id))
+        return [{"role": r["role"], "content": r["input"] or "", "choices": []} for r in rows]
+
+    def turn(self, project_id: str, message: str) -> dict:
+        """Record the user's message and return the (mock-scripted) agent's next turn:
+        {"message": str, "choices": list[str] (≤4), "done": bool}. Raises `Invalid` on an empty
+        message — persists nothing on that path, matching the mock."""
+        text = (message or "").strip()
+        if not text:
+            raise Invalid("message is empty")
+        session_id = _onboarding_session_id(project_id)
+
+        self._store.append(session_id, "user", [{"type": "text", "text": text}],
+                          project_id=project_id)
+
+        prior_agent_turns = sum(1 for r in self._store.history(session_id) if r["role"] == "agent")
+        done = prior_agent_turns >= len(_SCRIPT)
+        reply, choices = _HANDOFF if done else _SCRIPT[prior_agent_turns]
+        self._store.append(session_id, "agent", [{"type": "text", "text": reply}],
+                          project_id=project_id)
+        return {"message": reply, "choices": list(choices), "done": done}
