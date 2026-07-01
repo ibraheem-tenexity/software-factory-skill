@@ -6,7 +6,8 @@ from sqlalchemy import delete
 
 from software_factory.repositories._compile import to_sql
 from software_factory.repositories.canvas_repo import (
-    ProjectStateRepository, PhaseRepository, GateRepository, VerificationRepository)
+    ProjectStateRepository, PhaseRepository, GateRepository, VerificationRepository,
+    BlockerRepository, ArtifactRepository)
 from software_factory.models import tickets, agents, checkpoint
 
 
@@ -73,3 +74,35 @@ def test_flat_tables_delete_loop_scopes_each_table():
         sql, params = to_sql(stmt)
         assert sql.startswith(f"DELETE FROM {table.name}")
         assert params == ("p1",)
+
+
+# -- batch/cross-project reads (console.py N+1-prevention, converted from raw SQL) --------------
+def test_projectstate_batch_by_projects_in_clause():
+    fx = FakeExec()
+    ProjectStateRepository.batch_by_projects(fx, ["p1", "p2"])
+    _clean(fx.sql)
+    assert "projectstate.project_id IN (%s, %s)" in fx.sql
+    assert fx.params == ("p1", "p2")
+
+
+def test_phase_batch_statuses_order_by():
+    fx = FakeExec()
+    PhaseRepository.batch_statuses(fx, ["p1", "p2"])
+    _clean(fx.sql)
+    assert "phases.project_id IN (%s, %s)" in fx.sql
+    assert "ORDER BY phases.ts, phases.id" in fx.sql
+
+
+def test_blocker_batch_by_projects():
+    fx = FakeExec()
+    BlockerRepository.batch_by_projects(fx, ["p1"])
+    _clean(fx.sql)
+    assert "blockers.project_id IN (%s)" in fx.sql
+
+
+def test_artifact_batch_for_projects_order_by():
+    fx = FakeExec()
+    ArtifactRepository.batch_for_projects(fx, ["p1", "p2"])
+    _clean(fx.sql)
+    assert "artifacts.project_id IN (%s, %s)" in fx.sql
+    assert "ORDER BY artifacts.project_id, artifacts.id" in fx.sql
