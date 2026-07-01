@@ -70,6 +70,32 @@ def test_upsert_doc_summary_is_idempotent_on_conflict():
     assert row["status"] == "ready"
 
 
+def test_list_doc_summaries_returns_blob_id_keyed_map_for_the_scope():
+    """SOF-36: the Documents-tab enrichment reads this in bulk (one query per project view load,
+    not one per blob) — must be keyed by blob_id and scoped like everything else here."""
+    blob_id_a = _make_blob(storage_key="input/a.md")
+    blob_id_b = _make_blob(storage_key="input/b.md")
+    other_scope_blob = _make_blob(scope="project", scope_id="project-store-test-OTHER",
+                                  storage_key="input/c.md")
+    store = MemoryStore()
+    store.upsert_doc_summary(blob_id_a, "project", "project-store-test",
+                             summary_md="Summary A", status="ready")
+    store.upsert_doc_summary(blob_id_b, "project", "project-store-test",
+                             summary_md="Summary B", status="pending")
+    store.upsert_doc_summary(other_scope_blob, "project", "project-store-test-OTHER",
+                             summary_md="Not this scope", status="ready")
+
+    result = store.list_doc_summaries("project", "project-store-test")
+    assert set(result.keys()) == {blob_id_a, blob_id_b}
+    assert result[blob_id_a]["summary_md"] == "Summary A" and result[blob_id_a]["status"] == "ready"
+    assert result[blob_id_b]["summary_md"] == "Summary B" and result[blob_id_b]["status"] == "pending"
+
+
+def test_list_doc_summaries_empty_scope_returns_empty_dict():
+    store = MemoryStore()
+    assert store.list_doc_summaries("project", "project-store-test-NEVER-USED") == {}
+
+
 def test_overview_counts_doc_summaries_by_status_for_the_scope():
     blob_a = _make_blob(scope_id="project-overview-test")
     blob_b = _make_blob(scope_id="project-overview-test")

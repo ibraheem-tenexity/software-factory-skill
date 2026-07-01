@@ -140,6 +140,40 @@ def test_ingest_blob_dedups_on_unchanged_content_sha256():
     pass  # needs a real BlobStore/MemoryStore round-trip; see module docstring
 
 
+def test_ingest_blob_default_dedups_but_force_bypasses_it():
+    """SOF-36: the Regenerate button passes force=True — it must skip the unchanged-content
+    dedup short-circuit above, even though that specific pass-stub needs a real DB round-trip
+    to exercise the full pipeline. This one doesn't: BlobStore/MemoryStore are mocked (module-
+    level, matching how they're constructed inside ingest_blob), so both branches of the `if not
+    force and existing and ...` check are exercised with no DB at all."""
+    from unittest.mock import MagicMock, patch
+
+    blob = {"id": 1, "scope": "project", "scope_id": "project-x", "name": "doc.pdf", "sha256": "abc"}
+    existing = {"status": "ready", "content_sha256": "abc"}  # unchanged vs. blob["sha256"]
+
+    mock_blobs_store = MagicMock()
+    mock_blobs_store.get_blob.return_value = blob
+    mock_memory_store = MagicMock()
+    mock_memory_store.get_doc_summary.return_value = existing
+
+    with patch("software_factory.memory.ingest.BlobStore", return_value=mock_blobs_store), \
+         patch("software_factory.memory.ingest.MemoryStore", return_value=mock_memory_store):
+        # force=False (default): dedup skip fires — early return, no attempt to fetch bytes.
+        result = ingest.ingest_blob(1, console=MagicMock())
+    assert result == {"blob_id": 1, "status": "ready", "skipped": "unchanged (content_sha256 dedup)"}
+    mock_memory_store.upsert_doc_summary.assert_not_called()
+
+    with patch("software_factory.memory.ingest.BlobStore", return_value=mock_blobs_store), \
+         patch("software_factory.memory.ingest.MemoryStore", return_value=mock_memory_store), \
+         patch("software_factory.memory.ingest._fetch_blob_bytes",
+              side_effect=RuntimeError("reached the real pipeline")):
+        # force=True: dedup skip must NOT fire — proven by reaching (and failing inside) the
+        # real fetch/parse step instead of returning the "skipped" shortcut.
+        result = ingest.ingest_blob(1, console=MagicMock(), force=True)
+    assert result["status"] == "failed"
+    assert "skipped" not in result
+
+
 def test_ingest_blob_marks_failed_on_parse_error_without_raising():
     """A corrupt file's extract() call raising must land the doc as status=failed and return a
     clean dict — never propagate, so a caller iterating N blobs continues to the next one."""

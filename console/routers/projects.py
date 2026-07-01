@@ -205,9 +205,19 @@ def project_overview(pid: str, v: tuple = Depends(authorize_project)):
     }
 
 
+def _project_documents(pid: str) -> dict:
+    """Documents tab payload, enriched with each doc's AI summary (SOF-36) when memory has one —
+    `list_doc_summaries` returns {} if SF_MEMORY is off or nothing's been ingested yet, so this
+    degrades gracefully either way."""
+    from software_factory.memory.store import MemoryStore
+    doc_summaries = MemoryStore().list_doc_summaries("project", pid)
+    return project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid),
+                                  doc_summaries)
+
+
 @router.get("/api/projects/{pid}/documents")
 def project_documents(pid: str, v: tuple = Depends(authorize_project)):
-    return project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid))
+    return _project_documents(pid)
 
 
 @router.post("/api/projects/{pid}/materials")
@@ -226,7 +236,25 @@ def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authori
                  kind=state._doc_kind(body.name), content_type=body.content_type,
                  size_bytes=len(raw), sha256=storage.sha256(raw))
     maybe_ingest_async(blob_id, state.console)
-    return project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid))
+    return _project_documents(pid)
+
+
+@router.post("/api/projects/{pid}/documents/{blob_id}/summarize")
+def project_document_summarize(pid: str, blob_id: int, v: tuple = Depends(authorize_project)):
+    """Auto-summarize / Regenerate (SOF-36/T3.3): synchronously re-runs the T3.2 ingestion
+    pipeline for one document, bypassing the unchanged-content skip so a click always produces a
+    fresh summary. The user is waiting on this, unlike the upload path's fire-and-forget
+    maybe_ingest_async — small enough (one document) to just block on."""
+    from software_factory.memory import ingest as memory_ingest
+    if not memory_ingest.enabled():
+        raise HTTPException(status_code=404, detail="project memory is not enabled")
+    blob = state.blobs.get_blob(blob_id)
+    if not blob or blob["scope"] != "project" or blob["scope_id"] != pid:
+        raise HTTPException(status_code=404, detail="document not found")
+    result = memory_ingest.ingest_blob(blob_id, console=state.console, force=True)
+    if result.get("status") == "failed":
+        raise HTTPException(status_code=502, detail=result.get("error") or "summarization failed")
+    return _project_documents(pid)
 
 
 @router.get("/api/projects/{pid}/ingest/stream")

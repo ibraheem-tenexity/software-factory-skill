@@ -56,6 +56,19 @@ class MemoryStore:
         finally:
             conn.close()
 
+    def list_doc_summaries(self, scope: str, scope_id: str) -> dict[int, dict]:
+        """blob_id -> {summary_md, status} for every doc_summary row in this scope — a bulk read
+        for enriching a document listing (SOF-36) without an N+1 per-blob query."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT blob_id, summary_md, status FROM doc_summary WHERE scope = ? AND scope_id = ?",
+                (scope, scope_id),
+            ).fetchall()
+        finally:
+            conn.close()
+        return {r["blob_id"]: r for r in rows}
+
     # ---- chunk ---------------------------------------------------------------------------
     def add_chunk(
         self, blob_id: int, scope: str, scope_id: str, ordinal: int,
