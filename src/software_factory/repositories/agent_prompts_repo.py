@@ -5,14 +5,15 @@ which psycopg3 decodes to `Decimal`, not the `float` the rest of the app expects
 repositories/users.py's docstring, SOF-55)."""
 from __future__ import annotations
 
-from sqlalchemy import select, delete, func, cast, Float
+from sqlalchemy import select, delete, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..models import agent_prompts
+from ._compile import epoch_cast
 
 _COLS = (agent_prompts.c.callsign, agent_prompts.c.prompt, agent_prompts.c.version,
          agent_prompts.c.updated_by,
-         cast(func.extract("epoch", agent_prompts.c.updated_at), Float).label("updated_at"))
+         epoch_cast(agent_prompts.c.updated_at).label("updated_at"))
 
 
 class AgentPromptRepository:

@@ -17,15 +17,16 @@ SQLAlchemy's own bind/result processors never run; only psycopg3's own default a
 """
 from __future__ import annotations
 
-from sqlalchemy import select, insert, update, delete, func, cast, Text, Float
+from sqlalchemy import select, insert, update, delete, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..models import users, roles, organizations
+from ._compile import epoch_cast, uuid_str_cast
 
 _inv = users.alias("inv")  # self-join: the user who sent the invite
 
 _USER_COLS = (
-    cast(users.c.id, Text).label("id"),
+    uuid_str_cast(users.c.id).label("id"),
     users.c.google_sub,
     users.c.email,
     roles.c.name.label("role"),
@@ -38,9 +39,9 @@ _USER_COLS = (
     users.c.name.label("name"),
     users.c.sign_in_method,
     _inv.c.email.label("invited_by"),
-    cast(func.extract("epoch", users.c.created_at), Float).label("created_at"),
-    cast(func.extract("epoch", users.c.onboarded_at), Float).label("onboarded_at"),
-    cast(func.extract("epoch", users.c.last_active), Float).label("last_active"),
+    epoch_cast(users.c.created_at).label("created_at"),
+    epoch_cast(users.c.onboarded_at).label("onboarded_at"),
+    epoch_cast(users.c.last_active).label("last_active"),
 )
 # password_hash is deliberately NOT in _USER_COLS — this row feeds /api/users etc., so the hash must
 # never ride along. It's read only by `credentials()`'s dedicated query.
@@ -52,7 +53,7 @@ _ORG_COLS = (
     organizations.c.headcount, organizations.c.revenue, organizations.c.location,
     organizations.c.website, organizations.c.connected_systems, organizations.c.plan,
     organizations.c.monthly_budget_cap,
-    cast(func.extract("epoch", organizations.c.created_at), Float).label("created_at"),
+    epoch_cast(organizations.c.created_at).label("created_at"),
     organizations.c.created_by,
 )
 
@@ -67,7 +68,7 @@ class UserRepository:
         self._x.execute(stmt.on_conflict_do_nothing(index_elements=["name"]))
 
     def roles_rows(self) -> list:
-        return self._x.fetchall(select(cast(roles.c.id, Text).label("id"), roles.c.name))
+        return self._x.fetchall(select(uuid_str_cast(roles.c.id).label("id"), roles.c.name))
 
     # -- users --------------------------------------------------------------------------
     def all_users(self) -> list:
@@ -128,7 +129,7 @@ class UserRepository:
 
     def credentials(self, email: str) -> list:
         return self._x.fetchall(
-            select(cast(users.c.id, Text).label("id"), users.c.status, users.c.password_hash)
+            select(uuid_str_cast(users.c.id).label("id"), users.c.status, users.c.password_hash)
             .where(users.c.email == email))
 
     def touch_last_active(self, uid: str) -> None:

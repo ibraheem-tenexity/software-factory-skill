@@ -2,11 +2,10 @@
 so every method takes its filter values explicitly; no getter/closure, no cycle risk (see #212)."""
 from __future__ import annotations
 
-import json
-
-from sqlalchemy import select, insert, update, delete, func, distinct, cast, Float
+from sqlalchemy import select, insert, update, delete, func, distinct
 
 from ..models import blobs, blob_uses
+from ._compile import epoch_cast, serialize_jsonb
 
 _BLOB_COLS = (blobs.c.id, blobs.c.scope, blobs.c.scope_id, blobs.c.kind, blobs.c.name, blobs.c.tag,
               blobs.c.storage_key, blobs.c.content_type, blobs.c.size_bytes, blobs.c.sha256,
@@ -28,7 +27,7 @@ class BlobRepository:
                                     storage_key=storage_key, content_type=content_type,
                                     size_bytes=size_bytes, sha256=sha256,
                                     source_blob_id=source_blob_id, source_page=source_page,
-                                    provenance=json.dumps(provenance or {})).returning(blobs.c.id)
+                                    provenance=serialize_jsonb(provenance, default={})).returning(blobs.c.id)
         return self._x.fetchone(stmt)["id"]
 
     def list_for(self, scope, scope_id) -> list:
@@ -44,9 +43,7 @@ class BlobRepository:
         j = blobs.outerjoin(blob_uses, blob_uses.c.blob_id == blobs.c.id)
         stmt = (select(blobs.c.id, blobs.c.name, blobs.c.tag, blobs.c.kind, blobs.c.content_type,
                       blobs.c.size_bytes,
-                      # cast(..., Float): a bare extract() returns Postgres numeric, which
-                      # psycopg3 decodes to Decimal, not float (repositories/users.py, SOF-55)
-                      cast(func.extract("epoch", blobs.c.created_at), Float).label("updated"),
+                      epoch_cast(blobs.c.created_at).label("updated"),
                       func.count(distinct(blob_uses.c.project_id)).label("used_count"))
                .select_from(j)
                .where(blobs.c.scope == "org", blobs.c.scope_id == org_id)
