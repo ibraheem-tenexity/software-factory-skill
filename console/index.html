@@ -316,7 +316,7 @@
 
   <script>
     const $ = (id) => document.getElementById(id);
-    let cy = null, runId = null, timer = null, cola = null, laidOut = false, logCapped = null;
+    let cy = null, runId = null, timer = null, cola = null, laidOut = false;
 
     function nodeColor(ele) {
       const k = ele.data("kind"), s = ele.data("status");
@@ -435,22 +435,6 @@
         if (d.status === "passed") h += `<p class="chip ok">Gate passed.</p>`;
         else { h += `<p class="hint">Run paused for review.</p><button class="gate-go" onclick="continueRun('${d.gate}')">Continue ▶</button>`; }
       }
-      else if (d.kind === "orchestrator") {
-        h += `<p class="hint">Full claude transcript <button class="copy-btn" id="copy-transcript">Copy</button></p>`;
-        h += `<div class="transcript" id="transcript-box">Loading…</div>`;
-        box.innerHTML = h; box.classList.add("open");
-        const res = await fetch(`/api/runs/${runId}/log?full=json`);
-        const data = await res.json();
-        const el = document.getElementById("transcript-box");
-        if (el) { el.textContent = data.log || "(no output yet)"; el.scrollTop = el.scrollHeight; }
-        const cb = document.getElementById("copy-transcript");
-        if (cb) cb.onclick = async () => {
-          try { await navigator.clipboard.writeText(data.log || ""); cb.textContent = "Copied ✓"; }
-          catch (e) { cb.textContent = "Copy failed"; }
-          setTimeout(() => { cb.textContent = "Copy"; }, 1500);
-        };
-        return;
-      }
       else if (d.kind === "agent") { h += `<div class="markdown"><p>subagent · ${d.status}</p></div>`; }
       box.innerHTML = h; box.classList.add("open");
     }
@@ -519,7 +503,7 @@
     };
 
     // ---- live activity feed: tail /log (claude stream) + /events into human-readable lines ----
-    function renderActivity(logText, events, done) {
+    function renderActivity(events, done) {
       const lines = [];
       for (const e of (events || [])) {
         if (e.type === "phase") lines.push(['a-phase', `▸ phase: ${(e.payload || {}).name || ""}`]);
@@ -527,36 +511,7 @@
         else if (e.type === "blocker") lines.push(['a-block', `⛔ blocker: ${(e.payload || {}).what || ""}`]);
         else if (e.type === "done") lines.push(['a-phase', `✓ done`]);
       }
-      // SPEC §6: human lines only — tool name + its description; never raw JSON, prompt bodies,
-      // or absolute container paths.
-      const depath = (t) => (t || "").replace(/\/data\/runs\/[^/]+\/workspace\//g, "");
-      for (const raw of (logText || "").split("\n")) {
-        const s = raw.trim(); if (!s.startsWith("{")) continue;
-        let ev; try { ev = JSON.parse(s); } catch { continue; }
-        for (const c of ((ev.message || {}).content || [])) {
-          if (c.type === "text" && (c.text || "").trim()) {
-            const t = c.text.trim().split("\n")[0];                      // first line only, no prompt bodies
-            lines.push(['a-text', "💬 " + depath(t).slice(0, 160)]);
-          } else if (c.type === "tool_use") {
-            const inp = c.input || {};
-            let detail = inp.description || "";
-            if (!detail) {
-              if (c.name === "Task" || c.name === "Agent") detail = inp.description || (inp.prompt || "").split("\n")[0];
-              else if (inp.file_path) detail = inp.file_path;
-              else if (inp.command) detail = inp.command;
-              else if (inp.url) detail = inp.url;
-              else if (inp.query) detail = inp.query;
-            }
-            const icon = (c.name === "Task" || c.name === "Agent") ? "🤖" : "🔧";
-            lines.push(['a-tool', `${icon} ${c.name} — ${depath(detail).slice(0, 110)}`]);
-          }
-        }
-      }
-      // /log honesty: never present a truncated tail as the whole history.
-      const capNote = (typeof logCapped === "object" && logCapped)
-        ? [["a-cap", `… feed from the last ${Math.round(logCapped.shown / 1024)} KB of ` +
-            `${(logCapped.total / 1048576).toFixed(1)} MB — open the orchestrator node for the full transcript`]] : [];
-      $("feed").innerHTML = capNote.concat(lines.slice(-60)).map(([cls, t]) => `<div class="${cls}">${t.replace(/</g, "&lt;")}</div>`).join("");
+      $("feed").innerHTML = lines.slice(-60).map(([cls, t]) => `<div class="${cls}">${t.replace(/</g, "&lt;")}</div>`).join("");
       $("feed").scrollTop = $("feed").scrollHeight;
       $("livedot").className = "live-dot" + (done ? " idle" : "");
       $("activity-title").textContent = done ? "run finished" : "live activity";
@@ -766,16 +721,13 @@
     });
     async function poll() {
       if (!runId || !cy) return;
-      let s, g, log = "", evs = [];
+      let s, g, evs = [];
       try {
-        // Parallel — these were sequential, stacking 4 round-trips into every 2s tick.
-        const [rs, rg, rl, re] = await Promise.all([
+        // Parallel — these were sequential, stacking round-trips into every 2s tick.
+        const [rs, rg, re] = await Promise.all([
           fetch(`/api/runs/${runId}`), fetch(`/api/runs/${runId}/graph`),
-          fetch(`/api/runs/${runId}/log`), fetch(`/api/runs/${runId}/events`)]);
+          fetch(`/api/runs/${runId}/events`)]);
         s = await rs.json(); g = await rg.json();
-        const lenv = await rl.json();
-        log = lenv.log || "";
-        logCapped = lenv.capped ? { shown: lenv.returned_bytes, total: lenv.total_bytes } : null;
         evs = (await re.json()).events || [];
       } catch { return; }
       $("phase").innerHTML = "phase <b>" + s.phase + "</b>" + (s.done ? " ✓" : "") +
@@ -794,7 +746,7 @@
       if (repo) linksHtml += (linksHtml ? " · " : "") + `<a href="${repo.url}" target="_blank" rel="noopener">repo ↗</a>`;
       $("links").innerHTML = linksHtml;
       applyGraph(g);
-      renderActivity(log, evs, s.done || ["stopped", "blocked"].includes(s.phase));
+      renderActivity(evs, s.done || ["stopped", "blocked"].includes(s.phase));
       // Stage transitions
       if (s.stage === 1 && s.stage1_done && !window._s1banner) {
         window._s1banner = true;
