@@ -972,6 +972,71 @@ def test_detect_stage3_done_waits_for_process_to_finish(tmp_path):
     assert c.detect_stage3_done(rid) is True
 
 
+def test_detect_stage3_done_requires_signin_step_when_demo_creds_present(tmp_path):
+    # SOF-4 gate (d): if auth is present (demo-creds artifact recorded), the passing
+    # happy-flow must include a sign-in step — a post-login flow with no sign-in step is not done.
+    import json
+    from software_factory.db import ProjectStore, db_path
+    from software_factory.tickets import TicketStore
+    from software_factory.agents import AgentRegistry
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_project(ProjectRequest(description="app with auth"))
+    dbp = db_path(str(tmp_path), rid)
+    db = ProjectStore(dbp)
+    ts = TicketStore(dbp)
+    reg = AgentRegistry(dbp)
+
+    # Finish the process + pass all existing gates (a, b, c)
+    c._procs[rid] = type("DeadProc", (), {"poll": lambda self: 0})()
+    tid = ts.create_ticket("feature", acceptance="a", dod="d", wave=1)
+    reg.spawn("ag1", rid, tid, "builder", "claude-sonnet-4-6", phase="build")
+    ts.claim(tid, "ag1")
+    ts.mark_done(tid, provenance="1", diff_lines=10)
+    ts.mark_deployed(tid); ts.start_qa(tid); ts.qa_approve(tid)
+
+    # Happy-flow WITHOUT a sign-in step — passes gates a/b/c but should fail gate (d)
+    no_signin_result = {"steps": [{"name": "Navigate to dashboard", "ok": True},
+                                  {"name": "Check user name shown", "ok": True}]}
+    db.record_verification("https://app.example.com", True, no_signin_result)
+    db.record_artifact("Demo credentials", "demo_credentials.md", kind="demo-creds")
+
+    assert c.detect_stage3_done(rid) is False   # gate (d) blocks: no sign-in step
+
+    # Now re-record verification WITH a sign-in step -> gate (d) passes
+    signin_result = {"steps": [{"name": "Sign in with demo credentials", "ok": True},
+                               {"name": "Navigate to dashboard", "ok": True}]}
+    db.record_verification("https://app.example.com", True, signin_result)
+
+    assert c.detect_stage3_done(rid) is True
+
+
+def test_detect_stage3_done_no_demo_creds_skips_signin_check(tmp_path):
+    # SOF-4: if no demo-creds artifact, the sign-in gate does not apply (app has no auth).
+    import json
+    from software_factory.db import ProjectStore, db_path
+    from software_factory.tickets import TicketStore
+    from software_factory.agents import AgentRegistry
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_project(ProjectRequest(description="app without auth"))
+    dbp = db_path(str(tmp_path), rid)
+    db = ProjectStore(dbp)
+    ts = TicketStore(dbp)
+    reg = AgentRegistry(dbp)
+
+    c._procs[rid] = type("DeadProc", (), {"poll": lambda self: 0})()
+    tid = ts.create_ticket("feature", acceptance="a", dod="d", wave=1)
+    reg.spawn("ag1", rid, tid, "builder", "claude-sonnet-4-6", phase="build")
+    ts.claim(tid, "ag1")
+    ts.mark_done(tid, provenance="1", diff_lines=10)
+    ts.mark_deployed(tid); ts.start_qa(tid); ts.qa_approve(tid)
+
+    # No demo-creds artifact + verification without sign-in step -> still done (no auth)
+    result = {"steps": [{"name": "Navigate to home", "ok": True}]}
+    db.record_verification("https://app.example.com", True, result)
+
+    assert c.detect_stage3_done(rid) is True
+
+
 def test_stage3_prompt_is_plan_first_orchestrator_only_with_playwright_gate(tmp_path):
     from software_factory.console import make_prompt_stage3, make_prompt_stage1
     p3 = make_prompt_stage3(ProjectRequest(description="x"), "project-z", "/tmp/r",

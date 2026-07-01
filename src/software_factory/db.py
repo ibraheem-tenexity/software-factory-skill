@@ -289,7 +289,12 @@ def main(argv: list[str]) -> int:
     if verb == "set-phase":
         db.set_phase(rest[0], rest[1] if len(rest) > 1 else "active")
     elif verb == "record-artifact":
-        db.record_artifact(rest[0], rest[1],
+        _path = rest[1]
+        if not _path.startswith("http://") and not _path.startswith("https://"):
+            if not os.path.exists(_path):
+                sys.stderr.write(f"error: record-artifact: file not found: {_path!r}\n")
+                return 1
+        db.record_artifact(rest[0], _path,
                            rest[2] if len(rest) > 2 else None,
                            rest[3] if len(rest) > 3 else None)
     elif verb == "add-blocker":

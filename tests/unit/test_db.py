@@ -85,14 +85,36 @@ def test_verification_gate(tmp_path):
     assert db.has_passing_verification() is True
 
 
-def test_cli_writes_to_run_db(tmp_path):
+def test_cli_writes_to_run_db(tmp_path, monkeypatch):
     from software_factory.db import main
     runs = str(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "build-plan.md").write_text("# plan")
     assert main(["set-phase", runs, "project-0ddd55fe", "build"]) == 0
     assert main(["record-artifact", runs, "project-0ddd55fe", "Build Plan", "build-plan.md", "plan"]) == 0
     db = ProjectStore(db_path(runs, "project-0ddd55fe"))
     assert db.phase_status()["build"] == "active"
     assert any(a["title"] == "Build Plan" and a["kind"] == "plan" for a in db.artifacts())
+
+
+def test_record_artifact_rejects_missing_file(tmp_path, monkeypatch):
+    from software_factory.db import main
+    runs = str(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc = main(["record-artifact", runs, "project-0ddd55fe", "Demo credentials", "demo_credentials.md", "demo-creds"])
+    assert rc == 1
+    db = ProjectStore(db_path(runs, "project-0ddd55fe"))
+    assert not any(a["kind"] == "demo-creds" for a in db.artifacts())
+
+
+def test_record_artifact_allows_url_without_file(tmp_path, monkeypatch):
+    from software_factory.db import main
+    runs = str(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc = main(["record-artifact", runs, "project-0ddd55fe", "GitHub Repo", "https://github.com/acme/app", "repo"])
+    assert rc == 0
+    db = ProjectStore(db_path(runs, "project-0ddd55fe"))
+    assert any(a["kind"] == "repo" for a in db.artifacts())
 
 
 def test_cli_spawn_and_finish_agent(tmp_path):

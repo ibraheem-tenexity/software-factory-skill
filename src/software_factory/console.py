@@ -1674,6 +1674,14 @@ class Console:
         if not tickets.all_approved():
             return False
         passing = [v for v in db.verifications() if v["passed"]]
+        # Gate (d): if auth is present (agent recorded a demo-creds artifact), the happy-flow must
+        # include a real sign-in step — a post-login flow with no sign-in step is not done.
+        has_demo_creds = any((a.get("kind") or "").lower() == "demo-creds" for a in db.artifacts())
+        if has_demo_creds:
+            from .gate import has_signin_step
+            latest_result = json.loads(passing[-1]["result"]) if passing else None
+            if not has_signin_step(latest_result):
+                return False
         if passing:
             state.deploy_url = passing[-1]["url"]
         state.phase = "done"
