@@ -9,11 +9,16 @@ from unittest.mock import MagicMock
 from software_factory.chat_agent import ChatDockRunner, ConciergeTurn, SuggestedResponse, _context_for_project
 
 
+_FAKE_USAGE = {"model": "fake-model", "provider": "fake", "input_tokens": 42, "output_tokens": 7,
+              "cost_usd": 0.0021}
+
+
 class _FakeAgent:
-    def __init__(self, response="ok", suggested_responses=None, error=None):
+    def __init__(self, response="ok", suggested_responses=None, error=None, usage=None):
         self._response = response
         self._suggested = suggested_responses or []
         self._error = error
+        self._usage = usage if usage is not None else _FAKE_USAGE
         self.calls = []
 
     def run(self, context, messages):
@@ -22,6 +27,9 @@ class _FakeAgent:
             raise self._error
         return ConciergeTurn(response=self._response,
                              suggested_responses=[SuggestedResponse(**s) for s in self._suggested])
+
+    def run_with_usage(self, context, messages):
+        return self.run(context, messages), self._usage
 
 
 def _collect(agen):
@@ -61,6 +69,17 @@ def test_handle_message_streamed_yields_one_done_event():
     assert evt["project_id"] == "p1"
     assert evt["messages"][0]["role"] == "assistant"
     assert evt["messages"][0]["content"] == "hello from the dock"
+
+
+def test_handle_message_streamed_carries_real_usage_in_the_done_event():
+    agent = _FakeAgent(response="hello", usage={"model": "gpt-5.4", "provider": "openai",
+                                                "input_tokens": 123, "output_tokens": 45,
+                                                "cost_usd": 0.0067})
+    runner = ChatDockRunner(_mock_console(), agent=agent)
+    lines = _collect(runner.handle_message_streamed("p1", "hi", [], []))
+    evt = json.loads(lines[0])
+    assert evt["usage"] == {"model": "gpt-5.4", "provider": "openai",
+                           "input_tokens": 123, "output_tokens": 45, "cost_usd": 0.0067}
 
 
 def test_handle_message_streamed_infers_context_from_phase():
