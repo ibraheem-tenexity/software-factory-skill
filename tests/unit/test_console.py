@@ -2238,6 +2238,46 @@ def test_reap_github_repos_unmatched_repo_is_log_only_never_deleted(tmp_path, mo
     assert report["unknown_repos"] == [{"repo": "acme/some-unrelated-repo-deadbeef", "suffix": "deadbeef"}]
 
 
+def test_provision_repo_canonical_name_resolves_correctly_through_both_reaper_paths(tmp_path, monkeypatch):
+    """SOF-22 regression guard: run the REAL provision-repo verb (not a hand-built fixture), then
+    feed its canonical name through reap_github_repos and confirm BOTH of the reaper's matching
+    paths resolve it to the SAME, correct project_id — not just that the name matches a regex in
+    isolation. This is the mapping the operator asked to test, tying provision-repo and the
+    reaper together so a future change to either can't silently break the other."""
+    from software_factory.db import main as db_main
+    from software_factory import repo as repo_mod
+    from software_factory import github_repo_reaper as _ghr
+
+    c = console(tmp_path, FakeLauncher())
+    ids = iter(["project-9f8e7d6c5b4a3210"])
+    c._new_id = lambda: next(ids)
+    pid = c.start_project(ProjectRequest(description="x"))
+
+    ws = tmp_path / pid / "workspace"; ws.mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(ws)
+    monkeypatch.setattr(repo_mod.GitHub, "create_repo",
+                        lambda self, name, private=True: f"https://github.com/acme/{name}")
+    assert db_main(["provision-repo", str(tmp_path), pid, "quote-follow-up"]) == 0
+    monkeypatch.chdir(tmp_path)  # reap_github_repos scans <projects_dir>/<pid> dirs — get off the deleted-if-cwd path
+
+    st = c._load_state(pid); st.phase = "stopped"; st.save()   # stopped + no deploy -> reap
+    canonical_name = "quote-follow-up-9f8e7d6c"
+    monkeypatch.setattr(_ghr, "list_org_repos",
+                        lambda org, run=None: [{"name": canonical_name, "isArchived": False}])
+    report = c.reap_github_repos("acme", dry_run=True)
+
+    # (a) EXACT-match path: the artifact provision-repo recorded resolves this repo to THIS project.
+    assert report["unknown_repos"] == []
+    assert len(report["would_reap"]) == 1
+    assert report["would_reap"][0]["project_id"] == pid
+    assert report["would_reap"][0]["repo"] == f"acme/{canonical_name}"
+
+    # (b) SUFFIX-fallback shape: independently, the hex provision-repo chose really is this
+    # project's own 8-hex prefix — defense in depth if the artifact row is ever lost/corrupted.
+    m = _ghr.FACTORY_REPO_SUFFIX_RE.search(canonical_name)
+    assert m and m.group(1) == pid[len("project-"):][:8]
+
+
 def test_reap_github_repos_exact_match_still_honors_owner_shared_guard(tmp_path, monkeypatch):
     # #210/SOF-3: a repo the owner was invited to must NEVER be reaped, archived or not.
     # The exact-match path (#95/SOF-8) must not bypass this — it's an alternate way of

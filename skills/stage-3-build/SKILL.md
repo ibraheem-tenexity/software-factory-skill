@@ -143,10 +143,15 @@ allowlist. So:
   `COPY package*.json` → `npm ci` → `COPY . .` → placeholder build `ENV` → `npm run build` →
   start on `$PORT` (`next start -p ${PORT:-3000} -H 0.0.0.0`).
 
-### Surface the repo
-The build sub-agents create a GitHub repo. Once it exists, record it with a **CLEAN** url (strip any
-embedded `ghp_` token — use a credential helper / `GH_TOKEN`, never bake the token into the remote):
-`record-artifact "GitHub Repo" https://github.com/<org>/<repo> repo`.
+### Reuse the repo (do NOT create a second one)
+Stage 1 already created this project's ONE canonical GitHub repo. From inside your workspace:
+`python3 -m software_factory.db provision-repo <projects_dir> <project_id> <slug>` — since
+`ProjectState.repo_url` is already set, this clones Stage 1's existing repo into your cwd and
+prints its url; it does **not** create a new repo and does **not** re-record the "GitHub Repo"
+artifact (SOF-22 — two independent repo-creation paths per project used to leave two real repos
+and two duplicate artifact rows). Pass the same `<slug>` you'd have picked for a repo name
+(only used on the rare path where Stage 1 never got to provisioning). Never call
+`GitHub.create_repo` or `record-artifact "GitHub Repo"` directly.
 
 ## Phase 3: test — the GATE (mandatory; the only path to done)  (`set-phase test`)
 

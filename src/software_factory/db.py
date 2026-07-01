@@ -197,6 +197,7 @@ _USAGE = (
     "  qa-approve <projects_dir> <project_id> <ticket_id>\n"
     "  qa-reject <projects_dir> <project_id> <ticket_id> <bug_markdown>   (ticket → open, carries the bug report)\n"
     "  provision-db <projects_dir> <project_id>   (stage-3: create this run's Railway Postgres; writes context/deploy-db.json)\n"
+    "  provision-repo <projects_dir> <project_id> <slug>   (stage-1/stage-3: create-or-reuse this project's ONE canonical GitHub repo)\n"
 )
 
 
@@ -244,6 +245,44 @@ def _provision_db(projects_dir: str, project_id: str) -> int:
         return 1
 
 
+def _provision_repo(projects_dir: str, project_id: str, slug: str) -> int:
+    """Create-or-reuse this project's ONE canonical GitHub repo (SOF-22). Both stage-1 and
+    stage-3 call this exact same verb — idempotent, so a run never ends up with two repos
+    from two independent SKILL-driven creation paths.
+
+    First call: compute the canonical name as "<slug>-<first 8 hex chars of the project_id>"
+    (HOST-computed, not left to the agent, so the hex suffix github_repo_reaper's suffix-fallback
+    depends on can never be dropped or mistyped), create it, persist ``state.repo_url``, and
+    record the "GitHub Repo" artifact exactly once — in Python, so the SKILL instruction on
+    either stage can never double-record it.
+
+    A later call (a retry, or stage-3 running after stage-1 already provisioned): repo_url is
+    already set — no second repo, no second artifact row. Clone it into the caller's cwd if it
+    isn't already checked out there (create_repo's own --clone only benefited the FIRST caller's
+    workspace; a later stage's fresh workspace needs its own clone of the same repo)."""
+    from .repo import GitHub
+    from .projectstate import ProjectState
+    base = db_path(projects_dir, project_id)
+    db = ProjectStore(base)
+    state = ProjectState.load(project_id, db)
+    if state.repo_url:
+        if not os.path.isdir(".git"):
+            GitHub().clone_repo(state.repo_url)
+        print(state.repo_url)
+        return 0
+    hex_part = project_id[len("project-"):]
+    name = f"{slug}-{hex_part[:8]}"
+    url = GitHub().create_repo(name)
+    if not url:
+        sys.stderr.write(f"provision-repo failed: gh repo create returned no url for {name!r}\n")
+        return 1
+    state.repo_url = url
+    state.save()
+    db.record_artifact("GitHub Repo", url, kind="repo")
+    print(url)
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 3:
         sys.stderr.write(_USAGE)
@@ -261,6 +300,8 @@ def main(argv: list[str]) -> int:
         return 2
     if verb == "provision-db":
         return _provision_db(projects_dir, project_id)
+    if verb == "provision-repo":
+        return _provision_repo(projects_dir, project_id, rest[0])
     db = ProjectStore(db_path(projects_dir, project_id))
     if verb == "set-phase":
         db.set_phase(rest[0], rest[1] if len(rest) > 1 else "active")
