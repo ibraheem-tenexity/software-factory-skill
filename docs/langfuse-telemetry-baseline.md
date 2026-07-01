@@ -39,18 +39,34 @@ span/attribute naming is OpenInference's own convention, not something this code
 confirm it once against a real dashboard trace and lock in the specifics as an addendum to this doc
 rather than trusting this description alone.
 
-**Known gap (found during this audit, not fixed — flagging, not silently patching):** the code
-does not tag traces with `project_id` or any other session identifier. A trace is findable only by
-timestamp + agent name + message content — not by which draft/project generated it. If
-per-project trace correlation is ever needed, that's a follow-up (e.g. `langfuse.update_current_trace(session_id=project_id)`
-inside `handle_message`/`handle_message_streamed`), out of scope here.
+**Fixed in SOF-43 (2026-07-01):** traces are now tagged with a `session_id` (the conversation key)
+and `project_id` metadata via `langfuse.propagate_attributes(...)`, entered in
+`ChatAgentRunner._langfuse_trace_context()` and wrapped around the full `Runner.run` /
+`Runner.run_streamed` + stream-consumption lifetime (not just the initial call — spans are created
+incrementally as stream events are iterated, and `propagate_attributes` only tags spans created
+while it's still open). A trace is now findable by project, not only by timestamp+content.
 
-**Known nuance:** `self._langfuse` (the client `setup_langfuse()` returns) is stored but never
-explicitly flushed anywhere in the codebase. Langfuse's SDK auto-flushes on its own interval in a
-background thread, so this is fine for a long-running server — but a trace from a request
-immediately preceding an abrupt process exit (crash, not a graceful deploy swap) could theoretically
-be lost before it flushes. Not a "doesn't work" bug; worth knowing if a specific trace ever goes
-missing right around a restart.
+**Fixed in SOF-43 (2026-07-01):** an explicit flush now happens at both boundaries where a loss
+window existed: the **turn boundary** (`ChatAgentRunner._flush_langfuse()`, called after every
+`handle_message`/`handle_message_streamed` run) and the **process boundary** (`console/poller.py`'s
+`lifespan`, flushed in a `finally` around `yield` on graceful shutdown). Both are best-effort — a
+flush failure never fails a chat turn or blocks shutdown.
+
+**Still open — zero token usage (SOF-43, most impactful gap, not yet root-caused):** every
+"Factory Concierge" generation span in Langfuse reports `usage = {input:0, output:0, total:0}`.
+Ruled out: `openinference-instrumentation-openai-agents` is already at the latest published version
+(`1.6.1`, no pre-release ceiling either) — there is no newer version to bump to. Ruled out: a
+hypothesized Chat-Completions/Kimi dict-key-naming mismatch (`prompt_tokens` vs `input_tokens`) —
+verified via source (`agents/usage.py`, `openai_chatcompletions.py`) that the SDK always normalizes
+usage to `input_tokens`/`output_tokens`/`total_tokens` regardless of backend, so this is not a real
+bug on that path. `ModelSettings.include_usage` is a red herring for the canary's actual path
+(Responses API, `gpt-5.4`) — its own docstring scopes it to Chat Completions only. A temporary
+diagnostic (`ChatAgentRunner._log_usage_diagnostic`, logs `[langfuse-diag]` with
+`result.context_wrapper.usage` and each `raw_responses[*].usage`) is now live to determine whether
+the Agents SDK itself ever sees non-zero usage for this call pattern (implying an
+OpenInference/export-layer bug) or whether it's zero even there (implying the Responses API isn't
+returning usage for this pattern at all). Remove this diagnostic once the root cause is confirmed
+and fixed — it is not a permanent addition.
 
 ### Cheap re-verification recipe — run this after every console deploy
 

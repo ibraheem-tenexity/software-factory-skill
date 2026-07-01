@@ -342,4 +342,17 @@ async def lifespan(app: FastAPI):
     t = threading.Thread(target=_poll_transitions, daemon=True)
     t.start()
     print(f"software-factory console (FastAPI) — runs in {os.path.abspath(state.PROJECTS_DIR)}", flush=True)
-    yield
+    try:
+        yield
+    finally:
+        # SOF-43: explicit flush at the PROCESS boundary (per-turn flush lives in
+        # ChatAgentRunner._flush_langfuse) — closes the narrow window where a trace from a
+        # request right before shutdown could be lost to the SDK's own background auto-flush
+        # interval never getting a chance to fire. Best-effort; must never block shutdown.
+        runner = getattr(state, "_chat_runner", None)
+        client = getattr(runner, "_langfuse", None) if runner else None
+        if client:
+            try:
+                client.flush()
+            except Exception:
+                pass

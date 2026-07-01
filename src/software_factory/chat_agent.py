@@ -12,6 +12,9 @@ from openai.types.responses import ResponseFunctionToolCall
 
 from software_factory.chat_store import ChatMessage
 from software_factory.console import Console
+from software_factory.log import get_logger
+
+logger = get_logger(__name__)
 
 
 _DEFAULT_OPENAI_CHAT_MODEL = "gpt-5.4"   # concierge default (was gpt-4o); SF_CHAT_MODEL overrides it
@@ -411,6 +414,49 @@ class ChatAgentRunner:
         )
         self._conversations: dict[str, list] = {}
 
+    def _langfuse_trace_context(self, conv_key: str, project_id: str | None):
+        """SOF-43: a context manager that tags every span created within it with a session_id
+        (so a trace is findable by project, not only by timestamp+content) — or a no-op when
+        Langfuse tracing is disabled. Must be entered BEFORE the agent run starts and stay open
+        for its full duration (including streaming), since propagate_attributes only tags spans
+        created while it's active — per its own docs, it does not retroactively tag existing ones.
+        """
+        if not self._langfuse:
+            import contextlib
+            return contextlib.nullcontext()
+        from langfuse import propagate_attributes
+        return propagate_attributes(
+            session_id=conv_key,
+            metadata={"project_id": project_id} if project_id else None,
+        )
+
+    def _log_usage_diagnostic(self, result) -> None:
+        """SOF-43 TEMPORARY diagnostic — remove once the zero-token-usage root cause is
+        confirmed. Logs the Agents SDK's OWN view of usage (context_wrapper.usage aggregates
+        the whole run; raw_responses carries the per-model-call breakdown), independent of
+        whatever OpenInference/Langfuse then does with it. If this is ALSO zero, the SDK/API
+        never returned usage for this call — not an export-layer bug. If this is non-zero but
+        Langfuse still shows zero, the bug is downstream of the SDK."""
+        try:
+            logger.info(
+                "[langfuse-diag] context_wrapper.usage=%r raw_responses_usage=%r",
+                result.context_wrapper.usage,
+                [r.usage for r in result.raw_responses],
+            )
+        except Exception:
+            logger.warning("[langfuse-diag] failed to read usage from result", exc_info=True)
+
+    def _flush_langfuse(self) -> None:
+        """SOF-43: explicit flush at the turn boundary so a trace can't be lost to the SDK's
+        background auto-flush interval never firing before an abrupt process exit. Best-effort —
+        must never fail a chat turn."""
+        if not self._langfuse:
+            return
+        try:
+            self._langfuse.flush()
+        except Exception:
+            logger.warning("[langfuse] flush failed", exc_info=True)
+
     async def handle_message(self, project_id: str | None, user_msg: str,
                               files: list, images: list,
                               runtime: str = "", planning_model: str = "",
@@ -454,8 +500,13 @@ class ChatAgentRunner:
         self._pending_viewer = (owner or "", role or "admin")
         self._pending_draft_id = project_id or ""
         self._pending_interview_md = _render_interview(history)
+        # SOF-43: tag every span this run creates with session_id (so a trace is findable by
+        # project rather than only by timestamp+content) — must wrap the run itself, since
+        # OpenAIAgentsInstrumentor creates the root span inside Runner.run.
+        trace_ctx = self._langfuse_trace_context(conv_key, project_id)
         try:
-            result = await Runner.run(self._agent, input=history)
+            with trace_ctx:
+                result = await Runner.run(self._agent, input=history)
         finally:
             self._pending_files = []
             self._pending_runtime = ""
@@ -466,6 +517,9 @@ class ChatAgentRunner:
             self._pending_viewer = ("", "admin")
             self._pending_draft_id = ""
             self._pending_interview_md = ""
+
+        self._log_usage_diagnostic(result)
+        self._flush_langfuse()
 
         response_msgs = []
         text_parts: list[str] = []
@@ -574,13 +628,18 @@ class ChatAgentRunner:
         self._pending_viewer = (owner or "", role or "admin")
         self._pending_draft_id = project_id or ""
         self._pending_interview_md = _render_interview(history)
+        # SOF-43: the trace context must stay open for the FULL stream consumption, not just the
+        # initial Runner.run_streamed() call — spans are created as events are iterated, and
+        # propagate_attributes only tags spans created while the context is still active.
+        trace_ctx = self._langfuse_trace_context(conv_key, project_id)
         try:
-            result = Runner.run_streamed(self._agent, input=history)
-            async for event in result.stream_events():
-                if (event.type == "raw_response_event"
-                        and isinstance(event.data, ResponseTextDeltaEvent)
-                        and event.data.delta):
-                    yield json.dumps({"type": "delta", "content": event.data.delta}) + "\n"
+            with trace_ctx:
+                result = Runner.run_streamed(self._agent, input=history)
+                async for event in result.stream_events():
+                    if (event.type == "raw_response_event"
+                            and isinstance(event.data, ResponseTextDeltaEvent)
+                            and event.data.delta):
+                        yield json.dumps({"type": "delta", "content": event.data.delta}) + "\n"
         finally:
             self._pending_files = []
             self._pending_runtime = ""
@@ -591,6 +650,9 @@ class ChatAgentRunner:
             self._pending_viewer = ("", "admin")
             self._pending_draft_id = ""
             self._pending_interview_md = ""
+
+        self._log_usage_diagnostic(result)
+        self._flush_langfuse()
 
         response_msgs = []
         text_parts: list[str] = []
