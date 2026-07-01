@@ -70,6 +70,18 @@ class _StatePool:
 
     def _configure(self, conn):
         conn.prepare_threshold = None
+        # SOF-26/SOF-29: psycopg3 has no built-in adapter for pgvector's `vector` type. Without
+        # this, a `vector` column reads back as a plain string (confirmed empirically against a
+        # real pgvector DB during #237's review: "[0,0,0,...]", the STRING, not a 1024-length
+        # array) — inserts work either way, only reads are silently wrong. Registered once per
+        # real connection (here, at creation), not per-checkout, since it's a property of the
+        # psycopg connection object itself. Best-effort: a codebase with no pgvector columns in
+        # use yet must never fail to connect over this.
+        try:
+            from pgvector.psycopg import register_vector
+            register_vector(conn)
+        except Exception:
+            pass
         return conn
 
     def _new_conn(self):

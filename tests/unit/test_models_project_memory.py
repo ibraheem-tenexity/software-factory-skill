@@ -100,6 +100,11 @@ def test_smoke_insert_and_select_a_vector_and_generated_fts_row():
         ).fetchone()
         assert row["content"] == "hello world"
         assert row["fts"] is not None          # Postgres generated it from `content`
+        # Without pgvector.psycopg.register_vector() on the connection, `dense` reads back as
+        # the raw string Postgres serializes it as (len 2049, not 1024) — confirmed empirically
+        # during #237's review. SOF-29 moved that registration into dbshim._StatePool._configure
+        # (every dbshim connection gets it, once, at creation), which is what makes this a real
+        # array of length 1024 rather than a string.
         assert len(row["dense"]) == 1024
     finally:
         conn.close()
