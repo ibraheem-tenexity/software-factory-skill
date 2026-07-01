@@ -68,6 +68,16 @@ a native **Task** sub-agent, then `finish-agent <id> success`. **Launch the 3 se
 > The **exa** web-search MCP is wired into your workspace — use its `web_search`-type tools whenever
 > live web results help (alongside / instead of `WebSearch`).
 
+> The **memory** MCP (present when the operator enabled Project Memory) grounds every seat in the
+> customer's uploaded materials, not just `input/brief.md`. Call `get_project_overview` FIRST — a
+> project brief + rollup + key-facts digest, cheap and coarse. Then `search_memory("<specific
+> question>")` for anything a seat needs that the brief doesn't spell out (a spec PDF's exact field
+> list, a pricing tier, a named integration) — it returns the source document + section for every
+> hit, so cite it. **Graceful fallback (do this, don't skip it):** if a memory tool errors, times
+> out, or the server isn't offered at all this run, do NOT retry it and do NOT block on it — just
+> continue with `input/brief.md`/`context.md`/`input/interview.md` alone, exactly as before Project
+> Memory existed. Memory makes the PRD more grounded; it must never be a reason the stage stalls.
+
 1. **VANGUARD** (domain.expert) — the grounding anchor. **Web search REQUIRED:** `WebSearch` 4–6
    queries, `WebFetch` the best, surface **≥3 real existing products** (name + URL + features + gaps);
    evaluate ≥2 solution paths. Writes `PRD-draft-vanguard.md`.
