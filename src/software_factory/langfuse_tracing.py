@@ -7,9 +7,12 @@ LangChain rebuild (T2.1) will need its own tracing setup (e.g. an OpenInference 
 instrumentor) if Langfuse tracing is still wanted for the new agent — that's new code, not a
 port of this.
 
-`enabled()` survives: `select_chat_model()` (chat_agent.py) still uses it to decide whether to
-disable the OpenAI Agents SDK's own tracing for the Kimi/OpenRouter model-selection path, which
-is unrelated to the concierge's tool-calling framework.
+`enabled()` survives: `memory/cost.py` still uses it to gate ingestion cost recording. SOF-46:
+`select_chat_model()` (chat_agent.py), this module's other caller and the last importer of
+`agents`/`openinference-instrumentation-openai-agents` anywhere in this repo, is removed —
+superseded by `_build_chat_model()`, which never needed Langfuse-gated tracing-disable logic
+(the OpenAI Agents SDK's own tracing, which this was working around, doesn't exist on the
+LangChain path at all).
 """
 from __future__ import annotations
 

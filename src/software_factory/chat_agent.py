@@ -47,32 +47,6 @@ def _use_kimi(choice: str) -> bool:
     )
 
 
-def select_chat_model():
-    """Concierge model: gpt-5.4 (OpenAI) or Kimi K2.7 Code via OpenRouter's OpenAI-compatible API.
-
-    SF_CHAT_MODEL=kimi forces Kimi; unset picks gpt-5.4 when OPENAI_API_KEY exists, else Kimi when only
-    OPENROUTER_API_KEY does. Any OTHER SF_CHAT_MODEL value is passed through verbatim as the OpenAI
-    model id — so it's the no-redeploy rollback lever for the OpenAI model too (e.g. set it back to a
-    known-good id if gpt-5.4 is ever rejected), alongside the Kimi rollback."""
-    choice = os.environ.get("SF_CHAT_MODEL", "").strip().lower()
-    if _use_kimi(choice):
-        from agents import OpenAIChatCompletionsModel, set_tracing_disabled
-        from openai import AsyncOpenAI
-
-        from . import langfuse_tracing
-        if not langfuse_tracing.enabled():
-            # Without Langfuse the SDK's default tracing would try (and fail) to reach OpenAI.
-            # With Langfuse on, the OpenInference instrumentor replaces that exporter, so we
-            # KEEP tracing enabled to capture the Kimi path in Langfuse too.
-            set_tracing_disabled(True)
-        client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=os.environ.get("OPENROUTER_API_KEY", ""),
-        )
-        return OpenAIChatCompletionsModel(model=_KIMI_MODEL, openai_client=client)
-    return choice or _DEFAULT_OPENAI_CHAT_MODEL
-
-
 def chat_model_label() -> str:
     """Display id of the live concierge model (no client constructed) — for the OS Agents card."""
     choice = os.environ.get("SF_CHAT_MODEL", "").strip().lower()
@@ -292,10 +266,14 @@ CONCIERGE_CONTEXTS = ("intake", "overview", "build", "docs", "ingesting")
 
 
 def _build_chat_model():
-    """LangChain chat model honoring the SAME SF_CHAT_MODEL env selection as select_chat_model()
+    """LangChain chat model honoring the SAME SF_CHAT_MODEL env selection as chat_model_label()
     (OpenAI gpt-5.4 default, or Kimi K2.7 Code via OpenRouter's OpenAI-compatible endpoint) -- the
     model choice logic is identical, only the returned object type differs (a LangChain
-    BaseChatModel here, vs the OpenAI-Agents-SDK model wrapper select_chat_model() returns)."""
+    BaseChatModel here, vs the plain model-id string chat_model_label() returns).
+
+    SOF-46: this used to also match select_chat_model() (the OpenAI-Agents-SDK model wrapper) --
+    removed, it was the last importer of `agents` anywhere in this repo, superseded by this
+    function everywhere it mattered."""
     from langchain_openai import ChatOpenAI
 
     choice = os.environ.get("SF_CHAT_MODEL", "").strip().lower()

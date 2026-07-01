@@ -1,7 +1,9 @@
 """SOF-29: dense embeddings via OpenRouter (T3.1's embedding layer).
 
-Reuses the `openai` SDK already in the dependency tree (openai-agents pulls it in
-transitively) pointed at OpenRouter's OpenAI-compatible embeddings endpoint. Dense only —
+Reuses the `openai` SDK already in the dependency tree (langchain-openai pulls it in
+transitively — SOF-46 dropped the openai-agents package that used to; `pip show
+langchain-openai` confirms `openai` is still one of its own dependencies) pointed at
+OpenRouter's OpenAI-compatible embeddings endpoint. Dense only —
 OpenRouter's embeddings API never returns a sparse/learned-sparse vector (see
 docs/project-memory-concierge/project-memory-stack-2026.md); the sparse/keyword channel is
 Postgres tsvector, generated at the DB level (chunk.fts), not here.
