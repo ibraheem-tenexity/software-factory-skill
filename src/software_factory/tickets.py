@@ -64,8 +64,9 @@ class Ticket:
 class TicketStore:
     def __init__(self, path: str):
         self._project_id = project_id_from_path(path)
-        # Postgres; schema owned by Alembic (prod) / tests. All SQL is in TicketRepository.
-        self._repo = TicketRepository(PathExec(path), self._project_id)
+        # Postgres; schema owned by Alembic (prod) / tests. All SQL is in TicketRepository. The repo
+        # reads project_id LIVE (getter) so reassigning self._project_id still re-scopes every query.
+        self._repo = TicketRepository(PathExec(path), lambda: self._project_id)
 
     def create_ticket(self, title: str, acceptance: str, dod: str, wave: int,
                       app: Optional[str] = None, description: str = "") -> int:

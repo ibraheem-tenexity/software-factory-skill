@@ -35,7 +35,7 @@ class FakeExec:
 
 def _repo():
     fx = FakeExec()
-    return TicketRepository(fx, "p1"), fx
+    return TicketRepository(fx, lambda: "p1"), fx
 
 
 def _no_bad_placeholders(sql):

@@ -15,16 +15,20 @@ _TCOLS = (tickets.c.id, tickets.c.title, tickets.c.acceptance, tickets.c.dod, ti
 
 
 class TicketRepository:
-    def __init__(self, exec_, project_id: str):
+    def __init__(self, exec_, project_id):
+        """`project_id` is a zero-arg callable returning the owning store's CURRENT project_id, read
+        LIVE on every query. `_project_id` is the store's scoping source of truth and callers may
+        reassign it (e.g. tests point one store at another run in a shared DB), so the repo must not
+        capture a stale snapshot."""
         self._x = exec_
         self._pid = project_id
 
     def _scoped(self):
-        return tickets.c.project_id == self._pid
+        return tickets.c.project_id == self._pid()
 
     # -- writes -------------------------------------------------------------------------
     def insert(self, **vals) -> int:
-        stmt = insert(tickets).values(project_id=self._pid, **vals).returning(tickets.c.id)
+        stmt = insert(tickets).values(project_id=self._pid(), **vals).returning(tickets.c.id)
         return self._x.execute(stmt).fetchone()["id"]
 
     def update(self, ticket_id: int, **vals) -> int:
