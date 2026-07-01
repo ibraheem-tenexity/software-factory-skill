@@ -157,3 +157,20 @@ def admin_sow_create(body: SowIn, v: tuple = Depends(require_staff)):
 @router.patch("/api/admin/sow/{sow_id}")
 def admin_sow_update(sow_id: int, body: SowPatchIn, v: tuple = Depends(require_staff)):
     return state.admin_service.sow_update(sow_id, body)
+
+
+# ── conversation history (SOF-34, T1.5) — cross-tenant, staff-only ──────────────────────────────
+@router.get("/api/admin/conversations")
+def admin_conversations(org_id: str | None = None, project_id: str | None = None,
+                        user_id: str | None = None, session_id: str | None = None,
+                        role: str | None = None, date_from: str | None = None,
+                        date_to: str | None = None, cursor: str | None = None,
+                        limit: int = 50, v: tuple = Depends(require_staff)):
+    return state.admin_service.conversations(
+        org_id=org_id, project_id=project_id, user_id=user_id, session_id=session_id, role=role,
+        date_from=date_from, date_to=date_to, cursor=cursor, limit=limit)
+
+
+@router.get("/api/admin/conversations/{session_id}")
+def admin_conversation_transcript(session_id: str, v: tuple = Depends(require_staff)):
+    return state.admin_service.conversation_transcript(session_id)

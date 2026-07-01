@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import select, insert, func
+from sqlalchemy import select, insert, func, and_, or_
 
 from ..models import conversation
 
@@ -57,3 +57,48 @@ class ConversationRepository:
         return self._x.fetchall(select(*_COLS)
                                 .where(conversation.c.session_id == session_id)
                                 .order_by(conversation.c.seq))
+
+    def rollup(self, *, org_id=None, project_id=None, user_id=None, session_id=None, role=None,
+              date_from=None, date_to=None, cursor=None, limit=50) -> list:
+        """One row per session, aggregated from the messages matching the filters — a SINGLE grouped
+        query (SOF-34's "no N+1" AC), not a query-per-session. org_id/project_id/user_id are
+        session-constant scoping columns (set once when the session starts, ConversationStore never
+        varies them mid-session) so grouping by them alongside session_id is exact, not a guess.
+
+        `cursor`, if given, is (last_activity, session_id) from a previous page's last row — keyset
+        pagination ordered by (last_activity DESC, session_id DESC), stable under concurrent inserts
+        (unlike OFFSET, which can skip/duplicate rows as new messages land)."""
+        last_activity = func.max(conversation.c.created_at)
+        conds = []
+        if org_id is not None:
+            conds.append(conversation.c.org_id == org_id)
+        if project_id is not None:
+            conds.append(conversation.c.project_id == project_id)
+        if user_id is not None:
+            conds.append(conversation.c.user_id == user_id)
+        if session_id is not None:
+            conds.append(conversation.c.session_id == session_id)
+        if role is not None:
+            conds.append(conversation.c.role == role)
+        if date_from is not None:
+            conds.append(conversation.c.created_at >= date_from)
+        if date_to is not None:
+            conds.append(conversation.c.created_at <= date_to)
+
+        stmt = (
+            select(conversation.c.session_id, conversation.c.org_id, conversation.c.project_id,
+                   conversation.c.user_id, func.count().label("turn_count"),
+                   last_activity.label("last_activity"),
+                   func.coalesce(func.sum(conversation.c.cost_usd), 0).label("total_cost"))
+            .group_by(conversation.c.session_id, conversation.c.org_id, conversation.c.project_id,
+                      conversation.c.user_id)
+        )
+        if conds:
+            stmt = stmt.where(and_(*conds))
+        if cursor is not None:
+            cur_activity, cur_session_id = cursor
+            stmt = stmt.having(or_(last_activity < cur_activity,
+                                   and_(last_activity == cur_activity,
+                                        conversation.c.session_id < cur_session_id)))
+        stmt = stmt.order_by(last_activity.desc(), conversation.c.session_id.desc()).limit(limit)
+        return self._x.fetchall(stmt)
