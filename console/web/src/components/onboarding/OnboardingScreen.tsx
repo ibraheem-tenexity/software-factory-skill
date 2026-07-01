@@ -599,9 +599,18 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       let added: MatFile[] = picked.map((f) => ({ name: f.name, size: fmtBytes(f.size) }));
       try {
         const docs = await api.documents(draftId);
-        const byName = new Map((docs.uploaded || []).map((d) => [d.name, d]));
+        // SOF-54: group by name (not a flat name→row map) so two files attached with the SAME
+        // name in one batch each get their OWN blob_id instead of both collapsing onto the
+        // last match. `docs.uploaded` is ordered by blobs.id (insertion order) and the backend
+        // creates rows in the same order `picked` was attached — shift()ing each name's queue
+        // in `picked` order pairs them up correctly, not just "less wrong."
+        const byName = new Map<string, typeof docs.uploaded>();
+        for (const d of docs.uploaded || []) {
+          if (!byName.has(d.name)) byName.set(d.name, []);
+          byName.get(d.name)!.push(d);
+        }
         added = added.map((f) => {
-          const d = byName.get(f.name);
+          const d = byName.get(f.name)?.shift();
           return d?.id != null ? { ...f, blobId: Number(d.id) } : f;
         });
       } catch { /* degrade to plain "Uploaded" — see comment above */ }
