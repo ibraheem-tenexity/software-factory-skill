@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from software_factory.chat_store import ChatMessage
 from software_factory.console import Console
+from software_factory.memory import pricing
 
 
 _DEFAULT_OPENAI_CHAT_MODEL = "gpt-5.4"   # concierge default (was gpt-4o); SF_CHAT_MODEL overrides it
@@ -232,6 +233,57 @@ class ConciergeTurn(BaseModel):
 _SAFE_FALLBACK_RESPONSE = "Sorry, I didn't quite catch that -- could you say it again?"
 
 
+def _model_and_provider() -> tuple[str, str]:
+    """SOF-57: which model/provider actually served this turn -- reuses chat_model_label()'s
+    existing SF_CHAT_MODEL selection rather than re-deriving it, so this can never drift from
+    what _build_chat_model() constructed."""
+    model = chat_model_label()
+    provider = "openrouter" if model == _KIMI_MODEL else "openai"
+    return model, provider
+
+
+def _usage_cost_usd(model: str, provider: str, input_tokens: int, output_tokens: int) -> float | None:
+    """Real published OpenRouter $/token x real token counts -- never a fabricated number.
+    OpenRouter's catalog namespaces direct-OpenAI models as `openai/<model>`; the Kimi id
+    already carries its `moonshotai/` prefix since that's the literal string sent to
+    OpenRouter's API. Returns None (never 0) if live pricing can't be fetched."""
+    lookup_id = model if provider == "openrouter" else f"openai/{model}"
+    price = pricing.openrouter_price(lookup_id, kind="chat")
+    if price is None:
+        return None
+    return input_tokens * price["input"] + output_tokens * price["output"]
+
+
+def _extract_usage(messages: list) -> dict:
+    """The AIMessage LangChain's model integration attaches real token counts to via
+    `usage_metadata` -- walk `result["messages"]` backwards (the newest messages are the ones
+    this turn produced) and use the first one that has it."""
+    model, provider = _model_and_provider()
+    for m in reversed(messages):
+        usage_metadata = getattr(m, "usage_metadata", None)
+        if usage_metadata:
+            input_tokens = usage_metadata.get("input_tokens") or 0
+            output_tokens = usage_metadata.get("output_tokens") or 0
+            return {"model": model, "provider": provider,
+                    "input_tokens": input_tokens, "output_tokens": output_tokens,
+                    "cost_usd": _usage_cost_usd(model, provider, input_tokens, output_tokens)}
+    return {"model": model, "provider": provider, "input_tokens": 0, "output_tokens": 0, "cost_usd": None}
+
+
+def _sum_usage(usages: list[dict]) -> dict:
+    """Total real usage across multiple separately-billed model calls (a retry that got far
+    enough to actually call the model twice). Token counts always add; `cost_usd` only adds when
+    every contributing call's cost is known -- otherwise the total is honestly unknown (None)
+    rather than a fabricated partial number."""
+    model, provider = _model_and_provider()
+    input_tokens = sum(u["input_tokens"] for u in usages)
+    output_tokens = sum(u["output_tokens"] for u in usages)
+    costs = [u["cost_usd"] for u in usages]
+    cost_usd = sum(costs) if usages and all(c is not None for c in costs) else None
+    return {"model": model, "provider": provider,
+            "input_tokens": input_tokens, "output_tokens": output_tokens, "cost_usd": cost_usd}
+
+
 # ── T2.1: one context-parameterized LangChain agent ────────────────────────────────────────────
 # Product spec Principle 2 / §4.6: ONE assistant, same identity/voice everywhere; only its focus
 # (`context`) changes. Deliberately minimal -- system prompt + agent loop + a tool belt that
@@ -279,7 +331,21 @@ class ConciergeAgent:
         """`messages`: a LangChain-shaped message list (the conversation-store's to_provider()
         output, T1.2). Returns a validated ConciergeTurn -- never raises on a structured-output
         failure: retries once, then falls back to a safe {response, suggested_responses: []}
-        rather than 500ing the turn (spec §3).
+        rather than 500ing the turn (spec §3)."""
+        turn, _usage = self.run_with_usage(context, messages)
+        return turn
+
+    def run_with_usage(self, context: str, messages: list) -> tuple[ConciergeTurn, dict]:
+        """Same contract as `run()`, plus the real model/provider/token/cost this turn actually
+        cost (SOF-57) -- {"model", "provider", "input_tokens", "output_tokens", "cost_usd"}.
+
+        A malformed structured-output attempt is still a REAL, billed model call -- when that's
+        why an attempt failed, its usage must not be discarded (confirmed live: gpt-5.4's native
+        structured-output mode currently fails validation on effectively every intake turn, so
+        this is the common path in production right now, not an edge case). `StructuredOutputError`
+        carries the raw `ai_message` that failed to parse, which still has real `usage_metadata`
+        on it -- captured across both attempts and folded into the final usage regardless of
+        which attempt (if any) ultimately produces a valid ConciergeTurn.
 
         EXCEPTION SCOPE (confirmed against the installed LangChain 1.3.11 source, not assumed):
         `langchain.agents.create_agent`'s structured-output coercion raises
@@ -290,18 +356,24 @@ class ConciergeAgent:
         and this method's own "no structured_response" ValueError guard."""
         from langchain.agents.structured_output import StructuredOutputError
         agent = self._compiled_agent_for(context)
+        per_attempt_usages: list[dict] = []
         for _attempt in range(2):
             try:
                 result = agent.invoke({"messages": messages})
+                per_attempt_usages.append(_extract_usage(result.get("messages") or []))
                 structured = result.get("structured_response")
                 if isinstance(structured, ConciergeTurn):
-                    return structured
+                    return structured, _sum_usage(per_attempt_usages)
                 if structured is None:
                     raise ValueError("agent returned no structured_response")
-                return ConciergeTurn.model_validate(structured)
-            except (ValidationError, ValueError, StructuredOutputError):
+                return ConciergeTurn.model_validate(structured), _sum_usage(per_attempt_usages)
+            except (ValidationError, ValueError, StructuredOutputError) as e:
+                ai_message = getattr(e, "ai_message", None)
+                if ai_message is not None:
+                    per_attempt_usages.append(_extract_usage([ai_message]))
                 continue
-        return ConciergeTurn(response=_SAFE_FALLBACK_RESPONSE, suggested_responses=[])
+        return ConciergeTurn(response=_SAFE_FALLBACK_RESPONSE, suggested_responses=[]), \
+            _sum_usage(per_attempt_usages)
 
 
 # Phase -> context inference for the persistent dock (no per-screen signal exists in ChatIn
@@ -368,7 +440,7 @@ class ChatDockRunner:
 
         context = _context_for_project(self._console, project_id) if project_id else "build"
         try:
-            turn = await asyncio.to_thread(self._get_agent().run, context, list(history))
+            turn, usage = await asyncio.to_thread(self._get_agent().run_with_usage, context, list(history))
         except Exception as e:
             yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
             return
@@ -378,4 +450,5 @@ class ChatDockRunner:
         now = time.time()
         messages = [{"role": "assistant", "content": turn.response, "msg_type": "text",
                     "ts": now, "metadata": {}}]
-        yield json.dumps({"type": "done", "project_id": project_id, "messages": messages}) + "\n"
+        yield json.dumps({"type": "done", "project_id": project_id, "messages": messages,
+                          "usage": usage}) + "\n"

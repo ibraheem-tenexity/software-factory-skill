@@ -60,7 +60,8 @@ def _from_conversation_role(role: str) -> str:
 
 def _persist_chat_turn(project_id: str, msg: ChatMessage, *, owner_email: str = "",
                        model: str | None = None, provider: str | None = None,
-                       input_tokens: int = 0, output_tokens: int = 0, cost_usd: float = 0.0) -> None:
+                       input_tokens: int = 0, output_tokens: int = 0,
+                       cost_usd: float | None = 0.0) -> None:
     """Write one /api/chat turn to whichever store(s) are currently active."""
     if _jsonl_mirror_on():
         ChatStore(state._chat_path(project_id)).append(msg)
@@ -168,13 +169,15 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
         final_pid = result.get("project_id") or pid
         if final_pid and result.get("type") == "done":
             _persist_chat_turn(final_pid, user_msg, owner_email=v[0] or "")
+            # SOF-57: ChatDockRunner's "done" event now carries the real LangChain usage
+            # (model/provider/token counts/cost) for the assistant turn it just produced.
+            usage = result.get("usage") or {}
             msgs = [ChatMessage.from_dict(m) for m in (result.get("messages") or [])]
             for m in msgs:
-                # T1.4: ChatDockRunner's messages carry no model/provider/token/cost today
-                # (chat_agent.py's ConciergeAgent.run() doesn't expose LangChain's usage
-                # metadata up through handle_message_streamed) — ship null/0 rather than block
-                # on a chat_agent.py change; a fast-follow once that's threaded through.
-                _persist_chat_turn(final_pid, m)
+                _persist_chat_turn(final_pid, m, model=usage.get("model"), provider=usage.get("provider"),
+                                   input_tokens=usage.get("input_tokens", 0),
+                                   output_tokens=usage.get("output_tokens", 0),
+                                   cost_usd=usage.get("cost_usd", 0.0))
             state._push_sse(final_pid, msgs)
 
     return StreamingResponse(generate(), media_type="application/x-ndjson",
