@@ -2,6 +2,7 @@
 (no Supabase creds), which is the dev/test path."""
 import io
 import json
+import os
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -45,6 +46,47 @@ def test_url_does_not_upload(local):
     assert u.startswith("file://")
     with pytest.raises(FileNotFoundError):
         storage.get("project-x", "k.txt")
+
+
+# ── SOF-50: re-fetch by full path (what a stored blobs.storage_key actually is) ─────────────
+# storage_key is recorded as the FULL <scope_id>/<key> path (see blobs.record call sites in
+# projects.py/org_service.py). Re-fetching with the two-arg scope_id+key form re-prefixes
+# scope_id onto an already-full path — a real FileNotFoundError this caught in conversation_
+# provider.py's image resolver. url_by_path/get_by_path take the full path as-is, no re-prefixing.
+
+def test_get_by_path_resolves_a_full_storage_key_project_scoped(local):
+    scope_id, key = "project-abc12345", "materials/spec.pdf"
+    storage.put(scope_id, key, b"PDFDATA123")
+    full_storage_key = f"{scope_id}/{key}"   # what blobs.record() actually persists
+    assert storage.get_by_path(full_storage_key) == b"PDFDATA123"
+
+
+def test_get_by_path_resolves_a_full_storage_key_org_scoped(local):
+    # org-scoped storage uses a DIFFERENT scope_id convention ("org/<org_id>") than the blobs
+    # table's own scope_id column (bare org_id) — get_by_path must not care, since it never
+    # reconstructs the path from a scope_id at all.
+    storage_scope_id, key = "org/org-9f", "kb/handbook.pdf"
+    storage.put(storage_scope_id, key, b"HANDBOOK")
+    full_storage_key = f"{storage_scope_id}/{key}"
+    assert storage.get_by_path(full_storage_key) == b"HANDBOOK"
+
+
+def test_url_by_path_does_not_reprefix_an_already_full_path(local):
+    scope_id, key = "project-x", "materials/report.pdf"
+    storage.put(scope_id, key, b"x")
+    full_storage_key = f"{scope_id}/{key}"
+    u = storage.url_by_path(full_storage_key)
+    assert u == "file://" + os.path.join(str(local / "blobs"), full_storage_key)
+
+
+def test_double_prefixing_the_old_buggy_way_really_does_404(local):
+    # Regression anchor: confirms get(scope_id, full_storage_key) — the call pattern SOF-50 fixed
+    # — genuinely 404s, so this test would have caught the original bug had it existed pre-fix.
+    scope_id, key = "project-y", "materials/x.pdf"
+    storage.put(scope_id, key, b"y")
+    full_storage_key = f"{scope_id}/{key}"
+    with pytest.raises(FileNotFoundError):
+        storage.get(scope_id, full_storage_key)
 
 
 def test_listing(local):
