@@ -55,6 +55,7 @@ _PERSISTED = {
     "log_url",
     "owner_github_username",
     "launch_attempted",
+    "ingestion_spent_usd",
 }
 
 
@@ -63,6 +64,11 @@ class ProjectState:
     project_id: str
     phase: str = "provision"
     spent_usd: float = 0.0
+    # SOF-27: console-side ingestion spend (embedding/summarization/extraction), accumulated
+    # separately from spent_usd. It must NOT live in spent_usd: Console._cost() overwrites
+    # spent_usd wholesale from project.log's own cost every time it reparses the log, which
+    # would silently clobber any ingestion charge folded in there. See Console._project_spend.
+    ingestion_spent_usd: float = 0.0
     repo_url: Optional[str] = None
     deploy_url: Optional[str] = None
     # Proof marker — stamped at provision so the run carries a receipt of which skill drove it.
