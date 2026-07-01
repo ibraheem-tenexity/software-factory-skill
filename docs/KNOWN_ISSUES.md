@@ -153,11 +153,64 @@ so the deployed app's core AI feature is **dead on arrival**.
 **Symptom.** The factory creates orphan GitHub repos; the reaper service exists but is not
 yet armed in prod.
 
-**Plan.** Dry-run → ibraheem approves the kill-list → flip `SF_GITHUB_REPO_REAPER` on. The
-arming is deliberately gated on a human-approved kill-list (don't delete what you didn't
-create / contradicts the description).
+**Mechanism (already shipped, `SF_GITHUB_REPO_REAPER` stays off).** The dry-run/kill-list
+path already exists end-to-end and never deletes anything:
+- `src/software_factory/reap_github_repos.py` — CLI entrypoint. With no `--apply` flag it
+  forces `dry_run=True` regardless of `SF_GITHUB_REPO_REAPER`, so it is safe to run at any
+  time, including in prod, without arming anything.
+- `Console.reap_github_repos(org, dry_run=True)` — builds the candidate list: lists real org
+  repos via `gh`, matches each to a project by the #95/SOF-8 EXACT recorded repo URL first,
+  falling back to the `<name>-<hex>` suffix heuristic only when no exact record exists.
+  Repos matching neither are returned in `unknown_repos` (log-only, never a delete
+  candidate).
+- `github_repo_reaper.reap()` — applies the policy gate per candidate and returns a
+  structured report: `{armed, mode, reaped, kept, would_reap, failed, unknown_repos}`.
+  **`would_reap` is the kill-list** — each entry is
+  `{project_id, repo, phase, archived, has_verified_deploy, reason}` where `reason` is
+  `"archived"` or `"stopped-without-deploy"`.
+- **Owner-shared exclusion (#210/#217 guard, honored).** `_reap_reason()` checks
+  `owner_repo_shared` FIRST and returns `None` (keep) before the archived/stopped checks —
+  so a repo the project owner has a real GitHub collaborator invite on can never appear in
+  `would_reap`, regardless of archived/stopped state. `Console.reap_github_repos` sets this
+  flag from `repo_shared_with_owner(project_id)`, a durable `repo-shared` artifact Stage 1
+  records when the invite succeeds. Covered by
+  `test_reap_github_repos_exact_match_still_honors_owner_shared_guard` and
+  `test_reap_reason_owner_shared_keeps_even_when_archived` /
+  `..._when_stopped_without_deploy` in `tests/unit/test_github_repo_reaper.py`.
 
-**Status.** In progress, awaiting the dry-run review + flag flip. Depends on / pairs with #95.
+**Arming runbook — the ONLY step that arms is ibraheem flipping the env var. Nothing in this
+runbook or its tooling flips it.**
+1. **Dry-run, on the deployed service** (the CLI reads real project state from
+   `SF_PROJECTS_DIR` + the live registry/DB, and lists real org repos via `gh` — data that
+   does not exist in a local dev checkout):
+   ```
+   railway run --service factory-console python -m software_factory.reap_github_repos
+   ```
+   (Omit `--apply` — omitting it is itself the dry-run gate; the script forces
+   `dry_run=True` whenever `--apply` is absent, so this is safe to run at any time.)
+   Add `SF_GITHUB_ORG=<org>` before the command to target an org other than the default
+   `ibraheem-tenexity`.
+2. **Produce the kill-list.** The command prints the full JSON report to stdout. The
+   kill-list ibraheem reviews is the `would_reap` array — one entry per repo the reaper would
+   delete if armed, each carrying `{project_id, repo, phase, archived, has_verified_deploy,
+   reason}`. Cross-check `unknown_repos` too (repos that look factory-made but have no DB
+   match) — these are never delete candidates, but worth eyeballing for surprises.
+3. **ibraheem reviews and approves the kill-list.** Sanity-check each `would_reap` entry
+   against the real project — confirm it should really be gone, and confirm no entry you'd
+   expect to be owner-shared shows up (it shouldn't; the guard excludes those before they
+   ever reach `would_reap`).
+4. **Only after approval, ibraheem flips `SF_GITHUB_REPO_REAPER=on`** on the `factory-console`
+   Railway service. This is the sole arming action in the whole runbook — no code path in
+   this repo sets or defaults this variable to `on`. Once armed, the background poller
+   (`console/poller.py::_github_reaper_tick`) sweeps on its normal interval and deletes only
+   what the same policy gate would have put in `would_reap`.
+5. To disarm again, unset `SF_GITHUB_REPO_REAPER` (or set it to anything other than `on`) —
+   the reaper reverts to dry-run/log-only immediately, no restart required beyond the env
+   change taking effect.
+
+**Status.** Mechanism complete and tested; awaiting ibraheem to run the dry-run on the live
+service, review the real kill-list, and — separately — flip the flag. Depends on / pairs
+with #95.
 
 ---
 
