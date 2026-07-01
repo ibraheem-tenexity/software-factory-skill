@@ -302,6 +302,25 @@ def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
     assert {"orchestrator", "phase", "agent", "artifact", "blocker", "gate"} <= kinds
     phase_labels = {n["data"]["label"] for n in g["nodes"] if n["data"]["kind"] == "phase"}
     assert {"research", "architect", "deploy"} <= phase_labels
+
+
+def test_graph_artifact_node_carries_the_real_row_id(tmp_path):
+    """SOF-13: the standalone ArtifactViewer resolves by the artifacts-table row id (GET
+    /api/artifacts/{id}), so the live graph projection must expose it. It must be a SEPARATE
+    field from the node's own Cytoscape `id` (the synthetic "artifact:N" string) — overwriting
+    that would break Tree/Map rendering, which key nodes by `data.id`."""
+    from software_factory.db import ProjectStore, db_path
+    c = console(tmp_path, FakeLauncher())
+    project_id = c.start_project(ProjectRequest(description="guestbook"))
+    db = ProjectStore(db_path(str(tmp_path), project_id))
+    db.record_artifact("PRD", "PRD.md", kind="prd")
+    real_id = db.artifacts()[-1]["id"]
+
+    g = c.graph(project_id)
+    node = next(n["data"] for n in g["nodes"] if n["data"]["kind"] == "artifact" and n["data"]["label"] == "PRD")
+    assert node["artifact_id"] == real_id
+    assert node["id"] != real_id
+    assert node["id"].startswith("artifact:")
     gate_ids = {n["data"]["id"] for n in g["nodes"] if n["data"]["kind"] == "gate"}
     assert "gate:stage1" in gate_ids and "gate:stage2" in gate_ids
     deps_nodes = [n for n in g["nodes"] if n["data"]["kind"] == "deps"]

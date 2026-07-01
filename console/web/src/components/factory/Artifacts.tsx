@@ -19,7 +19,7 @@ export function openArtifact(id: number | string) {
 export function artifactsFromGraph(graph: Graph): ArtifactRef[] {
   return graph.nodes
     .filter((n: GraphNode) => n.data.kind === "artifact")
-    .map((n) => ({ label: n.data.label, path: n.data.path || "", url: n.data.url || null, status: n.data.status }));
+    .map((n) => ({ label: n.data.label, path: n.data.path || "", url: n.data.url || null, status: n.data.status, id: n.data.artifact_id }));
 }
 
 export function ArtifactList({ artifacts, onOpen }:
@@ -47,7 +47,7 @@ export function ArtifactList({ artifacts, onOpen }:
 
 // DocViewer — modal that fetches + renders one artifact (or arbitrary content, e.g. a ticket body).
 export function DocViewer({ projectId, doc, onClose }:
-  { projectId: string; doc: { label: string; path?: string; content?: string } | null; onClose: () => void }) {
+  { projectId: string; doc: { label: string; path?: string; content?: string; id?: number } | null; onClose: () => void }) {
   const [content, setContent] = useState<string | null>(doc?.content ?? null);
   const [loading, setLoading] = useState(false);
 
@@ -74,6 +74,13 @@ export function DocViewer({ projectId, doc, onClose }:
           <Icon name="file" size={15} color={T.tertiary} />
           <span style={{ flex: 1, font: `600 14px/1.2 ${T.sans}`, color: T.fg }}>{doc.label}</span>
           {doc.path && <span style={{ font: `400 11px/1 ${T.mono}`, color: T.tertiary }}>{doc.path}</span>}
+          {doc.id != null && (
+            <button onClick={() => openArtifact(doc.id!)} title="Open full viewer"
+              style={{ width: 28, height: 28, display: "grid", placeItems: "center", borderRadius: T.rMd,
+                border: "none", background: "transparent", cursor: "pointer", color: T.secondary }}>
+              <Icon name="external" size={14} />
+            </button>
+          )}
           <button onClick={onClose} style={{ width: 28, height: 28, display: "grid", placeItems: "center", borderRadius: T.rMd,
             border: "none", background: "transparent", cursor: "pointer", color: T.secondary }}><Icon name="x" size={16} /></button>
         </header>

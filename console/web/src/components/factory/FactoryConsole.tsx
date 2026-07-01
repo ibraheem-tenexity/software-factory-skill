@@ -22,7 +22,7 @@ import { KanbanCardSkel, MessageSkel } from "../skeleton";
 
 type Status = ProjectSummary & Record<string, any>;
 type View = "kanban" | "tree" | "map";
-type Doc = { label: string; path?: string; content?: string } | null;
+type Doc = { label: string; path?: string; content?: string; id?: number } | null;
 
 const VIEWS: { id: View; label: string; icon: string }[] = [
   { id: "kanban", label: "Kanban", icon: "kanban" },
@@ -210,7 +210,7 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
           )}
           {view === "kanban" && loaded && <BuildBoard tickets={tickets}
             onOpenTicket={(t) => setDoc({ label: `#${t.id} ${t.title}`, content: t.description || "(no description)" })} />}
-          {view === "tree" && <TreeView graph={graph} onOpenArtifact={(path, label) => setDoc({ label, path })} />}
+          {view === "tree" && <TreeView graph={graph} onOpenArtifact={(path, label, id) => id ? openArtifact(id) : setDoc({ label, path })} />}
           {view === "map" && <MapView graph={graph} />}
 
           {/* ── delivery footer ── (design: delivered ⇒ green repo+live; otherwise the QA loop note) */}
