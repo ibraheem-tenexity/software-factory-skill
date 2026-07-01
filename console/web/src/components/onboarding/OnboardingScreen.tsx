@@ -17,11 +17,11 @@ import { api, Org, OrgInput } from "../../api";
 import {
   T, Icon, Sparkle, Wordmark, Avatar, StatusPill, CategoryLabel, SectionDivider, Btn, TextInput, TextArea,
   Field, Chip, Chips, IndustryTile, IntegrationRow, Dropzone, Message, Composer, Segmented,
-  OrgImportPicker, INDUSTRIES, SIZES, REVENUE, ROLES, INTEGRATIONS,
+  OrgImportPicker, ChoiceList, INDUSTRIES, SIZES, REVENUE, ROLES, INTEGRATIONS,
 } from "./design";
 
 type Check = { id: string; label: string; done: boolean; optional?: boolean; nudge?: string };
-type ChatMsg = { role: string; content: string };
+type ChatMsg = { role: string; content: string; choices?: string[] };
 
 const SCOPE = ["Quoting / RFQ", "Order entry", "Pricing & approvals", "Inventory", "AP / AR", "Customer comms"];
 
@@ -502,15 +502,19 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     }
   };
 
-  const sendChat = async () => {
-    const text = composer.trim();
+  // One Concierge conversation turn (shared by the Composer and the ChoiceList). Ensures a draft
+  // exists, posts the message, appends the agent's reply — plain text or up to 4 choices.
+  const sendTurn = async (raw: string) => {
+    const text = raw.trim();
     if (!text || chatBusy) return;
-    // Create the draft on first chat message if the user hasn't typed a project name yet —
-    // the concierge can gather that itself, so the form doesn't need to come first.
+    // Create the draft on first message if the user hasn't named the project yet — the concierge
+    // can gather that itself, so the form doesn't need to come first.
     let pid = draftId;
     if (!pid) {
       try {
-        const { project_id } = await api.createDraft({ runtime: engineProviderRef.current });
+        // Chat-first (no project named yet): mint the draft with a placeholder name the user/agent
+        // refines later — create_draft requires a non-empty name.
+        const { project_id } = await api.createDraft({ runtime: engineProviderRef.current, project_name: p.name.trim() || "Untitled project" });
         setDraftId(project_id);
         pid = project_id;
       } catch {
@@ -521,17 +525,14 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     setMsgs((m) => [...m, { role: "user", content: text }]);
     setComposer(""); setChatBusy(true); setChatErr("");
     try {
-      const r = await api.chat({ message: text, project_id: pid });
-      const replies = (r.messages || []).filter((x: any) => x && x.role !== "user").map((x: any) => ({ role: x.role || "assistant", content: x.content || "" }));
-      setMsgs((m) => [...m, ...replies]);
-      // bridge: reflect any company values the concierge wrote (project name/goal/scope have no GET yet)
-      api.getOrg().then(({ org: o }) => { if (o) setOnFile(o); }).catch(() => {});
-    } catch (e: any) {
-      const msg = String(e?.message || e);
-      setChatErr(msg.includes("503") ? "Concierge chat needs a model key (available on the deployed app)." : "Message failed — try again.");
+      const r = await api.converse(pid, text);
+      setMsgs((m) => [...m, { role: "agent", content: r.message, choices: r.choices }]);
+    } catch {
+      setChatErr("Message failed — try again.");
     }
     setChatBusy(false);
   };
+  const sendChat = () => sendTurn(composer);
 
   if (mode === "loading") {
     return <div style={{ height: "100%", display: "grid", placeItems: "center", background: T.bg }}>
@@ -812,7 +813,14 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
             </div>
 
             {/* live concierge exchange (shares the draft id) */}
-            {msgs.map((m, i) => <Message key={i} who={m.role === "user" ? "user" : "agent"} text={m.content} />)}
+            {msgs.map((m, i) => (
+              <React.Fragment key={i}>
+                <Message who={m.role === "user" ? "user" : "agent"} text={m.content} />
+                {m.role === "agent" && m.choices && m.choices.length > 0 && i === msgs.length - 1 && (
+                  <ChoiceList options={m.choices} onPick={sendTurn} disabled={chatBusy} />
+                )}
+              </React.Fragment>
+            ))}
             {chatBusy && <span style={{ font: `400 11.5px/1 ${T.sans}`, color: T.tertiary }}>Concierge is thinking…</span>}
             {chatErr && <span style={{ font: `500 11.5px/1.4 ${T.sans}`, color: T.tertiary }}>{chatErr}</span>}
 

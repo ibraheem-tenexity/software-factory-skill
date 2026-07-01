@@ -28,6 +28,7 @@ from software_factory.registries import ToolStore, AgentRegistryStore  # noqa: E
 from software_factory.sow import SowStore  # noqa: E402
 from software_factory.services.org_service import OrgService  # noqa: E402
 from software_factory.services.secrets import Secrets  # noqa: E402
+from software_factory.services.conversation import Conversation  # noqa: E402
 from software_factory.services.files import doc_kind as _doc_kind  # noqa: E402,F401
 
 from console.throttle import LoginThrottle  # noqa: E402
@@ -48,6 +49,7 @@ agent_store = None
 sow_store = None
 org_service = None
 secrets_svc = None
+conversation_svc = None
 _has_chat_key = False
 _chat_runner = None
 _sse_clients: dict[str, list] = {}
@@ -60,7 +62,7 @@ def reset():
     """(Re)instantiate the long-lived singletons from the current environment. Called at import and
     by app.py on every reload — matches the monolith's reload-re-instantiates-stores behavior."""
     global PROJECTS_DIR, console, users, blobs, prompts, tool_store, agent_store, sow_store
-    global org_service, secrets_svc
+    global org_service, secrets_svc, conversation_svc
     global _has_chat_key, _chat_runner, _sse_clients, _sse_lock, _project_stages, login_throttle
 
     PROJECTS_DIR = os.environ.get("SF_PROJECTS_DIR", os.path.join(HERE, "..", ".projects"))
@@ -78,6 +80,7 @@ def reset():
     # the current instances; rebuilt each reset() so per-test TRUNCATE + re-seed is reflected.
     org_service = OrgService(users, blobs, console)
     secrets_svc = Secrets()
+    conversation_svc = Conversation()
     # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
     _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
     _chat_runner = ChatAgentRunner(console, users) if _has_chat_key else None

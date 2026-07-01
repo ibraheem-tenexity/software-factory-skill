@@ -11,7 +11,7 @@ from software_factory.deps import extract_env_creds
 
 import console.state as state
 from console.deps import require_authed, authorize_project, _can_see
-from console.schemas import ChatIn, DepsIn
+from console.schemas import ChatIn, ConverseIn, ConverseOut, DepsIn
 
 router = APIRouter()
 
@@ -85,6 +85,15 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
 
     return StreamingResponse(generate(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-cache"})
+
+
+@router.post("/api/projects/{pid}/converse", response_model=ConverseOut)
+def converse(pid: str, body: ConverseIn, v: tuple = Depends(authorize_project)):
+    """One onboarding-Concierge turn: record the user's message, return the (mock) agent's reply —
+    plain text or up to 4 choices, plus `done` when it's inviting hand-off. Backed by the in-memory
+    mock `conversation_svc` for now; swaps to the real agent + DB-backed history later with no route
+    change. `authorize_project` gates cross-org access."""
+    return state.conversation_svc.turn(pid, body.message)
 
 
 @router.get("/api/chat/{pid}/history")
