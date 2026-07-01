@@ -1457,6 +1457,38 @@ def test_stage3_prompt_mandates_demo_credentials_recording(tmp_path):
         assert "demo-creds" in p, rt
 
 
+def test_stage1_prompt_instructs_owner_invite_when_username_on_file():
+    # SOF-3: when the run has an owner_github_username, Stage 1 must be told to invite them
+    # as a collaborator on success and to add-blocker (never silently skip) on failure.
+    req = ProjectRequest(description="a crm", owner_github_username="demo-owner")
+    p = make_prompt_stage1(req, "project-xyz", projects_dir="/runs")
+    assert "demo-owner" in p
+    assert "add_collaborator" in p
+    assert "repo-shared" in p
+    assert "add-blocker" in p  # failure path still present
+
+
+def test_stage1_prompt_instructs_blocker_when_no_username_on_file():
+    # SOF-3: absence of a username must be a visible, recorded blocker — not a silent skip
+    # (the exact mistake SOF-4 fixed for demo-creds, applied here to owner repo access).
+    req = ProjectRequest(description="a crm")
+    p = make_prompt_stage1(req, "project-xyz", projects_dir="/runs")
+    assert "no owner GitHub username on file" in p
+    assert "add-blocker" in p
+    assert "add_collaborator" not in p
+
+
+def test_repo_shared_with_owner_true_when_artifact_recorded(tmp_path):
+    from software_factory.db import ProjectStore, db_path
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    rid = c.start_project(ProjectRequest(description="app"))
+    assert c.repo_shared_with_owner(rid) is False
+    ProjectStore(db_path(str(tmp_path), rid)).record_artifact(
+        "Owner Repo Access", "https://github.com/acme/app", kind="repo-shared")
+    assert c.repo_shared_with_owner(rid) is True
+
+
 def test_list_runs_unions_pg_registry_with_local_dirs(tmp_path, monkeypatch):
     # pg mode: a run can exist ONLY in the registry (fresh container, empty volume) —
     # discovery must surface it; local dirs win the dedupe (richer mtime ordering).

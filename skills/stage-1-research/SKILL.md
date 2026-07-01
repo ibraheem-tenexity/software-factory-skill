@@ -45,6 +45,13 @@ Turn it into usable scope. Do NOT re-record an input artifact — the console al
 - `GitHub.create_repo(name)`; seed `ProjectState`; `workspace.create` (the repo clones into your cwd's workspace).
 - **Record the repo IMMEDIATELY** so the operator sees the source link from the start — use the CLEAN
   https url (NEVER a tokenized remote): `record-artifact "GitHub Repo" https://github.com/<org>/<repo> repo`.
+- **Owner repo access (SOF-3):** your prompt states whether an owner GitHub username is on file for
+  this run. If YES — invite them: `GitHub.add_collaborator(repo, username)` (i.e. `gh api -X PUT
+  repos/<org>/<repo>/collaborators/<username> -f permission=pull`); on success `record-artifact
+  "Owner Repo Access" <same-repo-url> repo-shared` (this is what keeps the repo-reaper from ever
+  deleting it); on failure `add-blocker "GitHub Access: invite to <username> failed"`. If NO username
+  is on file — `add-blocker "GitHub Access: no owner GitHub username on file"`. Never silently skip
+  either way.
 
 ## Phase 3: research COUNCIL — parallel drafts → synthesis  (`set-phase research`)
 

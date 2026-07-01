@@ -107,6 +107,17 @@ def test_project_name_persists_across_reload(tmp_path):
     assert ProjectState.load("project-n", store(tmp_path)).name == "Acme CRM"
 
 
+def test_owner_github_username_persists(tmp_path):
+    # SOF-3: the owner's GitHub handle must survive a reload so a relaunch/release can thread it
+    # back into the Stage-1 prompt (it was a dataclass field but missing from _PERSISTED, exactly
+    # the deploy_db_attempts regression the sibling test above guards).
+    s = ProjectState.load("project-gh", store(tmp_path))
+    assert s.owner_github_username == ""           # default for runs with no username on file
+    s.owner_github_username = "demo-owner"
+    s.save()
+    assert ProjectState.load("project-gh", store(tmp_path)).owner_github_username == "demo-owner"
+
+
 def test_creds_vault_ids_persist_for_byok_vault_storage(tmp_path):
     # Vault UUIDs (the only persistent form of a BYOK key — never the plaintext) must survive
     # a reload so _launch_stage can retrieve them on Stages 2 + 3 and retries.

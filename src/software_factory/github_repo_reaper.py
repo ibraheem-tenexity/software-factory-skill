@@ -13,6 +13,8 @@ where the prefix is the first 8 hex chars of the project_id hex part (e.g. proje
 → suffix "4849c0d8"). Regex accepts 8–16 chars to cover both old and widened IDs.
 
 Reap policy mirrors deploy_db.py persistent mode:
+  owner_repo_shared=True → KEEP  (SOF-3: the project owner has real GitHub access to this repo —
+                                   never destroy it out from under them, regardless of archived/stopped)
   archived=True          → REAP  (even with a live deploy — discarded is discarded)
   stopped + no_deploy    → REAP  (stopped run that never shipped → no reason to keep repo)
   stopped + has_deploy   → KEEP  (live demo; relaunch makes a fresh repo anyway)
@@ -51,6 +53,7 @@ class ReapRecord:
     archived: bool
     phase: str
     has_verified_deploy: bool
+    owner_repo_shared: bool = False  # SOF-3: owner holds a real GitHub collaborator invite on this repo
 
 
 def github_reaper_mode() -> str:
@@ -64,6 +67,8 @@ def _reap_reason(rec: ReapRecord) -> str | None:
 
     Policy mirrors deploy_db._reap_reason (persistent mode) so the two reapers move in lockstep:
     a project whose DB service is reaped will also have its repo reaped on the same sweep."""
+    if rec.owner_repo_shared:
+        return None  # SOF-3: never reap a repo the owner has real access to, archived or not
     if rec.archived:
         return "archived"
     if rec.phase == "stopped" and not rec.has_verified_deploy:
