@@ -14,6 +14,18 @@ never carried in the session cookie, so a demotion/disable takes effect on the v
 Role lookups happen on every request, so the directory is cached in-process with a short TTL and
 invalidated on every write — a status/role/token_version change shows within seconds (and immediately
 for changes made through this process) without a DB round-trip per request.
+
+LAYERING (CRUD/app-logic separation): `UserRepository` holds the pure, parameterized SQL (no cache,
+no normalization, no lifecycle decisions) — it becomes SQLAlchemy Core in a later phase. `UserStore`
+is the business layer: it owns the read cache + fallback-to-stale, email normalization, the
+invited→active lifecycle, RBAC validation, cold-start seeding, and org orchestration, delegating every
+query/write to the repository. `UserStore`'s public surface is unchanged (callers + tests untouched).
+
+This is the sanctioned "Store already encapsulates the logic" shape of the CRUD/app-logic split
+(vs. the "logic was inlined in a router → extract a Service" shape used for org — see
+docs/ARCHITECTURE.md §3): keep the Store as the service layer, extract a pure-CRUD Repository it
+delegates to. Two classes, not three — a separate `UserService` behind a façade would be pure
+indirection since `UserStore` already IS the service and its name must be preserved.
 """
 from __future__ import annotations
 
@@ -59,21 +71,11 @@ def _bootstrap_admin_email() -> str:
     return (os.environ.get("SF_BOOTSTRAP_ADMIN_EMAIL", "") or "").strip().lower()
 
 
-class UserStore:
-    def __init__(self):
-        self._cache: dict | None = None
-        self._cache_ts = 0.0
-        self._roles: dict | None = None        # {role name -> id} cache
-        try:
-            self._ensure_roles()                # seed admin/member (covers create_all test DBs)
-            self.ensure_tenexity_org()          # canonical internal org (before bootstrap admin links to it)
-            self.ensure_bootstrap_admin()       # cold-start: the one env-seeded admin
-        except Exception:
-            # DB briefly unreachable at boot — the migration already seeded roles in prod, and the
-            # next write will retry. Never block startup on the directory.
-            pass
+class UserRepository:
+    """Pure parameterized CRUD over public.users / roles / organizations. No cache, no input
+    normalization, no lifecycle/validation — callers pass clean values. Each method ≈ one statement
+    (or read); this is the seam a later phase converts from raw SQL to SQLAlchemy Core."""
 
-    # -- pg helpers ---------------------------------------------------------------------
     def _exec(self, sql: str, params: tuple = ()) -> None:
         conn = dbshim._pg_connect(os.environ["DATABASE_URL"])
         try:
@@ -93,19 +95,127 @@ class UserStore:
             conn.close()
 
     # -- roles (RBAC) -------------------------------------------------------------------
+    def seed_role(self, rid: str, name: str, desc: str) -> None:
+        self._exec("INSERT INTO public.roles (id, name, description) VALUES (?::uuid, ?, ?) "
+                   "ON CONFLICT (name) DO NOTHING", (rid, name, desc))
+
+    def roles_rows(self) -> list:
+        return self._query("SELECT id::text AS id, name FROM public.roles")
+
+    # -- users --------------------------------------------------------------------------
+    def all_users(self) -> list:
+        return self._query(_USER_SELECT)
+
+    def users_where(self, where_sql: str, val) -> list:
+        return self._query(f"{_USER_SELECT} WHERE {where_sql}", (val,))
+
+    def upsert_user(self, uid: str, email: str, rid: str | None, inviter: str | None) -> None:
+        self._exec(
+            "INSERT INTO public.users (id, email, role_id, invited_by) VALUES (?::uuid, ?, ?::uuid, ?::uuid) "
+            "ON CONFLICT (email) DO UPDATE SET role_id = EXCLUDED.role_id, updated_at = now()",
+            (uid, email, rid, inviter))
+
+    def upsert_admin(self, uid: str, email: str, rid: str | None) -> None:
+        self._exec(
+            "INSERT INTO public.users (id, email, role_id, is_internal) VALUES (?::uuid, ?, ?::uuid, true) "
+            "ON CONFLICT (email) DO UPDATE SET role_id = EXCLUDED.role_id, is_internal = true, "
+            "updated_at = now()",
+            (uid, email, rid))
+
+    def set_identity(self, uid: str, google_sub: str) -> None:
+        self._exec("UPDATE public.users SET google_sub = ?, status = 'active', "
+                   "onboarded_at = COALESCE(onboarded_at, now()), updated_at = now() WHERE id = ?::uuid",
+                   (google_sub, uid))
+
+    def delete_user(self, email: str) -> None:
+        self._exec("DELETE FROM public.users WHERE email = ?", (email,))
+
+    def update_status(self, email: str, status: str) -> None:
+        self._exec("UPDATE public.users SET status = ?, updated_at = now() WHERE email = ?",
+                   (status, email))
+
+    def disable_user(self, email: str) -> None:
+        self._exec("UPDATE public.users SET status = 'disabled', token_version = token_version + 1, "
+                   "updated_at = now() WHERE email = ?", (email,))
+
+    def bump_token_version(self, email: str) -> None:
+        self._exec("UPDATE public.users SET token_version = token_version + 1, updated_at = now() "
+                   "WHERE email = ?", (email,))
+
+    def update_user_columns(self, email: str, cols: dict) -> None:
+        """Patch the given user columns (+ updated_at). `cols` is {column: value}; values are bound."""
+        sets = ", ".join(f"{c}=?" for c in cols)
+        self._exec(f"UPDATE public.users SET {sets}, updated_at = now() WHERE email=?",
+                   (*cols.values(), email))
+
+    def set_password_hash(self, email: str, password_hash: str) -> None:
+        self._exec("UPDATE public.users SET password_hash = ?, sign_in_method = 'password', "
+                   "updated_at = now() WHERE email = ?", (password_hash, email))
+
+    def credentials(self, email: str) -> list:
+        return self._query(
+            "SELECT id::text AS id, status, password_hash FROM public.users WHERE email = ?", (email,))
+
+    def touch_last_active(self, uid: str) -> None:
+        self._exec("UPDATE public.users SET last_active = now() WHERE id = ?::uuid", (uid,))
+
+    # -- organizations ------------------------------------------------------------------
+    def insert_org(self, oid: str, name: str, industry, sub_focus_json: str, headcount,
+                   revenue, location, website, connected_systems_json: str, by: str) -> None:
+        self._exec(
+            "INSERT INTO public.organizations (id, name, industry, sub_focus, headcount, revenue, "
+            "location, website, connected_systems, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (oid, name, industry, sub_focus_json, headcount, revenue, location, website,
+             connected_systems_json, by))
+
+    def org_by_id(self, org_id: str) -> list:
+        return self._query(_ORG_SELECT + " WHERE id=?", (org_id,))
+
+    def all_orgs(self) -> list:
+        return self._query(_ORG_SELECT + " ORDER BY name")
+
+    def update_org_columns(self, org_id: str, cols: dict) -> None:
+        """Patch the given organization columns (no updated_at column on organizations)."""
+        sets = ", ".join(f"{c}=?" for c in cols)
+        self._exec(f"UPDATE public.organizations SET {sets} WHERE id=?", (*cols.values(), org_id))
+
+    def unlink_org_members(self, org_id: str) -> None:
+        self._exec("UPDATE public.users SET org_id = NULL, updated_at = now() WHERE org_id = ?", (org_id,))
+
+    def delete_org_row(self, org_id: str) -> None:
+        self._exec("DELETE FROM public.organizations WHERE id = ?", (org_id,))
+
+
+class UserStore:
+    """Business layer over `UserRepository`: read cache (+ fallback-to-stale), email normalization,
+    the invited→active lifecycle, RBAC validation, cold-start seeding, and org orchestration."""
+
+    def __init__(self):
+        self._repo = UserRepository()
+        self._cache: dict | None = None
+        self._cache_ts = 0.0
+        self._roles: dict | None = None        # {role name -> id} cache
+        try:
+            self._ensure_roles()                # seed admin/member (covers create_all test DBs)
+            self.ensure_tenexity_org()          # canonical internal org (before bootstrap admin links to it)
+            self.ensure_bootstrap_admin()       # cold-start: the one env-seeded admin
+        except Exception:
+            # DB briefly unreachable at boot — the migration already seeded roles in prod, and the
+            # next write will retry. Never block startup on the directory.
+            pass
+
+    # -- roles (RBAC) -------------------------------------------------------------------
     def _ensure_roles(self) -> None:
         """Seed the two baseline roles if absent. The migration seeds them in prod; this covers a
         fresh `create_all` test DB (which builds tables but runs no migration data step)."""
         for name, desc in (("admin", "Full administrative access"),
                            ("member", "Standard member access")):
-            self._exec("INSERT INTO public.roles (id, name, description) VALUES (?::uuid, ?, ?) "
-                       "ON CONFLICT (name) DO NOTHING", (str(uuid.uuid4()), name, desc))
+            self._repo.seed_role(str(uuid.uuid4()), name, desc)
         self._roles = None
 
     def _roles_map(self) -> dict:
         if self._roles is None:
-            self._roles = {r["name"]: r["id"] for r in
-                           self._query("SELECT id::text AS id, name FROM public.roles")}
+            self._roles = {r["name"]: r["id"] for r in self._repo.roles_rows()}
         return self._roles
 
     def _role_id(self, name: str) -> str | None:
@@ -117,7 +227,7 @@ class UserStore:
         if self._cache is not None and (now - self._cache_ts) < _CACHE_TTL:
             return self._cache
         try:
-            rows = {r["email"].lower(): r for r in self._query(_USER_SELECT)}
+            rows = {r["email"].lower(): r for r in self._repo.all_users()}
         except Exception:
             # directory briefly unreachable — serve the last snapshot rather than locking everyone out.
             return self._cache or {}
@@ -160,14 +270,12 @@ class UserStore:
             row = self._fetch_one("u.email = ?", email)
         if row is None or row["status"] == "disabled":
             return None
-        self._exec("UPDATE public.users SET google_sub = ?, status = 'active', "
-                   "onboarded_at = COALESCE(onboarded_at, now()), updated_at = now() WHERE id = ?::uuid",
-                   (google_sub, row["id"]))
+        self._repo.set_identity(row["id"], google_sub)
         self._cache = None
         return self.get_by_id(row["id"])
 
     def _fetch_one(self, where_sql: str, val) -> dict | None:
-        rows = self._query(f"{_USER_SELECT} WHERE {where_sql}", (val,))
+        rows = self._repo.users_where(where_sql, val)
         return rows[0] if rows else None
 
     # -- writes (invalidate cache) ------------------------------------------------------
@@ -182,10 +290,7 @@ class UserStore:
             self._ensure_roles()
             rid = self._role_id(role)
         inviter = self._id_for_email(by) if by and "@" in by else None
-        self._exec(
-            "INSERT INTO public.users (id, email, role_id, invited_by) VALUES (?::uuid, ?, ?::uuid, ?::uuid) "
-            "ON CONFLICT (email) DO UPDATE SET role_id = EXCLUDED.role_id, updated_at = now()",
-            (str(uuid.uuid4()), email, rid, inviter))
+        self._repo.upsert_user(str(uuid.uuid4()), email, rid, inviter)
         self._cache = None
 
     def _id_for_email(self, email: str) -> str | None:
@@ -197,7 +302,7 @@ class UserStore:
         email = (email or "").strip().lower()
         if not email or email == _bootstrap_admin_email():
             return
-        self._exec("DELETE FROM public.users WHERE email = ?", (email,))
+        self._repo.delete_user(email)
         self._cache = None
 
     def set_status(self, email: str, status: str) -> None:
@@ -205,8 +310,7 @@ class UserStore:
         email = (email or "").strip().lower()
         if not email or status not in ("invited", "active", "disabled"):
             return
-        self._exec("UPDATE public.users SET status = ?, updated_at = now() WHERE email = ?",
-                   (status, email))
+        self._repo.update_status(email, status)
         self._cache = None
 
     def disable(self, email: str) -> None:
@@ -215,8 +319,7 @@ class UserStore:
         email = (email or "").strip().lower()
         if not email or email == _bootstrap_admin_email():   # never lock the cold-start admin out
             return
-        self._exec("UPDATE public.users SET status = 'disabled', token_version = token_version + 1, "
-                   "updated_at = now() WHERE email = ?", (email,))
+        self._repo.disable_user(email)
         self._cache = None
 
     def bump_token_version(self, email: str) -> None:
@@ -224,8 +327,7 @@ class UserStore:
         email = (email or "").strip().lower()
         if not email:
             return
-        self._exec("UPDATE public.users SET token_version = token_version + 1, updated_at = now() "
-                   "WHERE email = ?", (email,))
+        self._repo.bump_token_version(email)
         self._cache = None
 
     def ensure_bootstrap_admin(self) -> None:
@@ -239,11 +341,7 @@ class UserStore:
         if not rid:
             self._ensure_roles()
             rid = self._role_id("admin")
-        self._exec(
-            "INSERT INTO public.users (id, email, role_id, is_internal) VALUES (?::uuid, ?, ?::uuid, true) "
-            "ON CONFLICT (email) DO UPDATE SET role_id = EXCLUDED.role_id, is_internal = true, "
-            "updated_at = now()",
-            (str(uuid.uuid4()), email, rid))
+        self._repo.upsert_admin(str(uuid.uuid4()), email, rid)
         self._cache = None
         # Link the bootstrap admin to the canonical Tenexity org (org_id only — preserves role/is_internal)
         # so "Your organization" resolves and the admin-dashboard card (isAdmin && org) shows.
@@ -266,19 +364,17 @@ class UserStore:
             return
         if not self._exists(email):
             self.upsert(email, "member")
-        sets, vals = [], []
+        cols: dict = {}
         for col, val in (("org_id", org_id), ("designation", designation),
                          ("role_description", role_description), ("name", name),
                          ("sign_in_method", sign_in_method)):
             if val is not None:
-                sets.append(f"{col}=?"); vals.append(val)
+                cols[col] = val
         if is_internal is not None:
-            sets.append("is_internal=?"); vals.append(bool(is_internal))
-        if not sets:
+            cols["is_internal"] = bool(is_internal)
+        if not cols:
             return
-        vals.append(email)
-        self._exec(f"UPDATE public.users SET {', '.join(sets)}, updated_at = now() WHERE email=?",
-                   tuple(vals))
+        self._repo.update_user_columns(email, cols)
         self._cache = None
 
     # -- email+password sign-in ---------------------------------------------------------
@@ -288,8 +384,7 @@ class UserStore:
         email = (email or "").strip().lower()
         if not email or not raw_password:
             return
-        self._exec("UPDATE public.users SET password_hash = ?, sign_in_method = 'password', "
-                   "updated_at = now() WHERE email = ?", (auth.hash_password(raw_password), email))
+        self._repo.set_password_hash(email, auth.hash_password(raw_password))
         self._cache = None
 
     def authenticate_password(self, email: str, raw_password: str) -> dict | None:
@@ -299,8 +394,7 @@ class UserStore:
         email = (email or "").strip().lower()
         if not email or not raw_password:
             return None
-        rows = self._query(
-            "SELECT id::text AS id, status, password_hash FROM public.users WHERE email = ?", (email,))
+        rows = self._repo.credentials(email)
         u = rows[0] if rows else None
         if not u or u["status"] != "active" or not u.get("password_hash"):
             return None
@@ -314,7 +408,7 @@ class UserStore:
         uid = str(uid or "")
         if not uid:
             return
-        self._exec("UPDATE public.users SET last_active = now() WHERE id = ?::uuid", (uid,))
+        self._repo.touch_last_active(uid)
 
     # -- organizations ------------------------------------------------------------------
     def create_org(self, name: str, *, industry: str | None = None, sub_focus=None,
@@ -323,41 +417,36 @@ class UserStore:
                    connected_systems=None, by: str = "", org_id: str | None = None) -> str:
         """Insert an organization, returning its id (generated `org-<hex8>` unless given)."""
         oid = org_id or ("org-" + uuid.uuid4().hex[:8])
-        self._exec(
-            "INSERT INTO public.organizations (id, name, industry, sub_focus, headcount, revenue, "
-            "location, website, connected_systems, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (oid, name, industry, json.dumps(sub_focus or []), headcount, revenue, location,
-             website, json.dumps(connected_systems or []), by))
+        self._repo.insert_org(oid, name, industry, json.dumps(sub_focus or []), headcount, revenue,
+                              location, website, json.dumps(connected_systems or []), by)
         return oid
 
     def get_org(self, org_id: str) -> dict | None:
         if not org_id:
             return None
-        rows = self._query(_ORG_SELECT + " WHERE id=?", (org_id,))
+        rows = self._repo.org_by_id(org_id)
         return self._decode_org(rows[0]) if rows else None
 
     def list_orgs(self) -> list:
-        return [self._decode_org(r) for r in self._query(_ORG_SELECT + " ORDER BY name")]
+        return [self._decode_org(r) for r in self._repo.all_orgs()]
 
     def update_org(self, org_id: str, **fields) -> None:
         """Patch the provided org columns (json-encoding sub_focus/connected_systems)."""
         cols = [c for c in _ORG_COLS if c not in ("id", "created_at", "created_by")]
-        sets, vals = [], []
+        patch: dict = {}
         for col in cols:
             if col in fields and fields[col] is not None:
-                v = json.dumps(fields[col]) if col in _ORG_JSON_COLS else fields[col]
-                sets.append(f"{col}=?"); vals.append(v)
-        if not sets:
+                patch[col] = json.dumps(fields[col]) if col in _ORG_JSON_COLS else fields[col]
+        if not patch:
             return
-        vals.append(org_id)
-        self._exec(f"UPDATE public.organizations SET {', '.join(sets)} WHERE id=?", tuple(vals))
+        self._repo.update_org_columns(org_id, patch)
 
     def delete_org(self, org_id: str) -> None:
         """Delete an org and unlink its members (their rows survive, org_id cleared)."""
         if not org_id:
             return
-        self._exec("UPDATE public.users SET org_id = NULL, updated_at = now() WHERE org_id = ?", (org_id,))
-        self._exec("DELETE FROM public.organizations WHERE id = ?", (org_id,))
+        self._repo.unlink_org_members(org_id)
+        self._repo.delete_org_row(org_id)
         self._cache = None
 
     def org_for_user(self, email: str) -> dict | None:
