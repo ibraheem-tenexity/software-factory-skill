@@ -1331,12 +1331,20 @@ class Console:
         → Markdown[+images], wireframes survive). Records .md extractions as context artifacts;
         original PDF/DOCX binaries are kept on disk for the caller to push to blob storage.
         The draft stays invisible to the poller (is_pipeline_project excludes drafts).
-        Returns paths written (includes original binaries for PDF/DOCX so callers can blob-record)."""
+        Returns paths written (includes original binaries for PDF/DOCX so callers can blob-record).
+
+        SOF-56: `tolerate_extract_failures=True` — a text-free/malformed attachment here must not
+        500 the whole request (same failure-isolation principle SOF-32 applied to memory
+        ingestion); unlike `_provision_and_launch`'s Stage-1 input, a mid-interview attachment
+        failing to convert to Markdown doesn't mean the request itself failed — the original
+        still gets blob-recorded and separately ingested (memory/ingest.py has its own graceful
+        parse-failure handling)."""
         if not files:
             return []
         paths = self._paths(project_id)
         os.makedirs(paths["input_dir"], exist_ok=True)
-        written = persist_and_compose(paths["input_dir"], "", files, extract=self._extract)
+        written = persist_and_compose(paths["input_dir"], "", files, extract=self._extract,
+                                      tolerate_extract_failures=True)
         db = ProjectStore(paths["db"])
         for name in written:
             # raw PDF/DOCX originals go to blob storage (handled by the router, not here);

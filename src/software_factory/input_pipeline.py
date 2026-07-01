@@ -5,8 +5,14 @@ the user prompt together with the extracted Markdown → write that as the Stage
 input document. Only the *provision of input* lives here; the pipeline stages are
 untouched — Stage 1 still just reads `input/`.
 
-A malformed attachment or an empty extraction raises rather than being silently
-dropped — a missing input is a failure the operator needs to see.
+A malformed attachment or an empty extraction raises by default — a missing Stage-1 input is a
+failure the operator needs to see (`start_project`/`promote_draft`'s call site, where the file
+IS the input the run is about to build from). `tolerate_extract_failures=True` (SOF-56) opts a
+DIFFERENT caller — `attach_to_draft`, materials attached mid-interview, any number of files at
+any time — into the SOF-32 ingestion-pipeline pattern instead: one bad file is marked failed and
+skipped, the rest of the request still succeeds. The original binary is still kept + returned
+either way, so the caller can still blob-record it; only the `.md` extraction (and its inclusion
+in the composed `context.md`) is skipped for a file that failed to convert.
 """
 from __future__ import annotations
 
@@ -14,7 +20,10 @@ import base64
 import os
 from typing import Callable
 
+from .log import get_logger
 from .pdf_extract import extract_to_markdown
+
+logger = get_logger(__name__)
 
 
 def make_prompt(description: str, docs: list[tuple[str, str]]) -> str:
@@ -36,6 +45,7 @@ def persist_and_compose(
     extract_docx: Callable[[str], str] | None = None,
     brief: dict | None = None,
     interview_md: str | None = None,
+    tolerate_extract_failures: bool = False,
 ) -> list[str]:
     """Write attached files into `input_dir`, converting PDFs (markitdown) and Word docs to
     Markdown, then write the composed Stage 1 input to `input_dir/context.md` (it's composed from
@@ -60,7 +70,16 @@ def persist_and_compose(
         src_path = os.path.join(input_dir, name)
         with open(src_path, "wb") as out:
             out.write(raw)
-        md = converter(src_path)            # raises on empty/failed extraction
+        try:
+            md = converter(src_path)        # raises on empty/failed extraction
+        except Exception:
+            if not tolerate_extract_failures:
+                raise
+            logger.warning("[input_pipeline] %s: extraction failed, keeping the original "
+                           "without a .md twin (tolerate_extract_failures=True)", name,
+                           exc_info=True)
+            written.append(name)            # original still retained/blob-recordable
+            return
         # keep original alongside the extraction (caller records it as a blob)
         md_name = name + ".md"
         with open(os.path.join(input_dir, md_name), "w") as out:

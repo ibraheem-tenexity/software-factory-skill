@@ -189,6 +189,74 @@ def test_pdf_original_bytes_match_what_was_uploaded(tmp_path):
     assert open(os.path.join(input_dir, "doc.pdf"), "rb").read() == raw_pdf
 
 
+# ---- tolerate_extract_failures (SOF-56 — attach_to_draft's mid-interview attach path) ----
+
+def test_default_still_raises_on_a_malformed_pdf():
+    """Regression guard: the DEFAULT behavior (start_project/_provision_and_launch's call site)
+    is unchanged — a missing Stage-1 input must still surface loudly."""
+    import tempfile
+    input_dir = tempfile.mkdtemp()
+    with pytest.raises(RuntimeError):
+        persist_and_compose(
+            input_dir, "", [{"name": "blank.pdf", "content_b64": _b64(b"%PDF-1.4 blank")}],
+            extract=lambda path: (_ for _ in ()).throw(RuntimeError("no text extracted")),
+        )
+
+
+def test_tolerate_extract_failures_keeps_the_original_without_a_md_twin():
+    import tempfile
+    input_dir = tempfile.mkdtemp()
+    written = persist_and_compose(
+        input_dir, "", [{"name": "blank.pdf", "content_b64": _b64(b"%PDF-1.4 blank")}],
+        extract=lambda path: (_ for _ in ()).throw(RuntimeError("no text extracted")),
+        tolerate_extract_failures=True,
+    )
+    assert "blank.pdf" in written
+    assert "blank.pdf.md" not in written
+    assert os.path.exists(os.path.join(input_dir, "blank.pdf"))
+    assert not os.path.exists(os.path.join(input_dir, "blank.pdf.md"))
+
+
+def test_tolerate_extract_failures_does_not_raise_and_other_files_still_succeed():
+    import tempfile
+    input_dir = tempfile.mkdtemp()
+
+    def flaky_extract(path):
+        if "blank" in path:
+            raise RuntimeError("no text extracted")
+        return "# Good doc\n\nreal content"
+
+    written = persist_and_compose(
+        input_dir, "combine these",
+        [{"name": "blank.pdf", "content_b64": _b64(b"%PDF-1.4 blank")},
+         {"name": "good.pdf", "content_b64": _b64(b"%PDF-1.4 good")}],
+        extract=flaky_extract, tolerate_extract_failures=True,
+    )
+    assert "blank.pdf" in written and "blank.pdf.md" not in written
+    assert "good.pdf" in written and "good.pdf.md" in written
+    assert os.path.exists(os.path.join(input_dir, "good.pdf"))
+
+
+def test_tolerate_extract_failures_excludes_the_failed_doc_from_composed_context():
+    import tempfile
+    input_dir = tempfile.mkdtemp()
+
+    def flaky_extract(path):
+        if "blank" in path:
+            raise RuntimeError("no text extracted")
+        return "# Good doc\n\nreal content"
+
+    persist_and_compose(
+        input_dir, "combine these",
+        [{"name": "blank.pdf", "content_b64": _b64(b"%PDF-1.4 blank")},
+         {"name": "good.pdf", "content_b64": _b64(b"%PDF-1.4 good")}],
+        extract=flaky_extract, tolerate_extract_failures=True,
+    )
+    ctx = open(os.path.join(input_dir, "context.md")).read()
+    assert "real content" in ctx
+    assert "blank.pdf" not in ctx    # a failed doc never gets an "## Attached document:" section
+
+
 def test_docx_extractor_real_pandoc_on_singer_sow():
     # Real-binary integration check (skipped when pypandoc/mammoth aren't installed locally):
     # the actual Singer SOW must extract with structure intact.
