@@ -2213,18 +2213,59 @@ class Console:
             ))
         return deploy_db.reap(records, log=logger.info, dry_run=dry_run)
 
+    def _bulk_repo_signals(self, project_ids: list[str]) -> tuple[dict[str, str], set[str]]:
+        """Batch equivalent of calling `project_links(pid)["repo"]` + `repo_shared_with_owner(pid)`
+        for MANY projects, in ONE query instead of two fresh `ProjectStore` connections (=two
+        pooler round-trips) PER PROJECT. SOF-7 perf fix: those per-project round-trips against the
+        prod Supabase pooler were the actual cause of a 9-minute dry-run timeout with zero output
+        (a regression #217/SOF-8 introduced onto the reaper path). Mirrors both methods' own
+        matching rules exactly — same semantics, just batched.
+
+        Returns (project_id -> exact "GitHub Repo" artifact URL, {project_ids with a
+        'repo-shared' artifact})."""
+        repo_urls: dict[str, str] = {}
+        shared: set[str] = set()
+        if not project_ids:
+            return repo_urls, shared
+        placeholders = ",".join("?" for _ in project_ids)
+        conn = dbshim.connect(self._projects_dir)
+        try:
+            rows = conn.execute(
+                f"SELECT project_id, title, kind, path FROM artifacts "
+                f"WHERE project_id IN ({placeholders}) ORDER BY project_id, id",
+                tuple(project_ids),
+            ).fetchall()
+        finally:
+            conn.close()
+        for row in rows:
+            pid = row["project_id"]
+            kind = (row.get("kind") or "").lower()
+            if kind == "repo-shared":
+                shared.add(pid)
+                continue
+            if pid in repo_urls:
+                continue
+            path = row.get("path") or ""
+            title = (row.get("title") or "").lower()
+            if path.startswith("http") and ("repo" in title or kind == "repo"):
+                repo_urls[pid] = path
+        return repo_urls, shared
+
     def reap_github_repos(self, org: str, dry_run: bool = False) -> dict:
         """Sweep factory-created repos in `org` and reap those whose project is confirmed dead.
 
         SAFETY: prefers an EXACT match — the repo Stage 3 itself recorded via
-        `record-artifact("GitHub Repo", <clean url>, kind="repo")` (read through
-        `project_links`, #95/SOF-8) — over the old suffix-pattern guess. Falls back to the
-        <name>-[0-9a-f]{8,16} suffix heuristic only for projects with no exact record (older
-        runs that predate this convention, or a run whose Stage 3 skipped that step). Repos
-        matching neither are LOG-ONLY (returned in report["unknown_repos"], never
+        `record-artifact("GitHub Repo", <clean url>, kind="repo")` — over the old suffix-pattern
+        guess. Falls back to the <name>-[0-9a-f]{8,16} suffix heuristic only for projects with no
+        exact record (older runs that predate this convention, or a run whose Stage 3 skipped that
+        step). Repos matching neither are LOG-ONLY (returned in report["unknown_repos"], never
         auto-deleted). Reap policy mirrors the deploy-DB reaper: archived |
         stopped-without-deploy → reap; everything else → keep. Disarmed by default
-        (SF_GITHUB_REPO_REAPER=on to arm). dry_run=True forces preview."""
+        (SF_GITHUB_REPO_REAPER=on to arm). dry_run=True forces preview.
+
+        PERF: all project state (dispositions, repo urls, owner-shared flags) is read via
+        _load_states/_bulk_repo_signals — a HANDFUL of batch queries total, not O(N) round-trips
+        for N projects (#SOF-7 perf fix)."""
         from . import github_repo_reaper as _ghr
         all_repos = _ghr.list_org_repos(org)
         local = [n for n in os.listdir(self._projects_dir)
@@ -2232,15 +2273,17 @@ class Console:
         seen = set(local)
         all_pids = local + [r["project_id"] for r in dbshim.registry_projects()
                             if PROJECT_ID_RE.fullmatch(r["project_id"]) and r["project_id"] not in seen]
+        states = self._load_states(all_pids)
+        repo_urls, owner_shared_pids = self._bulk_repo_signals(all_pids)
         # Exact index (preferred): repo full name -> (project_id, state), from Stage 3's own
         # recorded "GitHub Repo" artifact. Suffix index (fallback): the first
         # FACTORY_REPO_SUFFIX_LENGTH (8) hex chars of the project_id hex part, for projects
-        # with no exact record. One _load_state per project, shared by both indexes.
+        # with no exact record.
         exact_by_repo: dict[str, tuple[str, object]] = {}
         pid_by_suffix: dict[str, tuple[str, object]] = {}
         for pid in all_pids:
-            st = self._load_state(pid)
-            exact = _ghr.org_repo_from_url(self.project_links(pid).get("repo"))
+            st = states[pid]
+            exact = _ghr.org_repo_from_url(repo_urls.get(pid) or getattr(st, "repo_url", None))
             if exact and exact not in exact_by_repo:
                 exact_by_repo[exact] = (pid, st)
             hex_part = pid[len("project-"):]         # strip "project-" prefix
@@ -2273,7 +2316,7 @@ class Console:
                 archived=bool(getattr(st, "archived", False)),
                 phase=getattr(st, "phase", "") or "",
                 has_verified_deploy=bool(getattr(st, "deploy_url", None)),
-                owner_repo_shared=self.repo_shared_with_owner(pid),
+                owner_repo_shared=pid in owner_shared_pids,
             ))
         report = _ghr.reap(records, log=logger.info, dry_run=dry_run)
         report["unknown_repos"] = unknown_repos
