@@ -2268,3 +2268,58 @@ def test_reap_github_repos_exact_match_still_honors_owner_shared_guard(tmp_path,
     report = c.reap_github_repos("acme", dry_run=True)
     assert report["would_reap"] == [] and report["unknown_repos"] == []
     assert len(report["kept"]) == 1 and report["kept"][0]["project_id"] == pid
+
+
+# ---------------------------------------------------------------------------------------
+# SOF-7 perf fix: #217/SOF-8 introduced a per-project ProjectStore (=pooler connection) round
+# -trip via project_links() + repo_shared_with_owner() inside the all_pids loop — a 9-minute
+# dry-run timeout with zero output in prod. _bulk_repo_signals batches both into one query.
+# ---------------------------------------------------------------------------------------
+
+def test_bulk_repo_signals_matches_project_links_and_repo_shared_with_owner_semantics(tmp_path):
+    from software_factory.db import ProjectStore, db_path
+    c = console(tmp_path, FakeLauncher())
+    p1 = c.start_project(ProjectRequest(description="x")); c._new_id = lambda: "project-p2"
+    p2 = c.start_project(ProjectRequest(description="y"))
+    _record_repo(tmp_path, p1, "https://github.com/acme/repo-one")
+    ProjectStore(db_path(str(tmp_path), p2)).record_artifact(
+        "Owner Repo Access", "https://github.com/acme/repo-two", kind="repo-shared")
+
+    repo_urls, shared = c._bulk_repo_signals([p1, p2])
+    assert repo_urls == {p1: "https://github.com/acme/repo-one"}
+    assert shared == {p2}
+    # Must agree with the original per-project methods it replaces.
+    assert c.project_links(p1)["repo"] == repo_urls[p1]
+    assert c.repo_shared_with_owner(p2) is True
+    assert p1 not in shared and p2 not in repo_urls
+
+
+def test_bulk_repo_signals_empty_input_returns_empty_without_querying(tmp_path):
+    c = console(tmp_path, FakeLauncher())
+    assert c._bulk_repo_signals([]) == ({}, set())
+
+
+def test_reap_github_repos_does_not_scale_db_connections_with_project_count(tmp_path, monkeypatch):
+    # THE regression test: #217 opened 2 fresh ProjectStore connections PER project (project_links
+    # + repo_shared_with_owner) inside the all_pids loop. With N projects that's O(2N) pooler
+    # round-trips — confirmed as the actual cause of a 9-minute prod dry-run timeout. After the
+    # batch fix, connection count must be CONSTANT (a handful of batch queries), not O(N).
+    from software_factory import dbshim, github_repo_reaper as _ghr
+    c = console(tmp_path, FakeLauncher())
+    for i in range(8):
+        c._new_id = lambda i=i: f"project-perf{i}"
+        pid = c.start_project(ProjectRequest(description="x"))
+        _record_repo(tmp_path, pid, f"https://github.com/acme/perf-repo-{i}")
+    monkeypatch.setattr(_ghr, "list_org_repos", lambda org, run=None: [])
+
+    calls = []
+    real_connect = dbshim.connect
+    def _counting_connect(path):
+        calls.append(path)
+        return real_connect(path)
+    monkeypatch.setattr(dbshim, "connect", _counting_connect)
+
+    c.reap_github_repos("acme", dry_run=True)
+    # A small constant regardless of the 8 projects above — NOT >= 8 (which the old per-project
+    # ProjectStore-per-call pattern would have produced) and nowhere near 2x that.
+    assert len(calls) <= 4, f"expected O(1) connections, got {len(calls)}: {calls}"

@@ -130,7 +130,10 @@ def reap(records: list[ReapRecord], run: Callable[[list[str]], RunResult] = _rea
     """Apply the policy gate to records and optionally delete repos.
 
     Returns a structured report: {armed, mode, reaped, kept, would_reap, failed}.
-    dry_run=True forces preview regardless of SF_GITHUB_REPO_REAPER."""
+    dry_run=True forces preview regardless of SF_GITHUB_REPO_REAPER.
+
+    SOF-7: logs every candidate AS IT'S EVALUATED (kept too, not just would_reap/reaped/failed)
+    so a long sweep is observable in real time rather than a single blob printed at the end."""
     mode = github_reaper_mode()
     armed = mode == "on" and not dry_run
     reaped, kept, would_reap, failed = [], [], [], []
@@ -140,6 +143,8 @@ def reap(records: list[ReapRecord], run: Callable[[list[str]], RunResult] = _rea
                    "phase": rec.phase, "archived": rec.archived,
                    "has_verified_deploy": rec.has_verified_deploy}
         if reason is None:
+            keep_reason = "owner-shared" if rec.owner_repo_shared else "active/done/kept-by-policy"
+            log(f"[github-reaper] KEEP {rec.repo_full_name} (project {rec.project_id}, {keep_reason})")
             kept.append(summary)
             continue
         if armed:

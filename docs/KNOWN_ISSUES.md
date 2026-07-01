@@ -177,6 +177,18 @@ path already exists end-to-end and never deletes anything:
   `test_reap_github_repos_exact_match_still_honors_owner_shared_guard` and
   `test_reap_reason_owner_shared_keeps_even_when_archived` /
   `..._when_stopped_without_deploy` in `tests/unit/test_github_repo_reaper.py`.
+- **Perf fix (SOF-7 fast-follow).** #95/SOF-8's exact-match index building called
+  `project_links(pid)` + `repo_shared_with_owner(pid)` inside the per-project loop — each
+  opens a FRESH `ProjectStore` (a pooler connection) — so a real prod run with N projects
+  cost O(2N) round-trips against the Supabase pooler. Observed live: a dry-run ran 9 minutes
+  in-container with zero output, then timed out. `Console._bulk_repo_signals(project_ids)`
+  batches both into ONE query (mirrors the existing `_load_states` batch pattern); combined
+  with `_load_states` instead of per-pid `_load_state`, the whole sweep is now a small
+  constant number of queries regardless of project count. Also added a `KEEP` log line to
+  `github_repo_reaper.reap()` so every candidate (not just would-reap/reaped/failed) logs as
+  it's evaluated — the sweep is observable in real time rather than one buffered blob at the
+  end. Regression-tested by counting `dbshim.connect` calls across 8 test projects (asserts
+  a small constant, not scaling with project count).
 
 **Arming runbook — the ONLY step that arms is ibraheem flipping the env var. Nothing in this
 runbook or its tooling flips it.**
