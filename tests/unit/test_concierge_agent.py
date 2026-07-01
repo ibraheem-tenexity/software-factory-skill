@@ -2,7 +2,8 @@
 structured output, the context-parameterized agent, and the retry-then-fallback contract.
 
 No live model calls: `create_agent` and the chat model are always mocked/injected. No DB.
-NOT YET WIRED into /api/chat or /converse — these tests exercise ConciergeAgent standalone.
+These tests exercise ConciergeAgent standalone; test_chat_dock_runner.py and
+test_conversation_db.py cover its two callers (/api/chat, /converse).
 """
 from unittest.mock import MagicMock, patch
 

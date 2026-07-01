@@ -19,6 +19,7 @@ import threading
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from software_factory.console import Console  # noqa: E402
+from software_factory.chat_agent import ChatDockRunner  # noqa: E402
 from software_factory import auth  # noqa: E402
 from software_factory.users import UserStore  # noqa: E402
 from software_factory.blobs import BlobStore  # noqa: E402
@@ -89,9 +90,10 @@ def reset():
     admin_service = AdminService(console, users, agent_store, tool_store, prompts, sow_store)
     # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
     _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
-    # SOF-35: the OpenAI-Agents-SDK ChatAgentRunner is removed; /api/chat is a stub (503, chat.py:41)
-    # until the LangChain rebuild (T2.1/T2.2) lands.
-    _chat_runner = None
+    # SOF-35 removed the OpenAI-Agents-SDK ChatAgentRunner; SOF-39/40 restores /api/chat on
+    # ChatDockRunner (LangChain ConciergeAgent, still chat.jsonl-backed — folding onto the
+    # conversation table is T1.4, a later follow-up, not done here).
+    _chat_runner = ChatDockRunner(console, users) if _has_chat_key else None
     _sse_clients = {}
     _sse_lock = threading.Lock()
     _project_stages = {}
