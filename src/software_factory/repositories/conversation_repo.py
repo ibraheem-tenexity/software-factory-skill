@@ -4,12 +4,23 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import select, insert, func, and_, or_
+from sqlalchemy import select, insert, func, and_, or_, cast, Text
 
 from ..models import conversation
 
-_COLS = (conversation.c.id, conversation.c.session_id, conversation.c.seq,
-         conversation.c.user_id, conversation.c.project_id, conversation.c.org_id,
+# id/session_id/user_id are UUID columns. GlobalExec's raw-SQL path bypasses SQLAlchemy's own
+# UUID(as_uuid=False) type coercion (the compiled statement + params go straight to psycopg3),
+# so a plain `conversation.c.id` in a SELECT list comes back as a real `uuid.UUID` object, not a
+# string — psycopg3 has its own native UUID adapter that fires once SQLAlchemy's own isn't in the
+# loop. Same bug class as the JSONB-needs-json.dumps gotcha, one column type over. Matches
+# repositories/users.py's existing cast(..., Text) convention for its own UUID columns — bind-
+# parameter comparisons (WHERE/INSERT VALUES) don't need this (Postgres infers the type from
+# context there); only SELECT-list/RETURNING output does.
+_COLS = (cast(conversation.c.id, Text).label("id"),
+         cast(conversation.c.session_id, Text).label("session_id"),
+         conversation.c.seq,
+         cast(conversation.c.user_id, Text).label("user_id"),
+         conversation.c.project_id, conversation.c.org_id,
          conversation.c.role, conversation.c.input, conversation.c.json_blob,
          conversation.c.tool_name, conversation.c.tool_call_id, conversation.c.tool_result,
          conversation.c.referenced_artifact, conversation.c.model, conversation.c.provider,
@@ -50,7 +61,7 @@ class ConversationRepository:
             tool_result=json.dumps(tool_result) if tool_result is not None else None,
             referenced_artifact=referenced_artifact, model=model, provider=provider,
             input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost_usd,
-        ).returning(conversation.c.id)
+        ).returning(cast(conversation.c.id, Text).label("id"))
         return self._x.fetchone(stmt)["id"]
 
     def all_for_session(self, session_id) -> list:
@@ -86,10 +97,18 @@ class ConversationRepository:
             conds.append(conversation.c.created_at <= date_to)
 
         stmt = (
-            select(conversation.c.session_id, conversation.c.org_id, conversation.c.project_id,
-                   conversation.c.user_id, func.count().label("turn_count"),
+            select(cast(conversation.c.session_id, Text).label("session_id"),
+                   conversation.c.org_id, conversation.c.project_id,
+                   cast(conversation.c.user_id, Text).label("user_id"),
+                   func.count().label("turn_count"),
                    last_activity.label("last_activity"),
                    func.coalesce(func.sum(conversation.c.cost_usd), 0).label("total_cost"))
+            # GROUP BY (and the cursor HAVING/ORDER BY below) reference the RAW, uncast column —
+            # a cast() in the SELECT list is a deterministic function of the grouped column, so
+            # Postgres accepts it without also needing the cast in GROUP BY; the HAVING/ORDER BY
+            # comparisons are bind-parameter context (a plain string param against the typed
+            # column), which Postgres coerces implicitly, same as users.py's WHERE/INSERT — only
+            # SELECT-list/RETURNING *output* needs the explicit cast.
             .group_by(conversation.c.session_id, conversation.c.org_id, conversation.c.project_id,
                       conversation.c.user_id)
         )
