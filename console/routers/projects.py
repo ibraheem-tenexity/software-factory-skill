@@ -5,7 +5,6 @@ import mimetypes
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import PlainTextResponse
 
 from software_factory import storage, project_view
 from software_factory.console import ProjectRequest, project_paths
@@ -162,17 +161,6 @@ def project_artifact(pid: str, path: str = "", raw: str = "", v: tuple = Depends
                  "md": "text/markdown"}.get(path.rsplit(".", 1)[-1].lower(), "text/plain")
         return Response(content=result["content"].encode(), media_type=f"{ctype}; charset=utf-8")
     return result
-
-
-@router.get("/api/projects/{pid}/log")
-def project_log(pid: str, full: str = "", v: tuple = Depends(authorize_project)):
-    if full == "json":
-        return {"log": state.console.read_log(pid, max_bytes=None)}
-    if full:
-        body = state.console.read_log(pid, max_bytes=None)
-        return PlainTextResponse(body, media_type="text/plain; charset=utf-8",
-                                 headers={"Content-Disposition": f'attachment; filename="{pid}.log"'})
-    return state.console.read_log_envelope(pid)
 
 
 @router.get("/api/projects/{pid}/deps")
