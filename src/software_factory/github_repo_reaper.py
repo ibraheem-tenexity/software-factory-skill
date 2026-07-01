@@ -1,8 +1,13 @@
 """GitHub repo reaper — sweep factory-created repos whose project is confirmed dead and delete them.
 
 SAFETY MODEL — four independent guards before any delete fires:
-  1. Repo name matches the factory suffix pattern: <name>-[0-9a-f]{8,16}
-  2. Suffix maps to a CONFIRMED project row in the DB; no-match repos are LOG-ONLY
+  1. Repo is identified as factory-created, preferred-then-fallback (#95/SOF-8):
+       a. EXACT match — Stage 3 itself recorded the clean repo url via
+          record-artifact("GitHub Repo", <url>, kind="repo"); org_repo_from_url() parses it
+          and Console.reap_github_repos indexes it directly against org repo names.
+       b. Suffix fallback (#89) — only for projects with no exact record: <name>-[0-9a-f]{8,16}
+          where the suffix is the first 8 hex chars of the project_id hex part.
+  2. The match maps to a CONFIRMED project row in the DB; no-match repos are LOG-ONLY
      (never auto-deleted — a real repo could end in hex, and we can't prove provenance).
   3. Project is confirmed dead: archived | stopped-without-deploy (same states the deploy-DB
      reaper kills under its persistent policy — one coherent "project dead → clean everything").
@@ -10,7 +15,8 @@ SAFETY MODEL — four independent guards before any delete fires:
 
 Identification convention (#89): factory Stage 3 names repos as "<slug>-<project_id_prefix>"
 where the prefix is the first 8 hex chars of the project_id hex part (e.g. project-4849c0d8…
-→ suffix "4849c0d8"). Regex accepts 8–16 chars to cover both old and widened IDs.
+→ suffix "4849c0d8"). Regex accepts 8–16 chars to cover both old and widened IDs. #95/SOF-8
+adds the exact-match preference above so this pattern is a fallback, not the primary signal.
 
 Reap policy mirrors deploy_db.py persistent mode:
   owner_repo_shared=True → KEEP  (SOF-3: the project owner has real GitHub access to this repo —
@@ -37,6 +43,18 @@ FACTORY_REPO_SUFFIX_RE = re.compile(r"-([0-9a-f]{8,16})$")
 
 # Canonical suffix length written by the factory Stage 3 provision node.
 FACTORY_REPO_SUFFIX_LENGTH = 8
+
+_GITHUB_REPO_URL_RE = re.compile(r"https?://github\.com/([\w.-]+/[\w.-]+?)(?:\.git)?/?$")
+
+
+def org_repo_from_url(url: str | None) -> str | None:
+    """Parse 'org/repo' out of a clean GitHub URL (https://github.com/org/repo). Returns None
+    for anything that isn't a github.com repo URL — the #95/SOF-8 exact-match input: Stage 3
+    itself records this clean URL via `record-artifact("GitHub Repo", <url>, kind="repo")`."""
+    if not url:
+        return None
+    m = _GITHUB_REPO_URL_RE.match(url.strip())
+    return m.group(1) if m else None
 
 
 @dataclass

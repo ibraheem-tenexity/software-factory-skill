@@ -2174,3 +2174,97 @@ def test_delete_project_removes_run_and_is_idempotent(tmp_path, monkeypatch):
 
     # Idempotent — a second delete (run already gone) must not raise.
     assert c.delete_project(rid) == {"project_id": rid, "deleted": True}
+
+
+# ---------------------------------------------------------------------------------------
+# #95/SOF-8 — Console.reap_github_repos prefers the EXACT repo Stage 3 itself recorded
+# (record-artifact("GitHub Repo", <clean url>, kind="repo")) over the old suffix-pattern
+# guess. Zero prior test coverage existed for this method at all.
+# ---------------------------------------------------------------------------------------
+
+def _record_repo(tmp_path, project_id, url):
+    from software_factory.db import ProjectStore, db_path
+    ProjectStore(db_path(str(tmp_path), project_id)).record_artifact(
+        "GitHub Repo", url, kind="repo")
+
+
+def test_reap_github_repos_matches_by_exact_recorded_name_not_by_guessing(tmp_path, monkeypatch):
+    # The repo's real name has NO hex suffix at all — the old suffix heuristic could never
+    # have matched it. Only the exact record (from Stage 3's own record-artifact call) can.
+    from software_factory import github_repo_reaper as _ghr
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="x"))
+    _record_repo(tmp_path, pid, "https://github.com/acme/my-custom-repo-name")
+    st = c._load_state(pid); st.phase = "stopped"; st.save()   # stopped + no deploy -> reap
+    monkeypatch.setattr(_ghr, "list_org_repos",
+                        lambda org, run=None: [{"name": "my-custom-repo-name", "isArchived": False}])
+    report = c.reap_github_repos("acme", dry_run=True)
+    assert report["unknown_repos"] == []
+    assert len(report["would_reap"]) == 1
+    assert report["would_reap"][0]["project_id"] == pid
+    assert report["would_reap"][0]["repo"] == "acme/my-custom-repo-name"
+
+
+def test_reap_github_repos_exact_match_kept_when_project_active(tmp_path, monkeypatch):
+    from software_factory import github_repo_reaper as _ghr
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="x"))
+    _record_repo(tmp_path, pid, "https://github.com/acme/active-project")
+    # default phase (not stopped/archived) -> keep
+    monkeypatch.setattr(_ghr, "list_org_repos",
+                        lambda org, run=None: [{"name": "active-project", "isArchived": False}])
+    report = c.reap_github_repos("acme", dry_run=True)
+    assert report["would_reap"] == [] and report["unknown_repos"] == []
+    assert len(report["kept"]) == 1 and report["kept"][0]["project_id"] == pid
+
+
+def test_reap_github_repos_falls_back_to_suffix_heuristic_when_no_exact_record(tmp_path, monkeypatch):
+    # No "GitHub Repo" artifact recorded (an older run, or Stage 3 skipped the step) — the
+    # suffix convention must still work, unchanged from before #95/SOF-8.
+    from software_factory import github_repo_reaper as _ghr
+    c = console(tmp_path, FakeLauncher())
+    ids = iter(["project-abcd1234ef"])
+    c._new_id = lambda: next(ids)
+    pid = c.start_project(ProjectRequest(description="x"))
+    st = c._load_state(pid); st.phase = "stopped"; st.save()
+    monkeypatch.setattr(_ghr, "list_org_repos",
+                        lambda org, run=None: [{"name": "my-app-abcd1234", "isArchived": False}])
+    report = c.reap_github_repos("acme", dry_run=True)
+    assert report["unknown_repos"] == []
+    assert len(report["would_reap"]) == 1
+    assert report["would_reap"][0]["project_id"] == pid
+
+
+def test_reap_github_repos_unmatched_repo_is_log_only_never_deleted(tmp_path, monkeypatch):
+    from software_factory import github_repo_reaper as _ghr
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="x"))
+    _record_repo(tmp_path, pid, "https://github.com/acme/this-projects-real-repo")
+    st = c._load_state(pid); st.phase = "stopped"; st.save()
+    monkeypatch.setattr(_ghr, "list_org_repos", lambda org, run=None: [
+        {"name": "this-projects-real-repo", "isArchived": False},          # exact match -> reap
+        {"name": "some-unrelated-repo-deadbeef", "isArchived": False},     # suffix-shaped, no DB match
+    ])
+    report = c.reap_github_repos("acme", dry_run=True)
+    assert len(report["would_reap"]) == 1
+    assert report["would_reap"][0]["repo"] == "acme/this-projects-real-repo"
+    assert report["unknown_repos"] == [{"repo": "acme/some-unrelated-repo-deadbeef", "suffix": "deadbeef"}]
+
+
+def test_reap_github_repos_exact_match_still_honors_owner_shared_guard(tmp_path, monkeypatch):
+    # #210/SOF-3: a repo the owner was invited to must NEVER be reaped, archived or not.
+    # The exact-match path (#95/SOF-8) must not bypass this — it's an alternate way of
+    # FINDING the record, not an alternate policy for what to do with it.
+    from software_factory.db import ProjectStore, db_path
+    from software_factory import github_repo_reaper as _ghr
+    c = console(tmp_path, FakeLauncher())
+    pid = c.start_project(ProjectRequest(description="x"))
+    _record_repo(tmp_path, pid, "https://github.com/acme/shared-with-owner")
+    ProjectStore(db_path(str(tmp_path), pid)).record_artifact(
+        "Owner Repo Access", "https://github.com/acme/shared-with-owner", kind="repo-shared")
+    st = c._load_state(pid); st.archived = True; st.save()   # archived would normally reap
+    monkeypatch.setattr(_ghr, "list_org_repos",
+                        lambda org, run=None: [{"name": "shared-with-owner", "isArchived": True}])
+    report = c.reap_github_repos("acme", dry_run=True)
+    assert report["would_reap"] == [] and report["unknown_repos"] == []
+    assert len(report["kept"]) == 1 and report["kept"][0]["project_id"] == pid

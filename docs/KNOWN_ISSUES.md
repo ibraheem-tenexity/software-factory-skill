@@ -202,11 +202,18 @@ linked project/SHA).
 
 **Resolved (TEN-151).** `GET /api/version` (`console/routers/open_routes.py` → `software_factory.version.version_info`) returns `{sha, short, dirty}`, sourced from `SF_GIT_SHA` (baked onto the service by `scripts/deploy.sh`) → `RAILWAY_GIT_COMMIT_SHA` → `git rev-parse` fallback. Link re-assertion: `software_factory.railway_link.assert_link` parses `railway status` and fails loudly on any project/env/service drift — run it before verifying via `make verify-link` (`scripts/assert-railway-link.sh`).
 
-### #95 — Harden the repo-reaper with an exact-name handle
-**Symptom.** The reaper matches orphan repos heuristically, which is fuzzy.
+### #95 — Harden the repo-reaper with an exact-name handle 🟢✅
+**Symptom.** The reaper matches orphan repos heuristically (a `<name>-[0-9a-f]{8,16}` suffix
+guessed from the project_id), which is fuzzy.
 
-**Fix.** Record the **exact** repo name at Stage-3 creation so the reaper matches the precise
-handle instead of pattern-guessing. Pairs with #97 (makes the kill-list unambiguous).
+**Fix.** Stage 3 already records the real, exact repo via
+`record-artifact("GitHub Repo", <clean url>, kind="repo")` (read back through
+`Console.project_links`) — the data just wasn't being used by the reaper. `Console.reap_github_repos`
+now builds an exact `repo_full_name → project` index from that recorded artifact and checks it
+FIRST; the old suffix-pattern guess is now only a fallback for projects with no exact record
+(older runs, or a Stage-3 that skipped the record step). No new schema, no new CLI verb — the
+exact handle was already being written, just not read. Pairs with #97 (makes the kill-list
+unambiguous).
 
 ---
 
