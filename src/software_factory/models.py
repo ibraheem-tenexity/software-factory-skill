@@ -374,10 +374,27 @@ checkpoint = Table(
     UniqueConstraint("project_id", "node", name="uq_checkpoint_project_node"),
 )
 
+# Org secrets (SOF-45): metadata only — the plaintext lives in Supabase Vault (pgsodium), this row
+# only holds `vault_id`, the pointer `vault.py`'s vault_store/vault_retrieve_many/vault_delete_many
+# resolve against. Replaces the earlier in-memory `services/secrets.py` mock.
+org_secrets = Table(
+    "org_secrets", metadata,
+    Column("id", _UUID, primary_key=True, server_default=text("gen_random_uuid()")),
+    Column("org_id", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("kind", Text),
+    Column("vault_id", Text, nullable=False),
+    Column("last4", Text),
+    Column("used_by", Integer, nullable=False, server_default="0"),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("org_id", "name", name="uq_org_secrets_org_name"),
+)
+
 # Groupings: the flat per-project tables, the global directory tables, and everything (Alembic + tests).
 PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
 FLAT_TABLES = PROJECTDB + (tickets, agents, checkpoint)
 GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
                  agent_prompts, mcp_tools, agent_registry, sow,
-                 doc_summary, chunk, conversation)
+                 doc_summary, chunk, conversation, org_secrets)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES

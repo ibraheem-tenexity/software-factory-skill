@@ -28,6 +28,8 @@ from software_factory.registries import ToolStore, AgentRegistryStore  # noqa: E
 from software_factory.sow import SowStore  # noqa: E402
 from software_factory.services.org_service import OrgService  # noqa: E402
 from software_factory.services.secrets import Secrets  # noqa: E402
+from software_factory.repositories.org_secrets_repo import OrgSecretsRepository  # noqa: E402
+from software_factory.repositories._exec import GlobalExec  # noqa: E402
 from software_factory.services.conversation import Conversation, DbConversation  # noqa: E402
 from software_factory.services.admin_service import AdminService  # noqa: E402
 from software_factory.services.files import doc_kind as _doc_kind  # noqa: E402,F401
@@ -81,7 +83,7 @@ def reset():
     # Service layer (business logic between routers and stores). Built AFTER the stores so it holds
     # the current instances; rebuilt each reset() so per-test TRUNCATE + re-seed is reflected.
     org_service = OrgService(users, blobs, console)
-    secrets_svc = Secrets()
+    secrets_svc = Secrets(OrgSecretsRepository(GlobalExec()))  # SOF-45: real Vault-backed store
     # DbConversation (SOF-31/T1.3) is the durable swap for the onboarding mock — same turn()/
     # history() contract, backed by ConversationStore. Opt-in via SF_CONVERSATION_DB so tests and
     # existing deploys stay on the in-memory mock until the flag is flipped.
