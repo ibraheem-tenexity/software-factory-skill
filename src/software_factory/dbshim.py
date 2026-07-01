@@ -143,11 +143,20 @@ class _StatePool:
         # for a return-to-pool so the existing call sites (blobs.py / agent_prompts.py / PgConn all do
         # `try/finally conn.close()`) recycle the connection transparently. Original close preserved
         # as `_hard_close` for the idle-reaper / close_all path.
-        original_close = conn.close
+        #
+        # IDEMPOTENT: getconn() calls _wrap() on EVERY checkout, including a warm connection being
+        # reused for the 2nd/3rd/... time — at that point `conn.close` is ALREADY `_return_to_pool`
+        # from the previous wrap. Capturing `original_close = conn.close` unconditionally would
+        # capture that stale `_return_to_pool` as the new `_hard_close`, corrupting the true-close
+        # escape hatch. The next `_drain_locked()` (close_all() at atexit, or a URL-change drain)
+        # then calls this corrupted `_hard_close()`, which calls `putconn()`, which RE-APPENDS the
+        # connection into `self._pool` — so `_drain_locked`'s `while self._pool:` loop never empties,
+        # spinning at ~100% CPU forever. Only capture the TRUE original close on the FIRST wrap.
+        if not hasattr(conn, "_hard_close"):
+            conn._hard_close = conn.close
         pool = self
         def _return_to_pool(*_a, **_kw):
             pool.putconn(conn)
-        conn._hard_close = original_close
         conn.close = _return_to_pool
         return conn
 
