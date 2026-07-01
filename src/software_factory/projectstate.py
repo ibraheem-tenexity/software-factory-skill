@@ -56,6 +56,7 @@ _PERSISTED = {
     "owner_github_username",
     "launch_attempted",
     "ingestion_spent_usd",
+    "memory_overview",
 }
 
 
@@ -69,6 +70,12 @@ class ProjectState:
     # spent_usd wholesale from project.log's own cost every time it reparses the log, which
     # would silently clobber any ingestion charge folded in there. See Console._project_spend.
     ingestion_spent_usd: float = 0.0
+    # SOF-32: the cached project-overview rollup (coarse "2,000-ft view" over this project's
+    # ready doc_summary rows) — no third table, per the locked decision (build-plan §7 #4).
+    # T3.1's MemoryStore.overview() reads this same key directly off the raw projectstate.data
+    # JSON blob (not through ProjectState) — both paths agree because ProjectState.save() writes
+    # this field into that same blob.
+    memory_overview: str = ""
     repo_url: Optional[str] = None
     deploy_url: Optional[str] = None
     # Proof marker — stamped at provision so the run carries a receipt of which skill drove it.
