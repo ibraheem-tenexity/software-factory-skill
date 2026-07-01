@@ -25,6 +25,7 @@ from .db import project_id_from_path
 from .repositories._exec import PathExec
 from .repositories.tickets_repo import TicketRepository
 import time
+import weakref
 from dataclasses import dataclass
 from typing import Optional
 
@@ -66,7 +67,12 @@ class TicketStore:
         self._project_id = project_id_from_path(path)
         # Postgres; schema owned by Alembic (prod) / tests. All SQL is in TicketRepository. The repo
         # reads project_id LIVE (getter) so reassigning self._project_id still re-scopes every query.
-        self._repo = TicketRepository(PathExec(path), lambda: self._project_id)
+        # A WEAKREF, not a closure over `self` directly: `self._repo` holding a closure that captures
+        # `self` is a reference CYCLE, which delays returning the pooled connection to dbshim's pool
+        # until the cyclic GC runs — exhausting the pool under call sites that construct many
+        # short-lived TicketStores (e.g. a per-call helper in a loop).
+        _self_ref = weakref.ref(self)
+        self._repo = TicketRepository(PathExec(path), lambda: _self_ref()._project_id)
 
     def create_ticket(self, title: str, acceptance: str, dod: str, wave: int,
                       app: Optional[str] = None, description: str = "") -> int:
