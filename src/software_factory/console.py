@@ -1912,34 +1912,6 @@ class Console:
         with open(p, "r", errors="replace") as f:
             return f.read()
 
-    def read_log(self, project_id: str, max_bytes: int | None = 20000) -> str:
-        if max_bytes is None:
-            return self._full_log(project_id)
-        return self._read_log_tail(project_id, max_bytes)
-
-    def read_log_envelope(self, project_id: str, max_bytes: int = 20000) -> dict:
-        """Tail of project.log with honesty about truncation — the UI must never present a
-        partial log as the whole thing."""
-        p = os.path.join(self._paths(project_id)["base"], "project.log")
-        total = os.path.getsize(p) if os.path.exists(p) else 0
-        log = self._read_log_tail(project_id, max_bytes)
-        return {
-            "log": log,
-            "capped": total > max_bytes,
-            "returned_bytes": min(total, max_bytes),
-            "total_bytes": total,
-        }
-
-    def _read_log_tail(self, project_id: str, max_bytes: int) -> str:
-        p = os.path.join(self._paths(project_id)["base"], "project.log")
-        if not os.path.exists(p):
-            return ""
-        with open(p, "rb") as f:
-            f.seek(0, 2)
-            size = f.tell()
-            f.seek(max(0, size - max_bytes))
-            return f.read().decode("utf-8", "replace")
-
     def _workspace_state(self, project_id: str, phase: str) -> str:
         ws = os.path.join(self._paths(project_id)["base"], "workspace")
         if os.path.isdir(ws):

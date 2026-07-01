@@ -1071,17 +1071,6 @@ def test_per_stage_models_opus_for_1_and_2_sonnet_for_3(tmp_path):
     assert _model_of(launcher) == "claude-sonnet-4-6"
 
 
-def test_read_log_tails_by_default_but_full_returns_everything(tmp_path):
-    import os
-    c = console(tmp_path, FakeLauncher())
-    rid = c.start_project(ProjectRequest(description="x"))
-    big = "L\n" * 30000  # ~60KB of saved log
-    with open(os.path.join(str(tmp_path), rid, "project.log"), "w") as f:
-        f.write(big)
-    assert len(c.read_log(rid)) <= 20000              # feed gets the tail
-    assert len(c.read_log(rid, max_bytes=None)) == len(big)  # full saved log is retrievable
-
-
 def test_default_launch_tees_agent_output_to_the_log_file(tmp_path):
     # Real subprocess: the launcher tees child output to project.log (and to container stdout,
     # which Railway captures — verified live, not here).
@@ -1097,14 +1086,12 @@ def test_default_launch_tees_agent_output_to_the_log_file(tmp_path):
 def test_run_output_is_captured_to_a_readable_log(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
-    project_id = c.start_project(ProjectRequest(description="guestbook"))
+    c.start_project(ProjectRequest(description="guestbook"))
     # the launcher is told where to capture the run's stdout/stderr
     assert launcher.log_path.endswith("project.log")
-    # and read_log surfaces whatever lands there
-    import os
     with open(launcher.log_path, "w") as f:
         f.write("provision: checking creds\nhello from claude\n")
-    assert "hello from claude" in c.read_log(project_id)
+    assert "hello from claude" in open(launcher.log_path).read()
 
 
 def test_status_reports_workspace_lifecycle(tmp_path):
