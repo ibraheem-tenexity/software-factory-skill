@@ -48,6 +48,20 @@ def member_client(member_mod):
     return TestClient(member_mod.app, base_url="https://testserver")
 
 
+@pytest.fixture(autouse=True)
+def _fake_vault(monkeypatch):
+    """SOF-45: secrets are now backed by Supabase Vault (pgsodium), which the local test Postgres
+    doesn't have — mocked here exactly like the BYOK path is in test_drafts.py/test_console.py.
+    last4/duplicate/not-found semantics are computed entirely in the service from its own
+    arguments, so a deterministic fake UUID per call is enough; no need to actually round-trip."""
+    import itertools
+    from software_factory.services import secrets as secrets_mod
+    counter = itertools.count(1)
+    monkeypatch.setattr(secrets_mod, "vault_store", lambda name, value: f"vault-uuid-{next(counter)}")
+    monkeypatch.setattr(secrets_mod, "vault_delete_many", lambda uuids: None)
+    monkeypatch.setattr(secrets_mod, "vault_retrieve_many", lambda vault_ids: {})
+
+
 def _login(mod, client, monkeypatch, email="op@tenexity.ai"):
     from software_factory import auth as a
     monkeypatch.setattr(a, "verify_google_id_token",
