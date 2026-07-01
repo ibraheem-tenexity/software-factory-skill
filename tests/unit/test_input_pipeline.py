@@ -56,7 +56,7 @@ def test_composed_context_contains_prompt_and_extracted_markdown(tmp_path):
         [{"name": "brief.pdf", "content_b64": _b64(b"%PDF-1.4 ...")}],
         extract=lambda path: "# Extracted\n\nthe contract terms",
     )
-    ctx = open(os.path.join(input_dir, "context.txt")).read()
+    ctx = open(os.path.join(input_dir, "context.md")).read()
     assert "analyze this brief" in ctx
     assert "the contract terms" in ctx
 
@@ -97,11 +97,11 @@ def test_docx_is_extracted_to_markdown_and_composed(tmp_path):
         [{"name": "singer-sow.docx", "content_b64": b64}],
         extract_docx=lambda p: "# Singer SOW\n\nrecipes, quotes, P21",
     )
-    assert "singer-sow.docx.md" in written and "context.txt" in written
+    assert "singer-sow.docx.md" in written and "context.md" in written
     # original kept on disk so caller can push it to blob storage
     assert "singer-sow.docx" in written
     assert os.path.exists(os.path.join(str(tmp_path), "singer-sow.docx"))
-    ctx = open(os.path.join(str(tmp_path), "context.txt")).read()
+    ctx = open(os.path.join(str(tmp_path), "context.md")).read()
     assert "build the AutoBuilder" in ctx and "recipes, quotes, P21" in ctx
 
 

@@ -4,10 +4,11 @@
 // table). Each carries { label, path, status, url }. An http path is an external link (repo /
 // live app) opened in a new tab; a file path opens in the DocViewer, which fetches the content
 // from /api/projects/{id}/artifact?path=… (api.artifact) and renders by extension:
-//   .md  → monospace text · .svg → inline · everything else → text.
+//   .md/.mdx → rich Markdown (shared MarkdownBody, SOF-21) · .svg → inline · everything else → text.
 import { useEffect, useState } from "react";
 import { T, Icon } from "../onboarding/design";
 import { api, Graph, GraphNode } from "../../api";
+import { MarkdownBody } from "../../markdown";
 
 export type ArtifactRef = { label: string; path: string; url: string | null; status?: string; id?: number };
 
@@ -63,7 +64,9 @@ export function DocViewer({ projectId, doc, onClose }:
   }, [doc, projectId]);
 
   if (!doc) return null;
-  const isSvg = (doc.path || "").toLowerCase().endsWith(".svg");
+  const lowerPath = (doc.path || "").toLowerCase();
+  const isSvg = lowerPath.endsWith(".svg");
+  const isMd = lowerPath.endsWith(".md") || lowerPath.endsWith(".mdx");
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(6,7,9,0.45)", zIndex: 50,
@@ -87,6 +90,7 @@ export function DocViewer({ projectId, doc, onClose }:
         <div style={{ padding: 18, overflow: "auto" }}>
           {loading ? <span style={{ font: `400 13px/1 ${T.sans}`, color: T.tertiary }}>Loading…</span>
             : isSvg && content ? <div style={{ display: "grid", placeItems: "center" }} dangerouslySetInnerHTML={{ __html: content }} />
+            : isMd && content ? <MarkdownBody content={content} />
             : <pre style={{ margin: 0, font: `400 12.5px/1.6 ${T.mono}`, color: T.fg, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{content}</pre>}
         </div>
       </div>

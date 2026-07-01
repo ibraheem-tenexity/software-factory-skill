@@ -30,7 +30,7 @@ Do NOT try to "emit" events — that mechanism is gone. The datastore is the sin
 ## Phase 1: extract  (`set-phase extract`)
 
 Read everything in `<base>/input/` (the console already extracted PDFs/DOCX to markdown + composed
-`context.txt`). In particular `input/brief.md` (the **structured project brief** from the onboarding
+`context.md`). In particular `input/brief.md` (the **structured project brief** from the onboarding
 interview — goals, success metrics, constraints, stakeholders, existing assets, risks, definition of
 done — the authoritative scope), `input/interview.md` (the transcript), and `input/images/` (extracted
 **wireframe/screenshot images**, when present — the PRD must reference them with captions). Turn it
@@ -44,7 +44,7 @@ into usable scope. Do NOT re-record an input artifact — the console already di
 ## Phase 3: research COUNCIL — work the seats in order, then synthesize  (`set-phase research`)
 
 Run the council SEQUENTIALLY (no Task tool): each seat is a logical agent producing a candidate PRD
-draft from the SAME context (`input/brief.md` + `input/interview.md` + `context.txt` + any
+draft from the SAME context (`input/brief.md` + `input/interview.md` + `context.md` + any
 `input/images/`). For each: `spawn-agent <id> <role> <model> research`, do its work YOURSELF, then
 `finish-agent <id> success`:
 

@@ -109,7 +109,7 @@ Stage 3 BUILD      tickets → built app(s) → deploy → verify  gate: done ti
 | `env.py` | dev/prod tiering (`SF_ENVIRONMENT`): `stage_env_baseline()` (scrubs console secrets from stage child processes), Railway project allowlist. |
 | `auth.py` + `users.py` | Google-OAuth login (`google-auth` token verify) + HMAC `uid`/`token_version` session cookie + service token; `UserStore` = the allowlist+RBAC directory (`roles`/`role_permissions`, status invited/active/disabled, per-request role resolution) backing membership + per-project ownership. |
 | `chat_agent.py` | The "Factory Concierge" — an OpenAI-Agents-SDK agent that turns a chat conversation into a `start_project` (and answers status/deps questions). Its effective prompt is `CONCIERGE_INSTRUCTIONS` plus an env-safe, 60s TTL cached `agent_prompts.CONCIERGE` override so prompt edits apply to new concierge sessions without per-turn DB latency. |
-| `input_pipeline.py`, `pdf_extract.py`, `docx_extract.py` | Ingest: attachments → Markdown, compose the Stage-1 input (`context.txt` + `brief.md` + `interview.md`). `docx_extract.extract_with_images` (mammoth + markdownify) keeps **wireframe images inside Word tables** → `input/images/`. |
+| `input_pipeline.py`, `pdf_extract.py`, `docx_extract.py` | Ingest: attachments → Markdown, compose the Stage-1 input (`context.md` + `brief.md` + `interview.md`). `docx_extract.extract_with_images` (mammoth + markdownify) keeps **wireframe images inside Word tables** → `input/images/`. |
 | `workspace_setup.py`, `workspace.py` | Per-stage ephemeral workspace: SKILL contract, `.mcp.json`, prior-stage artifacts, vendored design skills. |
 | `deploy.py` | Railway deploy + health-check helpers (stage 3). |
 | `deploy_db.py` | Provisions a per-project Railway Postgres and writes `context/deploy-db.json` for the build (agents have no Supabase access). Uses `railway add --database postgres --json` (the bare form is interactive and hangs headless) → **captures the real auto-named serviceId** → reads `DATABASE_URL` via `railway variables --service <serviceId> --json`. Idempotent: the serviceId is persisted before the variables read, so a retry **reuses** that service (never re-adds → no orphan). serviceId is the durable handle for teardown. Invoked by the **stage-3 agent** via the `provision-db` db-CLI verb (`db.py`), which persists the serviceId/volumeId to ProjectState + records the artifact; the agent runs it once and `add-blocker`+STOPs on failure (no code-level attempt cap — prompt + provision-idempotency + reaper are the orphan backstop). |
@@ -193,7 +193,7 @@ prod and `metadata.create_all` builds it in tests, so the two cannot drift.
   [`schema-erd.svg`](schema-erd.svg) (detail in [`schema-erd.md`](schema-erd.md)).
 
 **Files → the `/data` volume** (NOT in the database today; dir set by `SF_PROJECTS_DIR=/data/projects`):
-- `projects/<id>/input/` — `context.txt` (composed Stage-1 input) + converted attachments + raw uploads
+- `projects/<id>/input/` — `context.md` (composed Stage-1 input) + converted attachments + raw uploads
   (incl. **wireframe images**).
 - `projects/<id>/project.log` — full agent transcript (cost is parsed from here).
 - `projects/<id>/chat.jsonl` — the concierge chat history.
