@@ -9,10 +9,12 @@ parameter rather than importing a global singleton.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
 import threading
+import time
 from typing import Callable
 
 from .. import docx_extract, pdf_extract, storage
@@ -141,19 +143,58 @@ def _default_chat_client():
     return OpenAI(base_url=_OPENROUTER_BASE_URL, api_key=os.environ["OPENROUTER_API_KEY"])
 
 
-def _filter_key_facts(raw_facts: list[dict], blob_id: int, valid_section_paths: set[str]) -> list[dict]:
+def _filter_key_facts(raw_facts: list[dict], blob_id: int,
+                      valid_section_paths: set[str]) -> tuple[list[dict], list[dict]]:
     """The trust boundary (product spec: no confidence scores, no unreferenced facts). A fact
-    whose section_path isn't a real section_path from THIS document's own chunks is dropped —
-    never stored, never shown. document_blob_id is attached here, by code, never asked of the
-    model."""
-    out = []
+    whose section_path isn't a real section_path from THIS document's own chunks is never
+    stored as a fact — but it's NOT discarded either (SOF-37 needs it): it comes back as an
+    unreferenced candidate, which the caller turns into a reflection question instead of a
+    stated fact. document_blob_id is attached here, by code, never asked of the model, for
+    both lists.
+
+    Returns (referenced_facts, unreferenced_candidates)."""
+    referenced, unreferenced = [], []
     for f in raw_facts:
         fact = (f.get("fact") or "").strip()
         section_path = f.get("section_path")
-        if not fact or section_path not in valid_section_paths:
+        if not fact:
             continue
-        out.append({"fact": fact, "document_blob_id": blob_id, "section_path": section_path})
-    return out
+        entry = {"fact": fact, "document_blob_id": blob_id, "section_path": section_path}
+        if section_path in valid_section_paths:
+            referenced.append(entry)
+        else:
+            unreferenced.append(entry)
+    return referenced, unreferenced
+
+
+def _reflection_question_id(document_blob_id: int, fact: str) -> str:
+    """Deterministic — the same unreferenced candidate re-extracted on a re-ingest collapses
+    onto the same question id instead of spawning a duplicate."""
+    return hashlib.sha256(f"{document_blob_id}:{fact}".encode()).hexdigest()[:12]
+
+
+def _record_reflection_questions(console, project_id: str, unreferenced: list[dict]) -> None:
+    """SOF-37: an unreferenced candidate never becomes a stated fact — it becomes an
+    interview question the operator must answer or dismiss before build/hand-off (see the
+    promote-route gate in console/routers/projects.py). Deduped by content-derived id, so a
+    re-ingest of the same document never spawns duplicate questions for the same candidate."""
+    state = console._load_state(project_id)
+    existing_ids = {q["id"] for q in (state.reflection_questions or [])}
+    added = False
+    for candidate in unreferenced:
+        qid = _reflection_question_id(candidate["document_blob_id"], candidate["fact"])
+        if qid in existing_ids:
+            continue
+        state.reflection_questions = list(state.reflection_questions or []) + [{
+            "id": qid, "fact": candidate["fact"],
+            "document_blob_id": candidate["document_blob_id"],
+            "section_path_claimed": candidate["section_path"],
+            "status": "open", "answer": None, "created_at": time.time(),
+        }]
+        existing_ids.add(qid)
+        added = True
+    if added:
+        state.save()
 
 
 def _estimate_cost_usd(model: str, kind: str, *, input_chars: int = 0,
@@ -250,7 +291,9 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
         push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "summarizing", "pct": 100, "status": "failed"})
         return {"blob_id": blob_id, "status": "failed", "error": str(exc)}
 
-    key_facts = _filter_key_facts(raw_facts, blob_id, valid_section_paths)
+    key_facts, unreferenced = _filter_key_facts(raw_facts, blob_id, valid_section_paths)
+    if unreferenced and scope == "project":
+        _record_reflection_questions(console, scope_id, unreferenced)
 
     if usage:
         summarize_cost = _estimate_cost_usd(SUMMARIZE_MODEL, "chat", prompt_tokens=usage.get("prompt_tokens", 0),

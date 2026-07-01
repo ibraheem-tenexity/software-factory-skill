@@ -16,24 +16,39 @@ from unittest.mock import patch
 from software_factory.memory import ingest
 
 
-def test_filter_key_facts_drops_unreferenced_and_keeps_referenced():
+def test_filter_key_facts_splits_referenced_from_unreferenced():
+    # SOF-37: an unreferenced candidate is NOT discarded — it comes back separately so the
+    # caller can turn it into a reflection question instead of a stated fact.
     raw = [
         {"fact": "Uses OAuth2", "section_path": "Auth"},
         {"fact": "an unreferenced inference", "section_path": "NotARealSection"},
-        {"fact": "", "section_path": "Auth"},          # empty fact text
-        {"section_path": "Auth"},                        # missing fact key entirely
-        {"fact": "no section at all"},                   # missing section_path entirely
+        {"fact": "", "section_path": "Auth"},          # empty fact text -> dropped from BOTH
+        {"section_path": "Auth"},                        # missing fact key -> dropped from BOTH
+        {"fact": "no section at all"},                   # missing section_path -> unreferenced
     ]
-    out = ingest._filter_key_facts(raw, blob_id=42, valid_section_paths={"Auth", "Billing"})
-    assert out == [{"fact": "Uses OAuth2", "document_blob_id": 42, "section_path": "Auth"}]
+    referenced, unreferenced = ingest._filter_key_facts(raw, blob_id=42, valid_section_paths={"Auth", "Billing"})
+    assert referenced == [{"fact": "Uses OAuth2", "document_blob_id": 42, "section_path": "Auth"}]
+    assert unreferenced == [
+        {"fact": "an unreferenced inference", "document_blob_id": 42, "section_path": "NotARealSection"},
+        {"fact": "no section at all", "document_blob_id": 42, "section_path": None},
+    ]
+
+
+def test_reflection_question_id_is_deterministic_and_content_scoped():
+    id1 = ingest._reflection_question_id(42, "an unreferenced inference")
+    id2 = ingest._reflection_question_id(42, "an unreferenced inference")
+    id3 = ingest._reflection_question_id(43, "an unreferenced inference")
+    assert id1 == id2
+    assert id1 != id3
 
 
 def test_filter_key_facts_document_blob_id_is_never_taken_from_the_model():
     # Even if a (malicious or confused) model response includes its own document_blob_id, the
     # code-attached value must win — never trust the model for provenance.
     raw = [{"fact": "x", "section_path": "Auth", "document_blob_id": 999}]
-    out = ingest._filter_key_facts(raw, blob_id=42, valid_section_paths={"Auth"})
-    assert out == [{"fact": "x", "document_blob_id": 42, "section_path": "Auth"}]
+    referenced, unreferenced = ingest._filter_key_facts(raw, blob_id=42, valid_section_paths={"Auth"})
+    assert referenced == [{"fact": "x", "document_blob_id": 42, "section_path": "Auth"}]
+    assert unreferenced == []
 
 
 def test_build_rollup_skips_non_ready_and_empty_summaries():
