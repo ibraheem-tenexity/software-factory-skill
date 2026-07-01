@@ -1,7 +1,7 @@
 """In-memory mock secrets vault — stands in until the DB agent ships migration 0008 + org_secrets table."""
 import time
 
-from software_factory.services.errors import ServiceError
+from software_factory.services.errors import Invalid, NotFound
 
 
 class Secrets:
@@ -17,14 +17,14 @@ class Secrets:
     def create(self, org_id: str, name: str, value: str, kind: str) -> dict:
         org = self._org(org_id)
         if name in org:
-            raise ServiceError(409, f"secret '{name}' already exists")
+            raise Invalid(f"secret '{name}' already exists")
         org[name] = {"kind": kind, "last4": value[-4:], "used_by": 0, "updated_at": _now()}
         return {"name": name, **org[name]}
 
     def rotate(self, org_id: str, name: str, value: str) -> dict:
         org = self._org(org_id)
         if name not in org:
-            raise ServiceError(404, f"secret '{name}' not found")
+            raise NotFound(f"secret '{name}' not found")
         org[name]["last4"] = value[-4:]
         org[name]["updated_at"] = _now()
         return {"name": name, **org[name]}
@@ -32,13 +32,13 @@ class Secrets:
     def delete(self, org_id: str, name: str) -> None:
         org = self._org(org_id)
         if name not in org:
-            raise ServiceError(404, f"secret '{name}' not found")
+            raise NotFound(f"secret '{name}' not found")
         del org[name]
 
     def get_ref(self, org_id: str, name: str) -> dict:
         org = self._org(org_id)
         if name not in org:
-            raise ServiceError(404, f"secret '{name}' not found")
+            raise NotFound(f"secret '{name}' not found")
         return {"name": name, "kind": org[name]["kind"]}
 
 
