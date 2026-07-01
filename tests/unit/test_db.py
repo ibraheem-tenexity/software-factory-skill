@@ -249,11 +249,17 @@ def test_provision_repo_verb_is_idempotent_second_caller_reuses_no_duplicate(tmp
 
 
 def test_provision_repo_verb_reuse_skips_clone_when_already_checked_out(tmp_path, monkeypatch):
-    """A retry within the SAME workspace (repo already cloned there) must not re-clone."""
+    """A retry within the SAME workspace (repo already cloned there) must not re-clone.
+
+    SOF-44: `gh repo clone <url>` (like create_repo's own --clone) clones into a NEW
+    ./<repo-name>/ subdirectory of cwd, never into cwd itself — so the fixture puts .git under
+    that subdirectory, not directly under the workspace root (the old, buggy assumption this
+    ticket fixed)."""
     from software_factory.db import main
     from software_factory import repo as repo_mod
     runs = str(tmp_path); pid = "project-eeee5555ffff6666"
-    ws = tmp_path / pid / "workspace"; (ws / ".git").mkdir(parents=True)
+    ws = tmp_path / pid / "workspace"
+    (ws / "already-here-eeee5555" / ".git").mkdir(parents=True)
     monkeypatch.chdir(ws)
     clone_calls = []
     monkeypatch.setattr(repo_mod.GitHub, "clone_repo", lambda self, url: clone_calls.append(url))
@@ -262,6 +268,25 @@ def test_provision_repo_verb_reuse_skips_clone_when_already_checked_out(tmp_path
     st.save()
     assert main(["provision-repo", runs, pid, "irrelevant"]) == 0
     assert clone_calls == []
+
+
+def test_provision_repo_verb_reuse_reclones_when_not_actually_checked_out(tmp_path, monkeypatch):
+    """SOF-44 regression: before this fix, checking os.path.isdir(".git") in cwd was ALWAYS
+    False after a real clone (which lands in ./<repo-name>/, not cwd) — so this exact scenario
+    (freshly entered workspace, repo NOT yet cloned here) must still trigger a clone. Proves the
+    fix didn't flip the check backwards (e.g. skipping every clone unconditionally)."""
+    from software_factory.db import main
+    from software_factory import repo as repo_mod
+    runs = str(tmp_path); pid = "project-11112222333344"
+    ws = tmp_path / pid / "fresh-workspace"; ws.mkdir(parents=True)
+    monkeypatch.chdir(ws)
+    clone_calls = []
+    monkeypatch.setattr(repo_mod.GitHub, "clone_repo", lambda self, url: clone_calls.append(url))
+    st = ProjectState.load(pid, ProjectStore(db_path(runs, pid)))
+    st.repo_url = "https://github.com/acme/not-here-yet-11112222"
+    st.save()
+    assert main(["provision-repo", runs, pid, "irrelevant"]) == 0
+    assert clone_calls == ["https://github.com/acme/not-here-yet-11112222"]
 
 
 def test_provision_repo_verb_exits_nonzero_when_create_repo_fails(tmp_path, monkeypatch):
