@@ -24,7 +24,7 @@ from software_factory import auth  # noqa: E402
 from software_factory.users import UserStore  # noqa: E402
 from software_factory.blobs import BlobStore  # noqa: E402
 from software_factory.agent_prompts import PromptStore  # noqa: E402
-from software_factory.registries import ToolStore, AgentRegistryStore  # noqa: E402
+from software_factory.registries import ToolStore, AgentRegistryStore, MEMORY_MCP_TOOL  # noqa: E402
 from software_factory.sow import SowStore  # noqa: E402
 from software_factory.services.org_service import OrgService  # noqa: E402
 from software_factory.services.secrets import Secrets  # noqa: E402
@@ -86,6 +86,11 @@ def reset():
     blobs = BlobStore()           # org KB docs + run-scoped uploaded materials (bytes live in storage)
     prompts = PromptStore()       # editable agent prompts (§3.4) — stored/served, not yet applied
     tool_store = ToolStore()      # tools/MCP registry (§3.5) — real datastore (seeded), CRUD-able
+    # SOF-41/T4.2: the Project Memory MCP row only ever shows up once the feature is actually
+    # wired (SF_MEMORY=1) — showing "connected" for an endpoint that isn't mounted would mislead
+    # the Tools & MCP registry.
+    if os.environ.get("SF_MEMORY") == "1":
+        tool_store.ensure_tool(MEMORY_MCP_TOOL)
     agent_store = AgentRegistryStore()   # agent identity registry (§3.4)
     sow_store = SowStore()               # statement-of-work CRUD
     # Service layer (business logic between routers and stores). Built AFTER the stores so it holds
