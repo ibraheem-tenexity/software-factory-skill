@@ -4,7 +4,7 @@ only a passing browser journey counts.
 Critical scar: a missing/empty/garbage result must read as FAIL, never PASS. Done has to
 be earned with positive evidence, not inferred from the absence of a failure.
 """
-from software_factory.gate import happy_flow_passed, bugs_from
+from software_factory.gate import happy_flow_passed, bugs_from, has_signin_step
 
 
 def passing_result():
@@ -49,3 +49,22 @@ def test_bugs_lists_only_failing_steps_with_detail():
 
 def test_no_bugs_when_all_pass():
     assert bugs_from(passing_result()) == []
+
+
+def test_has_signin_step_detects_common_patterns():
+    for name in ("Sign in with demo credentials", "Log in", "signin", "Login as demo user",
+                 "Fill credentials", "sign-in"):
+        result = {"steps": [{"name": name, "ok": True}]}
+        assert has_signin_step(result) is True, name
+
+
+def test_has_signin_step_false_when_no_signin():
+    result = {"steps": [{"name": "Navigate to dashboard", "ok": True},
+                        {"name": "Check user profile", "ok": True}]}
+    assert has_signin_step(result) is False
+
+
+def test_has_signin_step_false_for_empty_or_none():
+    assert has_signin_step(None) is False
+    assert has_signin_step({}) is False
+    assert has_signin_step({"steps": []}) is False

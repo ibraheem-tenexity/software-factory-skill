@@ -29,3 +29,17 @@ def bugs_from(result: Optional[dict]) -> list[dict]:
         if step.get("ok") is not True:
             bugs.append({"step": step.get("name", "?"), "error": step.get("error", "")})
     return bugs
+
+
+_SIGNIN_KEYWORDS = ("sign in", "signin", "log in", "login", "sign-in", "credential")
+
+
+def has_signin_step(result: Optional[dict]) -> bool:
+    """True when the happy-flow result includes at least one step whose name suggests a sign-in action."""
+    if not result:
+        return False
+    for step in result.get("steps", []):
+        name = (step.get("name") or "").lower()
+        if any(kw in name for kw in _SIGNIN_KEYWORDS):
+            return True
+    return False
