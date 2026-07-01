@@ -706,10 +706,13 @@ class Console:
     def _project_spend(self, project_id: str) -> float:
         """THIS run's own spend (the per-project budget basis). Prior runs/projects do NOT count —
         each run/project is independently capped. Authoritative cost from the project.log, falling
-        back to the recorded projectstate spend."""
+        back to the recorded projectstate spend, PLUS console-side ingestion spend (SOF-27) — a
+        separate accumulator, since ingestion never runs as a stage process and so never appears
+        in project.log or gets counted by the max() below."""
         # max(): the log-derived figure normally leads, but the persisted projectstate spend survives
         # log loss / parser regressions — the budget guard must never silently under-count.
-        return max(self._cost(project_id), self._load_state(project_id).spent_usd or 0)
+        state = self._load_state(project_id)
+        return max(self._cost(project_id), state.spent_usd or 0) + (state.ingestion_spent_usd or 0)
 
     def _budget_ceiling(self, project_id: str) -> float:
         """SPEC §4: per-project ceiling — the run's own override, else SF_COST_CEILING (default 30)."""
