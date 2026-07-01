@@ -7,6 +7,9 @@ import { Spinner } from "../skeleton";
 // SOF-11: T used to be a byte-for-byte duplicate of admin/tokens.ts; both now share one source.
 import { T } from "../../theme";
 import { api } from "../../api";
+// SOF-17: the full block-level renderer (headings/tables/code/blockquotes/lists), shared with
+// the standalone ArtifactViewer so the two never drift.
+import { MarkdownBody } from "../../markdown";
 export { T };
 
 type CSS = React.CSSProperties;
@@ -534,8 +537,11 @@ export function OrgImportPicker({ docs = [] }:
 const MD_INLINE_RE = /(\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
 
 export function looksLikeMarkdown(s: unknown): boolean {
+  // SOF-17: a brief made ONLY of headings/a table/a blockquote (no bold/list mixed in) must
+  // still be detected — otherwise it falls through to the plain-text fallback below and none
+  // of it renders as markdown at all.
   return typeof s === "string" &&
-    /(\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_|`[^`]+`|\[[^\]]+\]\([^)]+\)|^\s*[-*]\s+|^\s*\d+[.)]\s+)/m.test(s);
+    /(\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_|`[^`]+`|\[[^\]]+\]\([^)]+\)|^\s*[-*]\s+|^\s*\d+[.)]\s+|^\s{0,3}#{1,6}\s+|^\s*>\s?|^```|^\s*\|.*\|\s*$)/m.test(s);
 }
 
 function renderInlineMd(text: string, key: string): React.ReactNode[] {
@@ -569,24 +575,10 @@ export function Markdown({ children, style, inline }:
     return <span style={style}>{renderInlineMd(flat, "i")}</span>;
   }
   if (!looksLikeMarkdown(text)) return <p style={{ margin: 0, ...style }}>{text}</p>;
-  const lines = text.split(/\r?\n/);
-  type Block = { items: string[] } | { p: string };
-  const blocks: Block[] = [];
-  let list: { items: string[] } | null = null;
-  const flush = () => { if (list) { blocks.push(list); list = null; } };
-  lines.forEach((ln) => {
-    const m = ln.match(/^\s*(?:[-*]|\d+[.)])\s+(.*)$/);
-    if (m) { if (!list) list = { items: [] }; list.items.push(m[1]); }
-    else { flush(); if (ln.trim()) blocks.push({ p: ln.trim() }); }
-  });
-  flush();
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 7, ...style }}>
-      {blocks.map((b, i) => "items" in b
-        ? <ul key={i} style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 3 }}>{b.items.map((it, j) => <li key={j}>{renderInlineMd(it, `${i}-${j}`)}</li>)}</ul>
-        : <p key={i} style={{ margin: 0 }}>{renderInlineMd((b as { p: string }).p, `${i}`)}</p>)}
-    </div>
-  );
+  // SOF-17: full block-level rendering (headings, GFM tables, fenced code, blockquotes,
+  // ordered/unordered lists, hr) — the same engine as the standalone ArtifactViewer, so the
+  // project brief and the artifact viewer never drift apart.
+  return <div style={style}><MarkdownBody content={text} /></div>;
 }
 
 export function Wordmark({ size = 19 }: { size?: number }) {
