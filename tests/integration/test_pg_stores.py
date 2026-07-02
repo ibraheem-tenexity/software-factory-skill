@@ -39,7 +39,7 @@ def test_full_store_round_trip_on_live_pg(pg_env):
     projects_dir, rid = pg_env
     db_path = os.path.join(projects_dir, rid)
     from software_factory.runtime_agents import AgentRegistry
-    from software_factory.budget import Usage
+    from software_factory.data_transfer_objects import Usage
     from software_factory.db import ProjectStore
     from software_factory.projectstate import ProjectState
     from software_factory.tickets import TicketStore

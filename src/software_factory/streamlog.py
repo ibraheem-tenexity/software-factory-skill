@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from .budget import PRICES
+from .constants import PRICES
 
 
 def _events(text: str):

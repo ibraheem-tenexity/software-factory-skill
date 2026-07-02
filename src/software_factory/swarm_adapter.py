@@ -18,7 +18,8 @@ import json
 import os
 from typing import Optional
 
-from .budget import PRICES, Usage
+from .data_transfer_objects import Usage
+from .constants import PRICES
 from .tickets import Ticket
 
 # Ticket agents do file work + db verbs; everything else (MCP bloat) stays off so the

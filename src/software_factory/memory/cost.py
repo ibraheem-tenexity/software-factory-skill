@@ -9,7 +9,7 @@ process) and Console._launch_stage()'s per-run ceiling refusal already read.
 """
 from __future__ import annotations
 
-from ..budget import PRICES
+from ..constants import PRICES
 from ..log import get_logger
 
 logger = get_logger(__name__)

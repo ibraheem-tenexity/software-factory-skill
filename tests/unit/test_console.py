@@ -10,7 +10,7 @@ from software_factory.console import (
     make_prompt_stage3, project_paths,
 )
 from software_factory.runtime_agents import AgentRegistry
-from software_factory.budget import Usage
+from software_factory.data_transfer_objects.usage import Usage
 
 
 class FakeLauncher:
@@ -821,7 +821,6 @@ def test_graph_agents_are_projected_from_the_agents_table(tmp_path):
 def test_graph_agent_status_reflects_outcome(tmp_path):
     from software_factory.db import db_path
     from software_factory.runtime_agents import AgentRegistry
-    from software_factory.budget import Usage
     c = console(tmp_path, FakeLauncher())
     rid = c.start_project(ProjectRequest(description="x"))
     reg = AgentRegistry(db_path(str(tmp_path), rid))

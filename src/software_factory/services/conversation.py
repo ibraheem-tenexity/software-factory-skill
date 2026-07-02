@@ -6,7 +6,6 @@ unconditionally the conversation service, backed by `ConversationStore`. The in-
 """
 import uuid
 
-from software_factory.services.errors import Invalid
 from software_factory import dbshim
 
 
@@ -139,38 +138,73 @@ class DbConversation:
         return [{"role": r["role"], "content": r["input"] or "", "choices": []} for r in rows]
 
     async def turn(self, project_id: str, message: str) -> dict:
-        """Record the user's message, run it through the real LangChain ChatAgent ("intake"
-        context, per-project tool belt), and return a ConciergeTurn dict: {response,
-        suggested_responses, message_id, session_id}. Raises `Invalid` on an empty message —
-        persists nothing on that path, matching the mock."""
+        """One Concierge turn. Non-empty message = the user's turn (recorded, agent replies).
+        EMPTY message = "the agent opens": no user row is written — the agent simply speaks next
+        from its system prompt (which carries the first-turn project context) + history. That is
+        the whole interview mechanism: the screen is a chat box, the LLM asks because that's what
+        LLMs do. Returns a ConciergeTurn dict: {response, suggested_responses, message_id,
+        session_id}."""
         text = (message or "").strip()
-        if not text:
-            raise Invalid("message is empty")
         session_id = _onboarding_session_id(project_id)
         # Checked BEFORE appending this message: an empty history means this call IS turn one —
         # that's the signal _get_agent uses to bake the first-turn context block into the system
         # prompt (SOF-62). Checking after the append below would always see >=1 row.
         is_first_turn = not self._store.history(session_id)
 
-        self._store.append(session_id, "user", [{"type": "text", "text": text}],
-                          project_id=project_id)
+        if text:
+            self._store.append(session_id, "user", [{"type": "text", "text": text}],
+                              project_id=project_id)
 
         from software_factory.conversation_provider import to_provider
         rows = self._store.history(session_id)
         messages = to_provider(rows, "openai")   # OpenRouter (Kimi) also uses the OpenAI shape
 
         agent = self._get_agent(project_id, is_first_turn=is_first_turn)
-        turn = await agent.run(messages)
+        result = await agent.run(messages)
+        turn = result["structured_response"]
         usage = getattr(agent, "last_usage", None) or {}
-
         suggested = [sr.model_dump() for sr in turn.suggested_responses]
-        block = {"type": "text", "text": turn.response, "suggested_responses": suggested}
-        message_id = self._store.append(
-            session_id, "agent", [block], project_id=project_id,
-            model=usage.get("model"), provider=usage.get("provider"),
-            input_tokens=usage.get("input_tokens", 0), output_tokens=usage.get("output_tokens", 0),
-            cost_usd=usage.get("cost_usd", 0.0),
-        )
+
+        # Append EVERYTHING the run produced — tool calls, tool results, replies — to the array,
+        # verbatim. The run's result messages start with the input we sent; everything after is new.
+        new_msgs = (result.get("messages") or [])[len(messages):]
+        message_id = None
+        response_recorded = False
+        for m in new_msgs:
+            mtype = getattr(m, "type", "")
+            if mtype == "ai":
+                blocks = []
+                text = m.content if isinstance(m.content, str) else ""
+                if text.strip():
+                    blk: dict = {"type": "text", "text": text}
+                    if text.strip() == turn.response.strip():
+                        blk["suggested_responses"] = suggested
+                        response_recorded = True
+                    blocks.append(blk)
+                for tc in (getattr(m, "tool_calls", None) or []):
+                    blocks.append({"type": "tool_use", "id": tc.get("id") or "", "name": tc.get("name") or "",
+                                   "input": tc.get("args") or {}})
+                if blocks:
+                    message_id = self._store.append(session_id, "agent", blocks, project_id=project_id)
+            elif mtype == "tool":
+                content_text = m.content if isinstance(m.content, str) else str(m.content)
+                message_id = self._store.append(
+                    session_id, "tool",
+                    [{"type": "tool_result", "tool_use_id": getattr(m, "tool_call_id", "") or "",
+                      "is_error": False, "content": [{"type": "text", "text": content_text}]}],
+                    project_id=project_id, tool_name=getattr(m, "name", None),
+                    tool_call_id=getattr(m, "tool_call_id", None))
+        # The user-facing reply (ToolStrategy emits it as a tool call, so it usually isn't a plain
+        # ai-text message above). Record it once, with usage on this final row.
+        if not response_recorded:
+            message_id = self._store.append(
+                session_id, "agent",
+                [{"type": "text", "text": turn.response, "suggested_responses": suggested}],
+                project_id=project_id,
+                model=usage.get("model"), provider=usage.get("provider"),
+                input_tokens=usage.get("input_tokens", 0), output_tokens=usage.get("output_tokens", 0),
+                cost_usd=usage.get("cost_usd") or 0.0,
+            )
 
         return {"response": turn.response, "suggested_responses": suggested,
                 "message_id": message_id, "session_id": session_id}

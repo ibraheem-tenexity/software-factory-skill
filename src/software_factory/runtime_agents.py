@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
 
-from .budget import Usage
+from .data_transfer_objects import Usage
 
 
 class Sink(Protocol):

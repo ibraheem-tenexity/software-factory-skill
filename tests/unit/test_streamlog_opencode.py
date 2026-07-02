@@ -3,7 +3,7 @@
 import json
 import os
 
-from software_factory.budget import PRICES
+from software_factory.constants import PRICES
 from software_factory.streamlog import OPENCODE_FALLBACK_MODEL, cost_usd
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "..", "fixtures", "opencode-run.jsonl")

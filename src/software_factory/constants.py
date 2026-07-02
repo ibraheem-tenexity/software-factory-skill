@@ -60,3 +60,32 @@ CONCIERGE_PROMPT_CACHE_TTL_SECONDS = 60.0
 # Shown when a generation still fails to produce a valid ConciergeTurn after one retry (spec §3):
 # a bad generation must never 500 the turn.
 CONCIERGE_SAFE_FALLBACK = "Sorry, I didn't quite catch that — could you say that again?"
+
+
+# USD per token. Reasoning tokens bill at the output rate. Cached (cache-read) is cheaper
+# than fresh input. Numbers reflect Claude list pricing.
+PRICES: dict[str, dict[str, float]] = {
+    "claude-opus-4-8": {
+        "input": 15.0 / 1_000_000,
+        "cached": 1.5 / 1_000_000,
+        "output": 75.0 / 1_000_000,
+    },
+    "claude-sonnet-4-6": {
+        "input": 3.0 / 1_000_000,
+        "cached": 0.3 / 1_000_000,
+        "output": 15.0 / 1_000_000,
+    },
+    "claude-haiku-4-5": {
+        "input": 1.0 / 1_000_000,
+        "cached": 0.1 / 1_000_000,
+        "output": 5.0 / 1_000_000,
+    },
+    # OpenRouter list pricing, confirmed 2026-06-09 via /api/v1/models. OpenCode's stream
+    # already carries authoritative per-step cost; this entry is the fallback rate when a
+    # step_finish event has tokens but no cost.
+    "openrouter/moonshotai/kimi-k2.7-code": {
+        "input": 0.75 / 1_000_000,
+        "cached": 0.375 / 1_000_000,
+        "output": 3.50 / 1_000_000,
+    },
+}
