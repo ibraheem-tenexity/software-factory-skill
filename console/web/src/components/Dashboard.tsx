@@ -158,6 +158,10 @@ function ProjectRow({ r, onClick, first, onRename, onRequestArchive, onRequestDe
   const live = st.key === "building" || st.key === "researching";
   const pct = pctOf(r, st.key);
   const archived = !!r.archived;
+  // Archived rows are de-emphasized — but dim only the CONTENT, never the actions menu. CSS
+  // opacity on the whole row cascades into the popover (a descendant), greying out
+  // "Delete permanently" so it reads as disabled (the reported bug). Keep actions full-opacity.
+  const dim = archived ? { opacity: 0.6 } : undefined;
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(r.name || "");
@@ -166,11 +170,10 @@ function ProjectRow({ r, onClick, first, onRename, onRequestArchive, onRequestDe
     <div role="button" tabIndex={0} onClick={renaming ? undefined : onClick}
       onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !renaming) onClick(); }}
       style={{ width: "100%", textAlign: "left", cursor: renaming ? "default" : "pointer", background: T.raised,
-        opacity: archived ? 0.6 : 1,
         borderTop: first ? "none" : `1px solid ${T.borderSubtle}`, padding: "16px 18px", display: "grid",
         gridTemplateColumns: "minmax(0,1fr) 132px 150px 96px 28px", alignItems: "center", gap: 16, transition: "background .12s" }}
       onMouseEnter={(e) => (e.currentTarget.style.background = T.sunken)} onMouseLeave={(e) => (e.currentTarget.style.background = T.raised)}>
-      <div style={{ minWidth: 0 }}>
+      <div style={{ minWidth: 0, ...dim }}>
         {renaming ? (
           <div onClick={stop} style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <TextInput value={name} onChange={setName} size="sm" />
@@ -190,7 +193,7 @@ function ProjectRow({ r, onClick, first, onRename, onRequestArchive, onRequestDe
           </>
         )}
       </div>
-      <div>
+      <div style={dim}>
         <div style={{ font: `500 11.5px/1 ${T.mono}`, color: T.secondary, marginBottom: 6 }}>{phaseIsStale(r.phase, r.stage) ? `stage ${r.stage} · starting` : (r.phase || "—")}</div>
         {st.key !== "draft" && !archived && (
           <span style={{ display: "block", width: 110, height: 5, borderRadius: 3, background: T.sunken, overflow: "hidden" }}>
@@ -198,8 +201,8 @@ function ProjectRow({ r, onClick, first, onRename, onRequestArchive, onRequestDe
           </span>
         )}
       </div>
-      <div><AgentDots agents={r.agents || []} owner={r.owner} /></div>
-      <div style={{ font: `400 11.5px/1.3 ${T.sans}`, color: T.tertiary }}>{relTime(r.updated)}<div style={{ font: `400 11px/1 ${T.mono}`, color: T.tertiary, marginTop: 3 }}>{money(r.spent_usd)}</div></div>
+      <div style={dim}><AgentDots agents={r.agents || []} owner={r.owner} /></div>
+      <div style={{ font: `400 11.5px/1.3 ${T.sans}`, color: T.tertiary, ...dim }}>{relTime(r.updated)}<div style={{ font: `400 11px/1 ${T.mono}`, color: T.tertiary, marginTop: 3 }}>{money(r.spent_usd)}</div></div>
       <div style={{ position: "relative" }} onClick={stop}>
         <button onClick={() => setMenu((v) => !v)} title="Project actions" style={{ display: "grid", placeItems: "center", width: 28, height: 28, borderRadius: 6, border: "none", background: "transparent", cursor: "pointer", color: T.tertiary }}><Icon name="dots" size={16} color={T.tertiary} /></button>
         {menu && (
