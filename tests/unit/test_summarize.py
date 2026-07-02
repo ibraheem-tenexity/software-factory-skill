@@ -1,5 +1,5 @@
 """Org usage & billing rollup (PRD §2.3) — pure summary over the org's runs."""
-from software_factory import billing
+from software_factory.services.org_service import summarize
 
 
 def test_summarize_rolls_up_org_spend_and_activity():
@@ -12,7 +12,7 @@ def test_summarize_rolls_up_org_spend_and_activity():
         {"project_id": "r3", "name": "Returns portal", "spent_usd": 2.05,
          "budget_stopped": True, "held": False, "deploy_url": ""},            # stopped
     ]
-    u = billing.summarize(org, runs)
+    u = summarize(org, runs)
     assert u["plan"] == "Team"
     assert u["monthly_budget_cap"] == 120.0
     assert u["spent"] == 32.35
@@ -24,7 +24,7 @@ def test_summarize_rolls_up_org_spend_and_activity():
 
 
 def test_summarize_handles_no_org_and_no_runs():
-    u = billing.summarize(None, [])
+    u = summarize(None, [])
     assert u["plan"] is None
     assert u["monthly_budget_cap"] is None
     assert u["spent"] == 0
@@ -34,5 +34,5 @@ def test_summarize_handles_no_org_and_no_runs():
 
 
 def test_summarize_name_falls_back_to_run_id():
-    u = billing.summarize({}, [{"project_id": "project-abc", "name": "", "spent_usd": 1.0}])
+    u = summarize({}, [{"project_id": "project-abc", "name": "", "spent_usd": 1.0}])
     assert u["by_project"][0]["name"] == "project-abc"

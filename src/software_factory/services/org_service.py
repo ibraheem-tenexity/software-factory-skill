@@ -11,10 +11,37 @@ from __future__ import annotations
 
 import base64
 
-from software_factory import storage, billing
+from software_factory import storage
 from ..memory.ingest import maybe_ingest_async
 from .errors import Invalid, NotFound
 from .files import doc_kind
+
+def summarize(org: dict | None, runs: list[dict]) -> dict:
+    """Roll the org's runs into the Usage & billing payload.
+
+    `org` is the organization record (for `plan`/`monthly_budget_cap`), or None.
+    `runs` are that org's runs (already owner-filtered to org members) as returned by
+    `Console.list_projects`. A run is "active" (building now) when it is neither budget-stopped,
+    held, nor already shipped (has a deploy_url)."""
+    org = org or {}
+    by_project = [
+        {"project_id": r["project_id"],
+         "name": r.get("name") or r["project_id"],
+         "spent_usd": round(r.get("spent_usd") or 0.0, 2)}
+        for r in runs
+    ]
+    by_project.sort(key=lambda p: p["spent_usd"], reverse=True)
+    active = sum(1 for r in runs
+                 if not r.get("budget_stopped") and not r.get("held") and not r.get("deploy_url"))
+    return {
+        "plan": org.get("plan"),
+        "monthly_budget_cap": org.get("monthly_budget_cap"),
+        "spent": round(sum(p["spent_usd"] for p in by_project), 2),
+        "active_projects": active,
+        "total_projects": len(runs),
+        "by_project": by_project,
+    }
+
 
 
 class OrgService:
@@ -145,7 +172,7 @@ class OrgService:
         member_emails = {m["email"].lower() for m in self.users.list_org_members(org["id"])}
         runs = [r for r in self.console.list_projects(owner=None)
                 if (r.get("owner") or "").lower() in member_emails]
-        return billing.summarize(org, runs)
+        return summarize(org, runs)
 
     def update_billing(self, email: str, body) -> dict:
         org = self._require_org(email)
