@@ -138,6 +138,36 @@ Return ONLY valid JSON. No markdown fences. No commentary."""
 # provide; a panel that doesn't parse as JSON is skipped, not guessed at.
 # ---------------------------------------------------------------------------------------------
 
+def _balanced_json_span_end(text: str, start: int) -> int | None:
+    """Index one past the '}' that closes the '{' at `start`, or None if it never closes.
+    STRING-AWARE (tracks quoted-string state + backslash escapes) so a literal '{'/'}' inside a
+    JSON string VALUE — e.g. a company description that happens to mention a brace — can never
+    desync the depth count. A naive char-counting scanner would either close too early or never
+    close at all in that case; this one only counts braces that are actually structural."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return None
+
+
 def _extract_json_block(text: str) -> dict | None:
     """The first fenced-or-bare JSON object in `text`, or None if none parses. Never raises —
     Fusion's panels are LLM prose with an embedded object, not guaranteed-clean JSON."""
@@ -146,18 +176,13 @@ def _extract_json_block(text: str) -> dict | None:
     start = candidate.find("{")
     if start == -1:
         return None
-    depth = 0
-    for i, ch in enumerate(candidate[start:], start):
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(candidate[start:i + 1])
-                except json.JSONDecodeError:
-                    return None
-    return None
+    end = _balanced_json_span_end(candidate, start)
+    if end is None:
+        return None
+    try:
+        return json.loads(candidate[start:end])
+    except json.JSONDecodeError:
+        return None
 
 
 def _split_fusion_markdown(raw: str) -> tuple[dict[str, str], str]:
@@ -183,33 +208,25 @@ def _extract_bold_section(text: str, heading: str) -> str:
 
 def _top_level_json_objects(text: str) -> list[dict]:
     """Every top-level (non-nested) balanced {...} span in `text`, parsed as JSON, in order.
-    Depth-tracks so a nested object (e.g. one competitor entry inside a profile's
-    `competitors` list) is never mistaken for its own top-level object — jumps past the whole
-    outer span once its matching close is found, rather than re-scanning inside it. A malformed
-    span is skipped, not fatal."""
+    Depth-tracks (string-aware, via _balanced_json_span_end) so a nested object (e.g. one
+    competitor entry inside a profile's `competitors` list) is never mistaken for its own
+    top-level object — jumps past the whole outer span once its matching close is found,
+    rather than re-scanning inside it. A malformed span is skipped, not fatal."""
     objs: list[dict] = []
     i, n = 0, len(text)
     while i < n:
         if text[i] != "{":
             i += 1
             continue
-        depth, j = 0, i
-        while j < n:
-            if text[j] == "{":
-                depth += 1
-            elif text[j] == "}":
-                depth -= 1
-                if depth == 0:
-                    break
-            j += 1
-        if depth == 0:
-            try:
-                objs.append(json.loads(text[i:j + 1]))
-            except json.JSONDecodeError:
-                pass
-            i = j + 1
-        else:
+        end = _balanced_json_span_end(text, i)
+        if end is None:
             i += 1
+            continue
+        try:
+            objs.append(json.loads(text[i:end]))
+        except json.JSONDecodeError:
+            pass
+        i = end
     return objs
 
 
