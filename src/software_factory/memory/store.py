@@ -7,6 +7,8 @@ share one app-layer filter shape (isolation is app-layer + credential-scoped MCP
 """
 from __future__ import annotations
 
+import time
+
 from .. import dbshim
 
 
@@ -23,7 +25,7 @@ class MemoryStore:
     # ---- doc_summary --------------------------------------------------------------------
     def upsert_doc_summary(
         self, blob_id: int, scope: str, scope_id: str, *,
-        summary_md: str | None = None, key_facts: list | None = None,
+        summary_md: str | None = None, assumptions: list | None = None,
         outline: list | None = None, embedding: list[float] | None = None,
         token_count: int | None = None, content_sha256: str | None = None,
         status: str = "pending",
@@ -33,15 +35,15 @@ class MemoryStore:
         try:
             conn.execute(
                 "INSERT INTO doc_summary "
-                "(blob_id, scope, scope_id, summary_md, key_facts, outline, embedding, "
+                "(blob_id, scope, scope_id, summary_md, assumptions, outline, embedding, "
                 " token_count, content_sha256, status) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT (blob_id) DO UPDATE SET "
-                "summary_md=excluded.summary_md, key_facts=excluded.key_facts, "
+                "summary_md=excluded.summary_md, assumptions=excluded.assumptions, "
                 "outline=excluded.outline, embedding=excluded.embedding, "
                 "token_count=excluded.token_count, content_sha256=excluded.content_sha256, "
                 "status=excluded.status, updated_at=now()",
-                (blob_id, scope, scope_id, summary_md, json.dumps(key_facts or []),
+                (blob_id, scope, scope_id, summary_md, json.dumps(assumptions or []),
                  json.dumps(outline or []), embedding, token_count, content_sha256, status),
             )
         finally:
@@ -149,17 +151,17 @@ class MemoryStore:
         except (ValueError, TypeError):
             return None
 
-    # ---- learned facts (SOF-37: the reflection step's "What I learned" surface) -----------
-    def learned_facts(self, scope: str, scope_id: str) -> list[dict]:
-        """Every key_fact from every READY doc_summary in this scope, each enriched with its
+    # ---- assumptions (SOF-37: the "Let's confirm what I learned" surface) -----------------
+    def assumptions(self, scope: str, scope_id: str) -> list[dict]:
+        """Every assumption from every READY doc_summary in this scope, each enriched with its
         source document's display name (via a blobs join) — the "links to a real source" AC.
-        Only ever returns facts that were already filtered as referenced at ingest time
-        (memory/ingest.py._filter_key_facts) — this method does no filtering of its own, it
+        Only ever returns assumptions that were already filtered as referenced at ingest time
+        (memory/ingest.py._filter_assumptions) — this method does no filtering of its own, it
         just flattens + joins what's already trustworthy."""
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT ds.key_facts, b.id AS blob_id, b.name AS document_name "
+                "SELECT ds.assumptions, b.id AS blob_id, b.name AS document_name "
                 "FROM doc_summary ds JOIN blobs b ON b.id = ds.blob_id "
                 "WHERE ds.scope = ? AND ds.scope_id = ? AND ds.status = ?",
                 (scope, scope_id, "ready"),
@@ -168,7 +170,38 @@ class MemoryStore:
             conn.close()
         out = []
         for row in rows:
-            facts = row["key_facts"] or []
-            for f in facts:
+            for f in row["assumptions"] or []:
                 out.append({**f, "document_name": row["document_name"]})
         return out
+
+    # ---- user-deposited document markdown (SOF-60) ----------------------------------------
+    def record_document_markdown(self, project_id: str, blob_id: int, title: str,
+                                 content: str) -> None:
+        """Persist a document's full converted markdown as an origin='user' artifacts row so
+        agents can read the whole document in original order (chunks lose that). Replace
+        semantics per blob (mirrors replace_chunks): a re-ingest refreshes, never duplicates."""
+        conn = self._connect()
+        try:
+            conn.execute(
+                "DELETE FROM artifacts WHERE source_blob_id = ? AND kind = 'document_markdown'",
+                (blob_id,),
+            )
+            conn.execute(
+                "INSERT INTO artifacts (project_id, title, path, kind, agent, ts, content, "
+                "source_blob_id, origin) VALUES (?, ?, '', 'document_markdown', NULL, ?, ?, ?, 'user')",
+                (project_id, title, time.time(), content, blob_id),
+            )
+        finally:
+            conn.close()
+
+    def get_document_markdown(self, blob_id: int) -> str | None:
+        """The full converted markdown for one uploaded document, or None if not ingested yet."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT content FROM artifacts WHERE source_blob_id = ? "
+                "AND kind = 'document_markdown'", (blob_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return row["content"] if row else None

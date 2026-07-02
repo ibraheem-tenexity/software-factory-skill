@@ -84,9 +84,11 @@ def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None) -
                          "size_bytes": b.get("size_bytes"), "content_type": b.get("content_type"),
                          "storage_key": key, "created_at": b.get("created_at"),
                          "summary": ds.get("summary_md"), "summary_status": ds.get("status")})
+    # SOF-60: origin='user' artifact rows are user-deposited document markdown (agent reading
+    # material), not factory output — they'd double-list next to their own upload here.
     produced = [{"id": a.get("id"), "title": a.get("title", ""), "path": a.get("path", ""),
                  "kind": a.get("kind", ""), "agent": a.get("agent", ""), "ts": a.get("ts")}
-                for a in (artifacts or [])]
+                for a in (artifacts or []) if a.get("origin") != "user"]
     return {"uploaded": uploaded, "produced": produced}
 
 

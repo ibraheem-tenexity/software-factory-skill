@@ -104,16 +104,16 @@ def project_deployments(pid: str, v: tuple = Depends(authorize_project)):
 @router.get("/api/projects/{pid}/brief")
 def project_brief(pid: str, v: tuple = Depends(authorize_project)):
     """The structured onboarding brief (shared by the chat interview and the brief form).
-    SOF-37: also carries the reflection surface — learned_facts (reference-backed, from ready
-    doc_summary rows) and reflection_questions (unreferenced candidates awaiting an answer/
-    dismissal — see the promote-route gate below)."""
+    SOF-37/SOF-60: also carries the reflection surface — assumptions (reference-backed, from
+    ready doc_summary rows) and reflection_questions (raised by the Concierge, awaiting an
+    answer/dismissal — see the promote-route gate below)."""
     from software_factory.brief import coverage as _cov
     from software_factory.memory.store import MemoryStore
     brief = state.console.draft_brief(pid)
     project_state = state.console._load_state(pid)
     return {
         "brief": brief, "coverage": _cov(brief),
-        "learned_facts": MemoryStore().learned_facts("project", pid),
+        "assumptions": MemoryStore().assumptions("project", pid),
         "reflection_questions": project_state.reflection_questions,
     }
 
@@ -521,8 +521,8 @@ def store_draft_creds(pid: str, body: CredsIn, v: tuple = Depends(authorize_proj
 @router.patch("/api/projects/{pid}/reflection/{question_id}")
 def resolve_reflection_question(pid: str, question_id: str, body: ReflectionAnswerIn,
                                 v: tuple = Depends(authorize_project)):
-    """SOF-37: resolve one outstanding reflection question (an unreferenced key_facts
-    candidate) — "answer" records the supplied text, "dismiss" says it isn't needed. Either
+    """SOF-37/SOF-60: resolve one outstanding reflection question (raised by the Concierge
+    during its analysis) — "answer" records the supplied text, "dismiss" says it isn't needed. Either
     way flips status off "open", which is what the promote-route gate below checks."""
     if body.action not in ("answer", "dismiss"):
         raise HTTPException(status_code=400, detail="action must be 'answer' or 'dismiss'")

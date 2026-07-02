@@ -24,7 +24,7 @@ def test_new_tables_are_registered_in_all_tables():
 def test_doc_summary_columns_match_the_ticket_spec():
     cols = {c.name for c in models.doc_summary.columns}
     assert cols == {
-        "blob_id", "scope", "scope_id", "summary_md", "key_facts", "outline",
+        "blob_id", "scope", "scope_id", "summary_md", "assumptions", "outline",
         "embedding", "token_count", "content_sha256", "status", "updated_at",
     }
     assert list(models.doc_summary.primary_key.columns)[0].name == "blob_id"

@@ -16,9 +16,10 @@ from unittest.mock import patch
 from software_factory.memory import ingest
 
 
-def test_filter_key_facts_splits_referenced_from_unreferenced():
-    # SOF-37: an unreferenced candidate is NOT discarded — it comes back separately so the
-    # caller can turn it into a reflection question instead of a stated fact.
+def test_filter_assumptions_splits_referenced_from_unreferenced():
+    # SOF-37/SOF-60: an unreferenced candidate never becomes a stated assumption — it comes
+    # back separately (and, post-SOF-60, is simply not persisted; the Concierge raises its own
+    # questions instead of ingest auto-escalating these).
     raw = [
         {"fact": "Uses OAuth2", "section_path": "Auth"},
         {"fact": "an unreferenced inference", "section_path": "NotARealSection"},
@@ -26,7 +27,7 @@ def test_filter_key_facts_splits_referenced_from_unreferenced():
         {"section_path": "Auth"},                        # missing fact key -> dropped from BOTH
         {"fact": "no section at all"},                   # missing section_path -> unreferenced
     ]
-    referenced, unreferenced = ingest._filter_key_facts(raw, blob_id=42, valid_section_paths={"Auth", "Billing"})
+    referenced, unreferenced = ingest._filter_assumptions(raw, blob_id=42, valid_section_paths={"Auth", "Billing"})
     assert referenced == [{"fact": "Uses OAuth2", "document_blob_id": 42, "section_path": "Auth"}]
     assert unreferenced == [
         {"fact": "an unreferenced inference", "document_blob_id": 42, "section_path": "NotARealSection"},
@@ -34,19 +35,11 @@ def test_filter_key_facts_splits_referenced_from_unreferenced():
     ]
 
 
-def test_reflection_question_id_is_deterministic_and_content_scoped():
-    id1 = ingest._reflection_question_id(42, "an unreferenced inference")
-    id2 = ingest._reflection_question_id(42, "an unreferenced inference")
-    id3 = ingest._reflection_question_id(43, "an unreferenced inference")
-    assert id1 == id2
-    assert id1 != id3
-
-
-def test_filter_key_facts_document_blob_id_is_never_taken_from_the_model():
+def test_filter_assumptions_document_blob_id_is_never_taken_from_the_model():
     # Even if a (malicious or confused) model response includes its own document_blob_id, the
     # code-attached value must win — never trust the model for provenance.
     raw = [{"fact": "x", "section_path": "Auth", "document_blob_id": 999}]
-    referenced, unreferenced = ingest._filter_key_facts(raw, blob_id=42, valid_section_paths={"Auth"})
+    referenced, unreferenced = ingest._filter_assumptions(raw, blob_id=42, valid_section_paths={"Auth"})
     assert referenced == [{"fact": "x", "document_blob_id": 42, "section_path": "Auth"}]
     assert unreferenced == []
 
