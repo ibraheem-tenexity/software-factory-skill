@@ -160,15 +160,6 @@ def set_app_variable(project_id: str, name: str, value: str, service_id: str | N
 
 DEPLOY_DB_FILE = "deploy-db.json"
 
-# DB-ish required tokens that mean "this app needs a database" — used to decide whether to
-# provision at all (a static app needs no Postgres).
-_DB_TOKEN_HINTS = ("DATABASE_URL", "POSTGRES", "PG_", "SUPABASE_URL", "SUPABASE_DB", "DB_URL")
-
-
-def needs_deploy_db(required: list | None) -> bool:
-    up = [str(t).upper() for t in (required or [])]
-    return any(any(h in t for h in _DB_TOKEN_HINTS) for t in up)
-
 
 def _pg_url_from(text: str) -> str | None:
     """Pull a postgres connection URL out of CLI / JSON output, trimming shell/quote trailers."""

@@ -308,13 +308,6 @@ class PgConn:
         wants_rows = returning or head.startswith("SELECT") or " RETURNING " in head
         return self._tx(tsql, tuple(params), wants_rows, returning)
 
-    def executescript(self, script: str):
-        stmts = [s.strip() for s in script.split(";") if s.strip()]
-        last = None
-        for s in stmts:
-            last = self._tx(_translate(s), (), False, None)
-        return last
-
     def commit(self):  # every statement is its own transaction
         pass
 

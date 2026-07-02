@@ -264,18 +264,6 @@ def test_mark_done_accepts_commit_sha_provenance(tmp_path):
         ts.mark_done(tid2, "a1b2c3d4e5f6a7b8", 0)   # empty diff still refused
 
 
-def test_evidence_opencode_run_corroborated_by_spend_not_agent_cost(tmp_path):
-    # Monolithic agents can't see their own cost; the run-level spend corroborates model work.
-    from software_factory.evidence import verify_evidence
-    bundle = {"runtime": "opencode", "skill": "software-factory", "skill_version": "0.0.1",
-              "spent_usd": 12.5, "deploy_url": "https://x",
-              "agents": {"counts": {"spawned": 3}, "total_cost_usd": 0.0},
-              "done_tickets": [{"id": 1, "provenance": "a1b2c3d4e5f6a7b8", "diff_lines": 10}]}
-    ok, reasons = verify_evidence(bundle)
-    assert not any("cost is zero" in r for r in reasons)
-    assert not any("without provenance" in r for r in reasons)
-
-
 def test_sf_swarm_wraps_stage3_in_the_driver_but_not_stages_1_2(tmp_path, monkeypatch):
     # §9 swarm build mode: stage 3's tracked process is the swarm driver, which receives
     # the EXACT opencode argv after `--` to exec once the swarm phase ends. Stages 1-2

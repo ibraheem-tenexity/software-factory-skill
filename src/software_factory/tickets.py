@@ -172,9 +172,6 @@ class TicketStore:
         (deployed/qa_testing/approved). Stage-3 proof counts these."""
         return [Ticket(**dict(r)) for r in self._repo.rows_by_status(_BUILT_OR_BEYOND)]
 
-    def approved_tickets(self) -> list[Ticket]:
-        return [Ticket(**dict(r)) for r in self._repo.rows_by_status(("approved",))]
-
     def reset_in_progress_tickets(self) -> int:
         """Reset all 'in_progress' tickets back to 'open', clearing the agent assignment.
         Called on resume/retry so a crashed swarm re-dispatches orphaned in-flight tickets."""

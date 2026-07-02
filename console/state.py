@@ -1,4 +1,4 @@
-"""Shared singletons + SSE registry + SPA/serving helpers for the console app.
+"""Shared singletons + ingest-SSE registry + SPA/serving helpers for the console app.
 
 ONE canonical home for the long-lived stores and the view helpers, so every router — and the tests
 that monkeypatch them — reference a single location. This is also what breaks the import cycle:
@@ -29,7 +29,7 @@ from software_factory.services.org_service import OrgService  # noqa: E402
 from software_factory.services.secrets import Secrets  # noqa: E402
 from software_factory.repositories.org_secrets import OrgSecretsRepository  # noqa: E402
 from software_factory.repositories._exec import GlobalExec  # noqa: E402
-from software_factory.services.conversation import Conversation, DbConversation  # noqa: E402
+from software_factory.services.conversation import DbConversation  # noqa: E402
 from software_factory.services.admin_service import AdminService  # noqa: E402
 from software_factory.repositories.conversation import ConversationRepository  # noqa: E402
 from software_factory.services.files import doc_kind as _doc_kind  # noqa: E402,F401
@@ -56,12 +56,9 @@ conversation_svc = None
 admin_service = None
 _has_chat_key = False
 _chat_runner = None
-_sse_clients: dict[str, list] = {}
-_sse_lock = threading.Lock()
-# SOF-32: a SEPARATE channel from _sse_clients/_push_sse — that one feeds the live chat
-# transcript (ChatPanel.tsx), which does not filter by msg_type, so piping ingest-progress
-# events through it would spam the visible chat with "processing chunk 3/12" noise. This is
-# its own stream for a future ProcessingScreen (SOF-49) to consume, with zero risk to chat.
+# SOF-32: the ingest-progress SSE channel, consumed via /api/projects/{pid}/ingest/stream
+# (ProcessingScreen, SOF-49). The old chat SSE registry (_sse_clients/_push_sse) was removed
+# along with its zero-caller GET /api/chat/{pid}/stream route.
 _ingest_sse_clients: dict[str, list] = {}
 _ingest_sse_lock = threading.Lock()
 _project_stages: dict[str, int] = {}
@@ -73,7 +70,7 @@ def reset():
     by app.py on every reload — matches the monolith's reload-re-instantiates-stores behavior."""
     global PROJECTS_DIR, console, users, blobs, tool_store, agent_store, sow_store
     global org_service, secrets_svc, conversation_svc, admin_service
-    global _has_chat_key, _chat_runner, _sse_clients, _sse_lock, _project_stages, login_throttle
+    global _has_chat_key, _chat_runner, _project_stages, login_throttle
     global _ingest_sse_clients, _ingest_sse_lock
 
     PROJECTS_DIR = os.environ.get("SF_PROJECTS_DIR", os.path.join(HERE, "..", ".projects"))
@@ -90,14 +87,12 @@ def reset():
     # the current instances; rebuilt each reset() so per-test TRUNCATE + re-seed is reflected.
     org_service = OrgService(users, blobs, console)
     secrets_svc = Secrets(OrgSecretsRepository(GlobalExec()))  # SOF-45: real Vault-backed store
-    # DbConversation (SOF-31/T1.3) is the durable swap for the onboarding mock — same turn()/
-    # history() contract, backed by ConversationStore. Opt-in via SF_CONVERSATION_DB so tests and
-    # existing deploys stay on the in-memory mock until the flag is flipped.
-    conversation_svc = (DbConversation(users=users, console=console)
-                        if os.environ.get("SF_CONVERSATION_DB") == "1" else Conversation())
+    # DbConversation (SOF-31/T1.3) — durable, DB-backed onboarding conversation via
+    # ConversationStore. Unconditional (SF_CONVERSATION_DB is retired).
+    conversation_svc = DbConversation(users=users, console=console)
     # Admin history table (SOF-34/T1.5) reads the conversation table directly — independent of
-    # conversation_svc/SF_CONVERSATION_DB, since it's a cross-tenant query surface, not the
-    # onboarding Concierge's own storage path.
+    # conversation_svc, since it's a cross-tenant query surface, not the onboarding Concierge's
+    # own storage path.
     admin_service = AdminService(console, users, agent_store, tool_store, sow_store,
                                  ConversationRepository(GlobalExec()))
     # The concierge runs on OpenAI or OpenRouter (Kimi) — either key enables chat.
@@ -105,8 +100,6 @@ def reset():
     # The /api/chat dock: ChatAgent behind ChatDock (console/chat_dock.py), history + persistence
     # on the conversation table (chat.jsonl/ChatStore retired).
     _chat_runner = ChatDock(console, users) if _has_chat_key else None
-    _sse_clients = {}
-    _sse_lock = threading.Lock()
     _ingest_sse_clients = {}
     _ingest_sse_lock = threading.Lock()
     _project_stages = {}
@@ -116,21 +109,10 @@ def reset():
 reset()
 
 
-def _push_sse(project_id: str, msgs):
-    """Push messages to all SSE clients watching this run."""
-    with _sse_lock:
-        clients = _sse_clients.get(project_id, [])
-    for msg in msgs:
-        data = json.dumps(msg.to_dict())
-        for q in clients:
-            q.append(f"data: {data}\n\n")
-
-
 def _push_ingest_sse(project_id: str, event: dict):
     """SOF-32: push one ingest-progress event (plain dict, no ChatMessage wrapper needed since
     this channel has no chat-history contract to keep) to clients watching this project's
-    ingestion. Shape: {blob_id, doc_name, stage, pct, status}. Separate from _push_sse — see
-    the _ingest_sse_clients docstring for why."""
+    ingestion. Shape: {blob_id, doc_name, stage, pct, status}."""
     with _ingest_sse_lock:
         clients = _ingest_sse_clients.get(project_id, [])
     data = json.dumps(event)

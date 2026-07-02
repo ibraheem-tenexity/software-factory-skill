@@ -26,9 +26,8 @@ from .constants import (
     PLANNING_MODELS, IMPL_MODELS,
     RUNNER_KEYS as _RUNNER_KEYS,
 )
-from . import artifacts, checkpoint as ckpt, deploy_db, env as _env, gates, streamlog, vault as _vault
+from . import artifacts, checkpoint as ckpt, deploy_db, env as _env, streamlog, vault as _vault
 from .runtime_agents import AgentRegistry
-from .evidence import build_evidence, verify_evidence
 from .input_pipeline import persist_and_compose
 from .pdf_extract import extract_to_markdown
 from . import deps as deps_mod
@@ -93,7 +92,6 @@ class ProjectRequest:
     impl_model: str = ""      # S3 model (claude runtime); empty -> stage default
     model: str = ""           # opencode model alias: "kimi"|"glm"; empty -> _OPENCODE_DEFAULT_ALIAS
     name: str = ""            # operator-chosen project name (display label)
-    gated: bool = False       # create held: registered + visible at $0, stage 1 launches on release
     owner: str = ""           # email of the creating user (multi-tenant: members see only their own)
     owner_github_username: str = ""  # SOF-3: owner's GitHub handle, if on file — invites them onto the repo
 
@@ -185,11 +183,6 @@ def make_prompt_stage3(req: ProjectRequest, project_id: str, projects_dir: str, 
         + _disposition_guidance(dispositions)
         + f"  app          = {req.description}"
     )
-
-
-# Keep the old prompt generator for backward compat with existing runs
-def make_prompt(req: ProjectRequest, project_id: str, projects_dir: str) -> str:
-    return make_prompt_stage1(req, project_id, projects_dir)
 
 
 def _make_drop_privileges(uid: int, gid: int):
@@ -903,7 +896,7 @@ class Console:
         """Prepare workspace, health-check MCP, and launch a claude -p process for a stage."""
         # §1 double-orchestrator guard: refuse if an orchestrator is already alive for this run.
         # start_stage2/3 and retry_stage check _stage_process_alive before calling here, but
-        # _provision_and_launch and release_project do not — and even for the callers, there is a
+        # _provision_and_launch does not — and even for the callers, there is a
         # TOCTOU window between their check and the _procs[project_id] write below. Checking here
         # closes both gaps: the un-guarded callers are covered and TOCTOU window shrinks to the
         # launch() call itself (a tight native Popen, not an LLM round-trip).
@@ -1111,12 +1104,12 @@ class Console:
         if req.name and self.name_taken(req.name):
             raise ValueError(f"A project named {req.name!r} already exists — names must be unique.")
         project_id = self._new_id()
-        return self._provision_and_launch(project_id, req, gated=req.gated)
+        return self._provision_and_launch(project_id, req)
 
-    def _provision_and_launch(self, project_id: str, req: ProjectRequest, *, gated: bool = False,
+    def _provision_and_launch(self, project_id: str, req: ProjectRequest, *,
                               interview_md: str | None = None) -> str:
-        """Provision a run dir (id already minted), persist state, and launch Stage 1 (unless
-        gated). Shared by start_project (fresh mint) and promote_draft (existing draft id)."""
+        """Provision a run dir (id already minted), persist state, and launch Stage 1.
+        Shared by start_project (fresh mint) and promote_draft (existing draft id)."""
         paths = self._paths(project_id)
         os.makedirs(paths["base"], exist_ok=True)
 
@@ -1137,8 +1130,7 @@ class Console:
         # SPEC §1: the HOST performs extraction — record it (and provision opening) itself,
         # so these phases are never trust-based and extract can never sit 'pending' forever.
         input_db.set_phase("extract", "done")
-        if not gated:
-            input_db.set_phase("provision", "active")
+        input_db.set_phase("provision", "active")
 
         state = self._load_state(project_id)
         env = {k: v for k, v in (req.credentials or {}).items() if v}
@@ -1175,7 +1167,7 @@ class Console:
         state.planning_model = req.planning_model if req.planning_model in PLANNING_MODELS else ""
         state.impl_model = req.impl_model if req.impl_model in IMPL_MODELS else ""
         state.opencode_model = req.model if req.model in _OPENCODE_MODEL_IDS else ""
-        state.held = bool(gated)
+        state.held = False   # drafts hold via create_draft; a provisioned run is never held
         state.owner = (req.owner or state.owner or "").lower()
         state.owner_github_username = (req.owner_github_username or state.owner_github_username or "").strip()
         # Immutable creator stamp — set ONCE (covers a direct start_project with no prior draft; a draft
@@ -1185,11 +1177,6 @@ class Console:
             state.created_at = time.time()
         state.save()
 
-        if gated:
-            # Held: registered + visible at $0; stage 1 launches on release_project. Create-time
-            # credential VALUES are not persisted (names only), so gated runs rely on the
-            # stage-3 deps flow for app credentials.
-            return project_id
         prompt = make_prompt_stage1(req, project_id, self._projects_dir, runtime=state.runtime,
                                     brief_block=brief_block)
         self._launch_stage(project_id, 1, prompt, env)
@@ -1484,27 +1471,6 @@ class Console:
         ts = [p["ts"] for p in ProjectStore(self._paths(project_id)["db"]).phases() if p.get("ts")]
         return min(ts) if ts else None
 
-    def release_project(self, project_id: str) -> bool:
-        """Release a gated hold: launch Stage 1. False if not held (double-release refuses)."""
-        state = self._load_state(project_id)
-        if not state.held:
-            return False
-        state.held = False
-        state.save()
-        ProjectStore(self._paths(project_id)["db"]).set_phase("provision", "active")
-        req = ProjectRequest(
-            description=state.description or "",
-            target=state.deploy_target or "railway",
-            runtime=state.runtime,
-            planning_model=state.planning_model,
-            impl_model=state.impl_model,
-            name=state.name,
-            owner_github_username=state.owner_github_username,
-        )
-        prompt = make_prompt_stage1(req, project_id, self._projects_dir, runtime=state.runtime)
-        self._launch_stage(project_id, 1, prompt, {})
-        return True
-
     def is_pipeline_project(self, project_id: str) -> bool:
         """True only if this run was actually started by THIS pipeline (start_project records ≥1
         artifact in project store). A resurfaced pre-redesign dir — PRD.md on disk but an empty project store
@@ -1639,8 +1605,7 @@ class Console:
             state.deploy_url = passing[-1]["url"]
         state.phase = "done"
         state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
-        # Persist the final spend into project store so cost survives log loss (SPEC §4 durability),
-        # and so verify_evidence's spent_usd comparison has a real basis.
+        # Persist the final spend into project store so cost survives log loss (SPEC §4 durability).
         state.spent_usd = max(state.spent_usd or 0, self._cost(project_id))
         self._upload_project_log(project_id, state)
         state.save()
@@ -2283,10 +2248,6 @@ class Console:
         items.sort(key=lambda e: e["ts"])
         return items
 
-    def continue_project(self, project_id: str, gate: str) -> dict:
-        gates.clear_gate(self._projects_dir, project_id, gate)
-        return {"cleared": gate}
-
     def artifact(self, project_id: str, path: str) -> dict:
         # Artifact paths arrive relative to wherever the recording agent worked: the run base
         # (host: "input/..."), the workspace (orchestrator: "architecture.md"), or the cloned
@@ -2396,12 +2357,3 @@ class Console:
                     tgt = ("phase:" + gname) if ("phase:" + gname) in existing_ids else "orchestrator"
                     edges.append({"data": {"source": gid, "target": tgt, "etype": "flow"}})
         return {"nodes": nodes, "edges": edges}
-
-    def evidence(self, project_id: str) -> dict:
-        paths = self._paths(project_id)
-        state = self._load_state(project_id)
-        reg = AgentRegistry(paths["agents_db"])
-        tickets = TicketStore(paths["tickets_db"])
-        bundle = build_evidence(state, reg, tickets)
-        ok, reasons = verify_evidence(bundle)
-        return {"verified": ok, "reasons": reasons, "bundle": bundle}

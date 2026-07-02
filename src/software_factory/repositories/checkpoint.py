@@ -29,12 +29,6 @@ class CheckpointRepository:
                 .returning(checkpoint.c.id))
         return self._x.fetchone(stmt) is not None
 
-    def all_for(self, project_id: str) -> list:
-        return self._x.fetchall(
-            select(checkpoint.c.node, checkpoint.c.output, checkpoint.c.stamped_at)
-            .where(checkpoint.c.project_id == project_id)
-            .order_by(checkpoint.c.stamped_at.asc()))
-
     def nodes_for(self, project_id: str) -> list:
         return self._x.fetchall(
             select(checkpoint.c.node).where(checkpoint.c.project_id == project_id))
@@ -47,8 +41,3 @@ class CheckpointRepository:
                        or_(checkpoint.c.node.in_(nodes), checkpoint.c.node.like("ticket:%")))
                 .returning(checkpoint.c.node))
         return self._x.fetchall(stmt)
-
-    def ticket_nodes_for(self, project_id: str) -> list:
-        return self._x.fetchall(
-            select(checkpoint.c.node)
-            .where(checkpoint.c.project_id == project_id, checkpoint.c.node.like("ticket:%")))

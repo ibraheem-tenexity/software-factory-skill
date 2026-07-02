@@ -120,7 +120,6 @@ def test_full_happy_lifecycle_to_approved(tmp_path):
     ts.qa_approve(tid)
     assert ts.get(tid).status == "approved"
     assert ts.all_approved()
-    assert [t.id for t in ts.approved_tickets()] == [tid]
 
 
 def test_qa_reject_bounces_to_open_with_bug_report(tmp_path):

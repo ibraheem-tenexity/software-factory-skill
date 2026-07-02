@@ -43,13 +43,6 @@ def test_insert_if_absent_jsonb_and_on_conflict():
     assert not any(isinstance(p, dict) for p in fx.params)   # never bind a raw dict
 
 
-def test_all_for_order_asc():
-    r, fx = _repo()
-    r.all_for("p1")
-    assert "FROM checkpoint" in fx.sql and "ORDER BY checkpoint.stamped_at ASC" in fx.sql
-    assert fx.params == ("p1",)
-
-
 def test_delete_nodes_in_expansion_and_like():
     r, fx = _repo()
     r.delete_nodes("p1", ["build", "deploy"])
@@ -68,10 +61,3 @@ def test_delete_nodes_empty_list_still_valid():
     assert fx.sql.startswith("DELETE FROM checkpoint")
     assert "checkpoint.node LIKE %s" in fx.sql
     assert "p1" in fx.params and "ticket:%" in fx.params
-
-
-def test_ticket_nodes_for_like():
-    r, fx = _repo()
-    r.ticket_nodes_for("p1")
-    assert "checkpoint.node LIKE %s" in fx.sql
-    assert fx.params == ("p1", "ticket:%")

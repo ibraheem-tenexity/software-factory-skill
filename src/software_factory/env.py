@@ -91,10 +91,6 @@ def sf_environment() -> str:
     return "dev"
 
 
-def is_prod() -> bool:
-    return sf_environment() == "prod"
-
-
 def stage_env_baseline(provided: dict | None = None) -> dict:
     """Return a scrubbed environment for a stage subprocess.
 

@@ -3,17 +3,17 @@
 Tests map to l2a7ngax's required coverage:
   1. Checkpoint immutability — second write is a no-op
   2. Retry/rewind node invalidation — deletes at node and downstream, not upstream
-  3. Kanban skip-completed-tickets on resume — run_swarm_waves filters skip_ticket_ids
-  4. Crash detection — auto_resume_dead_stage sets phase='crashed' instead of auto-resuming
-  5. Resume-skips-checkpointed-nodes — resume_project calls retry_stage preserving upstream ckpts
+  3. Crash detection — auto_resume_dead_stage sets phase='crashed' instead of auto-resuming
+  4. Resume-skips-checkpointed-nodes — resume_project calls retry_stage preserving upstream ckpts
 """
-import subprocess
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import select
 
-from software_factory import checkpoint as ckpt
-from software_factory.checkpoint import NODE_ORDER, completed_nodes, delete_from, write
+from software_factory.checkpoint import completed_nodes, delete_from, write
+from software_factory.models import checkpoint as checkpoint_table
+from software_factory.repositories._exec import GlobalExec
 
 
 PID = "project-cp01"   # scoped to each test by _clean_db fixture
@@ -44,7 +44,8 @@ def test_write_returns_false_on_duplicate():
 def test_duplicate_write_does_not_overwrite_original_output():
     write(PID, "extract", {"key": "original"})
     write(PID, "extract", {"key": "overwrite-attempt"})
-    rows = ckpt.read_all(PID)
+    rows = GlobalExec().fetchall(
+        select(checkpoint_table.c.output).where(checkpoint_table.c.project_id == PID))
     assert len(rows) == 1
     assert rows[0]["output"] == {"key": "original"}
 
@@ -95,93 +96,8 @@ def test_delete_from_is_idempotent_when_nothing_exists():
     assert deleted == []
 
 
-def test_completed_ticket_ids_returns_only_ticket_nodes():
-    write(PID, "stage:1")
-    ckpt.write_ticket(PID, 3)
-    ckpt.write_ticket(PID, 17)
-    ids = ckpt.completed_ticket_ids(PID)
-    assert ids == {"3", "17"}
-
-
 # ────────────────────────────────────────────────────────────────────────────────
-# 3. Kanban skip-completed-tickets on resume
-# ────────────────────────────────────────────────────────────────────────────────
-
-def test_run_swarm_waves_skips_checkpointed_tickets(tmp_path):
-    """Tickets in skip_ticket_ids are not dispatched to the swarm."""
-    from software_factory.tickets import TicketStore
-
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    db_path = str(tmp_path / "project-sk01")
-    store = TicketStore(db_path)
-    t1 = store.create_ticket("Feat A", "acc", "dod", wave=1)
-    store.create_ticket("Feat B", "acc", "dod", wave=1)
-
-    dispatched = []
-
-    def fake_spawn(argv, env=None, cwd=None, stdout=None, stderr=None):
-        import json, re
-        cfg_path = next((a for a in argv if a.endswith(".json")), None)
-        if cfg_path:
-            with open(cfg_path) as f:
-                cfg = json.load(f)
-            for agent in cfg.get("agents", []):
-                m = re.search(r"ticket[:\s#]+(\d+)", agent.get("systemPrompt", ""), re.I)
-                if m:
-                    dispatched.append(int(m.group(1)))
-        proc = MagicMock()
-        proc.poll.return_value = 0
-        return proc
-
-    from software_factory.swarm_stage3 import run_swarm_waves
-    run_swarm_waves(
-        base=db_path,
-        project_id="project-sk01",
-        ws=str(ws),
-        model="kimi",
-        budget_usd=10.0,
-        spawn=fake_spawn,
-        poll_s=0,
-        skip_ticket_ids={str(t1)},
-    )
-    assert t1 not in dispatched
-
-
-def test_run_swarm_waves_skips_empty_wave_after_all_tickets_filtered(tmp_path):
-    """When all tickets in a wave are checkpointed, the wave is skipped entirely."""
-    from software_factory.tickets import TicketStore
-
-    ws = tmp_path / "ws"
-    ws.mkdir()
-    db_path = str(tmp_path / "project-sk02")
-    store = TicketStore(db_path)
-    tid = store.create_ticket("Only ticket", "acc", "dod", wave=1)
-
-    spawned = []
-
-    def fake_spawn(*args, **kwargs):
-        spawned.append(True)
-        proc = MagicMock()
-        proc.poll.return_value = 0
-        return proc
-
-    from software_factory.swarm_stage3 import run_swarm_waves
-    run_swarm_waves(
-        base=db_path,
-        project_id="project-sk02",
-        ws=str(ws),
-        model="kimi",
-        budget_usd=10.0,
-        spawn=fake_spawn,
-        poll_s=0,
-        skip_ticket_ids={str(tid)},
-    )
-    assert spawned == []   # no swarm process launched — wave was empty after filtering
-
-
-# ────────────────────────────────────────────────────────────────────────────────
-# 4. Crash detection — auto_resume_dead_stage sets phase='crashed'
+# 3. Crash detection — auto_resume_dead_stage sets phase='crashed'
 # ────────────────────────────────────────────────────────────────────────────────
 
 def test_auto_resume_relaunches_dead_stage_transient_crash(tmp_path):
@@ -267,7 +183,7 @@ def test_auto_resume_skips_already_crashed_runs(tmp_path):
 
 
 # ────────────────────────────────────────────────────────────────────────────────
-# 5. Resume preserves upstream checkpoints
+# 4. Resume preserves upstream checkpoints
 # ────────────────────────────────────────────────────────────────────────────────
 
 def test_resume_project_clears_markers_and_calls_retry_stage(tmp_path):
