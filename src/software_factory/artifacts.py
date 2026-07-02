@@ -38,6 +38,56 @@ def prd_is_complete(text: str) -> tuple[bool, list[str]]:
     return (len(reasons) == 0, reasons)
 
 
+_LOCK_IN_VERDICTS = ("SHIP_AS_IS", "SHIP_WITH_EDITS", "SEND_BACK")
+
+
+def prd_lock_in_verdict(text: str) -> str | None:
+    """SOF-73: the PRD's closing lock-in line (SHIP_AS_IS / SHIP_WITH_EDITS / SEND_BACK, per
+    stage-1-research/SKILL.md's product-phase contract). None if no verdict token is present —
+    a missing verdict is treated as hollow by the caller, same as a missing acceptance-criteria
+    section is today."""
+    for verdict in _LOCK_IN_VERDICTS:
+        if re.search(rf"\b{verdict}\b", text or ""):
+            return verdict
+    return None
+
+
+def parse_screen_ids(text: str) -> list[str]:
+    """Stable screen IDs from the PRD's screen-catalog table (stage-1-research/SKILL.md requires
+    one). Reads markdown table rows inside a '## ... screen catalog' section and takes each row's
+    first cell as the ID. Best-effort: an unparseable/absent catalog yields an empty list rather
+    than raising — the caller decides what an empty list means for its gate."""
+    in_section = False
+    ids: list[str] = []
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if re.match(r"^#{1,3}\s+(\d+\.\s+)?.*screen\s+catalog", stripped, re.I):
+            in_section = True
+            continue
+        if in_section:
+            if re.match(r"^#{1,2}\s+\S", stripped):
+                break
+            if stripped.startswith("|"):
+                cell = stripped.strip("|").split("|", 1)[0].strip()
+                if cell and not re.match(r"^-+$", cell) and cell.lower() not in ("id", "screen id"):
+                    ids.append(cell)
+    return ids
+
+
+def design_spec_is_complete(text: str, screen_ids: list[str]) -> tuple[bool, list[str]]:
+    """SOF-73: design-spec.md must actually cover the PRD's screen catalog, not just exist.
+    Returns (ok, reasons). No screen_ids parsed from the PRD (catalog missing/unparseable) is
+    surfaced as a reason for visibility but does NOT fail this check on its own —
+    `artifacts.verify()` already requires design-spec.md to exist and be non-empty; this only adds
+    the per-screen coverage bar on top, and there's nothing to enforce when there's no catalog."""
+    if not screen_ids:
+        return (True, ["no screen IDs found in the PRD's screen catalog to check coverage against"])
+    missing = [sid for sid in screen_ids if sid not in (text or "")]
+    if missing:
+        return (False, [f"design-spec.md never references screen ID(s): {', '.join(missing)}"])
+    return (True, [])
+
+
 def parse_required_tokens(text: str) -> list[dict]:
     """Extract required tokens/keys/URLs from architecture.md's dependency section.
 

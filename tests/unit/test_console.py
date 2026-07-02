@@ -654,7 +654,7 @@ def test_stage_done_requires_the_orchestrator_process_to_have_finished(tmp_path)
     rid = c.start_project(ProjectRequest(description="x"))
     ws = os.path.join(str(tmp_path), rid, "workspace"); os.makedirs(ws, exist_ok=True)
     prd = ("# PRD\n" + "\n".join(f"- https://product{i}.example.com real product" for i in range(3))
-           + "\n## Acceptance Criteria\n- works\n## Ticket Seeds\n- t1\n")
+           + "\n## Acceptance Criteria\n- works\n## Ticket Seeds\n- t1\nSHIP_AS_IS\n")
     open(os.path.join(ws, "PRD.md"), "w").write(prd)
     assert c.detect_stage1_done(rid) is False                # gate passes but S1 still ALIVE -> not done
     assert c._load_state(rid).stage1_done is False
@@ -707,6 +707,40 @@ def test_derive_phases_start_of_run(tmp_path):
     assert ph["extract"] == "done"
     assert ph["provision"] == "active"
     assert ph["build"] == "pending" and ph["test"] == "pending"
+
+
+def test_derive_phases_renders_product_and_design_done_not_skipped(tmp_path):
+    # SOF-73: derive_phases() must read STAGE_1/STAGE_2 from constants, not a hardcoded tuple —
+    # otherwise a done stage's newest phase (product/design) renders "skipped" forever.
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_project(ProjectRequest(description="x"))
+    st = c._load_state(rid)
+    st.stage1_done = True
+    st.stage2_done = True
+    st.save()
+    ph = c.derive_phases(rid)
+    assert ph["product"] == "done"
+    assert ph["design"] == "done"
+
+
+def test_current_phase_implies_product_not_research_when_stage1_done(tmp_path):
+    # SOF-73: product is now stage 1's true last phase, not research.
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_project(ProjectRequest(description="x"))
+    st = c._load_state(rid)
+    st.stage1_done = True
+    st.save()
+    assert c.status(rid)["phase"] == "product"
+
+
+def test_graph_stage1_gate_diamond_sits_after_product(tmp_path):
+    # SOF-73: the Stage-1 gate diamond must render after product (stage 1's true last phase),
+    # not after research.
+    c = console(tmp_path, FakeLauncher())
+    rid = c.start_project(ProjectRequest(description="x"))
+    g = c.graph(rid)
+    gate_edge = next(e for e in g["edges"] if e["data"]["target"] == "gate:stage1")
+    assert gate_edge["data"]["source"] == "phase:product"
 
 
 def test_derive_phases_never_leaves_passed_phases_pending_or_active(tmp_path):
@@ -1112,7 +1146,7 @@ def test_stage_handoff_stage1_done_enables_stage2(tmp_path):
     prd = (
         "# PRD\nhttps://a.com https://b.com https://c.com\n"
         "## Acceptance criteria\nGiven a visitor, when submit, then shown\n"
-        "## Ticket seeds\n- seed: form\n"
+        "## Ticket seeds\n- seed: form\nSHIP_AS_IS\n"
     )
     with open(os.path.join(ws, "PRD.md"), "w") as f:
         f.write(prd)
@@ -1124,6 +1158,28 @@ def test_stage_handoff_stage1_done_enables_stage2(tmp_path):
 
     st = c.status(project_id)
     assert st["stage1_done"] is True
+
+
+def test_stage1_not_done_on_send_back_verdict(tmp_path):
+    """SOF-73: a PRD that otherwise passes prd_is_complete() but carries a SEND_BACK lock-in
+    verdict (or none at all) is not done — the product phase hasn't resolved yet."""
+    import os
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    project_id = c.start_project(ProjectRequest(description="guestbook"))
+    ws = os.path.join(str(tmp_path), project_id, "workspace")
+    os.makedirs(ws, exist_ok=True)
+    prd = (
+        "# PRD\nhttps://a.com https://b.com https://c.com\n"
+        "## Acceptance criteria\nGiven a visitor, when submit, then shown\n"
+        "## Ticket seeds\n- seed: form\nSEND_BACK\n"
+    )
+    with open(os.path.join(ws, "PRD.md"), "w") as f:
+        f.write(prd)
+
+    assert c.detect_stage1_done(project_id) is False
+    state = c._load_state(project_id)
+    assert state.stage1_done is False
 
 
 def test_stage2_not_done_when_ticket_store_is_empty(tmp_path):
@@ -1172,6 +1228,8 @@ def test_stage2_done_and_deps_flow(tmp_path):
         f.write(arch_text)
     with open(os.path.join(ws, "architecture.svg"), "w") as f:
         f.write("<svg/>")
+    with open(os.path.join(ws, "design-spec.md"), "w") as f:
+        f.write("# Design Spec\n(no screens in this PRD to cross-check)\n")
     ts = TicketStore(project_paths(d, project_id)["tickets_db"])
     ts.create_ticket("build form", acceptance="a", dod="d", wave=1)
 
@@ -1195,6 +1253,60 @@ def test_stage2_done_and_deps_flow(tmp_path):
     assert st["stage2_done"] is True
     assert st["deps_satisfied"] is True
     assert "RAILWAY_TOKEN" in st["deps_provided"]
+
+
+def test_stage2_not_done_when_design_spec_missing(tmp_path):
+    """SOF-73: architecture.md/svg + buildable tickets are not enough — a missing design-spec.md
+    is a hollow Stage 2, same convention as a missing architecture.svg already was."""
+    import os
+    from software_factory.tickets import TicketStore
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    project_id = c.start_project(ProjectRequest(description="guestbook"))
+    d = str(tmp_path)
+    base = os.path.join(d, project_id)
+    state = c._load_state(project_id)
+    state.stage1_done = True
+    state.save()
+    ws = os.path.join(base, "workspace")
+    os.makedirs(ws, exist_ok=True)
+    for name, body in [("PRD.md", "# PRD"), ("architecture.md", "# A\n## Required Tokens\n- X_KEY — y\n"),
+                       ("architecture.svg", "<svg/>")]:
+        with open(os.path.join(ws, name), "w") as f:
+            f.write(body)
+    TicketStore(project_paths(d, project_id)["tickets_db"]).create_ticket(
+        "build form", acceptance="a", dod="d", wave=1)
+    # No design-spec.md → not done, even though architecture + tickets are both real.
+    assert c.detect_stage2_done(project_id) is False
+
+
+def test_stage2_not_done_when_design_spec_misses_a_screen(tmp_path):
+    """SOF-73: design-spec.md exists but doesn't cover every screen ID in the PRD's catalog."""
+    import os
+    from software_factory.tickets import TicketStore
+    launcher = FakeLauncher()
+    c = console(tmp_path, launcher)
+    project_id = c.start_project(ProjectRequest(description="guestbook"))
+    d = str(tmp_path)
+    base = os.path.join(d, project_id)
+    state = c._load_state(project_id)
+    state.stage1_done = True
+    state.save()
+    ws = os.path.join(base, "workspace")
+    os.makedirs(ws, exist_ok=True)
+    prd = (
+        "# PRD\n## Screen Catalog\n"
+        "| ID | Screen | V1? |\n|----|--------|-----|\n| S1 | Login | Yes |\n| S2 | Dashboard | Yes |\n"
+    )
+    for name, body in [("PRD.md", prd), ("architecture.md", "# A\n## Required Tokens\n- X_KEY — y\n"),
+                       ("architecture.svg", "<svg/>"),
+                       ("design-spec.md", "# Design Spec\n## S1 Login\nLayout notes.\n")]:
+        with open(os.path.join(ws, name), "w") as f:
+            f.write(body)
+    TicketStore(project_paths(d, project_id)["tickets_db"]).create_ticket(
+        "build form", acceptance="a", dod="d", wave=1)
+    # design-spec.md never mentions S2 → not done.
+    assert c.detect_stage2_done(project_id) is False
 
 
 def test_submit_deps_unsatisfied_when_provide_lacks_value(tmp_path):

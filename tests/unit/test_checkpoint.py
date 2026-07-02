@@ -96,6 +96,30 @@ def test_delete_from_is_idempotent_when_nothing_exists():
     assert deleted == []
 
 
+def test_delete_from_product_preserves_research_invalidates_stage2():
+    # SOF-73: product sits between research and stage:2 in NODE_ORDER.
+    for node in ("stage:1", "extract", "provision", "research", "product", "stage:2", "architect"):
+        write(PID, node)
+    deleted = delete_from(PID, "product")
+    assert set(deleted) >= {"product", "stage:2", "architect"}
+    remaining = completed_nodes(PID)
+    assert {"stage:1", "extract", "provision", "research"} <= remaining
+    assert "product" not in remaining
+    assert "architect" not in remaining
+
+
+def test_delete_from_design_preserves_architect_invalidates_tickets():
+    # SOF-73: design sits between architect and tickets in NODE_ORDER.
+    for node in ("stage:2", "architect", "design", "tickets", "stage:3"):
+        write(PID, node)
+    deleted = delete_from(PID, "design")
+    assert set(deleted) >= {"design", "tickets", "stage:3"}
+    remaining = completed_nodes(PID)
+    assert {"stage:2", "architect"} <= remaining
+    assert "design" not in remaining
+    assert "tickets" not in remaining
+
+
 # ────────────────────────────────────────────────────────────────────────────────
 # 3. Crash detection — auto_resume_dead_stage sets phase='crashed'
 # ────────────────────────────────────────────────────────────────────────────────

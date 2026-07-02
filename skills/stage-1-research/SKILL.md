@@ -57,13 +57,38 @@ Turn it into usable scope. Do NOT re-record an input artifact — the console al
   is on file — `add-blocker "GitHub Access: no owner GitHub username on file"`. Never silently skip
   either way.
 
-## Phase 3: research COUNCIL — parallel drafts → synthesis  (`set-phase research`)
+## Phase 3: research  (`set-phase research`)
+
+**One Research agent** grounds the run in real-world facts BEFORE the product council drafts
+anything. `spawn-agent research research.lead <model> research`, dispatch a native **Task**
+sub-agent that asks **3 bounded** questions via Fusion (multi-model panel + cross-model
+consensus/contradiction synthesis — real cost, ~$0.05/call, ~3 min/call, so exactly 3, never more):
+
+```python
+from software_factory.research import fusion_research
+result = fusion_research("<question>")   # {"panels", "consensus", "contradictions", "cost_usd"}
+```
+
+Ask, and write each result as its own file (consensus + contradictions + a short pull from the
+panels, in your own words — Fusion's raw markdown is not committed verbatim):
+1. **Market scan** — what's the market size/shape/trend for this kind of product? → `market-scan.md`
+2. **Existing solutions** — who already solves this, how, and where do they fall short? → `existing-solutions.md`
+3. **Requirements fit** — what does a product like this typically need to include to be credible? → `requirements-fit.md`
+
+Record each: `record-artifact "Market Scan" market-scan.md research research`,
+`record-artifact "Existing Solutions" existing-solutions.md research research`,
+`record-artifact "Requirements Fit" requirements-fit.md research research`. `finish-agent research
+success`. These 3 files become grounding input for the product council in Phase 4 — VANGUARD no
+longer does its own ad-hoc web search from scratch; it starts from here.
+
+## Phase 4: product — council → synthesis → lock-in  (`set-phase product`)
 
 Run a **council**: 3 drafting seats each produce a candidate PRD draft from the SAME context
-(`input/brief.md` + `input/interview.md` + `context.md` + any `input/images/`), then a synthesizer
-reconciles them into the single final PRD. For each seat `spawn-agent <id> <role> research`, dispatch
-a native **Task** sub-agent, then `finish-agent <id> success`. **Launch the 3 seats in PARALLEL**
-(multiple Task calls in one turn) — they are independent:
+(`input/brief.md` + `input/interview.md` + `context.md` + any `input/images/` + Phase 3's
+`market-scan.md`/`existing-solutions.md`/`requirements-fit.md`). For each seat
+`spawn-agent <id> <role> <model> product`, dispatch a native **Task** sub-agent, then
+`finish-agent <id> success`. **Launch the 3 seats in PARALLEL** (multiple Task calls in one turn)
+— they are independent:
 
 > The **exa** web-search MCP is wired into your workspace — use its `web_search`-type tools whenever
 > live web results help (alongside / instead of `WebSearch`).
@@ -78,21 +103,25 @@ a native **Task** sub-agent, then `finish-agent <id> success`. **Launch the 3 se
 > continue with `input/brief.md`/`context.md`/`input/interview.md` alone, exactly as before Project
 > Memory existed. Memory makes the PRD more grounded; it must never be a reason the stage stalls.
 
-1. **VANGUARD** (domain.expert) — the grounding anchor. **Web search REQUIRED:** `WebSearch` 4–6
-   queries, `WebFetch` the best, surface **≥3 real existing products** (name + URL + features + gaps);
-   evaluate ≥2 solution paths. Writes `PRD-draft-vanguard.md`.
+1. **VANGUARD** (domain.expert) — the grounding anchor. Start from Phase 3's `market-scan.md` +
+   `existing-solutions.md`; `WebSearch`/`WebFetch` further ONLY to fill a specific gap those files
+   leave open. Surface **≥3 real existing products** (name + URL + features + gaps); evaluate ≥2
+   solution paths. Never fabricate a URL. Writes `PRD-draft-vanguard.md`.
 2. **CHROMA** (design.lead) — journeys, screens, states, a11y; the primary happy-flow click-path the
    Stage-3 Playwright gate verifies; visual guidance per the `frontend-design`/`ui-ux-pro-max` skills,
    with **`skills/tenexity-design/` as the overriding BRAND CANON** (its token names + PATTERN_MATRIX —
    the app must look like a Tenexity product). Writes `PRD-draft-design.md`.
 3. **HORIZON** (pm.lead) — product thesis, users/JTBD, MVP scope, **enumerated** features + business
    rules, acceptance criteria (given/when/then), ticket seeds, plus a reuse scan of prior repo work.
-   Writes `PRD-draft-horizon.md`.
+   Draws on `requirements-fit.md` for what a credible product in this space typically needs. Writes
+   `PRD-draft-horizon.md`.
 
-Then the **SYNTHESIZER** (HORIZON, second pass = the Chairman): `spawn-agent synth pm.lead research`,
-dispatch a Task sub-agent that reads all three drafts and composes the SINGLE `PRD.md`, then
-`finish-agent synth success`. The synthesized PRD MUST be an **Input-Contract PRD** (so the downstream
-build/harness can consume it deterministically) AND MUST pass `prd_is_complete()`. It must contain:
+Then dispatch `Task(subagent_type="product")` — the operator-configured PRODUCT agent (its prompt
+lives in Tenexity OS, materialized into your workspace as `.claude/agents/product.md`; if unset it
+falls back to Claude Code's own default subagent behavior) reads all three drafts and composes the
+SINGLE `PRD.md`, then `finish-agent product-synth success`. The synthesized PRD MUST be an
+**Input-Contract PRD** (so the downstream build/harness can consume it deterministically) AND MUST
+pass `prd_is_complete()`. It must contain:
 - **stable IDs** on every screen/step/note;
 - a **screen catalog** table with a scope column (`V1? = Yes/Future`), one row per screen, each tagged
   with its target **app** (`mobile-web | web | api`) — a project may ship **multiple deliverables**;
@@ -107,14 +136,20 @@ build/harness can consume it deterministically) AND MUST pass `prd_is_complete()
 - a closing **PRD lock-in** line: a `SHIP_AS_IS / SHIP_WITH_EDITS / SEND_BACK` tally summarizing where
   the seats agreed/diverged (autonomous — NO human gate).
 
-Commit + push, then `record-artifact PRD <repo>/PRD.md prd synth`.
+**On a `SEND_BACK` verdict**, re-loop the synthesis with the divergent seat(s) re-drafted — up to 2
+more passes. If still `SEND_BACK` after that, force `SHIP_WITH_EDITS` with an explicit escalation
+note in the PRD rather than looping forever; the run must never wedge on its own indecision.
+
+Commit + push, then `record-artifact PRD <repo>/PRD.md prd product-synth`.
 
 **Done-gate (mechanical):** `artifacts.prd_is_complete(PRD.md)` passes — ≥3 real product URLs, an
-acceptance-criteria section, and ticket seeds. A hollow/absent PRD does NOT advance.
+acceptance-criteria section, and ticket seeds — AND `artifacts.prd_lock_in_verdict(PRD.md)` is
+`SHIP_AS_IS` or `SHIP_WITH_EDITS` (never `SEND_BACK`, never missing). A hollow/absent/unresolved
+PRD does NOT advance.
 
 ## When done
 
-Once the PRD passes `prd_is_complete()`, **STOP**. The console detects the complete PRD and launches
+Once the PRD passes both checks above, **STOP**. The console detects the complete PRD and launches
 Stage 2. (No "done" event — the committed PRD in the datastore IS the signal.)
 
 ## Python layer (call it, don't reinvent)
@@ -123,7 +158,8 @@ Stage 2. (No "done" event — the committed PRD in the datastore IS the signal.)
 |------|------|
 | Record canvas state | `python3 -m software_factory.db <verb> <projects_dir> <project_id> ...` (above) |
 | Verify creds | `creds.check_all(target, env)` |
-| PRD done-gate | `artifacts.prd_is_complete(text)` |
+| Fusion research | `research.fusion_research(question)` |
+| PRD done-gate | `artifacts.prd_is_complete(text)` + `artifacts.prd_lock_in_verdict(text)` |
 | Isolated workspace | `workspace.create(projects_dir, project_id)` |
 
 ## Guardrails

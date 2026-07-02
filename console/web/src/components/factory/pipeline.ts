@@ -1,7 +1,7 @@
 // pipeline.ts — the real Software Factory pipeline model, mirrored from the backend.
 //
 // Source of truth is the server: PIPELINE = STAGE_1 + STAGE_2 + STAGE_3 in
-// src/software_factory/console.py (extract·provision·research | architect·tickets |
+// src/software_factory/constants.py (extract·provision·research·product | architect·design·tickets |
 // build·deploy·test·teardown). The console's graph() endpoint already emits a node per phase
 // with a derived `status` (pending|active|done|skipped) plus the two Stage gates and the deps
 // node, so the StageRail reads those node statuses directly rather than re-deriving them.
@@ -28,12 +28,14 @@ export const STAGES: { stage: number; title: string; phases: { id: string; label
       { id: "extract", label: "Extract" },
       { id: "provision", label: "Provision" },
       { id: "research", label: "Research" },
+      { id: "product", label: "Product" },
     ],
   },
   {
     stage: 2, title: "Design",
     phases: [
       { id: "architect", label: "Architect" },
+      { id: "design", label: "Design" },
       { id: "tickets", label: "Tickets" },
     ],
   },
@@ -52,9 +54,8 @@ export const STAGES: { stage: number; title: string; phases: { id: string; label
 export const PIPELINE_ORDER = STAGES.flatMap((s) => s.phases.map((p) => p.id));
 
 // Phases flagged as NEW in the pipeline config (design: buildboard.jsx PIPELINE `isNew`). The
-// badge marks genuinely new node KINDS, never whichever phase happens to be active. Currently
-// empty — SOF-73 populates it with product/design when those nodes land.
-export const NEW_PHASES: ReadonlySet<string> = new Set<string>([]);
+// badge marks genuinely new node KINDS, never whichever phase happens to be active.
+export const NEW_PHASES: ReadonlySet<string> = new Set<string>(["product", "design"]);
 
 // Index map for O(1) downstream-of checks.
 const PIPELINE_INDEX: Record<string, number> = Object.fromEntries(PIPELINE_ORDER.map((id, i) => [id, i]));

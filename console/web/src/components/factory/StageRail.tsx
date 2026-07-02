@@ -100,8 +100,8 @@ export function StageRail({ graph, phaseStates, depsSatisfied, atDeps, haltedNod
         halted={isHalted} faded={faded}
         onClick={rewindable ? () => onRewind(id) : undefined} />
     );
-    if (id === "research") {
-      const g1faded = !!haltedNode && isDownstreamOf("research", haltedNode);
+    if (id === "product") {
+      const g1faded = !!haltedNode && isDownstreamOf("product", haltedNode);
       items.push(<Connector key="cg1" faded={g1faded} />, <GateDiamond key="g1" passed={s1} title="Stage 1 gate" faded={g1faded} />);
     } else if (id === "tickets") {
       const g2faded = !!haltedNode && isDownstreamOf("tickets", haltedNode);

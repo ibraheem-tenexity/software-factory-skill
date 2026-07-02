@@ -219,6 +219,25 @@ def _skill_file(stage: int, skills_dir: str | None = None) -> str:
     return os.path.join(base, names[stage], "SKILL.md")
 
 
+def write_agent_file(ws: str, callsign: str, row: dict) -> None:
+    """SOF-73: materialize a system_agents row (PRODUCT/DESIGN) as a native Claude Code subagent
+    file at ws/.claude/agents/<callsign-lower>.md, so the orchestrator can dispatch
+    Task(subagent_type=<callsign-lower>) using the operator-configured prompt. Claude-runtime
+    only — opencode has no Task/subagent concept (see _launch_stage's opencode branch, which
+    splices the same row's prompt into the SKILL.opencode.md override instead)."""
+    agents_dir = os.path.join(ws, ".claude", "agents")
+    os.makedirs(agents_dir, exist_ok=True)
+    name = callsign.lower()
+    frontmatter = (
+        f"---\nname: {name}\n"
+        f"description: {row.get('name') or name.title()} phase agent for the software factory pipeline.\n"
+        f"tools: Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch\n"
+        f"model: {row.get('model_id') or 'inherit'}\n---\n\n"
+    )
+    with open(os.path.join(agents_dir, f"{name}.md"), "w") as f:
+        f.write(frontmatter + (row.get("prompt") or ""))
+
+
 def prepare_workspace(
     projects_dir: str,
     project_id: str,

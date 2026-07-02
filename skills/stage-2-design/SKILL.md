@@ -6,8 +6,9 @@ description: Design orchestrator for Stage 2 of the software factory pipeline. P
 # Stage 2 — Design & Plan
 
 You are the **design orchestrator** for Stage 2 of the software factory. Stage 1 has already
-produced a validated PRD (with research, design spec, and ≥3 real product URLs). Your job is to launch agents that
-produce the architecture and tickets that Stage 3 will build.
+produced a validated PRD (with research, CHROMA's embedded design guidance, and ≥3 real product
+URLs). Your job is to launch agents that produce the architecture, the per-screen design spec, and
+the tickets that Stage 3 will build.
 
 **You are an ORCHESTRATOR — you do NOT do the work yourself.** Launch native **Task** sub-agents; record state.
 Read the Stage 1 artifacts from `context/` (PRD.md and the design spec).
@@ -51,7 +52,27 @@ each (`architecture` and `architecture-svg`).
 
 **Done-gate:** `artifacts.verify(run_dir, ["PRD.md", "architecture.md", "architecture.svg"])` passes.
 
-## Phase 2: tickets  (`set-phase tickets`)
+## Phase 2: design  (`set-phase design`)
+
+`spawn-agent design design.lead <model> design` → a native **Task** sub-agent — `Task(subagent_type=
+"design")` (the operator-configured DESIGN agent; its prompt lives in Tenexity OS, materialized into
+your workspace as `.claude/agents/design.md`; if unset it falls back to Claude Code's own default
+subagent behavior). It reads `PRD.md`'s screen catalog (every screen ID + its scope/app tag) and
+CHROMA's embedded design guidance, and produces `design-spec.md`: a per-screen breakdown (layout,
+key components, states, a11y notes) that explicitly **references every screen ID from the PRD's
+catalog** — this is what the done-gate cross-checks, so don't invent screens the PRD doesn't list
+and don't skip one it does. Visual guidance follows the same `frontend-design`/`ui-ux-pro-max` skills
++ `skills/tenexity-design/` brand canon CHROMA already used. If the agent also produces a static
+mockup export (e.g. an HTML/SVG wireframe), record it too — it's a bonus artifact, not gated.
+
+Commit; `record-artifact "Design Spec" design-spec.md design-spec design`. `finish-agent design
+success`.
+
+**Done-gate (mechanical):** `artifacts.verify(run_dir, ["design-spec.md"])` passes AND
+`artifacts.design_spec_is_complete(design-spec.md, screen_ids)` — every screen ID from `PRD.md`'s
+screen catalog is referenced in `design-spec.md`.
+
+## Phase 3: tickets  (`set-phase tickets`)
 
 - A PM-lead Task sub-agent divides the implementation into steps in dependency (wave) order.
 - **PERSIST each ticket to the store** — `TicketStore.create_ticket(title, acceptance, dod, wave, app=...)`
@@ -61,7 +82,7 @@ each (`architecture` and `architecture-svg`).
   (`mobile-web | web | api | …`). A project may ship MORE THAN ONE deliverable. Set `app=` on each ticket
   to its deliverable so Stage 3 builds/deploys/verifies each app independently and the kanban can group by
   app. A single-app project just uses one app value (or omit it).
-- Tickets are derived from the PRD seeds + architecture + design spec.
+- Tickets are derived from the PRD seeds + architecture + `design-spec.md`.
 
 **Done-gate (mechanical):** waves ordered, no orphan features, AND the store holds buildable tickets — verify:
 ```bash
@@ -71,8 +92,9 @@ assert TicketStore('<project.db>').buildable_count() >= 1, 'EMPTY/HOLLOW ticket 
 
 ## When done
 
-Once PRD+architecture+svg exist AND `TicketStore.buildable_count() >= 1`, **STOP**. The console detects this,
-collects required dependencies from the user, and launches Stage 3. (No "done" event — the datastore is the signal.)
+Once PRD+architecture+svg+design-spec.md all exist (design-spec.md covering every PRD screen ID) AND
+`TicketStore.buildable_count() >= 1`, **STOP**. The console detects this, collects required
+dependencies from the user, and launches Stage 3. (No "done" event — the datastore is the signal.)
 
 ## Python layer
 
@@ -81,6 +103,8 @@ collects required dependencies from the user, and launches Stage 3. (No "done" e
 | Record canvas state | `python3 -m software_factory.db <verb> <projects_dir> <project_id> ...` |
 | Architecture diagram | `diagram.render(mermaid_text, out_path)` |
 | Artifact gate | `artifacts.verify(run_dir, paths)` |
+| Screen IDs from the PRD | `artifacts.parse_screen_ids(prd_text)` |
+| Design-spec done-gate | `artifacts.design_spec_is_complete(design_text, screen_ids)` |
 | Tickets | `tickets.TicketStore` — `create_ticket` (persist!), `claim`, `mark_done` |
 | Ticket done-gate | `tickets.TicketStore(db).buildable_count()` — must be ≥1 |
 
