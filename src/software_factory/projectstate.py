@@ -59,6 +59,7 @@ _PERSISTED = {
     "memory_overview",
     "reflection_questions",
     "concierge_notes",
+    "product_brief_md",
 }
 
 
@@ -87,6 +88,10 @@ class ProjectState:
     # (concierge-agent-spec.md §5). Persisted into the same projectstate.data JSON blob as
     # memory_overview — the "no third table" pattern — and read back by get_from_project_memory.
     concierge_notes: list = field(default_factory=list)
+    # SOF-63: the Concierge's finalized, painstakingly-detailed product brief (its
+    # finalize_product_brief tool writes this). When set, promote uses IT as the Stage-1
+    # context.md instead of make_prompt's dumb description+raw-doc concatenation.
+    product_brief_md: str = ""
     repo_url: Optional[str] = None
     deploy_url: Optional[str] = None
     # Proof marker — stamped at provision so the run carries a receipt of which skill drove it.

@@ -46,6 +46,7 @@ def persist_and_compose(
     brief: dict | None = None,
     interview_md: str | None = None,
     tolerate_extract_failures: bool = False,
+    product_brief_md: str | None = None,
 ) -> list[str]:
     """Write attached files into `input_dir`, converting PDFs (markitdown) and Word docs to
     Markdown, then write the composed Stage 1 input to `input_dir/context.md` (it's composed from
@@ -128,7 +129,13 @@ def persist_and_compose(
                 out.write(raw)
             written.append(name)
 
-    composed = make_prompt(description, docs)
+    # SOF-63: a Concierge-finalized product brief IS the Stage-1 input — it was synthesized from
+    # the description, the interview, and the documents, so context.md becomes the brief itself
+    # rather than make_prompt's raw description+document concatenation. The per-document .md
+    # extractions are still written above (and searchable via the memory MCP), so nothing is
+    # lost — it just isn't dumped inline. No brief (API-created projects, no interview) → the
+    # legacy composition, unchanged.
+    composed = (product_brief_md or "").strip() or make_prompt(description, docs)
     if composed.strip():
         os.makedirs(input_dir, exist_ok=True)
         with open(os.path.join(input_dir, "context.md"), "w") as cf:
