@@ -72,15 +72,18 @@ def _matching_sow_bodies(project_name: str) -> list[dict]:
     """SOW row(s) whose free-text `project` matches this project's name (SOF-62). No user-facing
     "choose an SOW" mechanism exists yet — sow.project is free-text, staff-authored (Tenexity OS
     §3.4b) — so name-match is the nearest-term linkage; a real `sow_id` on the draft is a separate,
-    later fix. Read via dbshim like MemoryStore does — sow is a global table, not project-scoped
-    storage, so this is a plain query, not a MemoryStore method."""
+    later fix. Case-insensitive (a staff-typed sow.project differing only in case shouldn't
+    silently miss — the sharpest edge of the known name-match gap, per review) but still an exact
+    match otherwise. Read via dbshim like MemoryStore does — sow is a global table, not
+    project-scoped storage, so this is a plain query, not a MemoryStore method."""
     name = (project_name or "").strip()
     if not name:
         return []
     conn = dbshim.connect(".")
     try:
         rows = conn.execute(
-            "SELECT title, body FROM sow WHERE project = ? AND body IS NOT NULL", (name,),
+            "SELECT title, body FROM sow WHERE lower(project) = lower(?) AND body IS NOT NULL",
+            (name,),
         ).fetchall()
     finally:
         conn.close()
@@ -160,6 +163,12 @@ class DbConversation:
         self._agents: dict = {}  # project_id → ChatAgent (tools bind project_id at construction)
 
     def _get_agent(self, project_id: str, is_first_turn: bool = False):
+        # self._agents is IN-PROCESS ONLY. After a restart, an in-flight conversation's first
+        # unanswered turn post-restart sees non-empty history (is_first_turn=False), so the
+        # context block is NOT reconstructed — by design, not a gap: the discussed context already
+        # lives in the persisted conversation history the agent replays every turn regardless.
+        # Do not "fix" this into always-injecting on cache-miss; that would double the context on
+        # every restart of a long-running conversation instead of relying on history.
         if self._agent is not None:
             return self._agent
         if project_id not in self._agents:
