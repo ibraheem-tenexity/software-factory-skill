@@ -26,9 +26,10 @@ static secret, so it deliberately has no vault-key affordance.
 Also seeds `fusion` (operator directive 2026-07-02, on-ticket comment): the OpenRouter Fusion
 research panel's model list, previously a hardcoded tuple in research.py — now DB-editable via
 this row's `config.analysis_models` (OS Tools tab), with NO code-level default or fallback.
-attached_to=["CONCIERGE"] is what's true today (concierge_tools.py's fusion_search tool);
-SOF-73 proposes also attaching it to a "design"/"research" pipeline node once that agent
-materialization exists — not seeded here, flagged in the PR for operator confirm.
+attached_to=["STAGE-1", "CONCIERGE"] — CONCIERGE is what's true today (concierge_tools.py's
+fusion_search tool); STAGE-1 per operator sign-off on #293 (2026-07-02, SOF-73's research-phase
+direction). fusion is {"kind": "api"} (no `command`/`type`) so it's declarative only — it never
+enters the composed .mcp.json or tool_env_overrides regardless of attached_to.
 
 REHEARSAL PROTOCOL:
   1. alembic upgrade 0013_tools_registry (on a test DB stamped at 0012_agent_tables)
@@ -65,7 +66,7 @@ _SEED = (
     ("memory", _MEMORY, ["STAGE-1", "STAGE-2", "STAGE-3"]),
     ("railway", _RAILWAY, ["STAGE-3"]),
     ("github", _GITHUB, ["STAGE-3"]),
-    ("fusion", _FUSION, ["CONCIERGE"]),
+    ("fusion", _FUSION, ["STAGE-1", "CONCIERGE"]),
 )
 
 
