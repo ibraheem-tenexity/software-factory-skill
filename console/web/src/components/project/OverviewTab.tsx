@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact, DepsResponse } from "../../api";
 import { openArtifact } from "../factory/Artifacts";
-import { T, Icon, CategoryLabel, Btn, StatusPill, Avatar, TextInput, TextArea, Markdown } from "../onboarding/design";
+import { T, Icon, Sparkle, CategoryLabel, Btn, StatusPill, Avatar, TextInput, TextArea, Markdown, ArtifactChip } from "../onboarding/design";
 import { PanelBodySkel } from "../skeleton";
 
 const fileToB64 = (file: File): Promise<string> => new Promise((resolve) => {
@@ -44,6 +44,20 @@ function statusTone(s?: string): Tone {
   if (/run|sync|active|live|deploy|done|connected/.test(v)) return "success";
   return "info";
 }
+// Avatar tone by role FAMILY (design orgproject.jsx:356 AGENTS: opus→brand, sonnet→warning,
+// qa→success): planners/architects → brand, builders → warning, QA/verification → success.
+// Unknown roles return undefined so Avatar keeps its hash-tone fallback.
+function agentTone(role?: string): "brand" | "warning" | "success" | undefined {
+  const v = (role || "").toLowerCase();
+  if (/qa|test|verif|playwright/.test(v)) return "success";
+  if (/architect|pm|lead|plan|synth|research|orchestr|concierge/.test(v)) return "brand";
+  if (/build|impl|dev|engineer|swarm|ticket|code/.test(v)) return "warning";
+  return undefined;
+}
+// The PRD is THE primary produced artifact (stage 1 records it as title "PRD", kind "prd") —
+// it gets the brand-variant chip per orgproject.jsx:384-388.
+const isPrd = (d: ProjectArtifact) =>
+  (d.kind || "").toLowerCase() === "prd" || d.title.trim().toLowerCase() === "prd";
 
 function Panel({ title, count, children, span = 1, accent, action }:
   { title: string; count?: number; children: React.ReactNode; span?: number; accent?: boolean; action?: React.ReactNode }) {
@@ -74,6 +88,23 @@ function FileRow({ label, kind, sub, onOpen }: { label: string; kind?: string; s
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <div style={{ font: `400 12px/1.4 ${T.sans}`, color: T.tertiary }}>{children}</div>;
+}
+
+// Designed panel empty state — dashed inset placeholder (BuildBoard's empty treatment) with an
+// icon + short explainer, and a CTA only where a REAL action exists (no fake affordances).
+function EmptyState({ icon, title, detail, cta }:
+  { icon: string; title: string; detail: string; cta?: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "20px 16px", textAlign: "center",
+      background: T.raised, border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg }}>
+      <span style={{ width: 30, height: 30, borderRadius: 8, display: "grid", placeItems: "center", background: T.sunken, border: `1px solid ${T.borderSubtle}` }}>
+        <Icon name={icon} size={15} color={T.tertiary} />
+      </span>
+      <span style={{ font: `600 12.5px/1.3 ${T.sans}`, color: T.secondary }}>{title}</span>
+      <span style={{ font: `400 12px/1.45 ${T.sans}`, color: T.tertiary, maxWidth: 320 }}>{detail}</span>
+      {cta && <span style={{ marginTop: 4 }}>{cta}</span>}
+    </div>
+  );
 }
 
 // #107 — post-deploy "provide your own key": a mocked provider dep (e.g. OPENROUTER_API_KEY)
@@ -261,16 +292,12 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
             </section>
           )}
 
-          {/* project brief */}
-          <Panel title="Project brief" span={2} accent>
+          {/* project brief — edit affordance lives in the Panel header action slot (design Panel) */}
+          <Panel title="Project brief" span={2} accent
+            action={!isDraft ? (editing
+              ? <div style={{ display: "flex", gap: 8 }}><Btn variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Btn><Btn variant="primary" size="sm" onClick={saveBrief}>Save</Btn></div>
+              : <Btn variant="secondary" size="sm" onClick={startEdit}>Edit brief</Btn>) : undefined}>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {!isDraft && (
-                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: -8 }}>
-                  {editing
-                    ? <div style={{ display: "flex", gap: 8 }}><Btn variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Btn><Btn variant="primary" size="sm" onClick={saveBrief}>Save</Btn></div>
-                    : <Btn variant="secondary" size="sm" onClick={startEdit}>Edit brief</Btn>}
-                </div>
-              )}
               {editing ? (
                 <>
                   <div>
@@ -303,11 +330,23 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                   ) : null}
                 </>
               )}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, paddingTop: 4 }}>
-                {([["Created by", brief.created_by || brief.owner], ["Created", fmtDate(brief.created)], ["Owner", brief.owner], ["Phase", brief.phase]] as [string, string | undefined][]).map(([k, v]) => (
-                  <div key={k}><CategoryLabel style={{ display: "block", marginBottom: 4 }}>{k}</CategoryLabel><span style={{ font: `500 12.5px/1.3 ${T.sans}`, color: T.fg, wordBreak: "break-all" }}>{v || "—"}</span></div>
-                ))}
-              </div>
+              {/* metadata — 3-col per orgproject.jsx:307-310; "Created by"/"Owner" merge into one
+                  cell when they're the same value (the common case); when they differ, minmax
+                  columns give long emails room to wrap instead of break-all chopping them. */}
+              {(() => {
+                const createdBy = brief.created_by || brief.owner;
+                const merged = !createdBy || !brief.owner || createdBy === brief.owner;
+                const cells: [string, string | undefined][] = merged
+                  ? [["Owner", brief.owner || createdBy], ["Created", fmtDate(brief.created)], ["Phase", brief.phase]]
+                  : [["Created by", createdBy], ["Owner", brief.owner], ["Created", fmtDate(brief.created)], ["Phase", brief.phase]];
+                return (
+                  <div style={{ display: "grid", gridTemplateColumns: merged ? "repeat(3, 1fr)" : "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, paddingTop: 4 }}>
+                    {cells.map(([k, v]) => (
+                      <div key={k} style={{ minWidth: 0 }}><CategoryLabel style={{ display: "block", marginBottom: 4 }}>{k}</CategoryLabel><span style={{ font: `500 12.5px/1.3 ${T.sans}`, color: T.fg, overflowWrap: "anywhere" }}>{v || "—"}</span></div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </Panel>
 
@@ -343,15 +382,16 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                 {([
                   ["Tickets done", build.tickets_total != null ? `${build.tickets_done ?? 0} / ${build.tickets_total}` : "—"],
                   ["Agents working", build.agents_working != null ? String(build.agents_working) : "—"],
-                  ["Spend", money(build.spent_usd)],
                 ] as [string, string][]).map(([k, v]) => (
                   <div key={k} style={{ display: "flex", justifyContent: "space-between" }}><span style={{ font: `400 12.5px/1 ${T.sans}`, color: T.secondary }}>{k}</span><span style={{ font: `500 12.5px/1 ${T.mono}`, color: T.fg }}>{v}</span></div>
                 ))}
+                {/* Spend — single `$spent / $cap` line (orgproject.jsx:324); the pencil edits the
+                    cap in place via the same PUT /budget flow (Enter/Escape, Save/Cancel). */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ font: `400 12.5px/1 ${T.sans}`, color: T.secondary }}>Budget cap</span>
+                  <span style={{ font: `400 12.5px/1 ${T.sans}`, color: T.secondary }}>Spend</span>
                   {capEditing ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <span style={{ font: `500 12px/1 ${T.mono}`, color: T.secondary }}>$</span>
+                      <span style={{ font: `500 12px/1 ${T.mono}`, color: T.secondary }}>{money(build.spent_usd)} / $</span>
                       <input value={capInput} onChange={(e) => setCapInput(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") { const n = parseFloat(capInput); if (!isNaN(n) && n > 0) { api.putBudget(projectId, n).then(loadOverview).catch(() => undefined); } setCapEditing(false); } if (e.key === "Escape") setCapEditing(false); }}
                         style={{ width: 58, font: `500 12.5px/1 ${T.mono}`, color: T.fg, background: T.bg, border: `1px solid ${T.borderDefault}`, borderRadius: 4, padding: "2px 5px", outline: "none" }} autoFocus />
@@ -362,7 +402,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                     </div>
                   ) : (
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ font: `500 12.5px/1 ${T.mono}`, color: T.fg }}>{build.budget_ceiling != null ? money(build.budget_ceiling) : "—"}</span>
+                      <span style={{ font: `500 12.5px/1 ${T.mono}`, color: T.fg }}>{money(build.spent_usd)} / {build.budget_ceiling != null ? money(build.budget_ceiling) : "—"}</span>
                       <button onClick={() => { setCapInput(build.budget_ceiling != null ? String(build.budget_ceiling) : ""); setCapEditing(true); }}
                         style={{ background: "none", border: "none", cursor: "pointer", color: T.tertiary, padding: 0, lineHeight: 1, display: "inline-flex" }} title="Edit budget cap">
                         <Icon name="pencil" size={11} color={T.tertiary} />
@@ -390,11 +430,13 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                         {s.status && <StatusPill tone={statusTone(s.status)} dot>{s.status}</StatusPill>}
                       </div>
                       {(s.detail || s.url) && <p style={{ margin: "3px 0 0", font: `400 11.5px/1.4 ${T.sans}`, color: T.tertiary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.detail || s.url}</p>}
+                      {s.metric && <span style={{ font: `500 10.5px/1 ${T.mono}`, color: T.secondary }}>{s.metric}</span>}
                     </div>
                   </div>
                 ))}
               </div>
-            ) : <Empty>{isDraft ? "No services connected yet — you'll link them during setup." : "No services connected yet."}</Empty>}
+            ) : <EmptyState icon="layers" title="No services connected"
+                  detail={isDraft ? "You'll link integrations and pick a build engine during setup — connected services show up here." : "Integrations, hosting, and testing services appear here as the factory puts them to work."} />}
           </Panel>
 
           {/* agents on this project */}
@@ -403,7 +445,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                 {agents.map((a, i) => (
                   <div key={a.role + i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <Avatar name={a.role} size={26} />
+                    <Avatar name={a.role} size={26} tone={agentTone(a.role)} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ display: "block", font: `600 12.5px/1.2 ${T.sans}`, color: T.fg }}>{a.role}{a.model && <span style={{ color: T.tertiary, fontWeight: 400 }}> · {a.model}</span>}</span>
                       {a.task && <span style={{ display: "block", font: `400 11px/1.3 ${T.sans}`, color: T.tertiary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.task}</span>}
@@ -412,7 +454,8 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                   </div>
                 ))}
               </div>
-            ) : <Empty>{isDraft ? "No agents yet — they spin up when the build starts." : "No agents on this project yet."}</Empty>}
+            ) : <EmptyState icon="bot" title="No agents yet"
+                  detail={isDraft ? "Agents spin up when the build starts — finish setup to kick off the pipeline." : "No agents have worked this project yet — they appear here as the pipeline dispatches them."} />}
           </Panel>
 
           {/* uploaded materials — "+ Add" attaches a real file (POST /api/projects/{id}/materials) */}
@@ -421,31 +464,46 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
               <input ref={addInputRef} type="file" multiple style={{ display: "none" }} onChange={(e) => { addMaterials(e.target.files); e.currentTarget.value = ""; }} />
               <button onClick={() => addInputRef.current?.click()} style={{ font: `500 11.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>+ Add</button>
             </>}>
-            {materials.length ? <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>{materials.map((d, i) => <FileRow key={d.name + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} />)}</div> : <Empty>Nothing uploaded.</Empty>}
+            {materials.length ? <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>{materials.map((d, i) => <FileRow key={d.name + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} />)}</div>
+              : <EmptyState icon="paperclip" title="Nothing uploaded"
+                  detail="Attach specs, spreadsheets, or walkthroughs — agents read them while building."
+                  cta={<Btn variant="secondary" size="sm" onClick={() => addInputRef.current?.click()}>+ Add a file</Btn>} />}
           </Panel>
 
           {/* produced documents */}
           <Panel title="Produced documents" count={produced.length || undefined} span={2}
             action={!isDraft && onOpenDocuments ? <button onClick={onOpenDocuments} style={{ font: `500 11.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>View all →</button> : null}>
             {produced.length ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
-                {produced.map((d, i) => <FileRow key={d.title + i} label={d.title} kind={d.kind} sub={d.agent} onOpen={d.id ? () => openArtifact(d.id!) : d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />)}
+              /* 3-col ArtifactChip grid (orgproject.jsx:384-388) — kind badge + label + arrow;
+                 the PRD gets the brand `primary` variant. Same open behavior as before. */
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 9 }}>
+                {produced.map((d, i) => (
+                  <ArtifactChip key={d.title + i} small
+                    a={{ kind: d.kind, label: d.title, note: d.agent || undefined, primary: isPrd(d) }}
+                    onOpen={d.id ? () => openArtifact(d.id!) : d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />
+                ))}
               </div>
-            ) : <Empty>{isDraft ? "The factory produces PRDs, architecture, designs, and tickets here once the build starts." : "The factory hasn't produced documents yet."}</Empty>}
+            ) : <EmptyState icon="file" title="No documents produced yet"
+                  detail={isDraft ? "The factory produces PRDs, architecture, designs, and tickets here once the build starts." : "PRDs, architecture, designs, and tickets land here as the factory's stages complete."} />}
           </Panel>
 
           {/* dependencies — #107, post-deploy only: replace a mocked provider key with a real one */}
           {build.done && deps && <DependenciesPanel projectId={projectId} deps={deps} onProvided={loadDeps} />}
 
-          {/* inherited org context */}
+          {/* inherited org context — sparkle caption per orgproject.jsx:393-399; the price-book
+              row renders ONLY when the payload actually carries one (never fabricated) */}
           <Panel title="Inherited org context">
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {([["Company", org.name], ["Industry", org.industry], ["Systems", org.connected_systems?.join(", ")]] as [string, string | undefined][]).map(([k, v]) => (
+              {([["Company", org.name], ["Industry", org.industry], ["Systems", org.connected_systems?.join(", ")],
+                 ...(org.price_book ? [["Price book", org.price_book]] : [])] as [string, string | undefined][]).map(([k, v]) => (
                 <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
                   <CategoryLabel>{k}</CategoryLabel>
                   <span style={{ font: `500 12px/1.3 ${T.sans}`, color: T.fg, textAlign: "right" }}>{v || "—"}</span>
                 </div>
               ))}
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 2, font: `400 11px/1 ${T.sans}`, color: T.tertiary }}>
+                <Sparkle size={10} color={T.brand} /> reused from organization
+              </span>
             </div>
           </Panel>
 

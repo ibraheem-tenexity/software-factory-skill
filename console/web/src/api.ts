@@ -89,9 +89,11 @@ export type ProjectArtifact = { id?: number; title: string; path?: string; kind?
 export type ProjectOverview = {
   brief?: { name?: string; description?: string; goal?: string; scope?: string[]; owner?: string; phase?: string; stage?: number; created?: number | string; runtime?: string; created_by?: string };
   build?: { pct?: number; tickets_done?: number; tickets_total?: number; agents_working?: number; spent_usd?: number; budget_ceiling?: number; done?: boolean; deploy_url?: string };
-  services?: { label: string; kind?: string; status?: string; detail?: string; url?: string }[];
+  // `metric` / `price_book` are OPTIONAL forward-compat fields (SOF-69): today's backend doesn't
+  // send them, so the Overview renders them presence-gated only — never fabricated.
+  services?: { label: string; kind?: string; status?: string; detail?: string; url?: string; metric?: string }[];
   agents?: { role: string; model?: string; status?: string; task?: string; cost_usd?: number }[];
-  org?: { name?: string; industry?: string; connected_systems?: string[] } | null;
+  org?: { name?: string; industry?: string; connected_systems?: string[]; price_book?: string } | null;
   materials?: ProjectMaterial[];
   produced?: ProjectArtifact[];
   materials_count?: number;
