@@ -725,8 +725,11 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                   </Card>
                     </div>
                     {!draftId && (
-                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 30 }}>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 9, padding: "11px 17px", borderRadius: 9999, background: T.raised, border: `1px solid ${T.borderDefault}`, boxShadow: T.shadowSm, font: `500 12.5px/1 ${T.sans}`, color: T.secondary }}>
+                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
+                        {/* sticky, not paddingTop-offset absolute: the locked stack (Scope/Engine/Materials)
+                            is tall enough to scroll past a fixed-position pill, leaving the dimmed cards
+                            with no visible explanation why they're locked. */}
+                        <div style={{ position: "sticky", top: 20, display: "inline-flex", alignItems: "center", gap: 9, padding: "11px 17px", borderRadius: 9999, background: T.raised, border: `1px solid ${T.borderDefault}`, boxShadow: T.shadowSm, font: `500 12.5px/1 ${T.sans}`, color: T.secondary }}>
                           <Icon name="lock" size={14} color={T.tertiary} /> Create the project above to unlock
                         </div>
                       </div>
@@ -822,8 +825,11 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                   </Card>
                     </div>
                     {!draftId && (
-                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 30 }}>
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 9, padding: "11px 17px", borderRadius: 9999, background: T.raised, border: `1px solid ${T.borderDefault}`, boxShadow: T.shadowSm, font: `500 12.5px/1 ${T.sans}`, color: T.secondary }}>
+                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
+                        {/* sticky, not paddingTop-offset absolute: the locked stack (Scope/Engine/Materials)
+                            is tall enough to scroll past a fixed-position pill, leaving the dimmed cards
+                            with no visible explanation why they're locked. */}
+                        <div style={{ position: "sticky", top: 20, display: "inline-flex", alignItems: "center", gap: 9, padding: "11px 17px", borderRadius: 9999, background: T.raised, border: `1px solid ${T.borderDefault}`, boxShadow: T.shadowSm, font: `500 12.5px/1 ${T.sans}`, color: T.secondary }}>
                           <Icon name="lock" size={14} color={T.tertiary} /> Create the project above to unlock
                         </div>
                       </div>
