@@ -72,8 +72,9 @@ def agents_projection(agents: list, tickets: list) -> list:
 def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None) -> dict:
     """Documents tab: user uploads (run blobs; display name = storage-key basename) + factory
     artifacts. `doc_summaries` (SOF-36) is MemoryStore.list_doc_summaries's blob_id -> row map —
-    optional so this stays callable/testable with no memory data at all (SF_MEMORY off, or no
-    doc_summary rows yet); a blob with no entry just gets summary=None/summary_status=None."""
+    optional so this stays callable/testable with no memory data at all (no doc_summary rows yet,
+    e.g. ingestion still running or not yet started); a blob with no entry just gets
+    summary=None/summary_status=None."""
     doc_summaries = doc_summaries or {}
     uploaded = []
     for b in blobs or []:

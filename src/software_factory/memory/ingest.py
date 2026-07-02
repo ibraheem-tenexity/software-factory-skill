@@ -1,6 +1,8 @@
 """SOF-32: the ingestion pipeline — blob -> parse -> chunk -> embed -> fts -> summarize ->
 reference-backed assumptions -> project overview rollup -> cost. Console-side (never in a stage
-agent), feature-flag-gated behind SF_MEMORY=1 so `main` stays shippable without it.
+agent). Always on (SOF-71) — memory is core product, not an opt-in rollout guard; a document
+that fails to ingest (missing key, model error) is marked `failed` and surfaced in the UI, never
+silently skipped.
 
 Layering: this module is classified CORE (tests/unit/test_boundary.py) and must never import
 `console.*`, even transitively. `console`/`push_progress` are passed in by the caller (the
@@ -35,15 +37,10 @@ def estimate_tokens(text: str) -> int:
     return len(text or "") // _ESTIMATED_CHARS_PER_TOKEN
 
 
-def enabled() -> bool:
-    return os.environ.get("SF_MEMORY") == "1"
-
-
 def maybe_ingest_async(blob_id: int, console, push_progress: Callable[[str | None, dict], None] | None = None) -> None:
-    """Fire-and-forget: spawn ingest_blob on a daemon thread iff SF_MEMORY=1. Never blocks the
-    caller (an upload HTTP handler) and never lets an ingest failure propagate into it."""
-    if not enabled():
-        return
+    """Fire-and-forget: spawn ingest_blob on a daemon thread. Never blocks the caller (an upload
+    HTTP handler) and never lets an ingest failure propagate into it — a genuine failure (missing
+    key, model error) is caught inside ingest_blob and marked `failed`, not swallowed here."""
     t = threading.Thread(target=_ingest_blob_safe, args=(blob_id, console, push_progress),
                         daemon=True, name=f"ingest-blob-{blob_id}")
     t.start()

@@ -118,10 +118,9 @@ app.include_router(chat.router)
 # Project Memory MCP (SOF-41/T4.2) — console-hosted, not a router (it's a full ASGI sub-app
 # speaking the MCP streamable-HTTP transport, mounted the same way the static SPA assets are
 # above). Bearer-token scope enforcement lives in the sub-app itself (memory/mcp_server.py's
-# _BearerScopeMiddleware); this mount just decides WHETHER the endpoint exists at all.
-if os.environ.get("SF_MEMORY") == "1":
-    from software_factory.memory.mcp_server import memory_asgi_app
-    app.mount("/mcp/memory", memory_asgi_app())
+# _BearerScopeMiddleware). Always mounted (SOF-71) — memory is core product, not opt-in.
+from software_factory.memory.mcp_server import memory_asgi_app
+app.mount("/mcp/memory", memory_asgi_app())
 
 
 if __name__ == "__main__":

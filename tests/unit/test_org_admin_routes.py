@@ -82,7 +82,7 @@ def test_docs_404_without_org(admin_mod, admin_client, monkeypatch):
     assert admin_client.get("/api/org/docs").status_code == 404
 
 
-def test_upload_list_use_delete_doc(admin_mod, admin_client, monkeypatch):
+def test_upload_list_use_delete_doc(admin_mod, admin_client, monkeypatch, stub_maybe_ingest_async):
     _login(admin_mod, admin_client, monkeypatch)
     _make_org(admin_client)
     data = base64.b64encode(b"hello").decode()
@@ -99,6 +99,10 @@ def test_upload_list_use_delete_doc(admin_mod, admin_client, monkeypatch):
 
     r2 = admin_client.post(f"/api/org/docs/{doc['id']}/use", json={"project_id": "project-1"})
     assert r2.status_code == 200 and r2.json()["used_count"] == 1
+    # SOF-71: record_doc_use calls maybe_ingest_async with real content — confirms the conftest
+    # seam intercepted it (real ingestion would otherwise spawn a genuine background thread).
+    assert len(stub_maybe_ingest_async) == 1
+    assert stub_maybe_ingest_async[0]["blob_id"] == doc["id"]
 
     assert admin_client.delete(f"/api/org/docs/{doc['id']}").status_code == 200
     assert admin_client.get("/api/org/docs").json()["docs"] == []

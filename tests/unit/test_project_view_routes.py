@@ -100,19 +100,11 @@ def test_documents_lists_uploaded_and_produced(auth_mod, auth_client, monkeypatc
 
 
 # ── SOF-36/T3.3: Auto-summarize / Regenerate ────────────────────────────────────────────────────
-
-def test_summarize_404s_when_memory_is_disabled(auth_mod, auth_client, monkeypatch):
-    _login(auth_mod, auth_client, monkeypatch)
-    _wire(auth_mod, monkeypatch)
-    monkeypatch.delenv("SF_MEMORY", raising=False)
-    r = auth_client.post("/api/projects/project-abc/documents/1/summarize")
-    assert r.status_code == 404
-
+# SOF-71: memory is always on now — the "404s when disabled" case no longer exists, deleted.
 
 def test_summarize_404s_on_unknown_blob(auth_mod, auth_client, monkeypatch):
     _login(auth_mod, auth_client, monkeypatch)
     _wire(auth_mod, monkeypatch)
-    monkeypatch.setenv("SF_MEMORY", "1")
     monkeypatch.setattr(auth_mod.blobs, "get_blob", lambda bid: None)
     r = auth_client.post("/api/projects/project-abc/documents/999/summarize")
     assert r.status_code == 404
@@ -123,7 +115,6 @@ def test_summarize_404s_when_blob_belongs_to_a_different_project(auth_mod, auth_
     # URL owns the project; the blob_id itself could belong to anyone without this extra check.
     _login(auth_mod, auth_client, monkeypatch)
     _wire(auth_mod, monkeypatch)
-    monkeypatch.setenv("SF_MEMORY", "1")
     monkeypatch.setattr(auth_mod.blobs, "get_blob",
                         lambda bid: {"id": bid, "scope": "project", "scope_id": "some-other-project"})
     r = auth_client.post("/api/projects/project-abc/documents/1/summarize")
@@ -133,7 +124,6 @@ def test_summarize_404s_when_blob_belongs_to_a_different_project(auth_mod, auth_
 def test_summarize_calls_ingest_blob_with_force_and_returns_documents(auth_mod, auth_client, monkeypatch):
     _login(auth_mod, auth_client, monkeypatch)
     _wire(auth_mod, monkeypatch)
-    monkeypatch.setenv("SF_MEMORY", "1")
     monkeypatch.setattr(auth_mod.blobs, "get_blob",
                         lambda bid: {"id": bid, "scope": "project", "scope_id": "project-abc"})
     calls = {}
@@ -154,7 +144,6 @@ def test_summarize_calls_ingest_blob_with_force_and_returns_documents(auth_mod, 
 def test_summarize_502s_when_ingest_reports_failed(auth_mod, auth_client, monkeypatch):
     _login(auth_mod, auth_client, monkeypatch)
     _wire(auth_mod, monkeypatch)
-    monkeypatch.setenv("SF_MEMORY", "1")
     monkeypatch.setattr(auth_mod.blobs, "get_blob",
                         lambda bid: {"id": bid, "scope": "project", "scope_id": "project-abc"})
 

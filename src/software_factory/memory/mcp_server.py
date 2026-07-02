@@ -258,6 +258,6 @@ def build_mcp() -> FastMCP:
 
 
 def memory_asgi_app():
-    """The mountable ASGI app — `console/app.py` mounts this at `/mcp/memory` behind
-    `_BearerScopeMiddleware`, gated by `SF_MEMORY`."""
+    """The mountable ASGI app — `console/app.py` mounts this unconditionally at `/mcp/memory`
+    behind `_BearerScopeMiddleware`, which enforces the per-project scope token boundary."""
     return _BearerScopeMiddleware(build_mcp().streamable_http_app())

@@ -116,7 +116,7 @@ def test_project_rename_and_archive(mod, client, monkeypatch):
     assert client.delete("/api/projects/project-x").json() == {"project_id": "project-x", "archived": True}
 
 
-def test_run_material_upload(mod, client, monkeypatch):
+def test_run_material_upload(mod, client, monkeypatch, stub_maybe_ingest_async):
     _login(mod, client, monkeypatch)
     monkeypatch.setattr(mod.console, "project_exists", lambda rid: True)
     monkeypatch.setattr(mod.console, "project_owner", lambda rid: "op@tenexity.ai")
@@ -127,6 +127,10 @@ def test_run_material_upload(mod, client, monkeypatch):
     up = r.json()["uploaded"]
     assert any(m["name"] == "spec.pdf" and m["kind"] == "pdf" for m in up)
     assert all(m.get("id") for m in up)        # stable id for the scope-toggle
+    # SOF-71: this route calls maybe_ingest_async with real content — confirms the conftest seam
+    # actually intercepted it (real ingestion would otherwise spawn a genuine background thread).
+    assert len(stub_maybe_ingest_async) == 1
+    assert stub_maybe_ingest_async[0]["blob_id"] == up[0]["id"]
 
 
 def test_project_scope_edit_wires_through(mod, client, monkeypatch):
