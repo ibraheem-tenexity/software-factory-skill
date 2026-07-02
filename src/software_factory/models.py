@@ -330,18 +330,20 @@ system_agents = Table(
     Column("updated_at", DateTime(timezone=True), server_default=func.now()),
 )
 
-# Tools / MCP registry (Tenexity OS §3.5) — real datastore (seeded with the factory's tools), no
-# hardcoded response. `used` is derived (not stored).
-mcp_tools = Table(
-    "mcp_tools", metadata,
-    Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("name", Text, nullable=False),
-    Column("type", Text),                       # MCP | API | native | HTTP
-    Column("provider", Text),
-    Column("scope", Text),
-    Column("status", Text, nullable=False, server_default="available"),  # connected | available
-    Column("auth", Text),
-    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+# Tools / MCP registry (SOF-81) — the real, live tool set: `config` is the exact shape
+# workspace_setup.py composes into a stage's .mcp.json (or, for non-MCP tools like `github`,
+# {"kind": "api", "env_key": ...}). `attached_to` names which system_agents callsigns / pipeline
+# nodes actually use the tool today — declarative, not enforced. Key material is NEVER stored
+# here: key_vault_id points into Supabase Vault (see vault.py), key_last4 is display-only.
+tools = Table(
+    "tools", metadata,
+    Column("name", Text, primary_key=True),
+    Column("config", JSONB, nullable=False),
+    Column("attached_to", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("key_vault_id", Text),
+    Column("key_last4", Text),
+    Column("updated_by", Text),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
 )
 
 sow = Table(
@@ -394,6 +396,6 @@ org_secrets = Table(
 PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
 FLAT_TABLES = PROJECTDB + (tickets, runtime_agents, checkpoint)
 GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
-                 system_agents, mcp_tools, sow,
+                 system_agents, tools, sow,
                  doc_summary, chunk, conversation, org_secrets)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES

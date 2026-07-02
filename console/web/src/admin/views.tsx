@@ -3,7 +3,7 @@ import { T } from "./tokens";
 import { Icon, Sparkle, StatusPill, MetricCard } from "./primitives";
 import { api } from "../api";
 import type { AdminAgent, AdminProjectRow, AdminClient, AdminTool } from "../api";
-import { useAdminFetch, fmtRel } from "./hooks";
+import { useAdminFetch, fmtRel, toolKind } from "./hooks";
 
 const PHASE_TONE: Record<string, "info" | "warning" | "brand" | "neutral" | "success"> = {
   REVIEW: "info",
@@ -759,7 +759,6 @@ export function AdminTools({
   const TYPE_C: Record<string, [string, string]> = {
     MCP: [T.brandSoft, T.brandDeep],
     API: [T.cHighSoft, T.cHigh],
-    native: [T.successSoft, T.success],
     HTTP: ["#f3e9fb", "#7a3ea8"],
   };
   const filtered = React.useMemo(() => {
@@ -769,10 +768,8 @@ export function AdminTools({
     return list.filter(
       (t) =>
         t.name.toLowerCase().includes(q) ||
-        t.type.toLowerCase().includes(q) ||
-        t.provider.toLowerCase().includes(q) ||
-        t.scope.toLowerCase().includes(q) ||
-        t.auth.toLowerCase().includes(q)
+        (t.attached_to || []).some((a) => a.toLowerCase().includes(q)) ||
+        JSON.stringify(t.config).toLowerCase().includes(q)
     );
   }, [data, query]);
   const all = data?.tools ?? [];
@@ -787,14 +784,11 @@ export function AdminTools({
       })
       .catch((err) => setSyncState({ busy: false, error: err.message || "Agent sync failed" }));
   };
-  const setStatus = (t: AdminTool, status: AdminTool["status"]) => {
-    api.adminUpdateTool(t.name, { status }).then(onRefresh).catch(() => {});
-  };
   return (
     <>
       <PageTitle
         title="Tool & MCP Registry"
-        sub="Every tool, MCP server, and connector available to the factory’s agents."
+        sub="The real tool set that drives every stage's .mcp.json — edit here, it's what a build gets."
         actions={
           <>
             <AdminBtn disabled={syncState.busy} onClick={syncAgents}>
@@ -808,42 +802,38 @@ export function AdminTools({
       />
       {syncState.notice && <Mono style={{ color: T.success, marginBottom: 10 }}>{syncState.notice}</Mono>}
       {syncState.error && <Mono style={{ color: T.danger, marginBottom: 10 }}>{syncState.error}</Mono>}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
-        <MetricCard label="Registered" value={all.length} hint="across all factories" accent />
-        <MetricCard label="Connected" value={all.filter((t) => t.status === "connected").length} hint="live & authenticated" />
-        <MetricCard label="MCP servers" value={all.filter((t) => t.type === "MCP").length} hint="model context protocol" />
-        <MetricCard label="Available" value={all.filter((t) => t.status === "available").length} hint="ready to connect" />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 }}>
+        <MetricCard label="Registered" value={all.length} hint="real tools, DB-backed" accent />
+        <MetricCard label="MCP servers" value={all.filter((t) => toolKind(t.config) !== "API").length} hint="composed into .mcp.json" />
+        <MetricCard label="Keys attached" value={all.filter((t) => t.has_key).length} hint="vault-backed overrides" />
       </div>
       <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden", background: T.raised }}>
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "minmax(0,1fr) 80px minmax(0,0.9fr) minmax(0,1fr) 120px 70px 90px 100px",
+            gridTemplateColumns: "minmax(0,0.9fr) 60px minmax(0,1.6fr) minmax(0,1.2fr) 110px 100px",
             gap: 12,
             padding: "11px 18px",
             borderBottom: `1px solid ${T.borderSubtle}`,
             background: T.sunken,
           }}
         >
-          <ColHead>Tool / Server</ColHead>
-          <ColHead>Type</ColHead>
-          <ColHead>Provider</ColHead>
-          <ColHead>Scope</ColHead>
-          <ColHead>Auth</ColHead>
-          <ColHead>Used by</ColHead>
-          <ColHead style={{ textAlign: "right" }}>Status</ColHead>
+          <ColHead>Tool</ColHead>
+          <ColHead>Kind</ColHead>
+          <ColHead>Config</ColHead>
+          <ColHead>Attached to</ColHead>
+          <ColHead>Key</ColHead>
           <ColHead style={{ textAlign: "right" }}>Actions</ColHead>
         </div>
         {filtered.map((t, i) => {
-          const tc = TYPE_C[t.type] || TYPE_C.native;
-          const connected = t.status === "connected";
-          const idVal = t.name;
+          const kind = toolKind(t.config);
+          const tc = TYPE_C[kind] || TYPE_C.MCP;
           return (
             <div
               key={t.name}
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(0,1fr) 80px minmax(0,0.9fr) minmax(0,1fr) 120px 70px 90px 100px",
+                gridTemplateColumns: "minmax(0,0.9fr) 60px minmax(0,1.6fr) minmax(0,1.2fr) 110px 100px",
                 gap: 12,
                 padding: "13px 18px",
                 alignItems: "center",
@@ -890,51 +880,40 @@ export function AdminTools({
                   justifySelf: "start",
                 }}
               >
-                {t.type}
+                {kind}
               </span>
-              <span
+              <Mono
                 style={{
-                  font: `400 12.5px/1.3 ${T.sans}`,
-                  color: T.secondary,
+                  fontSize: 11,
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
+                  color: T.secondary,
                 }}
               >
-                {t.provider}
-              </span>
-              <Mono style={{ fontSize: 11.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.scope}</Mono>
-              <Mono style={{ fontSize: 11 }}>{t.auth}</Mono>
-              <Mono style={{ fontSize: 12, color: t.used ? T.fg : T.tertiary }}>{t.used ? `${t.used} agents` : "—"}</Mono>
-              <span style={{ justifySelf: "end" }}>
-                {connected ? (
-                  <button
-                    onClick={() => setStatus(t, "available")}
+                {JSON.stringify(t.config)}
+              </Mono>
+              <span style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {(t.attached_to || []).length === 0 && <Mono style={{ color: T.tertiary }}>—</Mono>}
+                {(t.attached_to || []).map((a) => (
+                  <span
+                    key={a}
                     style={{
-                      font: `600 10.5px/1 ${T.mono}`,
-                      color: T.success,
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
+                      font: `600 9.5px/1 ${T.mono}`,
+                      color: T.secondary,
+                      background: T.sunken,
+                      border: `1px solid ${T.borderSubtle}`,
+                      padding: "3px 5px",
+                      borderRadius: 4,
                     }}
                   >
-                    live →
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setStatus(t, "connected")}
-                    style={{
-                      font: `600 10.5px/1 ${T.mono}`,
-                      color: T.brandDeep,
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                    }}
-                  >
-                    CONNECT →
-                  </button>
-                )}
+                    {a}
+                  </span>
+                ))}
               </span>
+              <Mono style={{ fontSize: 11.5, color: t.has_key ? T.fg : T.tertiary }}>
+                {t.has_key ? `••${t.key_last4}` : "no key"}
+              </Mono>
               <span style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button
                   onClick={() => onEdit(t)}

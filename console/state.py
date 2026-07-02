@@ -80,7 +80,7 @@ def reset():
     # inside UserStore.__init__, and all access thereafter is managed via Team & access (no redeploy).
     users = UserStore()
     blobs = BlobStore()           # org KB docs + run-scoped uploaded materials (bytes live in storage)
-    tool_store = ToolStore()      # tools/MCP registry (§3.5) — real datastore, CRUD-able (no seeds)
+    tool_store = ToolStore()      # tools/MCP registry (SOF-81) — migration-seeded, drives workspace .mcp.json
     agent_store = SystemAgentStore()     # system agents (§3.4): identity + prompt + model_id (no seeds)
     sow_store = SowStore()               # statement-of-work CRUD
     # Service layer (business logic between routers and stores). Built AFTER the stores so it holds

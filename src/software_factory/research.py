@@ -7,16 +7,21 @@ import re
 import httpx
 from dataclasses import dataclass, asdict
 
-# SOF-79: the ORIGINAL set ("google/gemini-flash-2.5", "...-v4-0324") does not exist on
-# OpenRouter and 500s in ~1s — verified live 2026-07-02. This set is confirmed working.
-_ANALYSIS_MODELS = (
-    "google/gemini-2.5-flash",
-    "moonshotai/kimi-k2.6",
-    "deepseek/deepseek-chat-v3-0324",
-)
 # SOF-79: real measured end-to-end latency for a Fusion call is ~165-181s (two live runs);
 # the original 60s timeout killed every successful call before it could complete.
 _FUSION_TIMEOUT_S = 240
+
+
+def _fusion_analysis_models() -> list[str]:
+    """The OpenRouter Fusion panel's model list — SOF-81: DB-editable via the `fusion` row in the
+    `tools` registry (OS Tools tab), not a code default. No code fallback on purpose: a missing/
+    empty config is a real operator setup gap, not something to paper over with a guessed list."""
+    from .tools import ToolStore
+    config = ToolStore().config_for("fusion")
+    models = (config or {}).get("analysis_models")
+    if not models:
+        raise ResearchError("'fusion' tool has no analysis_models configured — set it in the OS Tools tab")
+    return list(models)
 
 
 @dataclass
@@ -276,7 +281,7 @@ def _fusion_research(
         {
             "model": "openrouter/fusion",
             "messages": [{"role": "user", "content": prompt}],
-            "plugins": [{"id": "fusion", "analysis_models": list(_ANALYSIS_MODELS)}],
+            "plugins": [{"id": "fusion", "analysis_models": _fusion_analysis_models()}],
             "response_format": {"type": "json_object"},
         },
         api_key, _FUSION_TIMEOUT_S,
@@ -331,7 +336,7 @@ def fusion_research(question: str, *, api_key: str | None = None,
         {
             "model": "openrouter/fusion",
             "messages": [{"role": "user", "content": question}],
-            "plugins": [{"id": "fusion", "analysis_models": list(_ANALYSIS_MODELS)}],
+            "plugins": [{"id": "fusion", "analysis_models": _fusion_analysis_models()}],
         },
         api_key, timeout,
     )

@@ -188,18 +188,18 @@ export type AdminAgent = {
   source_ref?: string;
   runtime?: string;
   variants?: Record<string, string>;
-  tools?: { name: string; type?: string; scope?: string }[];
+  tools?: AdminTool[];
   activity?: { text: string; ts?: string }[];
 };
 
 export type AdminTool = {
   name: string;
-  type: "MCP" | "API" | "native" | "HTTP";
-  provider: string;
-  scope: string;
-  status: "connected" | "available";
-  used: number;
-  auth: string;
+  config: Record<string, unknown>;
+  attached_to: string[];
+  has_key: boolean;
+  key_last4: string | null;
+  updated_by: string | null;
+  updated_at: string | null;
 };
 
 export type AdminClient = {
@@ -424,9 +424,11 @@ export const api = {
   adminPatchAgentPrompt: (callsign: string, prompt: string, runtime?: string) => send<{ version?: number; applied: boolean; is_default?: boolean }>(`/api/admin/agents/${encodeURIComponent(callsign)}/prompt`, "PATCH", runtime ? { prompt, runtime } : { prompt }),
   adminRevertAgentPrompt: (callsign: string, runtime?: string) => send<{ version?: number; is_default?: boolean }>(`/api/admin/agents/${encodeURIComponent(callsign)}/prompt${runtime ? `?runtime=${encodeURIComponent(runtime)}` : ""}`, "DELETE"),
   adminTools: () => get<{ tools: AdminTool[] }>("/api/admin/tools"),
-  adminCreateTool: (body: Partial<AdminTool> & { name: string; type: AdminTool["type"]; provider: string }) => send<{ tool: AdminTool }>("/api/admin/tools", "POST", body),
-  adminUpdateTool: (id: string, body: Partial<AdminTool>) => send<{ tool: AdminTool }>(`/api/admin/tools/${encodeURIComponent(id)}`, "PATCH", body),
-  adminDeleteTool: (id: string) => send<{ ok?: boolean }>(`/api/admin/tools/${encodeURIComponent(id)}`, "DELETE"),
+  adminCreateTool: (body: { name: string; config: Record<string, unknown>; attached_to?: string[] }) => send<{ tool: AdminTool }>("/api/admin/tools", "POST", body),
+  adminUpdateTool: (name: string, body: { config?: Record<string, unknown>; attached_to?: string[] }) => send<{ tool: AdminTool }>(`/api/admin/tools/${encodeURIComponent(name)}`, "PATCH", body),
+  adminDeleteTool: (name: string) => send<{ ok?: boolean }>(`/api/admin/tools/${encodeURIComponent(name)}`, "DELETE"),
+  adminSetToolKey: (name: string, value: string) => send<{ tool: AdminTool }>(`/api/admin/tools/${encodeURIComponent(name)}/key`, "PUT", { value }),
+  adminDeleteToolKey: (name: string) => send<{ tool: AdminTool }>(`/api/admin/tools/${encodeURIComponent(name)}/key`, "DELETE"),
   adminAccess: () => get<{ users: AdminAccessUser[] }>("/api/admin/access"),
   adminInvite: (body: {
     email: string;

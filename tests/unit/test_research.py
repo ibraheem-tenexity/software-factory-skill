@@ -1,5 +1,15 @@
 from dataclasses import asdict
+import pytest
 from software_factory.research import CompanyProfile, ResearchError
+
+
+@pytest.fixture(autouse=True)
+def _stub_fusion_analysis_models(monkeypatch):
+    """SOF-81: the Fusion panel's model list is DB-editable (the `fusion` tools-registry row), not
+    a code default — stub it here so these pure unit tests don't need a real DB/ToolStore."""
+    monkeypatch.setattr("software_factory.research._fusion_analysis_models",
+                        lambda: ["google/gemini-2.5-flash", "moonshotai/kimi-k2.6",
+                                "deepseek/deepseek-chat-v3-0324"])
 
 
 def _make_profile(**overrides) -> CompanyProfile:

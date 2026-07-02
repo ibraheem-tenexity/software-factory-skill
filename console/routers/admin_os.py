@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 import console.state as state
 from console.deps import require_staff
 from console.schemas import (DemoIn, PromptIn, InviteIn, AccessPatchIn, AgentIn, AgentPatchIn,
-                             ToolIn, ToolPatchIn, OrgIn, OrgPatchIn, SowIn, SowPatchIn)
+                             ToolIn, ToolPatchIn, ToolKeyIn, OrgIn, OrgPatchIn, SowIn, SowPatchIn)
 
 router = APIRouter()
 
@@ -75,7 +75,7 @@ def admin_revert_prompt(callsign: str, runtime: str | None = None, v: tuple = De
     return state.admin_service.revert_prompt(callsign, runtime)
 
 
-# ── tools / MCP registry ───────────────────────────────────────────────────────────────────────
+# ── tools / MCP registry (SOF-81) ─────────────────────────────────────────────────────────────
 @router.get("/api/admin/tools")
 def admin_tools(v: tuple = Depends(require_staff)):
     return state.admin_service.tools()
@@ -83,17 +83,27 @@ def admin_tools(v: tuple = Depends(require_staff)):
 
 @router.post("/api/admin/tools")
 def admin_tool_create(body: ToolIn, v: tuple = Depends(require_staff)):
-    return state.admin_service.create_tool(body)
+    return state.admin_service.create_tool(body, by=v[0] or "")
 
 
-@router.patch("/api/admin/tools/{tool_id}")
-def admin_tool_update(tool_id: int, body: ToolPatchIn, v: tuple = Depends(require_staff)):
-    return state.admin_service.update_tool(tool_id, body)
+@router.patch("/api/admin/tools/{name}")
+def admin_tool_update(name: str, body: ToolPatchIn, v: tuple = Depends(require_staff)):
+    return state.admin_service.update_tool(name, body, by=v[0] or "")
 
 
-@router.delete("/api/admin/tools/{tool_id}")
-def admin_tool_delete(tool_id: int, v: tuple = Depends(require_staff)):
-    return state.admin_service.delete_tool(tool_id)
+@router.put("/api/admin/tools/{name}/key")
+def admin_tool_set_key(name: str, body: ToolKeyIn, v: tuple = Depends(require_staff)):
+    return state.admin_service.set_tool_key(name, body, by=v[0] or "")
+
+
+@router.delete("/api/admin/tools/{name}/key")
+def admin_tool_delete_key(name: str, v: tuple = Depends(require_staff)):
+    return state.admin_service.delete_tool_key(name)
+
+
+@router.delete("/api/admin/tools/{name}")
+def admin_tool_delete(name: str, v: tuple = Depends(require_staff)):
+    return state.admin_service.delete_tool(name)
 
 
 # ── clients / tenants (admin-scoped org CRUD) ────────────────────────────────────────────────────

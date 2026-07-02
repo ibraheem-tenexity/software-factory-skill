@@ -97,7 +97,34 @@ def test_system_agent_upsert_only_updates_provided_fields():
 
 
 # -- tools ----------------------------------------------------------------------------------------
-def test_tool_insert_returning_via_fetchone():
-    fx = FakeExec(fetchone_result={"id": 1, "name": "X"})
-    row = ToolRepository(fx).insert_returning("X", "MCP", "P", "s", "available", "none")
-    assert row == {"id": 1, "name": "X"}
+def test_tool_upsert_inserts_when_absent():
+    fx = FakeExec(fetchone_result=None)  # by_name-style existence check finds nothing
+    ToolRepository(fx).upsert("exa", {"type": "http"}, ["STAGE-1"], "op@x.com")
+    _clean(fx.sql)
+    assert fx.sql.startswith("INSERT INTO tools")
+    assert "config" in fx.sql and "attached_to" in fx.sql
+    # config/attached_to must be JSON-serialized strings, not bare dict/list — GlobalExec's raw-SQL
+    # path bypasses SQLAlchemy's own bind processor (see repositories/_compile.py's serialize_jsonb
+    # docstring); a bare dict here is exactly the "cannot adapt type 'dict'" psycopg3 crash a FakeExec
+    # test can catch without ever touching a real DB.
+    import json
+    assert json.loads(fx.params[1]) == {"type": "http"}
+    assert json.loads(fx.params[2]) == ["STAGE-1"]
+
+
+def test_tool_upsert_updates_when_present():
+    fx = FakeExec(fetchone_result={"name": "exa"})  # existence check finds the row
+    ToolRepository(fx).upsert("exa", {"type": "http"}, None, "op@x.com")
+    _clean(fx.sql)
+    assert fx.sql.startswith("UPDATE tools")
+    assert "attached_to" not in fx.sql  # attached_to=None -> left untouched on update
+    import json
+    assert json.loads(fx.params[0]) == {"type": "http"}
+
+
+def test_tool_set_key_writes_vault_pointer_and_last4():
+    fx = FakeExec()
+    ToolRepository(fx).set_key("exa", "vault-uuid-1", "abcd", "op@x.com")
+    _clean(fx.sql)
+    assert fx.sql.startswith("UPDATE tools")
+    assert "key_vault_id" in fx.sql and "key_last4" in fx.sql

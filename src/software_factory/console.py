@@ -39,7 +39,7 @@ from .repositories._exec import PathExec
 from .repositories.canvas import ProjectStateRepository, PhaseRepository, BlockerRepository, ArtifactRepository
 from .repositories.runtime_agents import AgentRepository
 from .tickets import TicketStore
-from .workspace_setup import prepare_workspace
+from .workspace_setup import prepare_workspace, tool_env_overrides
 from .log import get_logger
 
 logger = get_logger(__name__)
@@ -938,6 +938,11 @@ class Console:
             except Exception:
                 logger.debug("[launch] %s vault retrieve failed — caller env used as-is",
                              project_id, exc_info=True)  # Vault unavailable — best-effort
+        # SOF-81: a key an operator attached to a `tools` row (OS Tools tab) for THIS stage
+        # overrides the console's own env passthrough for that tool (e.g. a rotated EXA_API_KEY
+        # or RAILWAY_TOKEN) — absent key, behavior is unchanged. Lower precedence than the run's
+        # own BYOK creds above (`env` already wins on collision).
+        env = {**tool_env_overrides(stage), **env}
         runtime = state.runtime or "claude"
         # The stage RUNNER (`claude -p` / `opencode run`) is itself an LLM agent and needs its OWN
         # provider key to authenticate. stage_env_baseline scrubs the console's env down to a tiny
