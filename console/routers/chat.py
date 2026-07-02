@@ -1,6 +1,5 @@
-"""Concierge chat: /api/chat (send), /api/chat/{pid}/history, /api/chat/{pid}/deps, SSE stream."""
+"""Concierge chat: /api/chat (send), /api/chat/{pid}/history, /api/chat/{pid}/deps."""
 import asyncio
-import inspect
 import json
 import os
 import time
@@ -83,7 +82,7 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
                     pid, body.message, body.files, body.images,
                     runtime=body.runtime, planning_model=body.planning_model,
                     impl_model=body.impl_model, project_name=body.project_name,
-                    gated=body.gated, owner=v[0] or "", role=v[1] or "member",
+                    owner=v[0] or "", role=v[1] or "member",
                 ):
                     yield line
                     try:
@@ -111,7 +110,6 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
                                    input_tokens=usage.get("input_tokens", 0),
                                    output_tokens=usage.get("output_tokens", 0),
                                    cost_usd=usage.get("cost_usd", 0.0))
-            state._push_sse(final_pid, msgs)
 
     return StreamingResponse(generate(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-cache"})
@@ -120,23 +118,9 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
 @router.post("/api/projects/{pid}/converse", response_model=ConverseOut)
 async def converse(pid: str, body: ConverseIn, v: tuple = Depends(authorize_project)):
     """One onboarding-Concierge turn: record the user's message, return the agent's reply as a
-    ConciergeTurn — {response, suggested_responses[]} (T2.2; no `choices`/`done`). Backed by the
-    in-memory mock `Conversation` (sync) or the DB-backed `DbConversation` (async ChatAgent,
-    SF_CONVERSATION_DB) — the mock stays scripted. `authorize_project` gates cross-org access."""
-    result = state.conversation_svc.turn(pid, body.message)
-    if inspect.isawaitable(result):
-        result = await result
-    if "response" in result:
-        return result   # DbConversation already returns the new ConciergeTurn shape
-    # Conversation (the mock) still returns its ORIGINAL {message, choices, done} — untouched,
-    # per T1.3's hermetic-mock contract (its own tests assert this shape directly). Translate at
-    # the wire boundary so ConverseOut's new contract holds regardless of which service is active;
-    # `choices` (single-select strings) map to single-select suggested_responses, `done` becomes a
-    # hand-off invite suggested_response rather than a hidden boolean (spec §3).
-    suggested = [{"response": c, "type": "single select"} for c in result.get("choices", [])]
-    if result.get("done"):
-        suggested = [{"response": "Hand off to the factory", "type": "single select"}]
-    return {"response": result["message"], "suggested_responses": suggested}
+    ConciergeTurn — {response, suggested_responses[]}. Backed by the DB-backed `DbConversation`
+    (async ChatAgent). `authorize_project` gates cross-org access."""
+    return await state.conversation_svc.turn(pid, body.message)
 
 
 @router.get("/api/chat/{pid}/history")
@@ -159,33 +143,4 @@ def chat_deps(pid: str, body: DepsIn, v: tuple = Depends(authorize_project)):
                                  msg_type="status_update", ts=time.time(),
                                  metadata={"project_id": pid, "stage": 3})
         _persist_chat_turn(pid, launch_msg)
-        state._push_sse(pid, [dep_msg, launch_msg])
-    else:
-        state._push_sse(pid, [dep_msg])
     return result
-
-
-@router.get("/api/chat/{pid}/stream")
-async def chat_stream(pid: str, v: tuple = Depends(authorize_project)):
-    """SSE for real-time pipeline updates. Drains a per-client queue fed by _push_sse (from the
-    poller thread + chat/deps handlers); keepalive every 2s."""
-    q: list[str] = []
-    with state._sse_lock:
-        state._sse_clients.setdefault(pid, []).append(q)
-
-    async def gen():
-        try:
-            while True:
-                if q:
-                    yield q.pop(0)
-                else:
-                    yield ": keepalive\n\n"
-                    await asyncio.sleep(2)
-        finally:
-            with state._sse_lock:
-                clients = state._sse_clients.get(pid, [])
-                if q in clients:
-                    clients.remove(q)
-
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})

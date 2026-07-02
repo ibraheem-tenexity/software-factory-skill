@@ -84,12 +84,6 @@ def test_pg_lastrowid_via_returning(pg):
     assert any("RETURNING id" in s for s, _ in fake.statements)
 
 
-def test_pg_executescript_runs_each_statement(pg):
-    conn, fake = pg
-    conn.executescript("UPDATE tickets SET status='done' WHERE id=?; DELETE FROM phases WHERE id=?;")
-    sqls = [s for s, _ in fake.statements]
-    assert any(s.startswith("UPDATE tickets") for s in sqls)
-    assert any(s.startswith("DELETE FROM phases") for s in sqls)
 
 
 def test_pg_write_retries_then_raises(monkeypatch, tmp_path):

@@ -49,7 +49,7 @@ class ChatDock:
         files: list, images: list,
         runtime: str = "", planning_model: str = "",
         impl_model: str = "", project_name: str = "",
-        gated: bool = False, owner: str = "", role: str = "member",
+        owner: str = "", role: str = "member",
     ):
         """Async generator yielding NDJSON lines. `ChatAgent.run()` is a single call (no real
         token-by-token stream), so this yields exactly one `done` event with the full reply —

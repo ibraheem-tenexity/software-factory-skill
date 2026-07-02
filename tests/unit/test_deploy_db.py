@@ -32,15 +32,6 @@ _VARS = json.dumps({"DATABASE_URL": "postgresql://u:p@h:5432/railway", "PGHOST":
 _EMPTY_VARS = json.dumps({"PGHOST": "h"})  # no DATABASE_URL — simulates async provisioning in progress
 
 
-def test_needs_deploy_db():
-    assert deploy_db.needs_deploy_db(["DATABASE_URL"])
-    assert deploy_db.needs_deploy_db(["SUPABASE_URL", "FOO"])
-    assert deploy_db.needs_deploy_db(["POSTGRES_PASSWORD"])
-    assert not deploy_db.needs_deploy_db(["OPENROUTER_API_KEY", "NEXTAUTH_SECRET"])
-    assert not deploy_db.needs_deploy_db([])
-    assert not deploy_db.needs_deploy_db(None)
-
-
 def test_provision_captures_real_service_id_and_reads_url(tmp_path, monkeypatch):
     monkeypatch.delenv("RAILWAY_PROJECT_ID", raising=False)
     run = _runner([_ADD, _VARS])

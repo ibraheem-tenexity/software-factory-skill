@@ -79,7 +79,6 @@ class ChatIn(BaseModel):
     impl_model: str = ""
     model: str = ""   # opencode model alias: "kimi"|"glm"
     project_name: str = ""
-    gated: bool = False
 
 
 class ConverseIn(BaseModel):
@@ -115,10 +114,6 @@ class ProvideDepIn(BaseModel):
     value: str = ""
 
 
-class ContinueIn(BaseModel):
-    gate: str = ""
-
-
 class ProjectPatchIn(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -130,17 +125,8 @@ class MaterialScopeIn(BaseModel):
     scope: str = "project"     # "project" | "org"
 
 
-class Stage3In(BaseModel):
-    creds: dict | None = None
-
-
 class BudgetIn(BaseModel):
     ceiling: float | None = None
-
-
-class RetryIn(BaseModel):
-    stage: int = 0
-    creds: dict | None = None
 
 
 class RetryNodeIn(BaseModel):
@@ -149,22 +135,6 @@ class RetryNodeIn(BaseModel):
 
 class RewindIn(BaseModel):
     node: str
-
-
-class ProjectCreateIn(BaseModel):
-    description: str = ""
-    context: str = ""
-    budget: float = 100
-    target: str = "railway"
-    files: list = []
-    runtime: str = ""
-    planning_model: str = ""
-    impl_model: str = ""
-    model: str = ""   # opencode model alias: "kimi"|"glm"
-    project_name: str = ""
-    gated: bool = False
-    railway_token: str = ""
-    railway_project_id: str = ""
 
 
 # Option C onboarding (draft model): the form defers draft creation until the user types a name,
@@ -309,12 +279,4 @@ class SecretCreateIn(BaseModel):
 
 class SecretRotateIn(BaseModel):
     value: str
-
-
-class SecretOut(BaseModel):
-    name: str
-    kind: str
-    last4: str
-    used_by: int
-    updated_at: str
 

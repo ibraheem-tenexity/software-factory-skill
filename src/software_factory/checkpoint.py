@@ -54,13 +54,6 @@ def write(project_id: str, node: str, output: dict | None = None) -> bool:
     return _repo.insert_if_absent(project_id, node, output, time.time())
 
 
-def read_all(project_id: str) -> list[dict]:
-    """All checkpoints for this project, oldest first."""
-    rows = _repo.all_for(project_id)
-    return [{"node": r["node"], "output": r["output"], "stamped_at": r["stamped_at"]}
-            for r in rows]
-
-
 def completed_nodes(project_id: str) -> set[str]:
     """Set of node names that have a checkpoint (= confirmed done)."""
     return {r["node"] for r in _repo.nodes_for(project_id)}
@@ -75,13 +68,3 @@ def delete_from(project_id: str, node: str) -> list[str]:
     to_delete_ordered = [n for n in NODE_ORDER if _node_pos(n) >= pos]
     rows = _repo.delete_nodes(project_id, to_delete_ordered)
     return [r["node"] for r in rows]
-
-
-def write_ticket(project_id: str, ticket_id: int | str, output: dict | None = None) -> bool:
-    """Convenience wrapper for per-ticket checkpoints (node = 'ticket:<id>')."""
-    return write(project_id, f"ticket:{ticket_id}", output)
-
-
-def completed_ticket_ids(project_id: str) -> set[str]:
-    """Set of ticket IDs (as strings) that have a checkpoint."""
-    return {r["node"].split(":", 1)[1] for r in _repo.ticket_nodes_for(project_id)}

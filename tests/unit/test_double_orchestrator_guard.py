@@ -7,17 +7,15 @@ untracked — invisible to _stage_process_alive, never budget-gated, never reape
 Two live stage-1 orchestrators raced the same project.log in the E2E pilot (~2x burn).
 
 Fix: _launch_stage checks _stage_process_alive at entry and returns None immediately if alive.
-This covers _provision_and_launch / release_project (no outer guard) and shrinks the TOCTOU
-window for start_stage2/3 / retry_stage (which already check before calling).
+This covers _provision_and_launch (no outer guard) and shrinks the TOCTOU window for
+start_stage2/3 / retry_stage (which already check before calling).
 
 These tests assert:
   (1) _launch_stage refuses a duplicate launch while first orchestrator is alive
   (2) _procs[project_id] retains the FIRST process (not overwritten by the refused second)
   (3) The second launch() call is never made (FakeLauncher call-count stays at 1)
   (4) Duplicate _provision_and_launch (draft promoted twice) is blocked
-  (5) Duplicate release_project is already blocked by the held-flag check, but _launch_stage
-      provides defense-in-depth if the flag race ever happens
-  (6) After the process exits, _launch_stage accepts a new launch (guard only blocks ALIVE)
+  (5) After the process exits, _launch_stage accepts a new launch (guard only blocks ALIVE)
 """
 import pytest
 
@@ -128,24 +126,7 @@ def test_promote_draft_twice_blocked(tmp_path, monkeypatch):
     assert launcher.calls == 1
 
 
-# ── (5) release_project defense-in-depth ─────────────────────────────────────────────────
-
-def test_release_while_alive_blocked_at_launch_stage(tmp_path, monkeypatch):
-    """release_project itself guards via state.held, but _launch_stage is defense-in-depth
-    if the held flag is ever bypassed in a race. Verify the guard fires."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "key-x")
-    c, launcher = _make_console(tmp_path, ["project-rel01"])
-    pid = c.start_project(ProjectRequest(description="app"))
-    assert launcher.calls == 1
-    assert c._stage_process_alive(pid)
-
-    # Directly call _launch_stage (bypassing release_project's flag check) to test the guard
-    result = c._launch_stage(pid, 1, "prompt", {})
-    assert result is None
-    assert launcher.calls == 1
-
-
-# ── (6) after process exits, new launch is allowed ────────────────────────────────────────
+# ── (5) after process exits, new launch is allowed ────────────────────────────────────────
 
 def test_launch_allowed_after_process_exits(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "key-x")

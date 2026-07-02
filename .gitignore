@@ -4,12 +4,16 @@ __pycache__/
 *.egg-info/
 .runs/
 .runs-dev/
+.projects/
 .venv/
 *.db
 .env
 env_text.txt
 open-ai-key.txt
 client_secret_*.json
+# Dependency lockfile for a package manager (uv) the Dockerfile build doesn't use — the pip
+# install reads pyproject.toml directly (SOF-48); an uv.lock here is stray local tooling output.
+uv.lock
 
 # Design prototype reference for Task 4 (do not commit) — see .design-source/NOTES.md
 .design-source/

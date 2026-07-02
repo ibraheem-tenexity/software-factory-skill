@@ -9,15 +9,15 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 
 from software_factory import storage, project_view
-from software_factory.console import ProjectRequest, project_paths
+from software_factory.console import project_paths
 from software_factory.db import artifact_by_id
 from software_factory.deps import extract_env_creds
 from software_factory.memory.ingest import maybe_ingest_async
 
 import console.state as state
 from console.deps import require_authed, authorize_project, _can_see
-from console.schemas import (ProjectCreateIn, DraftCreateIn, ProjectPatchIn, MaterialScopeIn, OrgDocIn,
-                             ContinueIn, DepsIn, ProvideDepIn, Stage3In, BudgetIn, RetryIn, RetryNodeIn,
+from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, OrgDocIn,
+                             DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
                              RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, ReflectionAnswerIn)
 
 router = APIRouter()
@@ -28,34 +28,6 @@ router = APIRouter()
 def projects_list(include_archived: bool = False, v: tuple = Depends(require_authed)):
     owner = None if v[1] == "admin" else v[0]
     return {"projects": state.console.list_projects(owner=owner, include_archived=include_archived)}
-
-
-@router.post("/api/projects")
-def projects_create(body: ProjectCreateIn, v: tuple = Depends(require_authed)):
-    creds = {}
-    if body.railway_token:
-        creds["RAILWAY_TOKEN"] = body.railway_token
-    if body.railway_project_id:
-        creds["RAILWAY_PROJECT_ID"] = body.railway_project_id
-    req = ProjectRequest(
-        description=body.description,
-        context=body.context,
-        budget=float(body.budget),
-        target=body.target,
-        credentials=creds,
-        context_files=body.files,
-        runtime=body.runtime,
-        planning_model=body.planning_model,
-        impl_model=body.impl_model,
-        model=body.model,
-        name=body.project_name,
-        gated=bool(body.gated),
-        owner=v[0] or "",
-    )
-    try:
-        return {"project_id": state.console.start_project(req)}
-    except ValueError as e:           # duplicate project name
-        raise HTTPException(status_code=409, detail=str(e))
 
 
 # ── Drafts (Option C onboarding) ──────────────────────────────────────────────────────────────
@@ -79,11 +51,6 @@ def project_status(pid: str, v: tuple = Depends(authorize_project)):
     return state.console.status(pid)
 
 
-@router.get("/api/projects/{pid}/evidence")
-def project_evidence(pid: str, v: tuple = Depends(authorize_project)):
-    return state.console.evidence(pid)
-
-
 @router.get("/api/projects/{pid}/graph")
 def project_graph(pid: str, v: tuple = Depends(authorize_project)):
     return state.console.graph(pid)
@@ -93,12 +60,6 @@ def project_graph(pid: str, v: tuple = Depends(authorize_project)):
 def project_tickets(pid: str, v: tuple = Depends(authorize_project)):
     """Build-ticket projection for the kanban view (empty before Stage 2)."""
     return state.console.tickets(pid)
-
-
-@router.get("/api/projects/{pid}/deployments")
-def project_deployments(pid: str, v: tuple = Depends(authorize_project)):
-    """Per-deliverable deployments (a run may ship multiple apps)."""
-    return state.console.deployments(pid)
 
 
 @router.get("/api/projects/{pid}/brief")
@@ -329,11 +290,6 @@ def project_material_scope(pid: str, material_id: int, body: MaterialScopeIn,
 
 
 # ── Run-scoped actions ──────────────────────────────────────────────────────────────────────
-@router.post("/api/projects/{pid}/continue")
-def project_continue(pid: str, body: ContinueIn, v: tuple = Depends(authorize_project)):
-    return state.console.continue_project(pid, body.gate)
-
-
 @router.post("/api/projects/{pid}/deps")
 def project_submit_deps(pid: str, body: DepsIn, v: tuple = Depends(authorize_project)):
     result = state.console.submit_deps(pid, body.deps)
@@ -352,22 +308,6 @@ def project_provide_deployed_dep(pid: str, body: ProvideDepIn, v: tuple = Depend
     service (triggers a redeploy) — see `Console.provide_deployed_dep`. Always 200; the body's
     `ok` field carries success/failure so the UI can show a specific error, never a silent no-op."""
     return state.console.provide_deployed_dep(pid, body.name, body.value)
-
-
-@router.post("/api/projects/{pid}/stage2")
-def project_stage2(pid: str, v: tuple = Depends(authorize_project)):
-    result = state.console.start_stage2(pid)
-    if result:
-        return {"project_id": result, "stage": 2}
-    raise HTTPException(status_code=409, detail="stage1 not done or MCP unhealthy")
-
-
-@router.post("/api/projects/{pid}/stage3")
-def project_stage3(pid: str, body: Stage3In, v: tuple = Depends(authorize_project)):
-    result = state.console.start_stage3(pid, extra_creds=extract_env_creds(body.creds or {}))
-    if result:
-        return {"project_id": result, "stage": 3}
-    raise HTTPException(status_code=409, detail="stage2 not done or deps not satisfied")
 
 
 @router.post("/api/projects/{pid}/budget")
@@ -399,14 +339,6 @@ def project_relaunch(pid: str, v: tuple = Depends(authorize_project)):
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return {"project_id": new_id, "relaunched_from": pid}
-
-
-@router.post("/api/projects/{pid}/retry")
-def project_retry(pid: str, body: RetryIn, v: tuple = Depends(authorize_project)):
-    result = state.console.retry_stage(pid, int(body.stage), extra_creds=body.creds)
-    if result:
-        return {"project_id": result, "retried_stage": int(body.stage)}
-    raise HTTPException(status_code=409, detail="cannot retry: invalid stage or prior stage not done")
 
 
 @router.post("/api/projects/{pid}/pause")
@@ -441,13 +373,6 @@ def project_rewind(pid: str, body: RewindIn, v: tuple = Depends(authorize_projec
     """Invalidate checkpoints at `node` and downstream, kill the running process, and set
     phase='paused'. Does NOT auto-resume — call /resume when ready."""
     return state.console.rewind_to_node(pid, body.node)
-
-
-@router.post("/api/projects/{pid}/release")
-def project_release(pid: str, v: tuple = Depends(authorize_project)):
-    if state.console.release_project(pid):
-        return {"project_id": pid, "released": True}
-    raise HTTPException(status_code=409, detail="not held")
 
 
 # ── Draft write-through + handoff (Option C onboarding; drafts only) ──────────────────────────

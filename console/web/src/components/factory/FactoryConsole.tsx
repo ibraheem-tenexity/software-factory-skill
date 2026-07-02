@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { T, Icon, Wordmark, StatusPill, Btn } from "../onboarding/design";
 import { AccountMenu } from "../AccountMenu";
 import { api, phaseIsStale, ProjectSummary, Graph, Ticket } from "../../api";
-import { phaseStatesFromGraph, atWaitForDeps, PhaseStatus } from "./pipeline";
+import { phaseStatesFromGraph, atWaitForDeps, PhaseStatus, toneForHaltedPhase } from "./pipeline";
 import { StageRail } from "./StageRail";
 import { WaitForDeps } from "./WaitForDeps";
 import { BuildBoard } from "./BuildBoard";
@@ -32,9 +32,8 @@ const VIEWS: { id: View; label: string; icon: string }[] = [
 const VIEW_TITLE: Record<View, string> = { kanban: "Build board", tree: "Process tree", map: "Process graph" };
 
 function phaseTone(phase?: string): "success" | "warning" | "danger" | "neutral" {
-  if (phase === "done") return "success";
-  if (phase === "stopped" || phase === "crashed") return "danger";
-  if (phase === "paused") return "warning";
+  const halted = toneForHaltedPhase(phase);
+  if (halted) return halted;
   if (phase) return "warning";   // an in-flight phase (design renders the build phase amber)
   return "neutral";
 }

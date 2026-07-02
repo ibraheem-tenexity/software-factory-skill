@@ -69,7 +69,6 @@ def _narrate(pid: str, key: str, text: str):
         pass
     msg = ChatMessage(role="assistant", content=text)
     chat_persistence.persist_chat_turn(pid, msg)
-    state._push_sse(pid, [msg])
     # Operator email on the four operator-relevant events (done / depswait / budget / crash) —
     # placed AFTER the dedup so an email fires at most once per (run, event). Fire-and-forget:
     # notify.send never raises and must never block the poller.

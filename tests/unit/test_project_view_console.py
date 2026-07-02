@@ -1,6 +1,6 @@
 """Thin console read-accessors backing the Project View: agents(rid), artifacts(rid), project_created(rid)."""
 from software_factory.console import Console, ProjectRequest
-from software_factory.agents import AgentRegistry
+from software_factory.runtime_agents import AgentRegistry
 from software_factory.db import ProjectStore
 
 

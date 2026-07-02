@@ -186,7 +186,6 @@ _USAGE = (
     "  record-artifact <projects_dir> <project_id> <title> <path> [kind] [agent]\n"
     "  add-blocker <projects_dir> <project_id> <what> [blocks]\n"
     "  clear-blocker <projects_dir> <project_id> <what>\n"
-    "  set-gate <projects_dir> <project_id> <name> <status>\n"
     "  record-verification <projects_dir> <project_id> <url> <passed:0|1> <result-json>\n"
     "  record-deployment <projects_dir> <project_id> <app> <url> [status] [service_name] [verified:0|1]\n"
     "  spawn-agent <projects_dir> <project_id> <agent_id> <role> <model> [phase] [ticket_id]\n"
@@ -327,8 +326,6 @@ def main(argv: list[str]) -> int:
         db.add_blocker(rest[0], rest[1] if len(rest) > 1 else None)
     elif verb == "clear-blocker":
         db.clear_blocker(rest[0])
-    elif verb == "set-gate":
-        db.set_gate(rest[0], rest[1])
     elif verb == "record-verification":
         db.record_verification(rest[0], rest[1] in ("1", "true", "True"), rest[2])
     elif verb == "record-deployment":

@@ -37,32 +37,6 @@ def test_to_dict_is_json_serialisable():
     assert d["connected_systems"] == ["SAP", "Salesforce"]
 
 
-def test_to_prompt_block_contains_key_fields():
-    profile = _make_profile()
-    block = profile.to_prompt_block()
-    assert "Acme Corp" in block
-    assert "Manufacturing" in block
-    assert "mid-market" in block
-    assert "SAP" in block
-    assert "Widget Pro" in block
-    assert "RivalCo" in block
-    assert "Acme raises" in block
-
-
-def test_to_prompt_block_skips_none_fields():
-    profile = _make_profile(industry=None, size_hint=None, sub_focus=None)
-    block = profile.to_prompt_block()
-    # None fields should not produce a broken "None" line
-    assert "None" not in block
-
-
-def test_to_prompt_block_empty_lists_omitted():
-    profile = _make_profile(products=[], competitors=[], recent_news=[], connected_systems=[])
-    block = profile.to_prompt_block()
-    # empty lists produce no bullet lines
-    assert "- " not in block
-
-
 import json
 from unittest.mock import patch, MagicMock
 from software_factory.research import _exa_search, ResearchError

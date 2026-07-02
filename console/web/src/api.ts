@@ -52,10 +52,6 @@ export type BriefResponse = { brief_markdown: string | null; assumptions: Assump
 
 export type Me = { email: string; role: string; auth: boolean; name?: string; is_internal?: boolean };
 
-// GET /api/projects/{id}/deployments → console.deployments(). Per-deliverable: a run ships 1..N apps.
-export type Deployment = { app?: string; url?: string; repo?: string; [k: string]: any };
-export type DeploymentsResponse = { deployments: Deployment[]; apps: string[] };
-
 // GET /api/projects/{id}/deps → console.stage2_artifacts(). `tokens` are the architecture-derived
 // required tokens; `disposition[name]` is the per-token plan (mcp | mock | provide).
 export type DepToken = { name: string; [k: string]: any };
@@ -384,7 +380,6 @@ export const api = {
   chatHistory: (id: string) => get<{ messages: any[] }>(`/api/chat/${id}/history`),
   transcribe: (audio_base64: string, format: string) =>
     send<{ text: string }>("/api/transcribe", "POST", { audio_base64, format }),
-  deployments: (id: string) => get<DeploymentsResponse>(`/api/projects/${id}/deployments`),
   deps: (id: string) => get<DepsResponse>(`/api/projects/${id}/deps`),
   submitDeps: (id: string, deps: DepSubmit) =>
     send<DepsSubmitResponse>(`/api/projects/${id}/deps`, "POST", { deps }),
@@ -413,8 +408,6 @@ export const api = {
   createSecret: (body: { name: string; value: string; kind: string }) => send<{ secret: OrgSecret }>("/api/org/secrets", "POST", body),
   rotateSecret: (name: string, body: { value: string }) => send<{ secret: OrgSecret }>(`/api/org/secrets/${encodeURIComponent(name)}`, "PATCH", body),
   deleteSecret: (name: string) => send<void>(`/api/org/secrets/${encodeURIComponent(name)}`, "DELETE"),
-  createProject: (body: { description: string; project_name: string }) =>
-    send<{ project_id: string }>("/api/projects", "POST", body),
   // ── Tenexity OS admin portal (§3). Staff-gated, cross-tenant. Degrade to empty until live.
   adminOverview: () => get<AdminOverview>("/api/admin/overview"),
   adminClients: () => get<{ clients: AdminClient[] }>("/api/admin/clients"),
@@ -422,7 +415,6 @@ export const api = {
   adminUpdateClient: (org_id: string, body: Partial<AdminClient>) => send<{ client: AdminClient }>(`/api/admin/clients/${encodeURIComponent(org_id)}`, "PATCH", body),
   adminDeleteClient: (org_id: string) => send<{ ok?: boolean }>(`/api/admin/clients/${encodeURIComponent(org_id)}`, "DELETE"),
   adminProjects: (mode?: AdminProjectMode) => get<{ projects: AdminProjectRow[] }>(`/api/admin/projects${mode ? `?mode=${mode}` : ""}`),
-  adminSetProjectMode: (rid: string, is_demo: boolean) => send<{ project: AdminProjectRow }>(`/api/admin/projects/${encodeURIComponent(rid)}`, "PATCH", { is_demo }),
   adminAgents: () => get<{ agents: AdminAgent[] }>("/api/admin/agents"),
   adminSyncAgents: () => send<{ synced: number; agents: AdminAgent[] }>("/api/admin/agents/sync", "POST"),
   adminCreateAgent: (body: Partial<Omit<AdminAgent, "callsign">> & { callsign: string }) => send<{ agent: AdminAgent }>("/api/admin/agents", "POST", body),
@@ -495,9 +487,6 @@ export const api = {
   // Restore an archived project (un-archives it); permanent delete removes the run for good.
   restoreProject: (id: string) => send<{ project_id: string; archived: boolean }>(`/api/projects/${id}/restore`, "POST"),
   deleteProjectPermanently: (id: string) => send<{ project_id: string; deleted: boolean }>(`/api/projects/${id}/permanent`, "DELETE"),
-  // Manual kill-switch — halts the live stage process, sets phase=stopped, stops the poller
-  // re-advancing. Endpoint shipping in qsvigmth's run-control PR; graceful until then.
-  stopProject: (id: string) => send<ProjectSummary & Record<string, any>>(`/api/projects/${id}/stop`, "POST"),
   // ── Recovery endpoints (bkkc52v5 PR #89) ──
   pauseProject: (id: string) => send<Record<string, any>>(`/api/projects/${id}/pause`, "POST"),
   resumeProject: (id: string) => send<Record<string, any>>(`/api/projects/${id}/resume`, "POST"),

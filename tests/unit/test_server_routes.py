@@ -365,17 +365,6 @@ def test_stop_endpoint_wires_to_console(client, app_mod, monkeypatch):
     assert res.status_code == 200 and res.json()["phase"] == "stopped"
 
 
-def test_push_sse_delivers_to_registered_client(app_mod):
-    # The SSE mechanic: _push_sse fans a message out to every queue registered for the run
-    # (the stream endpoint registers one such queue; the poller + chat/deps handlers push).
-    from software_factory.data_transfer_objects.chat_store import ChatMessage
-    q: list = []
-    with app_mod._sse_lock:
-        app_mod._sse_clients.setdefault("project-1e17ea6a", []).append(q)
-    app_mod._push_sse("project-1e17ea6a", [ChatMessage(role="assistant", content="ping")])
-    assert q and q[0].startswith("data: ") and "ping" in q[0] and q[0].endswith("\n\n")
-
-
 # ── local .env loading (console startup) ──────────────────────────────────────────────────────
 def test_load_local_env_fills_gaps_but_does_not_override(tmp_path, monkeypatch):
     import console.app as app_mod

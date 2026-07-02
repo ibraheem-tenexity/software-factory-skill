@@ -119,7 +119,7 @@ def test_record_artifact_allows_url_without_file(tmp_path, monkeypatch):
 
 def test_cli_spawn_and_finish_agent(tmp_path):
     from software_factory.db import main
-    from software_factory.agents import AgentRegistry
+    from software_factory.runtime_agents import AgentRegistry
     runs = str(tmp_path)
     assert main(["spawn-agent", runs, "project-abc12345", "t7", "builder", "claude-sonnet-4-6", "build", "7"]) == 0
     assert main(["finish-agent", runs, "project-abc12345", "t7", "real_diff", "0.12", "9", "40"]) == 0

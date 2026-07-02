@@ -32,10 +32,6 @@ export function Skel({ w = "100%", h = 12, r, dark, style }: { w?: string | numb
   return <span className={dark ? "sf-skel on-dark" : "sf-skel"} style={{ display: "block", width: w, height: h, borderRadius: r ?? 4, ...style }} />;
 }
 
-export function SkelLine({ w = "70%", h = 12, dark }: { w?: string | number; h?: number; dark?: boolean }) {
-  return <Skel w={w} h={h} dark={dark} />;
-}
-
 export function SkelCircle({ size = 28, dark }: { size?: number; dark?: boolean }) {
   return <Skel w={size} h={size} r="50%" dark={dark} />;
 }
@@ -106,24 +102,6 @@ export function ListRowSkel({ rows = 3 }: { rows?: number }) {
             <Skel w="55%" h={10} />
           </div>
           <SkelPill w={56} h={20} />
-        </div>
-      ))}
-    </>
-  );
-}
-
-// admin/users.tsx: users table rows
-export function TableRowSkel({ rows = 5 }: { rows?: number }) {
-  return (
-    <>
-      {Array.from({ length: rows }, (_, i) => (
-        <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: `1px solid ${T.borderSubtle}` }}>
-          <SkelCircle size={28} />
-          <Skel w="18%" h={12} />
-          <Skel w="22%" h={12} />
-          <span style={{ flex: 1 }} />
-          <SkelPill w={52} h={20} />
-          <SkelPill w={52} h={20} />
         </div>
       ))}
     </>

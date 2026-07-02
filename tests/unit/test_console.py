@@ -6,10 +6,10 @@ This is the harness around the skill — it launches the skill and reads back th
 artifacts; it does not do the building itself.
 """
 from software_factory.console import (
-    Console, ProjectRequest, make_prompt, make_prompt_stage1, make_prompt_stage2,
+    Console, ProjectRequest, make_prompt_stage1, make_prompt_stage2,
     make_prompt_stage3, project_paths,
 )
-from software_factory.agents import AgentRegistry
+from software_factory.runtime_agents import AgentRegistry
 from software_factory.budget import Usage
 
 
@@ -30,19 +30,6 @@ def console(tmp_path, launcher, extract=lambda path: "# Extracted\n\nbrief conte
     ids = iter(["project-xyz"])
     return Console(str(tmp_path), launch=launcher, new_id=lambda: next(ids), extract=extract)
 
-
-def test_make_prompt_invokes_the_skill_with_run_id_target_and_budget():
-    req = ProjectRequest(description="a guestbook app", context="dark theme", budget=100.0, target="railway")
-    p = make_prompt(req, "project-xyz", projects_dir="/runs")
-    assert "software-factory" in p          # explicit, deterministic invocation
-    assert "project-xyz" in p
-    assert "100" in p
-    assert "guestbook" in p
-    assert "/runs/project-xyz" in p          # tells the orchestrator where to write artifacts
-    # Stage 3 prompt carries the deploy target
-    p3 = make_prompt_stage3(req, "project-xyz", projects_dir="/runs")
-    assert "railway" in p3
-    assert "sf-project-xyz" in p3
 
 
 def test_start_run_stamps_proof_marker_and_launches_headless_claude(tmp_path):
@@ -123,14 +110,13 @@ def test_credentials_are_never_written_to_disk(tmp_path):
     assert "RAILWAY_TOKEN" in c.status(project_id)["creds_provided"]
 
 
-def test_status_and_evidence_never_expose_secret_values(tmp_path):
+def test_status_never_exposes_secret_values(tmp_path):
     launcher = FakeLauncher()
     c = console(tmp_path, launcher)
     project_id = c.start_project(ProjectRequest(description="guestbook", target="railway",
                                     credentials={"RAILWAY_TOKEN": SECRET}))
     import json
     assert SECRET not in json.dumps(c.status(project_id))
-    assert SECRET not in json.dumps(c.evidence(project_id))
 
 
 def test_empty_credentials_are_ignored(tmp_path):
@@ -284,22 +270,23 @@ def test_list_runs_agents_empty_when_none_spawned(tmp_path):
     assert row["agents"] == []
 
 
-def test_graph_folds_pipeline_agents_artifacts_blockers_gates(tmp_path):
+def test_graph_folds_pipeline_agents_artifacts_blockers(tmp_path):
     from software_factory.db import ProjectStore, db_path
-    from software_factory.agents import AgentRegistry
+    from software_factory.runtime_agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
     project_id = c.start_project(ProjectRequest(description="guestbook"))
     d = str(tmp_path)
-    # an agent, an artifact, a blocker, and an open gate — ALL recorded in project.db (no events)
+    # an agent, an artifact, and a blocker — ALL recorded in project.db (no events). The human-
+    # review gate mechanism (an "awaiting" gate projected as its own graph node) is retired along
+    # with the fully-autonomous pipeline's dashboard "Continue" button — see gates.py's removal.
     AgentRegistry(db_path(d, project_id)).spawn("t1", project_id, None, "build form", "claude-sonnet-4-6", phase="build")
     db = ProjectStore(db_path(d, project_id))
     db.record_artifact("PRD", "PRD.md", kind="prd")
     db.add_blocker("Supabase project not ready", blocks="wait-for-deps")
-    db.set_gate("prd", "awaiting")
 
     g = c.graph(project_id)
     kinds = {n["data"]["kind"] for n in g["nodes"]}
-    assert {"orchestrator", "phase", "agent", "artifact", "blocker", "gate"} <= kinds
+    assert {"orchestrator", "phase", "agent", "artifact", "blocker"} <= kinds
     phase_labels = {n["data"]["label"] for n in g["nodes"] if n["data"]["kind"] == "phase"}
     assert {"research", "architect", "deploy"} <= phase_labels
 
@@ -820,7 +807,7 @@ def test_graph_agents_are_projected_from_the_agents_table(tmp_path):
     # Agents appear on the canvas ONLY when recorded in project.db (no planned roster). A recorded
     # agent hangs off its phase, is real=True, and its status comes from the agents table.
     from software_factory.db import db_path
-    from software_factory.agents import AgentRegistry
+    from software_factory.runtime_agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
     rid = c.start_project(ProjectRequest(description="x"))
     assert not [n for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "agent"]  # nothing recorded yet
@@ -833,7 +820,7 @@ def test_graph_agents_are_projected_from_the_agents_table(tmp_path):
 
 def test_graph_agent_status_reflects_outcome(tmp_path):
     from software_factory.db import db_path
-    from software_factory.agents import AgentRegistry
+    from software_factory.runtime_agents import AgentRegistry
     from software_factory.budget import Usage
     c = console(tmp_path, FakeLauncher())
     rid = c.start_project(ProjectRequest(description="x"))
@@ -867,7 +854,7 @@ def test_url_artifacts_are_links_not_missing(tmp_path):
 def test_artifacts_are_children_of_the_agent_that_created_them(tmp_path):
     import os
     from software_factory.db import ProjectStore, db_path
-    from software_factory.agents import AgentRegistry
+    from software_factory.runtime_agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
     rid = c.start_project(ProjectRequest(description="x"))
     d = str(tmp_path)
@@ -885,18 +872,10 @@ def test_artifacts_are_children_of_the_agent_that_created_them(tmp_path):
     assert any(e["data"]["source"] == "phase:research" and e["data"]["target"] == "agent:horizon" for e in g["edges"])
 
 
-def test_gate_continue_and_artifact(tmp_path):
-    from software_factory import gates
-    from software_factory.db import ProjectStore, db_path
+def test_artifact_read_stays_inside_the_run_dir(tmp_path):
     c = console(tmp_path, FakeLauncher())
     project_id = c.start_project(ProjectRequest(description="guestbook"))
     d = str(tmp_path)
-    ProjectStore(db_path(d, project_id)).set_gate("prd", "awaiting")
-    assert gates.pending_gate(d, project_id) == "prd"
-    c.continue_project(project_id, "prd")                       # dashboard "Continue"
-    assert gates.pending_gate(d, project_id) is None
-
-    # artifact read stays inside the run dir
     import os
     os.makedirs(os.path.join(d, project_id, "workspace"), exist_ok=True)
     open(os.path.join(d, project_id, "workspace", "PRD.md"), "w").write("# PRD\nproblem...")
@@ -915,7 +894,7 @@ def test_stage3_done_requires_playwright_pass_and_real_agents(tmp_path):
     # Also mirrors Stages 1/2: done only flips once the Claude Code process has finished.
     from software_factory.db import ProjectStore, db_path
     from software_factory.tickets import TicketStore
-    from software_factory.agents import AgentRegistry
+    from software_factory.runtime_agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
     rid = c.start_project(ProjectRequest(description="x"))
     dbp = db_path(str(tmp_path), rid)
@@ -953,7 +932,7 @@ def test_detect_stage3_done_waits_for_process_to_finish(tmp_path):
     # running we must NOT flip done prematurely.
     from software_factory.db import ProjectStore, db_path
     from software_factory.tickets import TicketStore
-    from software_factory.agents import AgentRegistry
+    from software_factory.runtime_agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
     rid = c.start_project(ProjectRequest(description="x"))
     dbp = db_path(str(tmp_path), rid)
@@ -983,7 +962,7 @@ def test_detect_stage3_done_requires_signin_step_when_demo_creds_present(tmp_pat
     import json
     from software_factory.db import ProjectStore, db_path
     from software_factory.tickets import TicketStore
-    from software_factory.agents import AgentRegistry
+    from software_factory.runtime_agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
     rid = c.start_project(ProjectRequest(description="app with auth"))
     dbp = db_path(str(tmp_path), rid)
@@ -1020,7 +999,7 @@ def test_detect_stage3_done_no_demo_creds_skips_signin_check(tmp_path):
     import json
     from software_factory.db import ProjectStore, db_path
     from software_factory.tickets import TicketStore
-    from software_factory.agents import AgentRegistry
+    from software_factory.runtime_agents import AgentRegistry
     c = console(tmp_path, FakeLauncher())
     rid = c.start_project(ProjectRequest(description="app without auth"))
     dbp = db_path(str(tmp_path), rid)
@@ -1115,28 +1094,6 @@ def test_status_reports_workspace_lifecycle(tmp_path):
     assert c.status(project_id)["workspace"] == "cleaned"
 
 
-def test_evidence_verifies_the_run_was_really_built_by_the_skill(tmp_path):
-    launcher = FakeLauncher()
-    c = console(tmp_path, launcher)
-    project_id = c.start_project(ProjectRequest(description="guestbook", target="railway"))
-
-    paths = project_paths(str(tmp_path), project_id)
-    reg = AgentRegistry(paths["agents_db"], clock=lambda: 1)
-    reg.spawn("a1", project_id, 1, "build", "claude-opus-4-8")
-    reg.record("a1", outcome="real_diff", cost_usd=0.42, provenance="7", diff_lines=120)
-    from software_factory.tickets import TicketStore
-    ts = TicketStore(paths["tickets_db"])
-    tid = ts.create_ticket("guestbook", acceptance="a", dod="d", wave=1)
-    ts.mark_done(tid, provenance="7", diff_lines=120)
-
-    state = c._load_state(project_id)
-    state.phase = "done"; state.deploy_url = "https://g.up.railway.app"; state.spent_usd = 0.42
-    state.save()
-
-    ev = c.evidence(project_id)
-    assert ev["verified"] is True
-    assert ev["reasons"] == []
-    assert ev["bundle"]["skill"] == "software-factory"
 
 
 def test_stage_handoff_stage1_done_enables_stage2(tmp_path):
