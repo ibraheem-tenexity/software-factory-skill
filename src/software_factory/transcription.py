@@ -1,38 +1,48 @@
-"""Speech-to-text: proxies dictation audio to OpenRouter's Whisper Large v3 (SOF-14).
+"""Speech-to-text: proxies dictation audio to OpenAI's gpt-4o-transcribe (SOF-14, SOF-75).
 
-OpenRouter exposes a dedicated (non-chat-completions) transcription endpoint: JSON body with
-base64 audio, not the OpenAI SDK's multipart file-upload shape. Confirmed against the OpenRouter
-docs (guides/overview/multimodal/stt, api-reference/transcriptions/create-audio-transcriptions)
-before building — see SOF-14.
+SOF-75: switched from OpenRouter Whisper Large v3 to OpenAI `gpt-4o-transcribe` — it handles the
+short clips onboarding produces with markedly less tail-garble/hallucination. This is OpenAI's
+transcription endpoint, which takes a MULTIPART file upload (not a base64 JSON body), so the
+FE-supplied base64 is decoded to bytes and sent as a file part. `OPENAI_API_KEY` is required
+(set in prod); a missing key raises TranscriptionError, which the caller surfaces as a graceful
+"dictation unavailable" rather than a crash.
 """
+import base64
 import os
 
 import httpx
 
-_ENDPOINT = "https://openrouter.ai/api/v1/audio/transcriptions"
-_MODEL = "openai/whisper-large-v3"
+_ENDPOINT = "https://api.openai.com/v1/audio/transcriptions"
+_MODEL = "gpt-4o-transcribe"
 
 
 class TranscriptionError(Exception):
-    """OpenRouter transcription call failed (missing key, upstream error, bad audio, etc.)."""
+    """Transcription call failed (missing key, upstream error, bad audio, etc.)."""
 
 
 def transcribe_audio(data_b64: str, fmt: str, language: str | None = None) -> str:
-    """Send base64-encoded dictation audio to OpenRouter Whisper Large v3; return the transcript.
+    """Send base64-encoded dictation audio to OpenAI gpt-4o-transcribe; return the transcript.
     Raises TranscriptionError with a user-facing message on any failure."""
-    api_key = os.environ.get("OPENROUTER_API_KEY")
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        raise TranscriptionError("OPENROUTER_API_KEY is not set — dictation unavailable")
+        raise TranscriptionError("OPENAI_API_KEY is not set — dictation unavailable")
 
-    body = {"model": _MODEL, "input_audio": {"data": data_b64, "format": fmt}}
+    try:
+        audio = base64.b64decode(data_b64)
+    except Exception as exc:
+        raise TranscriptionError(f"invalid audio data: {exc}") from exc
+
+    files = {"file": (f"audio.{fmt}", audio, f"audio/{fmt}")}
+    data = {"model": _MODEL}
     if language:
-        body["language"] = language
+        data["language"] = language
 
     try:
         resp = httpx.post(
             _ENDPOINT,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=body,
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=files,
+            data=data,
             timeout=60,
         )
         resp.raise_for_status()
