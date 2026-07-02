@@ -43,7 +43,6 @@ def persist_and_compose(
     files: list[dict],
     extract: Callable[[str], str] = extract_to_markdown,
     extract_docx: Callable[[str], str] | None = None,
-    brief: dict | None = None,
     interview_md: str | None = None,
     tolerate_extract_failures: bool = False,
     product_brief_md: str | None = None,
@@ -55,8 +54,9 @@ def persist_and_compose(
     through the image-aware path (`docx_extract.extract_with_images`) so embedded wireframe/
     screenshot images — including those inside table cells — are extracted to `input_dir/images/`
     and kept paired with their captions; falls back to the text-only converter if the image
-    deps are unavailable. If `brief`/`interview_md` are supplied, the structured onboarding brief
-    and interview transcript are written as `brief.md`/`interview.md` for Stage 1 to consume.
+    deps are unavailable. `product_brief_md` (the Concierge-finalized brief, SOF-63) SUPERSEDES
+    the raw composition as context.md when present; `interview_md` is written verbatim as
+    `interview.md` for Stage 1 to consume.
 
     PDF/DOCX originals are kept on disk alongside their `.md` extractions so callers can push
     them to object storage. Returned list includes both the original filename AND the `.md` name
@@ -142,14 +142,6 @@ def persist_and_compose(
             cf.write(composed)
         written.append("context.md")
 
-    if brief:
-        from .brief import brief_to_prompt_block
-        block = brief_to_prompt_block(brief)
-        if block.strip():
-            os.makedirs(input_dir, exist_ok=True)
-            with open(os.path.join(input_dir, "brief.md"), "w") as bf:
-                bf.write(block)
-            written.append("brief.md")
     if interview_md and interview_md.strip():
         os.makedirs(input_dir, exist_ok=True)
         with open(os.path.join(input_dir, "interview.md"), "w") as itf:

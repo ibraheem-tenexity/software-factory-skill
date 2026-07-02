@@ -1,7 +1,7 @@
 """Agent tables consolidation: agents→runtime_agents · new system_agents · drop the old pair
 
-Revision ID: 0011_agent_tables
-Revises: 0010_org_secrets
+Revision ID: 0012_agent_tables
+Revises: 0011_assumptions_and_document_artifacts
 Create Date: 2026-07-01
 
 The agent mess collapses to TWO tables:
@@ -19,7 +19,8 @@ model_id from old `agent_registry.model`. Each carry-over is independently guard
 table existing, so a fresh DB (create_all already made the new schema) just gets the 4 bare rows.
 
 REHEARSAL PROTOCOL:
-  1. alembic upgrade 0011_agent_tables  (on a test DB stamped at 0010_org_secrets)
+  1. alembic upgrade 0012_agent_tables  (on a test DB stamped at
+     0011_assumptions_and_document_artifacts)
   2. Assert: `runtime_agents` exists (with the old `agents` rows), `system_agents` has exactly the
      4 rows (prompts/models carried over where the old tables had them), `agent_prompts` and
      `agent_registry` are gone, and `conversation` has no `referenced_artifact` column.
@@ -27,8 +28,8 @@ REHEARSAL PROTOCOL:
 """
 from alembic import op
 
-revision = "0011_agent_tables"
-down_revision = "0010_org_secrets"
+revision = "0012_agent_tables"
+down_revision = "0011_assumptions_and_document_artifacts"
 branch_labels = None
 depends_on = None
 

@@ -42,13 +42,13 @@ export type GraphNode = { data: Record<string, any> };
 export type GraphEdge = { data: Record<string, any> };
 export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
 
-export type Brief = Record<string, string>;
 // SOF-37/SOF-60: assumptions are reference-backed (every entry links to a real source document
 // + section, never a confidence score); reflection_questions are raised by the Concierge and
 // await an answer/dismissal — building cannot proceed while any is "open" (the /promote 409).
 export type Assumption = { fact: string; document_blob_id: number; section_path: string | null; document_name: string };
 export type ReflectionQuestion = { id: string; fact: string; document_blob_id: number; section_path_claimed: string | null; status: "open" | "answered" | "dismissed"; answer: string | null; created_at: number };
-export type BriefResponse = { brief: Brief; coverage: Record<string, boolean>; assumptions: Assumption[]; reflection_questions: ReflectionQuestion[] };
+// brief_markdown is the concierge-finalized product brief (null until finalized).
+export type BriefResponse = { brief_markdown: string | null; assumptions: Assumption[]; reflection_questions: ReflectionQuestion[] };
 
 export type Me = { email: string; role: string; auth: boolean; name?: string; is_internal?: boolean };
 
@@ -356,7 +356,9 @@ export const api = {
   graph: (id: string) => get<Graph>(`/api/projects/${id}/graph`),
   tickets: (id: string) => get<TicketsResponse>(`/api/projects/${id}/tickets`),
   brief: (id: string) => get<BriefResponse>(`/api/projects/${id}/brief`),
-  putBrief: (id: string, brief: Brief) => send<BriefResponse>(`/api/projects/${id}/brief`, "PUT", brief),
+  // Thin goal/scope editor (post-promote "Edit brief"); returns the draft-projection shape.
+  putBrief: (id: string, brief: { goals?: string; scope?: string[] }) =>
+    send<{ name: string; goal: string; scope: string[]; description: string }>(`/api/projects/${id}/brief`, "PUT", brief),
   resolveReflection: (id: string, questionId: string, action: "answer" | "dismiss", answer?: string) =>
     send<{ reflection_questions: ReflectionQuestion[] }>(
       `/api/projects/${id}/reflection/${questionId}`, "PATCH", { action, answer: answer || "" }),
@@ -470,11 +472,11 @@ export const api = {
   createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number }) =>
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),
   patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number }) =>
-    send<{ name: string; goal: string; scope: string[]; description: string; brief: Record<string, string>; coverage: Record<string, boolean> }>(`/api/projects/${id}/draft`, "PATCH", body),
+    send<{ name: string; goal: string; scope: string[]; description: string }>(`/api/projects/${id}/draft`, "PATCH", body),
   // Read counterpart to PATCH /draft (qsvigmth's run-control PR #48) — rehydrates the intake form
   // when RESUMING an existing draft instead of minting a new one.
   getDraft: (id: string) =>
-    get<{ name: string; goal: string; scope: string[]; description: string; brief: Record<string, string>; coverage: Record<string, boolean> }>(`/api/projects/${id}/draft`),
+    get<{ name: string; goal: string; scope: string[]; description: string }>(`/api/projects/${id}/draft`),
   // BYOK key submission (qsvigmth's draft-BYOK PR). Vault-stores each credential; records UUIDs in
   // state.creds_vault_ids; promote threads them into the runner env. Returns names only, never values.
   submitCreds: (id: string, credentials: Record<string, string>) =>
@@ -533,13 +535,3 @@ export function phaseIsStale(phase: string | undefined, stage: number | undefine
   return !(_STAGE_PHASES[stage] || []).includes(phase);
 }
 
-export const BRIEF_SECTIONS: { key: string; label: string }[] = [
-  { key: "goals", label: "Context & Goals" },
-  { key: "scale", label: "Scale & Usage" },
-  { key: "success_metrics", label: "Success Metrics" },
-  { key: "constraints", label: "Constraints" },
-  { key: "stakeholders", label: "Stakeholders" },
-  { key: "existing_assets", label: "Existing Assets" },
-  { key: "risks", label: "Risks & Unknowns" },
-  { key: "definition_of_done", label: "Definition of Done" },
-];

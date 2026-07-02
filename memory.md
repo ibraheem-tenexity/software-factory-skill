@@ -292,3 +292,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. Live state DB via factory-console Railway env.
 3. Count was 33 orphans (LMS/workforce app run mislabeled with file basename project.db). The #165 guard prevents new 'project.db' rows from landing.
 4. Summary: 33 rows deleted; post-purge count is 0. #114 data-hygiene complete.
+
+# Claude (brief-refactor agent) Update at Time: 01:07:2026:00:00:00.000
+1. Removed the dead 7-section brief system (brief.py already deleted): Stage-1 input is now the Concierge-finalized product-brief markdown, read via Console.product_brief() from the newest kind='product_brief' artifact (content column from PR #277, path fallback).
+2. src/software_factory/{console,projectstate,input_pipeline}.py, console/routers/projects.py, console/web/src/{api.ts,components/onboarding/InterviewView.tsx}, migrations/versions/{0002_tenexity_os.py,0012_agent_tables_consolidation.py} (renamed from 0011, re-parented onto PR #277's 0011_assumptions_and_document_artifacts).
+3. ProjectState.brief/interview_coverage replaced by plain `goal`; promote gate is now open reflection_questions ONLY (user decides readiness); GET /brief returns {brief_markdown, learned_facts, reflection_questions}; PUT /brief is a thin goals/scope editor via set_draft_project; migration 0002 froze its DDL inline (no models import).
+4. Summary: brief dict/coverage/enough are gone end-to-end; old stored JSON keys are silently ignored by the _PERSISTED filter; py compileall + FE tsc both clean. Not committed.

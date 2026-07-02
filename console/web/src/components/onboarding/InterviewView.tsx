@@ -2,40 +2,26 @@
 // — InterviewView + InterviewRail"). Two columns: a calm read-only main column reviewing what the
 // Concierge learned, and a fixed-width (340px) InterviewRail that asks outstanding questions ONE
 // AT A TIME with a segmented progress strip — mirrors optionC.jsx's InterviewRail, not a
-// simplified all-at-once form. The queue (open SOF-37 reflection questions, then the brief
-// sections the promote gate requires beyond "goals") is derived fresh from live polled state each
-// render, never a locally-tracked index — so it can never drift from server truth. Nothing here
-// invents new backend behavior: api.resolveReflection and api.putBrief both already exist and are
-// already tested; onboarding just never called them before hand-off, which is why every hand-off
-// 409'd regardless of project name.
+// simplified all-at-once form. The queue (open SOF-37 reflection questions — the only promote
+// gate; the user decides brief readiness) is derived fresh from live polled state each render,
+// never a locally-tracked index — so it can never drift from server truth.
 import React, { useEffect, useState } from "react";
 import { api, Assumption, ReflectionQuestion } from "../../api";
 import { T, Icon, CategoryLabel, Wordmark, Btn, TextArea, StatusPill } from "./design";
 
-// Mirrors brief.py's REQUIRED_SECTIONS minus "goals" (already collected by the intake form's
-// "What are you building?" field). If REQUIRED_SECTIONS ever changes, update this list to match.
-const BRIEF_FOLLOWUPS: { key: string; label: string; prompt: string }[] = [
-  { key: "success_metrics", label: "Success Metrics", prompt: "What does success look like for this project? How will you know it worked?" },
-  { key: "definition_of_done", label: "Definition of Done", prompt: "What has to be true for you to consider this shipped?" },
-];
-
-type QueueItem =
-  | { kind: "reflection"; question: ReflectionQuestion }
-  | { kind: "brief"; key: string; label: string; prompt: string };
+type QueueItem = { kind: "reflection"; question: ReflectionQuestion };
 
 export function InterviewView({ draftId, projectName, goal, onBack, onHandoff, submitting, error }: {
   draftId: string; projectName: string; goal: string; onBack: () => void; onHandoff: () => void; submitting: boolean; error: string;
 }) {
   const [assumptions, setAssumptions] = useState<Assumption[]>([]);
   const [questions, setQuestions] = useState<ReflectionQuestion[]>([]);
-  const [coverage, setCoverage] = useState<Record<string, boolean>>({});
   const [loaded, setLoaded] = useState(false);
   const [answeredCount, setAnsweredCount] = useState(0);
 
   const refresh = () => api.brief(draftId).then((d) => {
     setAssumptions(d.assumptions || []);
     setQuestions(d.reflection_questions || []);
-    setCoverage(d.coverage || {});
     setLoaded(true);
   }).catch(() => setLoaded(true));
 
@@ -49,13 +35,8 @@ export function InterviewView({ draftId, projectName, goal, onBack, onHandoff, s
   }, [draftId]);
 
   const openQuestions = questions.filter((q) => q.status === "open");
-  const missingSections = BRIEF_FOLLOWUPS.filter((s) => !coverage[s.key]);
-  // Fixed order: clarify facts from the materials first, then the strategic brief questions —
-  // recomputed fresh from live state every render.
-  const queue: QueueItem[] = [
-    ...openQuestions.map((question) => ({ kind: "reflection" as const, question })),
-    ...missingSections.map((s) => ({ kind: "brief" as const, key: s.key, label: s.label, prompt: s.prompt })),
-  ];
+  // The queue is the open reflection questions — recomputed fresh from live state every render.
+  const queue: QueueItem[] = openQuestions.map((question) => ({ kind: "reflection" as const, question }));
   const current = queue[0];
   const ready = loaded && queue.length === 0;
   const total = answeredCount + queue.length;
@@ -66,11 +47,6 @@ export function InterviewView({ draftId, projectName, goal, onBack, onHandoff, s
     setAnsweredCount((n) => n + 1);
   };
 
-  const submitFollowup = async (key: string, text: string) => {
-    const d = await api.putBrief(draftId, { [key]: text });
-    setCoverage(d.coverage);
-    setAnsweredCount((n) => n + 1);
-  };
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: T.bg, fontFamily: T.sans }}>
@@ -149,8 +125,6 @@ export function InterviewView({ draftId, projectName, goal, onBack, onHandoff, s
               <span style={{ font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary }}>Loading…</span>
             ) : current?.kind === "reflection" ? (
               <ReflectionQuestionCard question={current.question} onResolve={resolveQuestion} />
-            ) : current?.kind === "brief" ? (
-              <BriefFollowupCard label={current.label} prompt={current.prompt} onSubmit={(text) => submitFollowup(current.key, text)} />
             ) : (
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 4px" }}>
                 <Icon name="check" size={16} color={T.success} />
@@ -189,22 +163,3 @@ function ReflectionQuestionCard({ question, onResolve }: {
   );
 }
 
-function BriefFollowupCard({ label, prompt, onSubmit }: { label: string; prompt: string; onSubmit: (text: string) => Promise<void> }) {
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const submit = async () => {
-    if (text.trim().length < 24 || busy) return;
-    setBusy(true);
-    try { await onSubmit(text.trim()); } finally { setBusy(false); }
-  };
-  return (
-    <div>
-      <CategoryLabel tone="brand" style={{ marginBottom: 8 }}>{label}</CategoryLabel>
-      <p style={{ margin: "0 0 12px", font: `500 14px/1.4 ${T.sans}`, color: T.fg }}>{prompt}</p>
-      <TextArea rows={4} value={text} onChange={setText} placeholder="A sentence or two is enough…" />
-      <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-        <Btn variant="secondary" size="sm" disabled={text.trim().length < 24 || busy} onClick={submit}>{busy ? "Saving…" : "Continue"}</Btn>
-      </div>
-    </div>
-  );
-}

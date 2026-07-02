@@ -103,16 +103,14 @@ def project_deployments(pid: str, v: tuple = Depends(authorize_project)):
 
 @router.get("/api/projects/{pid}/brief")
 def project_brief(pid: str, v: tuple = Depends(authorize_project)):
-    """The structured onboarding brief (shared by the chat interview and the brief form).
-    SOF-37/SOF-60: also carries the reflection surface — assumptions (reference-backed, from
-    ready doc_summary rows) and reflection_questions (raised by the Concierge, awaiting an
-    answer/dismissal — see the promote-route gate below)."""
-    from software_factory.brief import coverage as _cov
+    """The concierge-finalized product brief (markdown; null until the concierge records the
+    kind='product_brief' artifact). SOF-37/SOF-60: also carries the reflection surface —
+    assumptions (reference-backed, from ready doc_summary rows) and reflection_questions
+    (raised by the Concierge, awaiting an answer/dismissal — see the promote-route gate below)."""
     from software_factory.memory.store import MemoryStore
-    brief = state.console.draft_brief(pid)
     project_state = state.console._load_state(pid)
     return {
-        "brief": brief, "coverage": _cov(brief),
+        "brief_markdown": state.console.product_brief(pid),
         "assumptions": MemoryStore().assumptions("project", pid),
         "reflection_questions": project_state.reflection_questions,
     }
@@ -120,11 +118,12 @@ def project_brief(pid: str, v: tuple = Depends(authorize_project)):
 
 @router.put("/api/projects/{pid}/brief")
 def update_project_brief(pid: str, body: dict, v: tuple = Depends(authorize_project)):
-    """Edit the brief from the form. Body: {section: text, ...} (only known sections persist)."""
-    from software_factory.brief import BRIEF_SECTIONS
-    sections = {k: v2 for k, v2 in (body or {}).items() if k in BRIEF_SECTIONS}
-    cov = state.console.update_draft_brief(pid, sections)
-    return {"brief": state.console.draft_brief(pid), "coverage": cov}
+    """Thin goal/scope editor (post-promote 'Edit brief' in the Overview tab). Body:
+    {goals?: str, scope?: list}. Writes through set_draft_project, which recomposes the
+    canonical description; the product brief itself is the Concierge-authored artifact and is
+    not editable here. Returns {name, goal, scope, description}."""
+    body = body or {}
+    return state.console.set_draft_project(pid, goal=body.get("goals"), scope=body.get("scope"))
 
 
 @router.get("/api/projects/{pid}/events")
@@ -393,7 +392,7 @@ def project_stop(pid: str, v: tuple = Depends(authorize_project)):
 def project_relaunch(pid: str, v: tuple = Depends(authorize_project)):
     """Mint a fresh run from the spec of a stopped or done project.
 
-    Creates a NEW project_id seeded from the source's description, brief, scope, runtime,
+    Creates a NEW project_id seeded from the source's description, goal, scope, runtime,
     models, budget ceiling, creds_vault_ids, and input materials. Source run is untouched.
     Returns the new project_id. 409 if the source is not stopped or done."""
     email, _role, _ok = v
@@ -457,7 +456,7 @@ def project_release(pid: str, v: tuple = Depends(authorize_project)):
 @router.get("/api/projects/{pid}/draft")
 def get_draft(pid: str, v: tuple = Depends(authorize_project)):
     """Read the draft's intake fields to REHYDRATE the onboarding form when resuming an existing draft
-    (the read counterpart to PATCH /draft). Returns {name, goal, scope, description, brief, coverage}.
+    (the read counterpart to PATCH /draft). Returns {name, goal, scope, description}.
     Draft-only: a promoted project has no editable draft intake."""
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
@@ -541,9 +540,10 @@ def resolve_reflection_question(pid: str, question_id: str, body: ReflectionAnsw
 @router.post("/api/projects/{pid}/promote")
 def promote_draft(pid: str, body: PromoteIn, v: tuple = Depends(authorize_project)):
     """Hand off to the factory: promote the draft into a real run and launch Stage 1. The composed
-    state.description + accumulated brief are the payload (description override optional).
+    state.description + concierge-finalized product brief are the payload (description override
+    optional).
 
-    SOF-52: the brief-completeness (SOF-51) + open-reflection-questions (SOF-37) trust gate now
+    SOF-52: the open-reflection-questions (SOF-37) trust gate now
     lives in console.promote_draft() itself, not here — it raises services.errors.Conflict, which
     app.py's global ServiceError handler serializes to the exact same 409 shape this route used
     to build inline. Gate-by-construction: every caller of that method is covered, not just this

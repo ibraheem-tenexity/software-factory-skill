@@ -64,6 +64,22 @@ def _key_source(runtime: str, creds_provided: list) -> str:
     return "BYOK" if runner_key in (creds_provided or []) else "TENEXITY"
 
 
+def _compose_description(goal: str, scope=None) -> str:
+    """The CANONICAL project description = goal prose + an appended scope-of-work line.
+
+    Single source of truth for the Option C onboarding format (the frontend used to do this as
+    composeDescription; it lives server-side so the form and the concierge agent produce identical
+    strings). Scope is a list of work-area labels (e.g. ["Quoting / RFQ", "Pricing & approvals"]).
+    Empty scope → just the goal; empty goal + scope → just the scope line.
+    """
+    goal = (goal or "").strip()
+    items = [s.strip() for s in (scope or []) if s and s.strip()]
+    if not items:
+        return goal
+    line = "Scope of work: " + ", ".join(items) + "."
+    return f"{goal}\n\n{line}" if goal else line
+
+
 @dataclass
 class ProjectRequest:
     description: str
@@ -117,10 +133,10 @@ def _orchestration_preamble(stage_title: str, project_id: str, projects_dir: str
 def make_prompt_stage1(req: ProjectRequest, project_id: str, projects_dir: str, runtime: str = "claude",
                        brief_block: str = "") -> str:
     ctx = f"\n\nContext / detailed input:\n{req.context}" if req.context else ""
-    # The structured onboarding brief (from the interview) is the richest context — inject it
-    # directly so the council seats plan from it; the full block is also at input/brief.md and the
-    # transcript at input/interview.md.
-    brief = (f"\n\nThe user was interviewed; the structured brief follows (also at input/brief.md; "
+    # The concierge-authored product brief is the richest context — inject it directly so the
+    # council seats plan from it; the full markdown is also at input/brief.md and the transcript
+    # at input/interview.md.
+    brief = (f"\n\nThe user was interviewed; the product brief follows (also at input/brief.md; "
              f"full transcript at input/interview.md). Treat it as authoritative project context:\n"
              f"{brief_block.strip()}") if brief_block.strip() else ""
     if req.owner_github_username:
@@ -1098,20 +1114,22 @@ class Console:
         return self._provision_and_launch(project_id, req, gated=req.gated)
 
     def _provision_and_launch(self, project_id: str, req: ProjectRequest, *, gated: bool = False,
-                              brief: dict | None = None, interview_md: str | None = None,
-                              product_brief_md: str | None = None) -> str:
+                              interview_md: str | None = None) -> str:
         """Provision a run dir (id already minted), persist state, and launch Stage 1 (unless
         gated). Shared by start_project (fresh mint) and promote_draft (existing draft id)."""
         paths = self._paths(project_id)
         os.makedirs(paths["base"], exist_ok=True)
 
         # input -> (pdf/docx->markdown[+images]) -> markdown + prompt -> composed Stage 1 input,
-        # plus the structured brief + interview transcript when promoting an interviewed draft.
-        # SOF-63: a Concierge-finalized product brief supersedes the raw composition as context.md.
+        # plus the interview transcript when promoting an interviewed draft.
+        # SOF-63: a Concierge-finalized product brief (the kind='product_brief' ARTIFACT, written
+        # by the Concierge's finalize_product_brief tool — the single source, per the operator's
+        # storage ruling) supersedes the raw composition as context.md.
+        brief_block = self.product_brief(project_id) or ""
         written = persist_and_compose(
             paths["input_dir"], req.description, req.context_files or [],
-            extract=self._extract, brief=brief, interview_md=interview_md,
-            product_brief_md=product_brief_md,
+            extract=self._extract, interview_md=interview_md,
+            product_brief_md=brief_block or None,
         )
         input_db = ProjectStore(paths["db"])
         for name in written:
@@ -1165,8 +1183,6 @@ class Console:
         if not state.created_by:
             state.created_by = state.owner
             state.created_at = time.time()
-        if brief is not None:
-            state.brief = brief
         state.save()
 
         if gated:
@@ -1174,10 +1190,6 @@ class Console:
             # credential VALUES are not persisted (names only), so gated runs rely on the
             # stage-3 deps flow for app credentials.
             return project_id
-        brief_block = ""
-        if brief:
-            from .brief import brief_to_prompt_block
-            brief_block = brief_to_prompt_block(brief)
         prompt = make_prompt_stage1(req, project_id, self._projects_dir, runtime=state.runtime,
                                     brief_block=brief_block)
         self._launch_stage(project_id, 1, prompt, env)
@@ -1212,17 +1224,35 @@ class Console:
         state.opencode_model = model if model in _OPENCODE_MODEL_IDS else ""
         if budget is not None and float(budget) > 0:
             state.budget_ceiling = float(budget)
-        state.brief = {}
-        state.interview_coverage = {}
         state.save()
         return project_id
 
     def is_draft(self, project_id: str) -> bool:
         return self._load_state(project_id).phase == "draft"
 
-    def draft_brief(self, project_id: str) -> dict:
-        """The accumulated brief for a draft (read-only copy)."""
-        return dict(self._load_state(project_id).brief or {})
+    def product_brief(self, project_id: str) -> str | None:
+        """The concierge-finalized product brief (markdown), read from the NEWEST artifact row
+        with kind='product_brief' (recorded by the concierge's finalize_product_brief tool).
+        The artifact's `content` column carries the markdown when present (PR #277); a
+        path-only row falls back to reading that file under the run base dir. None = no brief
+        has been finalized for this project."""
+        paths = self._paths(project_id)
+        rows = [a for a in ProjectStore(paths["db"]).artifacts()
+                if (a.get("kind") or "") == "product_brief"]
+        if not rows:
+            return None
+        row = rows[-1]  # artifacts() is ordered by insert id → last matching row is the newest
+        content = row.get("content")
+        if content:
+            return content
+        path = row.get("path") or ""
+        if path:
+            try:
+                with open(os.path.join(paths["base"], path)) as f:
+                    return f.read()
+            except OSError:
+                return None
+        return None
 
     def attach_to_draft(self, project_id: str, files: list) -> list[str]:
         """Persist + extract files attached during the interview into the draft's input/ (PDF/DOCX
@@ -1256,39 +1286,23 @@ class Console:
             db.record_artifact("input", "input/" + name, kind="context")
         return [w for w in written if w != "context.md"]
 
-    def update_draft_brief(self, project_id: str, brief: dict, coverage: dict | None = None) -> dict:
-        """Merge brief sections into a draft and persist. Returns the updated coverage so the
-        concierge can see progress. Idempotent."""
-        state = self._load_state(project_id)
-        merged = dict(state.brief or {})
-        merged.update({k: v for k, v in (brief or {}).items() if v})
-        state.brief = merged
-        if coverage is not None:
-            state.interview_coverage = coverage
-        state.save()
-        from .brief import coverage as _cov
-        return state.interview_coverage or _cov(merged)
-
     def draft_project(self, project_id: str) -> dict:
-        """Read-only project projection of a draft (name + goal + scope + composed description +
-        brief + coverage) — the counterpart of set_draft_project, for the concierge's get_intake_state."""
-        from .brief import coverage as _cov
+        """Read-only project projection of a draft (name + goal + scope + composed description) —
+        the counterpart of set_draft_project, for the concierge's get_intake_state."""
         state = self._load_state(project_id)
-        brief = dict(state.brief or {})
-        return {"name": state.name, "goal": brief.get("goals", ""), "scope": list(state.scope or []),
-                "description": state.description or "", "brief": brief, "coverage": _cov(brief)}
+        return {"name": state.name, "goal": state.goal or "", "scope": list(state.scope or []),
+                "description": state.description or ""}
 
     def set_draft_project(self, project_id: str, name: str | None = None,
                           goal: str | None = None, scope: list | None = None,
                           runtime: str | None = None, model: str | None = None) -> dict:
         """Structured project setter for the Option C onboarding (draft phase). Writes the project
-        name, the goal (into brief.goals so it reaches the Stage-1 brief block), the scope-of-work
-        backing, and the build-engine runtime (claude|opencode) — then RECOMPOSES the canonical
-        description = compose(goal, scope) server-side, so the form and the concierge agent never
-        duplicate the format. Each field is optional; goal and scope recompose against each other's
-        persisted value so independent calls stay idempotent.
-        Returns {name, goal, scope, description, brief, coverage}."""
-        from .brief import compose_description, coverage as _cov
+        name, the plain goal (state.goal), the scope-of-work backing, and the build-engine runtime
+        (claude|opencode) — then RECOMPOSES the canonical description = compose(goal, scope)
+        server-side, so the form and the concierge agent never duplicate the format. Each field is
+        optional; goal and scope recompose against each other's persisted value so independent
+        calls stay idempotent.
+        Returns {name, goal, scope, description}."""
         state = self._load_state(project_id)
         if name is not None:
             state.name = name
@@ -1296,21 +1310,19 @@ class Console:
             state.runtime = runtime
         if model is not None:
             state.opencode_model = model if model in _OPENCODE_MODEL_IDS else ""
-        brief = dict(state.brief or {})
         if goal is not None:
-            brief["goals"] = goal
-            state.brief = brief
+            state.goal = goal
         if scope is not None:
             state.scope = list(scope)
         # Recompose only when there's something to compose from (avoid clobbering a hand-set
         # description with an empty string before any project answer exists).
-        eff_goal = brief.get("goals", "") or ""
+        eff_goal = state.goal or ""
         eff_scope = state.scope or []
         if eff_goal or eff_scope:
-            state.description = compose_description(eff_goal, eff_scope)
+            state.description = _compose_description(eff_goal, eff_scope)
         state.save()
-        return {"name": state.name, "goal": brief.get("goals", ""), "scope": list(state.scope or []),
-                "description": state.description or "", "brief": brief, "coverage": _cov(brief)}
+        return {"name": state.name, "goal": state.goal or "", "scope": list(state.scope or []),
+                "description": state.description or ""}
 
     def store_draft_creds(self, project_id: str, credentials: dict) -> dict:
         """Vault-store BYOK credentials against a draft and record the vault UUIDs in state.
@@ -1343,29 +1355,25 @@ class Console:
     def promote_draft(self, project_id: str, description: str = "",
                       interview_md: str | None = None, target: str = "railway") -> str:
         """Promote a draft into a real run: launch Stage 1 against the EXISTING draft id, threading
-        the accumulated brief + interview transcript into the Stage-1 input. No new id is minted.
+        the concierge-finalized product brief + interview transcript into the Stage-1 input. No
+        new id is minted.
 
         SOF-52: the trust gate lives HERE, not just at the HTTP router (SOF-51/SOF-37) — every
         caller (the promote route, the concierge's hand_off_to_factory tool, any future one) goes
         through this method, so raising here gates by construction instead of by each caller
-        remembering to check first. Raises Conflict (409, same wire shape the router used to
-        build inline — app.py's global ServiceError handler serializes exc.detail verbatim) when
-        the brief is missing a required section or a reflection question is still open."""
-        from .brief import enough as _enough
+        remembering to check first. The USER decides readiness; the only gate is open reflection
+        questions. Raises Conflict (409, same wire shape the router used to build inline —
+        app.py's global ServiceError handler serializes exc.detail verbatim) when a reflection
+        question is still open."""
         from .services.errors import Conflict
         state = self._load_state(project_id)
-        ready, missing_sections = _enough(state.brief or {})
         open_questions = [q for q in (state.reflection_questions or []) if q["status"] == "open"]
-        if not ready or open_questions:
-            detail = {"error": "project is not ready to promote"}
-            if not ready:
-                detail["missing_sections"] = missing_sections
-            if open_questions:
-                detail["open_questions"] = open_questions
+        if open_questions:
+            detail = {"error": "project is not ready to promote",
+                      "open_questions": open_questions}
             raise Conflict(detail)
-        brief = dict(state.brief or {})
-        # The description anchors the prompt; prefer an explicit one, else the brief's goals.
-        desc = (description or state.description or brief.get("goals") or "").strip()
+        # The description anchors the prompt; prefer an explicit one, else the plain goal.
+        desc = (description or state.description or state.goal or "").strip()
         req = ProjectRequest(
             description=desc,
             target=target or state.deploy_target or "railway",
@@ -1379,8 +1387,7 @@ class Console:
         state.phase = "provision"
         state.held = False
         state.save()
-        return self._provision_and_launch(project_id, req, brief=brief, interview_md=interview_md,
-                                          product_brief_md=state.product_brief_md or None)
+        return self._provision_and_launch(project_id, req, interview_md=interview_md)
 
     def relaunch_project(self, source_id: str, owner: str = "") -> str:
         """Mint a fresh run from the same spec as a stopped/done project.
@@ -1409,8 +1416,7 @@ class Console:
 
         state = self._load_state(new_id)
         state.description = source_state.description
-        state.brief = dict(source_state.brief or {})
-        state.interview_coverage = dict(source_state.interview_coverage or {})
+        state.goal = source_state.goal or ""
         state.scope = list(source_state.scope or [])
         state.runtime = source_state.runtime or os.environ.get("SF_RUNTIME", "claude")
         state.planning_model = source_state.planning_model
@@ -1439,7 +1445,7 @@ class Console:
             owner=state.owner,
             owner_github_username=source_state.owner_github_username,
         )
-        return self._provision_and_launch(new_id, req, brief=state.brief)
+        return self._provision_and_launch(new_id, req)
 
     def deployments(self, project_id: str) -> dict:
         """Per-deliverable deployments (a run ships 1..N apps; no single run-level deploy_url)."""
@@ -2242,14 +2248,12 @@ class Console:
         """Update a project's name / scope / description / summary in place (post-promotion edit).
         When `scope` is given the description is recomposed (goal + scope line), exactly like the
         draft setter. `summary` is the customer-facing blurb (populated externally)."""
-        from .brief import compose_description
         state = self._load_state(project_id)
         if name is not None:
             state.name = name
         if scope is not None:
             state.scope = list(scope)
-            goal = (state.brief or {}).get("goals", "") or ""
-            state.description = compose_description(goal, state.scope)
+            state.description = _compose_description(state.goal or "", state.scope)
         elif description is not None:
             state.description = description
         if summary is not None:

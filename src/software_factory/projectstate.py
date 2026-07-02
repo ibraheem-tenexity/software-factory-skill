@@ -46,7 +46,7 @@ _PERSISTED = {
     "planning_model", "impl_model", "opencode_model",
     "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
     "budget_ceiling", "deploy_db_attempts", "deploy_db_service_id", "deploy_db_volume_id", "held", "owner",
-    "brief", "interview_coverage", "scope", "is_demo", "archived",
+    "goal", "scope", "is_demo", "archived",
     "summary",
     "created_by", "created_at",
     "creds_vault_ids",
@@ -59,7 +59,6 @@ _PERSISTED = {
     "memory_overview",
     "reflection_questions",
     "concierge_notes",
-    "product_brief_md",
 }
 
 
@@ -88,10 +87,10 @@ class ProjectState:
     # (concierge-agent-spec.md §5). Persisted into the same projectstate.data JSON blob as
     # memory_overview — the "no third table" pattern — and read back by get_from_project_memory.
     concierge_notes: list = field(default_factory=list)
-    # SOF-63: the Concierge's finalized, painstakingly-detailed product brief (its
-    # finalize_product_brief tool writes this). When set, promote uses IT as the Stage-1
-    # context.md instead of make_prompt's dumb description+raw-doc concatenation.
-    product_brief_md: str = ""
+    # SOF-63 NOTE: the Concierge's finalized product brief is NOT state — it's the
+    # kind='product_brief' ARTIFACT (markdown in artifacts.content, newest row wins; written by
+    # finalize_product_brief, read by Console.product_brief). At promote it supersedes
+    # make_prompt's raw composition as the Stage-1 context.md (input_pipeline.persist_and_compose).
     repo_url: Optional[str] = None
     deploy_url: Optional[str] = None
     # Proof marker — stamped at provision so the run carries a receipt of which skill drove it.
@@ -137,13 +136,12 @@ class ProjectState:
     # Whether the invite succeeded is NOT mirrored here — like demo-creds, it's a recorded
     # 'repo-shared' artifact (see console.repo_shared_with_owner), the single source of truth.
     owner_github_username: str = ""
-    # Structured onboarding brief (see brief.BRIEF_SECTIONS) + per-section covered flags. Accumulated
-    # during the pre-run interview (phase == "draft") and injected into the Stage-1 PRD prompt.
-    brief: dict = field(default_factory=dict)
-    interview_coverage: dict = field(default_factory=dict)
-    # Option C "scope of work" selections (e.g. ["Quoting / RFQ", ...]). NOT a brief section —
-    # the structured backing for the project description: description = compose(brief.goals, scope),
-    # recomposed idempotently whenever goal or scope changes via Console.set_draft_project.
+    # The plain project goal (one prose answer from intake). The structured brief is the
+    # Concierge-authored product_brief ARTIFACT (kind='product_brief'), not state.
+    goal: str = ""
+    # Option C "scope of work" selections (e.g. ["Quoting / RFQ", ...]) — the structured backing
+    # for the project description: description = compose(goal, scope), recomposed idempotently
+    # whenever goal or scope changes via Console.set_draft_project.
     scope: list = field(default_factory=list)
 
     # Tenexity OS REAL/DEMO toggle (§3.3). False = real customer project; True = demo/internal.

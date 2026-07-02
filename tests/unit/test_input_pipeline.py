@@ -148,15 +148,15 @@ def test_docx_falls_back_to_text_when_image_deps_missing(tmp_path, monkeypatch):
     assert "# Fallback text" in open(os.path.join(str(tmp_path), "spec.docx.md")).read()
 
 
-def test_brief_and_interview_are_written_when_supplied(tmp_path):
+def test_interview_is_written_when_supplied(tmp_path):
+    """The 7-section brief dict / brief.md are gone — the Concierge's product brief supersedes
+    context.md instead (covered by the SOF-63 tests above). Only interview.md remains here."""
     import os
     written = persist_and_compose(
         str(tmp_path), "build it", [],
-        brief={"goals": "A cargo screening prototype for ground handlers."},
         interview_md="USER: build cargo screening\nAI: on it",
     )
-    assert "brief.md" in written and "interview.md" in written
-    assert "PROJECT BRIEF" in open(os.path.join(str(tmp_path), "brief.md")).read()
+    assert "interview.md" in written and "brief.md" not in written
     assert "cargo screening" in open(os.path.join(str(tmp_path), "interview.md")).read()
 
 
