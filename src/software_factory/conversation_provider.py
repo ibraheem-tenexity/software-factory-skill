@@ -96,9 +96,9 @@ def _openai_message(row: dict, resolve_image) -> list[dict]:
                  for b in blocks if b["type"] == TOOL_USE]
 
     provider_role = {"user": "user", "agent": "assistant", "system": "system"}[role]
-    msg: dict = {"role": provider_role}
-    if content_parts or not tool_calls:
-        msg["content"] = content_parts
+    # `content` is ALWAYS present: LangChain's message conversion KeyErrors on a missing key, and
+    # OpenAI accepts "" alongside tool_calls — a tool_calls-only assistant message gets content "".
+    msg: dict = {"role": provider_role, "content": content_parts if content_parts else ""}
     if tool_calls:
         msg["tool_calls"] = tool_calls
     return [msg]

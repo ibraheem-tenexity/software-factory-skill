@@ -50,21 +50,27 @@ def build_project_tools(console: Console, project_id: str) -> list:
     def get_from_project_memory(query: str) -> str:
         """Search everything known about THIS project — ingested documents, the rolled-up
         overview, and notes you've saved — and return the most relevant results for `query`."""
-        matches = memory_search.search("project", project_id, query)
-        overview = store.overview("project", project_id)
-        state = console._load_state(project_id)
-        return json.dumps({
-            "matches": matches,
-            "overview": overview.get("rollup"),
-            "notes": list(state.concierge_notes or []),
-        }, default=str)
+        try:
+            matches = memory_search.search("project", project_id, query)
+            overview = store.overview("project", project_id)
+            state = console._load_state(project_id)
+            return json.dumps({
+                "matches": matches,
+                "overview": overview.get("rollup"),
+                "notes": list(state.concierge_notes or []),
+            }, default=str)
+        except Exception as exc:  # a broken tool must degrade the answer, never kill the chat
+            return f"memory search unavailable ({type(exc).__name__}: {exc}) — answer from the conversation and your context."
 
     @tool
     def create_project_summary() -> str:
         """Recompute and return the project's memory summary — the rollup over every ingested
         document. Call after documents finish ingesting, or when the user asks what you know."""
-        _recompute_project_rollup(console, project_id, store)
-        return store.overview("project", project_id).get("rollup") or "(no summary yet)"
+        try:
+            _recompute_project_rollup(console, project_id, store)
+            return store.overview("project", project_id).get("rollup") or "(no summary yet)"
+        except Exception as exc:  # degrade, never kill the chat
+            return f"summary unavailable ({type(exc).__name__}: {exc})"
 
     @tool
     def check_project_status() -> str:
@@ -99,7 +105,7 @@ def build_project_tools(console: Console, project_id: str) -> list:
         once there are several documents — don't search everything by default."""
         try:
             hits = memory_search.search_documents("project", project_id, query)
-        except ValueError as exc:
+        except Exception as exc:
             return f"search failed: {exc}"
         return json.dumps(hits, default=str)
 

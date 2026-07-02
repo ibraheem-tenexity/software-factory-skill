@@ -1,1 +1,1 @@
-from usage import Usage
+from .usage import Usage
