@@ -44,9 +44,14 @@ def test_name_and_summary_persist_in_columns_not_json(tmp_path):
     st.description = "goal prose"
     st.save()
     # raw row: name/summary live in the columns and are absent from the blob; other fields stay in it.
-    row = db._conn.execute(
-        "SELECT data, name, summary FROM projectstate WHERE project_id = ?", ("project-1",)
-    ).fetchone()
+    from software_factory import dbshim
+    conn = dbshim.connect(str(tmp_path / "project-1"))
+    try:
+        row = conn.execute(
+            "SELECT data, name, summary FROM projectstate WHERE project_id = ?", ("project-1",)
+        ).fetchone()
+    finally:
+        conn.close()
     blob = json.loads(row["data"])
     assert "name" not in blob and "summary" not in blob
     assert blob["description"] == "goal prose"

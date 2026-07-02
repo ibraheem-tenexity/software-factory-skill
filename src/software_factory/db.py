@@ -66,8 +66,7 @@ class ProjectStore:
         os.makedirs(path or ".", exist_ok=True)
         self._project_id = project_id_from_path(path)
         # Postgres; schema owned by Alembic (prod) / tests. All SQL is in repositories/canvas.py.
-        self._exec = PathExec(path)
-        self._conn = self._exec._conn  # back-compat: a diagnostic test reads the raw PgConn directly
+        self._exec = PathExec(path)  # per-call checkout — nothing is held between statements
         # Live getter via a WEAKREF, not a closure over `self` directly: a closure capturing `self`
         # and stored on an attribute `self` owns (self._phase_repo, etc.) is a reference CYCLE — CPython
         # won't return the pooled connection to dbshim's pool until the cyclic GC eventually runs,

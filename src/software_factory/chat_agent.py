@@ -7,6 +7,7 @@ the model/context constants in `constants.py`, and the tool belt in `concierge_t
 """
 from __future__ import annotations
 
+import logging
 import os
 
 from langchain.agents import create_agent
@@ -24,6 +25,8 @@ from software_factory.default_prompt import build_system_prompt
 
 # Model type → chat model class. Kimi (Moonshot) speaks the OpenAI wire protocol, so it's the same
 # client class with a different base_url/key — the map is the single place that knowledge lives.
+logger = logging.getLogger(__name__)
+
 CHAT_MODEL_CLASSES: dict[str, type[ChatOpenAI]] = {"openai": ChatOpenAI, "kimi": ChatOpenAI}
 
 
@@ -126,15 +129,19 @@ class ChatAgent:
             response_format=ToolStrategy(ConciergeTurn),
         )
 
-    async def run(self, messages: list) -> ConciergeTurn:
-        """Run the agent over the conversation history and return the terminal ConciergeTurn.
-        One retry, then a safe fallback — a bad generation never 500s the turn (spec §3).
-        Side effect: `self.last_usage` carries this turn's real model/token/cost usage."""
-        for _ in range(2):
+    async def run(self, messages: list) -> dict:
+        """Run the agent over the history array and return the RAW result — `messages` (everything
+        the run produced: tool calls, tool results, replies) plus `structured_response`. No "turn"
+        abstraction: the caller appends the produced messages to its array and that's it.
+        One retry, then a safe fallback — a bad generation never 500s the request.
+        Side effect: `self.last_usage` carries this run's real model/token/cost usage."""
+        for attempt in range(2):
             try:
                 result = await self._agent.ainvoke({"messages": messages})
                 self.last_usage = _extract_usage(result.get("messages") or [])
-                return result["structured_response"]
+                return result
             except Exception:
+                logger.exception("[chat_agent] run attempt %s failed", attempt + 1)
                 continue
-        return ConciergeTurn(response=CONCIERGE_SAFE_FALLBACK, suggested_responses=[])
+        return {"messages": [],
+                "structured_response": ConciergeTurn(response=CONCIERGE_SAFE_FALLBACK, suggested_responses=[])}

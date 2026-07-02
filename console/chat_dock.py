@@ -73,7 +73,7 @@ class ChatDock:
         context = self._context_for_project(project_id) if project_id else "build"
         agent = self._get_agent(project_id, context)
         try:
-            turn = await agent.run(history)
+            turn = (await agent.run(history))["structured_response"]
         except Exception as e:
             yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
             return

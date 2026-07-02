@@ -1,8 +1,9 @@
 """Two execution lanes for repositories, both over the existing `dbshim` pool — no new SQLAlchemy
 Engine, so the tuned pool/retry/idle-reaper and Supabase-pooler settings are preserved.
 
-- `PathExec`: per-project stores (constructed with a run `path`). Wraps a `dbshim.connect(path)`
-  `PgConn`; every statement is its own autocommit transaction (matching today's per-project stores).
+- `PathExec`: per-project stores (constructed with a run `path`). Checks out a pooled `PgConn` per
+  CALL (`dbshim.connect(path)`) and returns it in a finally; every statement is its own autocommit
+  transaction (matching today's per-project stores).
 - `GlobalExec`: global singleton stores. Checks out a pooled connection per call, runs the statement
   in its own transaction, and returns it (matching today's `users.py`/`blobs.py`/`registries.py`).
 
@@ -17,29 +18,50 @@ from ._compile import to_sql
 
 
 class PathExec:
-    """Per-project lane over a `PgConn` (dbshim.connect(path))."""
+    """Per-project lane over a `PgConn` (dbshim.connect(path)) — one checkout PER CALL.
+
+    Construction used to check out a PgConn and hold it for the object's whole lifetime. The store
+    objects built on this lane (ProjectStore/TicketStore/…) are constructed per-request all over
+    the console, and several are alive at once inside a single call (e.g. `Console.status`), so
+    each in-flight request pinned 3-4 of the pool's `_POOL_MAX=10` slots even while idle — a
+    page-load burst of parallel GETs plus the 3s background poller saturated the pool, and every
+    `getconn()` waiter then held its own already-checked-out conns for the full 5s wait before
+    raising "DB pool exhausted" (#126's no-silent-growth cap, kept intact). Checking out per call,
+    like `GlobalExec`, means a slot is held only while a statement actually runs. Semantics are
+    unchanged: every statement was already its own autocommit transaction on PgConn, and the
+    cursor buffers rows client-side so it stays valid after the conn returns to the pool."""
 
     def __init__(self, path: str):
-        self._conn = dbshim.connect(path)
+        self._path = path
 
     def fetchall(self, stmt) -> list:
         sql, params = to_sql(stmt)
-        return self._conn.execute(sql, params).fetchall()
+        conn = dbshim.connect(self._path)
+        try:
+            return conn.execute(sql, params).fetchall()
+        finally:
+            conn.close()
 
     def fetchone(self, stmt):
         sql, params = to_sql(stmt)
-        return self._conn.execute(sql, params).fetchone()
+        conn = dbshim.connect(self._path)
+        try:
+            return conn.execute(sql, params).fetchone()
+        finally:
+            conn.close()
 
     def execute(self, stmt):
         """Run a write; returns the cursor (`.rowcount`, `.lastrowid`, or a RETURNING row via
-        `.fetchone()`). Commit is a no-op on PgConn (per-statement autocommit) but called for parity."""
+        `.fetchone()`). No commit needed: every statement is its own autocommit transaction."""
         sql, params = to_sql(stmt)
-        cur = self._conn.execute(sql, params)
-        self._conn.commit()
-        return cur
+        conn = dbshim.connect(self._path)
+        try:
+            return conn.execute(sql, params)
+        finally:
+            conn.close()
 
     def close(self) -> None:
-        self._conn.close()
+        pass  # nothing held between calls; kept for the existing `try/finally exec_.close()` sites
 
 
 class GlobalExec:

@@ -3,11 +3,13 @@
 // the "Factory console" tab is a NAV CALLBACK into the existing console (onOpenFactory) — it is NOT
 // rendered inline, so this stays fully decoupled from the factory components.
 import { useEffect, useRef, useState } from "react";
-import { api, ProjectSummary } from "../../api";
+import { api, ProjectSummary, Graph, Ticket } from "../../api";
 import { T, Icon, Btn, StatusPill, Wordmark, TextInput } from "../onboarding/design";
 import { AccountMenu } from "../AccountMenu";
 import { OverviewTab } from "./OverviewTab";
 import { DocumentsTab } from "./DocumentsTab";
+import { Concierge } from "../factory/Concierge";
+import { artifactsFromGraph, openArtifact, ArtifactRef } from "../factory/Artifacts";
 
 type Tab = "overview" | "documents";
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
@@ -55,6 +57,25 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume, onOpen
   useEffect(() => {
     api.status(projectId).then(setStatus).catch(() => setStatus(null));
   }, [projectId]);
+
+  // The persistent Concierge dock (design concierge.jsx ProjectConcierge): one always-visible
+  // rail shared by Overview · Factory console · Documents — same shell everywhere. The console
+  // tab renders its own (FactoryConsole); this mounts it on the other two surfaces.
+  const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  useEffect(() => {
+    let live = true;
+    const load = () => {
+      api.graph(projectId).then((g) => { if (live) setGraph(g); }).catch(() => undefined);
+      api.tickets(projectId).then((t) => { if (live) setTickets(t.tickets || []); }).catch(() => undefined);
+    };
+    load();
+    const h = setInterval(load, 15000);
+    return () => { live = false; clearInterval(h); };
+  }, [projectId]);
+  const artifacts = artifactsFromGraph(graph);
+  const doneTickets = tickets.filter((t) => t.status === "approved" || t.status === "done" || t.status === "deployed" || t.status === "qa_testing").length;
+  const openRef = (a: ArtifactRef) => { if (a.url) window.open(a.url, "_blank"); else if (a.id != null) openArtifact(a.id); };
 
   const name = status?.name || projectId;
   const st = status ? statusOf(status) : null;
@@ -145,9 +166,19 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume, onOpen
         </div>
       </div>
 
-      {/* tab content (peer views; Factory console navigates out via onOpenFactory) */}
-      {tab === "overview" && <OverviewTab projectId={projectId} onOpenFactory={onOpenFactory} onOpenDocuments={() => setTab("documents")} onResume={onResume} onDiscard={isDraft ? doArchive : undefined} />}
-      {tab === "documents" && <DocumentsTab projectId={projectId} />}
+      {/* tab content + the persistent Concierge dock (same rail on every surface) */}
+      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          {tab === "overview" && <OverviewTab projectId={projectId} onOpenFactory={onOpenFactory} onOpenDocuments={() => setTab("documents")} onResume={onResume} onDiscard={isDraft ? doArchive : undefined} />}
+          {tab === "documents" && <DocumentsTab projectId={projectId} />}
+        </div>
+        <aside style={{ width: 340, flexShrink: 0, borderLeft: `1px solid ${T.borderSubtle}`, background: T.raised, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <Concierge projectId={projectId} projectName={name} artifacts={artifacts}
+            onOpenArtifact={openRef} isBuilding={!!status && !status.done && status.phase !== "draft" && status.phase !== "stopped"}
+            ticketsDone={doneTickets} ticketsTotal={tickets.length}
+            buildDone={!!status?.done} deployed={!!status?.deploy_url} phase={status?.phase} />
+        </aside>
+      </div>
     </div>
   );
 }
