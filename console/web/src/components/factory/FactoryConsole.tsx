@@ -7,7 +7,7 @@
 //
 // Liveness: polls status + tickets + graph every 4s (agents run server-side; no sim button).
 import { useEffect, useState } from "react";
-import { T, Icon, Wordmark, StatusPill, Btn } from "../onboarding/design";
+import { T, Icon, Wordmark, StatusPill, Btn, Segmented } from "../onboarding/design";
 import { AccountMenu } from "../AccountMenu";
 import { api, phaseIsStale, ProjectSummary, Graph, Ticket } from "../../api";
 import { phaseStatesFromGraph, atWaitForDeps, PhaseStatus, toneForHaltedPhase } from "./pipeline";
@@ -22,7 +22,7 @@ import { KanbanCardSkel, MessageSkel } from "../skeleton";
 
 type Status = ProjectSummary & Record<string, any>;
 type View = "kanban" | "tree" | "map";
-type Doc = { label: string; path?: string; content?: string; id?: number } | null;
+type Doc = { label: string; path?: string; content?: string; id?: number; agent?: string; kind?: string } | null;
 
 const VIEWS: { id: View; label: string; icon: string }[] = [
   { id: "kanban", label: "Kanban", icon: "kanban" },
@@ -44,7 +44,17 @@ function setParam(key: string, value: string | null) {
   history.replaceState(null, "", "?" + p.toString());
 }
 
-export function FactoryConsole({ projectId, onBack }: { projectId: string; onBack: () => void }) {
+// The three §2.5 peer tabs rendered inside the console header (design: buildprogress.jsx:132-143).
+const PEER_TABS: { id: "overview" | "build" | "documents"; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "build", label: "Factory console" },
+  { id: "documents", label: "Documents" },
+];
+
+export function FactoryConsole({ projectId, onBack, onSwitchTab }:
+  { projectId: string; onBack: () => void;
+    // Navigate back to the ProjectView with the given tab active (App threads this through).
+    onSwitchTab?: (tab: "overview" | "documents") => void }) {
   const [status, setStatus] = useState<Status>({} as Status);
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -88,6 +98,11 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
   const delivered = status.done || allTicketsDone;
   const liveUrl = liveArt?.url || status.deploy_url;
 
+  // Open an artifact ref: full viewer when it has an id, else the in-console DocViewer (with the
+  // producing agent + kind so the viewer header can render its badge + "produced by" line).
+  const openDocFromRef = (a: ArtifactRef) =>
+    a.id ? openArtifact(a.id) : setDoc({ label: a.label, path: a.path, agent: a.agent, kind: a.kind });
+
   // Recovery: paused/crashed runs show the RecoveryBar + halted rail state
   const halted = status.phase === "paused" || status.phase === "crashed";
   const haltedNode: string | undefined = status.paused_at_node || status.crashed_at_node;
@@ -101,9 +116,9 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: T.bg, color: T.fg, font: `400 14px/1.5 ${T.sans}` }}>
-      {/* ── top bar ── */}
-      <header style={{ display: "flex", alignItems: "center", gap: 14, padding: "0 18px", height: 56,
-        borderBottom: `1px solid ${T.borderSubtle}`, background: T.raised, flexShrink: 0 }}>
+      {/* ── top bar (+ §2.5 peer-tab strip) ── */}
+      <div style={{ borderBottom: `1px solid ${T.borderSubtle}`, background: T.raised, flexShrink: 0 }}>
+      <header style={{ display: "flex", alignItems: "center", gap: 14, padding: "0 18px", height: 56 }}>
         <button onClick={onBack} style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
           border: "none", background: "transparent", color: T.secondary, font: `500 13px/1 ${T.sans}`, padding: "6px 8px", borderRadius: T.rMd }}>
           <Icon name="arrowLeft" size={15} /> Projects
@@ -149,17 +164,36 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
         )}
         <AccountMenu size={26} />
       </header>
+      {onSwitchTab && (
+        <div style={{ display: "flex", gap: 2, padding: "0 18px" }}>
+          {PEER_TABS.map((t) => {
+            const on = t.id === "build";
+            return (
+              <button key={t.id} onClick={on ? undefined : () => onSwitchTab(t.id as "overview" | "documents")}
+                style={{ position: "relative", padding: "11px 14px", background: "none", border: "none",
+                  cursor: on ? "default" : "pointer", font: `${on ? 600 : 500} 13px/1 ${T.sans}`, color: on ? T.fg : T.secondary }}>
+                {t.label}
+                {on && <span style={{ position: "absolute", left: 10, right: 10, bottom: -1, height: 2, background: T.brand, borderRadius: 2 }} />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      </div>
 
       {/* ── body: Concierge rail + main column ── */}
       <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "340px 1fr", gap: 0 }}>
-        <div style={{ borderRight: `1px solid ${T.borderSubtle}`, padding: 16, overflowY: "auto", background: T.raised }}>
+        <div style={{ borderRight: `1px solid ${T.borderSubtle}`, background: T.raised, minHeight: 0, overflow: "hidden",
+          display: "flex", flexDirection: "column" }}>
           {!loaded ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}>
               {[0, 1, 2].map((i) => <MessageSkel key={i} />)}
             </div>
           ) : (
             <Concierge projectId={projectId} projectName={status.name || ""} artifacts={artifacts}
-              onOpenArtifact={(a) => a.id ? openArtifact(a.id) : setDoc({ label: a.label, path: a.path })} isBuilding={running} />
+              onOpenArtifact={openDocFromRef} isBuilding={running}
+              ticketsDone={doneTickets} ticketsTotal={tickets.length}
+              buildDone={delivered} deployed={!!liveUrl} phase={status.phase} />
           )}
         </div>
 
@@ -184,17 +218,7 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
                 <span style={{ display: "block", height: "100%", width: pct + "%", background: allTicketsDone ? T.success : T.brand, transition: "width .5s" }} />
               </span>
             </div>
-            <div style={{ display: "inline-flex", gap: 2, padding: 2, borderRadius: T.rMd, background: T.sunken, border: `1px solid ${T.borderSubtle}` }}>
-              {VIEWS.map((v) => (
-                <button key={v.id} onClick={() => setView(v.id)}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 11px", borderRadius: 6,
-                    cursor: "pointer", border: "none", font: `500 11.5px/1 ${T.sans}`,
-                    background: view === v.id ? T.raised : "transparent", color: view === v.id ? T.fg : T.tertiary,
-                    boxShadow: view === v.id ? T.shadowXs : "none" }}>
-                  <Icon name={v.icon} size={13} color={view === v.id ? T.brand : T.tertiary} />{v.label}
-                </button>
-              ))}
-            </div>
+            <Segmented value={view} onChange={(v) => setView(v as View)} options={VIEWS} />
           </div>
 
           {view === "kanban" && !loaded && (
@@ -209,8 +233,9 @@ export function FactoryConsole({ projectId, onBack }: { projectId: string; onBac
           )}
           {view === "kanban" && loaded && <BuildBoard tickets={tickets}
             onOpenTicket={(t) => setDoc({ label: `#${t.id} ${t.title}`, content: t.description || "(no description)" })} />}
-          {view === "tree" && <TreeView graph={graph} onOpenArtifact={(path, label, id) => id ? openArtifact(id) : setDoc({ label, path })} />}
-          {view === "map" && <MapView graph={graph} />}
+          {view === "tree" && <TreeView graph={graph} onOpenArtifact={openDocFromRef}
+            ticketsDone={doneTickets} ticketsTotal={tickets.length} onViewBoard={() => setView("kanban")} />}
+          {view === "map" && <MapView graph={graph} onOpenArtifact={openDocFromRef} />}
 
           {/* ── delivery footer ── (design: delivered ⇒ green repo+live; otherwise the QA loop note) */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",

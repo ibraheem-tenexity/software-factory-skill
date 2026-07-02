@@ -51,6 +51,11 @@ export const STAGES: { stage: number; title: string; phases: { id: string; label
 // All phase ids in pipeline order (matches server PIPELINE).
 export const PIPELINE_ORDER = STAGES.flatMap((s) => s.phases.map((p) => p.id));
 
+// Phases flagged as NEW in the pipeline config (design: buildboard.jsx PIPELINE `isNew`). The
+// badge marks genuinely new node KINDS, never whichever phase happens to be active. Currently
+// empty — SOF-73 populates it with product/design when those nodes land.
+export const NEW_PHASES: ReadonlySet<string> = new Set<string>([]);
+
 // Index map for O(1) downstream-of checks.
 const PIPELINE_INDEX: Record<string, number> = Object.fromEntries(PIPELINE_ORDER.map((id, i) => [id, i]));
 

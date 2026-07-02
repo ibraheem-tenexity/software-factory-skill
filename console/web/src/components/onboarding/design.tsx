@@ -223,9 +223,11 @@ export function Chips({ options, value, onChange, multi }:
 
 // Pill-track segmented control (two-option toggle). Options may be disabled — a disabled option
 // renders greyed with a "SOON" tag and is not selectable (used to gate not-yet-wired backend paths).
+// SOF-68: options may carry an `icon` (Icon name) — rendered before the label, brand-tinted when
+// selected (the factory console's Kanban/Tree/Map toggle uses this instead of an inline re-impl).
 export function Segmented({ value, onChange, options }:
   { value: string; onChange?: (v: string) => void;
-    options: { id: string; label: string; disabled?: boolean }[] }) {
+    options: { id: string; label: string; icon?: string; disabled?: boolean }[] }) {
   return (
     <div style={{ display: "inline-flex", padding: 3, gap: 2, background: T.sunken, borderRadius: 9999, border: `1px solid ${T.borderSubtle}` }}>
       {options.map((o) => {
@@ -237,6 +239,7 @@ export function Segmented({ value, onChange, options }:
               background: on ? T.raised : "transparent", color: on ? T.fg : o.disabled ? T.tertiary : T.secondary,
               opacity: o.disabled ? 0.55 : 1, display: "inline-flex", alignItems: "center", gap: 5,
               boxShadow: on ? T.shadowXs : "none" }}>
+            {o.icon && <Icon name={o.icon} size={13} color={on ? T.brand : T.tertiary} />}
             {o.label}
             {o.disabled && <span style={{ font: `700 8px/1 ${T.mono}`, color: T.tertiary, background: T.raised, padding: "2px 4px", borderRadius: 3 }}>SOON</span>}
           </button>
@@ -381,6 +384,64 @@ export function ConfidencePill({ band, score }:
       <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor" }} />
       {map[2]}{score != null ? ` ${score}` : ""}
     </span>
+  );
+}
+
+// ---- artifact chip (SOF-68 · design: buildboard.jsx:113-125 ArtifactChip + KIND_BADGE) ----
+// KIND_BADGE colours are the design's own constants (buildboard.jsx:78-81) — the repo/fig pairs
+// are design-specified values with no T token equivalent, kept verbatim like the design does.
+export const KIND_BADGE: Record<string, [string, string, string]> = {
+  md: ["MD", T.brandSoft, T.brandDeep], repo: ["REPO", "#eceef1", "#30363d"],
+  svg: ["SVG", T.cHighSoft, T.cHigh], fig: ["FIG", "#f3e9fb", "#7a3ea8"],
+};
+
+// Badge triple for a kind. Unknown kinds get a truthful neutral badge from the kind text itself
+// (never the design's KIND_BADGE.md fallback — a .txt artifact must not claim to be markdown).
+export function kindBadgeFor(kind?: string): [string, string, string] {
+  return (kind && KIND_BADGE[kind]) || [(kind || "doc").slice(0, 4).toUpperCase(), T.sunken, T.secondary];
+}
+
+export type ArtifactChipItem = { kind?: string; label: string; note?: string; primary?: boolean };
+
+export function ArtifactChip<A extends ArtifactChipItem>({ a, onOpen, small }:
+  { a: A; onOpen?: (a: A) => void; small?: boolean }) {
+  const k = kindBadgeFor(a.kind);
+  return (
+    <button onClick={() => onOpen && onOpen(a)} title={`Open ${a.label}`}
+      style={{ display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer",
+        padding: small ? "5px 8px" : "6px 9px", borderRadius: T.rMd, border: `1px solid ${a.primary ? T.brand : T.borderSubtle}`,
+        background: a.primary ? T.brandSoft : T.raised, transition: "all .12s", maxWidth: "100%" }}>
+      <span style={{ font: `700 8.5px/1 ${T.mono}`, letterSpacing: "0.04em", color: k[2], background: k[1], padding: "3px 4px", borderRadius: 3, flexShrink: 0 }}>{k[0]}</span>
+      <span style={{ font: `500 12px/1.1 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.label}</span>
+      {a.note && <span style={{ font: `400 10px/1 ${T.mono}`, color: T.tertiary, flexShrink: 0 }}>{a.note}</span>}
+      <Icon name="arrowRight" size={12} color={a.primary ? T.brandDeep : T.tertiary} style={{ flexShrink: 0 }} />
+    </button>
+  );
+}
+
+// Working pill (design: concierge.jsx ConciergeHeader's `working` state) — pulsing brand chip.
+export function WorkingPill({ label = "Working" }: { label?: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 7px", borderRadius: 9999,
+      background: T.brandSoft, border: `1px solid ${T.brand}33` }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.brand, flexShrink: 0, animation: "sfPulse 1.4s ease-in-out infinite" }} />
+      <span style={{ font: `600 10px/1 ${T.mono}`, letterSpacing: "0.06em", color: T.brand }}>{label}</span>
+    </span>
+  );
+}
+
+// Suggestion chips (design: concierge.jsx QuickReplies) — one tap sends the text as the user turn.
+export function QuickReplies({ options, onPick, disabled }:
+  { options: string[]; onPick: (o: string) => void; disabled?: boolean }) {
+  if (!options.length) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+      {options.map((o) => (
+        <button key={o} onClick={() => !disabled && onPick(o)} disabled={disabled}
+          style={{ font: `500 12px/1 ${T.sans}`, padding: "7px 11px", borderRadius: 9999, cursor: disabled ? "default" : "pointer",
+            border: `1px solid ${T.brand}55`, background: T.brandSoft, color: T.brandDeep, opacity: disabled ? 0.6 : 1, transition: "all .12s" }}>{o}</button>
+      ))}
+    </div>
   );
 }
 
