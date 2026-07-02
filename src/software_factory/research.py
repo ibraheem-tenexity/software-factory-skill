@@ -3,8 +3,20 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import httpx
 from dataclasses import dataclass, asdict
+
+# SOF-79: the ORIGINAL set ("google/gemini-flash-2.5", "...-v4-0324") does not exist on
+# OpenRouter and 500s in ~1s — verified live 2026-07-02. This set is confirmed working.
+_ANALYSIS_MODELS = (
+    "google/gemini-2.5-flash",
+    "moonshotai/kimi-k2.6",
+    "deepseek/deepseek-chat-v3-0324",
+)
+# SOF-79: real measured end-to-end latency for a Fusion call is ~165-181s (two live runs);
+# the original 60s timeout killed every successful call before it could complete.
+_FUSION_TIMEOUT_S = 240
 
 
 @dataclass
@@ -106,6 +118,133 @@ Research the company "{name}"{website_hint}{extra_hint} and return a JSON object
 Return ONLY valid JSON. No markdown fences. No commentary."""
 
 
+# ---------------------------------------------------------------------------------------------
+# SOF-79: Fusion (openrouter/fusion) does NOT return JSON even with response_format=json_object
+# — verified live 2026-07-02. It returns MARKDOWN:
+#   ## Panel responses
+#   ### <model-id>                (one per analysis model)
+#   <that model's raw reply — usually a bare JSON object, sometimes fenced ```json ... ```>
+#   ## Analysis
+#   **Consensus**
+#   <bullet text>
+#   **Contradictions**
+#   <bullet text>
+#   [optionally: **Partial coverage** / **Unique insights** / **Blind spots** — free text]
+#   [optionally: a final synthesized/merged JSON object, outside any ### header — undocumented,
+#    observed live, not guaranteed; when present it's a real reconciliation across panels and a
+#    better source than picking one panel arbitrarily]
+# These three helpers are shared by the company-profile path (_fusion_research) and the general
+# question-answering path (fusion_research) below — neither invents data the response didn't
+# provide; a panel that doesn't parse as JSON is skipped, not guessed at.
+# ---------------------------------------------------------------------------------------------
+
+def _extract_json_block(text: str) -> dict | None:
+    """The first fenced-or-bare JSON object in `text`, or None if none parses. Never raises —
+    Fusion's panels are LLM prose with an embedded object, not guaranteed-clean JSON."""
+    fence = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+    candidate = fence.group(1) if fence else text
+    start = candidate.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    for i, ch in enumerate(candidate[start:], start):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(candidate[start:i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
+def _split_fusion_markdown(raw: str) -> tuple[dict[str, str], str]:
+    """Structural split only (no JSON parsing): {model_id: raw_panel_text} and the '## Analysis'
+    section's raw text (empty string if the response has no Analysis section at all)."""
+    panel_section = re.search(r"## Panel responses\s*\n(.*?)(?=\n## |\Z)", raw, re.DOTALL)
+    analysis_section = re.search(r"## Analysis\s*\n?(.*)", raw, re.DOTALL)
+    panels: dict[str, str] = {}
+    if panel_section:
+        chunks = re.split(r"^### (.+)$", panel_section.group(1), flags=re.MULTILINE)
+        # re.split with a capturing group yields [pre, header1, body1, header2, body2, ...].
+        for model, body in zip(chunks[1::2], chunks[2::2]):
+            panels[model.strip()] = body.strip()
+    analysis_text = analysis_section.group(1).strip() if analysis_section else ""
+    return panels, analysis_text
+
+
+def _extract_bold_section(text: str, heading: str) -> str:
+    """Text under a `**Heading**` marker, up to the next `**Bold**` marker or end of `text`."""
+    m = re.search(rf"\*\*{re.escape(heading)}\*\*\s*(.*?)(?=\n\*\*|\Z)", text, re.DOTALL)
+    return m.group(1).strip() if m else ""
+
+
+def _top_level_json_objects(text: str) -> list[dict]:
+    """Every top-level (non-nested) balanced {...} span in `text`, parsed as JSON, in order.
+    Depth-tracks so a nested object (e.g. one competitor entry inside a profile's
+    `competitors` list) is never mistaken for its own top-level object — jumps past the whole
+    outer span once its matching close is found, rather than re-scanning inside it. A malformed
+    span is skipped, not fatal."""
+    objs: list[dict] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] != "{":
+            i += 1
+            continue
+        depth, j = 0, i
+        while j < n:
+            if text[j] == "{":
+                depth += 1
+            elif text[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        if depth == 0:
+            try:
+                objs.append(json.loads(text[i:j + 1]))
+            except json.JSONDecodeError:
+                pass
+            i = j + 1
+        else:
+            i += 1
+    return objs
+
+
+def _synthesized_profile(analysis_text: str) -> dict | None:
+    """A final merged/reconciled JSON object Fusion sometimes appends after the analysis prose
+    (observed live 2026-07-02; not documented anywhere) — preferred over any single panel's raw
+    guess when present, since it reconciles the panels rather than picking one arbitrarily. Must
+    be the LAST TOP-LEVEL object, not just the text's last '{' — a naive rfind("{") finds the
+    opening brace of the last NESTED object instead (e.g. one `competitors` entry near the end
+    of the real profile), silently returning a 3-field competitor stub instead of the profile;
+    caught by testing against the real captured response, not assumed correct from source
+    reading alone."""
+    objs = _top_level_json_objects(analysis_text)
+    return objs[-1] if objs else None
+
+
+def _fusion_post(payload: dict, api_key: str, timeout: float) -> tuple[str, float | None]:
+    """POST to Fusion and return (raw_markdown_content, cost_usd). Shared transport for both
+    the company-profile path and the general question path."""
+    try:
+        resp = httpx.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        raise ResearchError(f"Fusion research failed: {exc}") from exc
+    body = resp.json()
+    raw = body["choices"][0]["message"]["content"]
+    cost_usd = (body.get("usage") or {}).get("cost")
+    return raw, cost_usd
+
+
 def _fusion_research(
     name: str,
     website: str | None,
@@ -116,37 +255,28 @@ def _fusion_research(
     extra_hint = f". Additional context: {extra}" if extra else ""
     prompt = _FUSION_PROMPT.format(name=name, website_hint=website_hint, extra_hint=extra_hint)
 
-    try:
-        resp = httpx.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "openrouter/fusion",
-                "messages": [{"role": "user", "content": prompt}],
-                "plugins": [{
-                    "id": "fusion",
-                    "analysis_models": [
-                        "google/gemini-flash-2.5",
-                        "moonshotai/kimi-k2.6",
-                        "deepseek/deepseek-v4-0324",
-                    ],
-                }],
-                "response_format": {"type": "json_object"},
-            },
-            timeout=60,
-        )
-        resp.raise_for_status()
-    except Exception as exc:
-        raise ResearchError(f"Fusion research failed: {exc}") from exc
+    raw, _cost_usd = _fusion_post(
+        {
+            "model": "openrouter/fusion",
+            "messages": [{"role": "user", "content": prompt}],
+            "plugins": [{"id": "fusion", "analysis_models": list(_ANALYSIS_MODELS)}],
+            "response_format": {"type": "json_object"},
+        },
+        api_key, _FUSION_TIMEOUT_S,
+    )
 
-    raw = resp.json()["choices"][0]["message"]["content"]
-    try:
-        data = json.loads(raw)
-    except Exception as exc:
-        raise ResearchError(f"Failed to parse Fusion JSON response: {exc}") from exc
+    panels_raw, analysis_text = _split_fusion_markdown(raw)
+    panel_json = {m: j for m, t in panels_raw.items() if (j := _extract_json_block(t))}
+    # Fallback to treating the WHOLE response as one bare JSON object if the markdown structure
+    # isn't there at all (no "## Panel responses"/"## Analysis" found) — defensive, not the
+    # normal path (every live call this session returned the full markdown wrapper), in case a
+    # future single-model-panel or config variant ever skips the wrapper.
+    data = (_synthesized_profile(analysis_text) or next(iter(panel_json.values()), None)
+           or _extract_json_block(raw))
+    if data is None:
+        raise ResearchError(
+            f"Fusion response had no parseable panel or synthesized JSON "
+            f"({len(panels_raw)} panel(s) found, 0 parsed)")
 
     return CompanyProfile(
         name=data.get("name") or name,
@@ -164,6 +294,39 @@ def _fusion_research(
     )
 
 
+def fusion_research(question: str, *, api_key: str | None = None,
+                    timeout: float = _FUSION_TIMEOUT_S) -> dict:
+    """General-purpose Fusion research (SOF-79/SOF-73): ask any question, get the per-model
+    panel replies plus the cross-model consensus/contradiction synthesis and real cost. For
+    company-profile enrichment specifically, use research_company(mode='deep') instead — this
+    is the lower-level primitive the Stage-1 research phase (SOF-73) consumes directly.
+
+    Returns {"panels": {model_id: raw_text}, "consensus": str, "contradictions": str,
+    "cost_usd": float | None}. Panel text is kept RAW (not JSON-parsed) — a general research
+    question has no reason to produce structured JSON per panel the way the company-profile
+    prompt does. Raises ResearchError only on a transport failure, never on the response's shape
+    (an empty consensus/contradictions string just means Fusion's markdown didn't include one)."""
+    api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ResearchError("OPENROUTER_API_KEY is not set — required for Fusion research")
+
+    raw, cost_usd = _fusion_post(
+        {
+            "model": "openrouter/fusion",
+            "messages": [{"role": "user", "content": question}],
+            "plugins": [{"id": "fusion", "analysis_models": list(_ANALYSIS_MODELS)}],
+        },
+        api_key, timeout,
+    )
+    panels_raw, analysis_text = _split_fusion_markdown(raw)
+    return {
+        "panels": panels_raw,
+        "consensus": _extract_bold_section(analysis_text, "Consensus"),
+        "contradictions": _extract_bold_section(analysis_text, "Contradictions"),
+        "cost_usd": cost_usd,
+    }
+
+
 def research_company(
     name: str,
     *,
@@ -174,8 +337,10 @@ def research_company(
     """Enrich a company profile.
 
     mode="quick"  — Exa REST search, ~1-3s, requires EXA_API_KEY
-    mode="deep"   — OpenRouter Fusion (built-in panel web search + LLM synthesis), ~10-30s,
-                    requires OPENROUTER_API_KEY
+    mode="deep"   — OpenRouter Fusion (built-in panel web search + LLM synthesis). SOF-79:
+                    real measured latency is ~165-180s (NOT ~10-30s as originally assumed) —
+                    callers must tolerate a multi-minute call, not a quick one. Requires
+                    OPENROUTER_API_KEY.
     """
     if mode == "quick":
         api_key = os.environ.get("EXA_API_KEY")

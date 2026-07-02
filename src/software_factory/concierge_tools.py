@@ -83,8 +83,10 @@ def build_project_tools(console: Console, project_id: str) -> list:
 
     @tool
     def fusion_search(company_name: str, website: str | None = None) -> str:
-        """Deep web research on a company via OpenRouter Fusion (~10-30s; richer than exa_search,
-        web synthesis). Use when you need a thorough company profile."""
+        """Deep web research on a company via OpenRouter Fusion — multi-model panel + web
+        synthesis, richer than exa_search. SOF-79: takes ~3 minutes (real measured latency
+        ~165-180s), not a quick call — only reach for this when exa_search's fast pass genuinely
+        isn't enough, and tell the user it'll take a few minutes before calling it."""
         try:
             return json.dumps(asdict(research_company(company_name, website=website, mode="deep")), default=str)
         except ResearchError as exc:
