@@ -101,8 +101,6 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
       );
       const reader = resp.body!.getReader();
       const decoder = new TextDecoder();
-      // Optimistic assistant bubble — filled incrementally by delta events
-      setMessages((m) => [...m, { role: "assistant", content: "", ts: Date.now() / 1000 }]);
       let buf = "";
       while (true) {
         const { done, value } = await reader.read();
@@ -113,14 +111,11 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
         for (const line of lines) {
           if (!line.trim()) continue;
           const evt = JSON.parse(line);
-          if (evt.type === "delta") {
-            setMessages((m) => {
-              const copy = [...m];
-              copy[copy.length - 1] = { ...copy[copy.length - 1], content: copy[copy.length - 1].content + evt.content };
-              return copy;
-            });
-          } else if (evt.type === "done") {
-            setMessages((m) => [...m.slice(0, -1), ...(evt.messages || []) as ChatMsg[]]);
+          // /api/chat is NON-streaming: ChatAgent.run() is one call, so the backend emits a single
+          // `done` event carrying the full reply (chat_dock.py). The `sending` typing indicator
+          // covers the wait; the real assistant message(s) land here on done. No token deltas.
+          if (evt.type === "done") {
+            setMessages((m) => [...m, ...(evt.messages || []) as ChatMsg[]]);
           } else if (evt.type === "error") {
             setSendErr(evt.detail || "Message failed — try again.");
           }
@@ -128,8 +123,6 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
       }
     } catch (e: any) {
       setSendErr(ctrl.signal.aborted ? "Response timed out — try again." : String(e?.message || "Message failed — try again."));
-      // Remove the optimistic bubble on error
-      setMessages((m) => m[m.length - 1]?.role === "assistant" && m[m.length - 1]?.content === "" ? m.slice(0, -1) : m);
     } finally {
       clearTimeout(timer);
       setSending(false);
@@ -179,6 +172,21 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
           {messages.map((m, i) => (
             <Message key={i} who={m.role === "assistant" ? "agent" : "user"} text={m.content} />
           ))}
+          {/* typing indicator while the (non-streaming) turn is in flight — the reply arrives as a
+              single done event, so without this the feed would sit blank with no waiting state */}
+          {sending && (
+            <article style={{ display: "flex", gap: 10 }}>
+              <span style={{ marginTop: 1, width: 28, height: 28, flexShrink: 0, borderRadius: "50%", display: "grid", placeItems: "center",
+                background: T.brandSoft, color: T.brand, boxShadow: `inset 0 0 0 1px ${T.brand}33` }}><Sparkle size={13} color={T.brand} /></span>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 5, border: `1px solid ${T.brand}33`,
+                background: T.brandSoft + "4d", borderRadius: T.rLg, padding: "13px 14px" }}>
+                {[0, 1, 2].map((i) => (
+                  <span key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.brand,
+                    animation: "sfPulse 1.2s ease-in-out infinite", animationDelay: `${i * 0.18}s` }} />
+                ))}
+              </div>
+            </article>
+          )}
           {events.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ font: `500 10px/1 ${T.sans}`, letterSpacing: "0.1em", textTransform: "uppercase", color: T.tertiary, padding: "2px 0" }}>Recent activity</span>
