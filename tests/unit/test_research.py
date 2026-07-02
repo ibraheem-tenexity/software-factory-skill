@@ -343,6 +343,19 @@ class TestExtractJsonBlock:
     def test_malformed_json_returns_none_not_raise(self):
         assert _extract_json_block('{"name": "Acme", broken}') is None
 
+    def test_brace_inside_a_json_string_value_does_not_desync_depth(self):
+        # A literal '{'/'}' inside a quoted string VALUE (e.g. a company description) must not
+        # be counted as a structural brace — string-aware since the review round after #289.
+        text = '{"name": "Acme", "description": "Uses a { symbol } in its logo"}'
+        assert _extract_json_block(text) == {
+            "name": "Acme", "description": "Uses a { symbol } in its logo"}
+
+    def test_escaped_quote_inside_string_does_not_end_the_string_early(self):
+        text = r'{"name": "Acme", "note": "She said \"hi { there\" to me"}'
+        parsed = _extract_json_block(text)
+        assert parsed is not None
+        assert parsed["name"] == "Acme"
+
 
 class TestTopLevelJsonObjects:
     def test_nested_object_is_not_mistaken_for_a_second_top_level_object(self):
@@ -357,6 +370,11 @@ class TestTopLevelJsonObjects:
 
     def test_empty_text_returns_empty_list(self):
         assert _top_level_json_objects("") == []
+
+    def test_brace_inside_a_string_value_does_not_split_one_object_into_two(self):
+        text = 'prose {"name": "Acme", "note": "a { in prose"} more prose {"name": "Beta"}'
+        objs = _top_level_json_objects(text)
+        assert [o["name"] for o in objs] == ["Acme", "Beta"]
 
 
 class TestSynthesizedProfile:
