@@ -20,6 +20,12 @@ export function useAdminFetch<T>(fn: () => Promise<T>) {
   return { data, loading, refetch: () => setRev((r) => r + 1) };
 }
 
+export function toolKind(config: Record<string, unknown>): "MCP" | "HTTP" | "API" {
+  if (config?.kind === "api") return "API";
+  if (config?.type === "http") return "HTTP";
+  return "MCP";
+}
+
 export function fmtRel(updated?: number | string): string {
   if (!updated) return "—";
   if (typeof updated === "string") return updated;

@@ -3,7 +3,7 @@ import { T } from "./tokens";
 import { Icon, Sparkle, StatusPill, Field, TextInput, Btn } from "./primitives";
 import { api } from "../api";
 import type { AdminAgent, AdminTool, AdminClient, AdminAccessUser } from "../api";
-import { useAdminFetch, fmtRel } from "./hooks";
+import { useAdminFetch, fmtRel, toolKind } from "./hooks";
 
 const TYPE_C: Record<string, [string, string]> = {
   MCP: [T.brandSoft, T.brandDeep],
@@ -438,7 +438,8 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <Mono style={{ marginBottom: 2, display: "block" }}>Tools available to {active.sign}</Mono>
               {(detail?.tools ?? []).map((t) => {
-                const tc = TYPE_C[t.type || "MCP"] || TYPE_C.MCP;
+                const kind = toolKind(t.config);
+                const tc = TYPE_C[kind] || TYPE_C.MCP;
                 return (
                   <div
                     key={t.name}
@@ -461,10 +462,10 @@ export function AgentPromptPanel({ agent, onClose, onSaved }: { agent: AdminAgen
                         borderRadius: 3,
                       }}
                     >
-                      {t.type || "MCP"}
+                      {kind}
                     </span>
                     <span style={{ flex: 1, font: `500 13px/1.2 ${T.sans}`, color: T.fg }}>{t.name}</span>
-                    <Mono style={{ fontSize: 10.5 }}>{t.scope}</Mono>
+                    <Mono style={{ fontSize: 10.5 }}>{t.has_key ? `key ••${t.key_last4}` : "no key"}</Mono>
                   </div>
                 );
               })}
@@ -687,22 +688,49 @@ export function ToolModal({
   onSaved: () => void;
 }) {
   const [name, setName] = React.useState(tool?.name ?? "");
-  const [type, setType] = React.useState<AdminTool["type"]>(tool?.type ?? "MCP");
-  const [provider, setProvider] = React.useState(tool?.provider ?? "");
-  const [scope, setScope] = React.useState(tool?.scope ?? "");
-  const [auth, setAuth] = React.useState(tool?.auth ?? "");
-  const [status, setStatus] = React.useState(tool?.status ?? "available");
+  const [configText, setConfigText] = React.useState(tool ? JSON.stringify(tool.config, null, 2) : "{\n  \n}");
+  const [attachedText, setAttachedText] = React.useState((tool?.attached_to ?? []).join(", "));
+  const [configError, setConfigError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [keyValue, setKeyValue] = React.useState("");
+  const [keyShow, setKeyShow] = React.useState(false);
+  const [keyBusy, setKeyBusy] = React.useState(false);
+
   const save = () => {
-    const body: any = { name, type, provider, scope, auth, status };
+    let config: Record<string, unknown>;
+    try {
+      config = JSON.parse(configText);
+    } catch (e: any) {
+      setConfigError(e.message || "invalid JSON");
+      return;
+    }
+    setConfigError(null);
+    const attached_to = attachedText.split(",").map((s) => s.trim()).filter(Boolean);
     setBusy(true);
-    const p = tool ? api.adminUpdateTool(tool.name, body) : api.adminCreateTool(body);
+    const p = tool ? api.adminUpdateTool(tool.name, { config, attached_to })
+                  : api.adminCreateTool({ name, config, attached_to });
     p.then(() => {
       setBusy(false);
       onSaved();
       onClose();
-    }).catch(() => setBusy(false));
+    }).catch((err) => { setBusy(false); setConfigError(err.message || "save failed"); });
   };
+
+  const setKey = () => {
+    if (!tool || !keyValue.trim()) return;
+    setKeyBusy(true);
+    api.adminSetToolKey(tool.name, keyValue).then(() => {
+      setKeyBusy(false);
+      setKeyValue("");
+      onSaved();
+    }).catch(() => setKeyBusy(false));
+  };
+  const removeKey = () => {
+    if (!tool) return;
+    setKeyBusy(true);
+    api.adminDeleteToolKey(tool.name).then(() => { setKeyBusy(false); onSaved(); }).catch(() => setKeyBusy(false));
+  };
+
   return (
     <div style={overlay}>
       <div style={modalCard}>
@@ -712,94 +740,61 @@ export function ToolModal({
         </div>
         <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14, overflow: "auto" }}>
           <Field label="Tool / server name">
-            <TextInput value={name} onChange={setName} placeholder="e.g. Supabase" disabled={!!tool} />
+            <TextInput value={name} onChange={setName} placeholder="e.g. exa" disabled={!!tool} />
           </Field>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Type">
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  height: 36,
-                  borderRadius: T.rMd,
-                  border: `1px solid ${T.borderDefault}`,
-                  background: T.raised,
-                  position: "relative",
-                }}
-              >
-                <select
-                  value={type}
-                  onChange={(e) => setType(e.target.value as AdminTool["type"])}
-                  style={{
-                    appearance: "none",
-                    WebkitAppearance: "none",
-                    width: "100%",
-                    height: "100%",
-                    border: "none",
-                    background: "transparent",
-                    outline: "none",
-                    padding: "0 28px 0 11px",
-                    font: `500 12.5px/1 ${T.sans}`,
-                    color: T.fg,
-                    cursor: "pointer",
-                  }}
-                >
-                  <option>MCP</option>
-                  <option>API</option>
-                  <option>native</option>
-                  <option>HTTP</option>
-                </select>
-                <Icon name="chevronDown" size={14} color={T.tertiary} style={{ position: "absolute", right: 9, pointerEvents: "none" }} />
+          <Field label='Config (JSON — the exact .mcp.json server block, or {"kind":"api",...})'>
+            <textarea
+              value={configText}
+              onChange={(e) => setConfigText(e.target.value)}
+              rows={8}
+              spellCheck={false}
+              style={{
+                width: "100%",
+                borderRadius: T.rMd,
+                border: `1px solid ${configError ? T.danger : T.borderDefault}`,
+                background: T.raised,
+                padding: "9px 11px",
+                font: `500 12px/1.5 ${T.mono}`,
+                color: T.fg,
+                resize: "vertical",
+              }}
+            />
+            {configError && <Mono style={{ color: T.danger, marginTop: 4, display: "block" }}>{configError}</Mono>}
+          </Field>
+          <Field label="Attached to (comma-separated — system_agents callsigns / pipeline nodes)">
+            <TextInput value={attachedText} onChange={setAttachedText} placeholder="STAGE-1, STAGE-2, STAGE-3, CONCIERGE" />
+          </Field>
+          {tool && (
+            <Field label="Key">
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <Mono style={{ color: tool.has_key ? T.fg : T.tertiary }}>
+                  {tool.has_key ? `••••••${tool.key_last4}` : "no key attached"}
+                </Mono>
+                {tool.has_key && (
+                  <button onClick={removeKey} disabled={keyBusy}
+                    style={{ font: `500 11px/1 ${T.sans}`, color: T.danger, border: "none", background: "transparent", cursor: "pointer" }}>
+                    Remove
+                  </button>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div style={{ position: "relative", flex: 1 }}>
+                  <TextInput type={keyShow ? "text" : "password"} value={keyValue} onChange={setKeyValue}
+                    placeholder={tool.has_key ? "replace with a new value" : "paste key value"} style={{ paddingRight: 40 }} />
+                  <button onClick={() => setKeyShow(!keyShow)}
+                    style={{ position: "absolute", right: 8, top: 8, border: "none", background: "transparent", cursor: "pointer", font: `500 11px/1 ${T.sans}`, color: T.secondary }}>
+                    {keyShow ? "hide" : "show"}
+                  </button>
+                </div>
+                <Btn size="md" onClick={setKey} disabled={!keyValue.trim() || keyBusy}>
+                  {tool.has_key ? "Replace" : "Set key"}
+                </Btn>
               </div>
             </Field>
-            <Field label="Status">
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  height: 36,
-                  borderRadius: T.rMd,
-                  border: `1px solid ${T.borderDefault}`,
-                  background: T.raised,
-                  position: "relative",
-                }}
-              >
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as AdminTool["status"])}
-                  style={{
-                    appearance: "none",
-                    WebkitAppearance: "none",
-                    width: "100%",
-                    height: "100%",
-                    border: "none",
-                    background: "transparent",
-                    outline: "none",
-                    padding: "0 28px 0 11px",
-                    font: `500 12.5px/1 ${T.sans}`,
-                    color: T.fg,
-                    cursor: "pointer",
-                  }}
-                >
-                  <option value="connected">connected</option>
-                  <option value="available">available</option>
-                </select>
-                <Icon name="chevronDown" size={14} color={T.tertiary} style={{ position: "absolute", right: 9, pointerEvents: "none" }} />
-              </div>
-            </Field>
-          </div>
-          <Field label="Provider">
-            <TextInput value={provider} onChange={setProvider} placeholder="Supabase" />
-          </Field>
-          <Field label="Scope">
-            <TextInput value={scope} onChange={setScope} placeholder="postgres · auth · storage" />
-          </Field>
-          <Field label="Auth">
-            <TextInput value={auth} onChange={setAuth} placeholder="service key" />
-          </Field>
+          )}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
             <Btn onClick={onClose}>Cancel</Btn>
-            <Btn variant="primary" onClick={save} disabled={!name || !provider || busy}>
+            <Btn variant="primary" onClick={save} disabled={!name || busy}>
               {busy ? "Saving…" : tool ? "Save" : "Register"}
             </Btn>
           </div>

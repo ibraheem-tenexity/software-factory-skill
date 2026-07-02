@@ -295,3 +295,68 @@ def test_stage3_contracts_drop_supabase_and_use_deploy_db_file():
         assert "context/deploy-db.json" in t
         assert "create the Supabase project" not in t
         assert "supabase` MCP" not in t
+
+
+# ── SOF-81: mcp_config() is COMPOSED FROM THE `tools` TABLE ──────────────────────────────────────
+
+def test_mcp_config_is_composed_from_the_tools_table():
+    """The anti-drift point of SOF-81: what the OS Tools tab shows is what a stage build gets,
+    by construction — not a parallel hardcoded dict that can silently diverge from it."""
+    from software_factory.tools import ToolStore
+    from software_factory.workspace_setup import mcp_config
+    store = ToolStore()
+    store.upsert("playwright", {"command": "npx", "args": ["custom-arg"]}, ["STAGE-1"], "test")
+    store.upsert("github", {"kind": "api", "env_key": "GH_TOKEN"}, ["STAGE-1"], "test")
+    store.upsert("railway", {"command": "railway", "args": ["mcp"]}, ["STAGE-3"], "test")
+
+    cfg = mcp_config(1)
+    # Only the row(s) attached to STAGE-1 and MCP-shaped (has command/type) are composed in —
+    # github (kind=api) has no .mcp.json presence, railway isn't attached to STAGE-1.
+    assert cfg == {"mcpServers": {"playwright": {"command": "npx", "args": ["custom-arg"]}}}
+    assert mcp_config(3)["mcpServers"]["railway"] == {"command": "railway", "args": ["mcp"]}
+
+
+def test_mcp_config_strips_env_key_registry_metadata():
+    """env_key is SOF-81 bookkeeping (which env var a vault key overrides) — it must never leak
+    into the literal .mcp.json server block the runtime parses."""
+    from software_factory.tools import ToolStore
+    from software_factory.workspace_setup import mcp_config
+    ToolStore().upsert("exa", {"type": "http", "url": "https://mcp.exa.ai/mcp",
+                               "headers": {"x-api-key": "${EXA_API_KEY}"}, "env_key": "EXA_API_KEY"},
+                       ["STAGE-1"], "test")
+    exa = mcp_config(1)["mcpServers"]["exa"]
+    assert "env_key" not in exa
+    assert exa == {"type": "http", "url": "https://mcp.exa.ai/mcp",
+                  "headers": {"x-api-key": "${EXA_API_KEY}"}}
+
+
+def test_mcp_config_falls_back_to_hardcoded_when_table_empty():
+    """Boot-resilience: an empty/unreachable tools table must never strand a stage launch — it
+    degrades to the same hardcoded config every stage got before SOF-81."""
+    from software_factory.workspace_setup import mcp_config, _hardcoded_mcp_config
+    assert mcp_config(1) == _hardcoded_mcp_config(1)
+    assert mcp_config(3) == _hardcoded_mcp_config(3)
+
+
+def test_tool_env_overrides_empty_when_no_key_attached():
+    from software_factory.tools import ToolStore
+    from software_factory.workspace_setup import tool_env_overrides
+    ToolStore().upsert("exa", {"type": "http", "env_key": "EXA_API_KEY"}, ["STAGE-1"], "test")
+    assert tool_env_overrides(1) == {}
+
+
+def test_tool_env_overrides_injects_vault_key_for_attached_stage():
+    from unittest.mock import patch
+    from software_factory.tools import ToolStore
+    from software_factory.workspace_setup import tool_env_overrides
+    store = ToolStore()
+    store.upsert("exa", {"type": "http", "env_key": "EXA_API_KEY"}, ["STAGE-1"], "test")
+    with patch("software_factory.tools.vault_store", return_value="vault-uuid-1"):
+        store.set_key("exa", "sk-real-exa-key", "test")
+    with patch("software_factory.tools.vault_retrieve_many",
+              return_value={"exa": "sk-real-exa-key"}) as mock_retrieve:
+        overrides = tool_env_overrides(1)
+    assert overrides == {"EXA_API_KEY": "sk-real-exa-key"}
+    mock_retrieve.assert_called_once_with({"exa": "vault-uuid-1"})
+    # Not attached to STAGE-2 -> no override there.
+    assert tool_env_overrides(2) == {}

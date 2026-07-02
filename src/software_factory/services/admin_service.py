@@ -121,7 +121,7 @@ class AdminService:
                         "overridden": False}
             if row and row.get("model_id"):
                 live = {**live, "model": row["model_id"]}
-            return {**live, "tools": [t for t in self.tool_store.all() if t["status"] == "connected"],
+            return {**live, "tools": [t for t in self.tool_store.all() if cs in (t.get("attached_to") or [])],
                     "activity": []}
         card = next((a for a in tenexity_os.agent_roster(self.agent_store.all(),
                                                          tenexity_os.agent_rollups())
@@ -130,7 +130,7 @@ class AdminService:
             raise NotFound("unknown agent")
         return {**card, "prompt": row["prompt"] if row else "",
                 "prompt_applied": False,
-                "tools": [t for t in self.tool_store.all() if t["status"] == "connected"],
+                "tools": [t for t in self.tool_store.all() if cs in (t.get("attached_to") or [])],
                 "activity": []}
 
     def create_agent(self, body) -> dict:
@@ -178,25 +178,41 @@ class AdminService:
         self.agent_store.delete(cs)
         return {"callsign": cs, "version": 0, "is_default": True}
 
-    # ── tools / MCP registry ─────────────────────────────────────────────────────────
+    # ── tools / MCP registry (SOF-81) ────────────────────────────────────────────────
     def tools(self) -> dict:
-        return {"tools": [{**t, "used": None} for t in self.tool_store.all()]}
+        return {"tools": self.tool_store.all()}
 
-    def create_tool(self, body) -> dict:
-        if not (body.name or "").strip():
+    def create_tool(self, body, by: str) -> dict:
+        name = (body.name or "").strip()
+        if not name:
             raise Invalid("name required")
-        return {"tool": self.tool_store.create(body.name, type=body.type, provider=body.provider,
-                                               scope=body.scope, auth=body.auth, status=body.status)}
+        if self.tool_store.get(name):
+            raise Invalid(f"tool '{name}' already exists")
+        return {"tool": self.tool_store.upsert(name, body.config, body.attached_to, by)}
 
-    def update_tool(self, tool_id: int, body) -> dict:
-        fields = {k: val for k, val in body.model_dump().items() if val is not None}
-        tool = self.tool_store.update(tool_id, fields)
-        if not tool:
+    def update_tool(self, name: str, body, by: str) -> dict:
+        existing = self.tool_store.get(name)
+        if not existing:
             raise NotFound("unknown tool")
-        return {"tool": tool}
+        fields = body.model_dump(exclude_unset=True)
+        config = fields.get("config", existing["config"])
+        return {"tool": self.tool_store.upsert(name, config, fields.get("attached_to"), by)}
 
-    def delete_tool(self, tool_id: int) -> dict:
-        self.tool_store.delete(tool_id)
+    def set_tool_key(self, name: str, body, by: str) -> dict:
+        if not self.tool_store.get(name):
+            raise NotFound("unknown tool")
+        value = (body.value or "").strip()
+        if not value:
+            raise Invalid("value required")
+        return {"tool": self.tool_store.set_key(name, value, by)}
+
+    def delete_tool_key(self, name: str) -> dict:
+        return {"tool": self.tool_store.delete_key(name)}
+
+    def delete_tool(self, name: str) -> dict:
+        if not self.tool_store.get(name):
+            raise NotFound("unknown tool")
+        self.tool_store.delete(name)
         return {"ok": True}
 
     # ── clients / tenants (admin-scoped org CRUD) ──────────────────────────────────────

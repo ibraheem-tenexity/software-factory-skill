@@ -8,10 +8,13 @@ in the workspace, not just in the Docker image root.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 
 from . import workspace
+
+logger = logging.getLogger(__name__)
 
 SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "skills")
 PHASE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "phases")
@@ -20,6 +23,12 @@ DESIGN_SKILL_NAMES = ("frontend-design", "ui-ux-pro-max", "tenexity-design")
 # design doc must speak in its tokens/archetypes, S3 vendors tokens.css into the app.
 BUILD_SKILL_NAMES = ("tenexity-design",)
 
+# SOF-81: BOOT-RESILIENCE FALLBACK ONLY. The `tools` table (tools.ToolStore) is the source of
+# truth — mcp_config() below reads it. These hardcoded dicts fire only if that read fails (DB
+# unreachable, table missing), so a console boot hiccup can't strand every stage launch. If you're
+# changing a tool's config, edit its `tools` row (OS Tools tab), not this dict — a live edit here
+# with no matching DB row is exactly the drift SOF-81 exists to kill.
+#
 # Playwright everywhere (the happy-flow gate drives the live app with it). Stage 3 ALSO gets the
 # Railway + Supabase MCP for deploy/provisioning. Both auth from env tokens already in the workspace
 # (RAILWAY_TOKEN, SUPABASE_ACCESS_TOKEN) — verified headless: `railway mcp` exposes project-scoped
@@ -50,15 +59,60 @@ _MEMORY = {"type": "http", "url": "${SF_MEMORY_MCP_URL}",
           "headers": {"Authorization": "Bearer ${SF_MEMORY_TOKEN}"}}
 
 
-def mcp_config(stage: int) -> dict:
+def _hardcoded_mcp_config(stage: int) -> dict:
     servers = {"playwright": _PLAYWRIGHT, "exa": _EXA, "openrouter": _OPEN_ROUTER, "memory": _MEMORY}
     if stage >= 3:
         servers["railway"] = _RAILWAY
     return {"mcpServers": servers}
 
 
-# Back-compat alias (stage-1 view); prefer mcp_config(stage).
-MCP_CONFIG = mcp_config(1)
+def _is_mcp_shaped(config: dict) -> bool:
+    """A `tools` row is an MCP server block if it has a `command` (local) or `type` (remote, e.g.
+    http) key. Rows shaped {"kind": "api", ...} (github, fusion) aren't MCP servers at all — they're
+    env-key/config-only entries with no .mcp.json presence."""
+    return "command" in config or "type" in config
+
+
+def mcp_config(stage: int) -> dict:
+    """The stage's .mcp.json, COMPOSED FROM THE `tools` TABLE (SOF-81) — the OS Tools tab IS what
+    a stage build gets, by construction. `env_key` is SOF-81 registry metadata (which env var a
+    vault-attached key overrides — see tool_env_overrides), never part of the real MCP server
+    shape, so it's stripped before writing. Falls back to the hardcoded dicts above only if the
+    table read itself fails."""
+    callsign = f"STAGE-{stage}"
+    try:
+        from .tools import ToolStore
+        rows = ToolStore().all()
+        if not rows:
+            raise RuntimeError("tools table is empty")
+        servers = {
+            row["name"]: {k: v for k, v in row["config"].items() if k != "env_key"}
+            for row in rows
+            if callsign in (row.get("attached_to") or []) and _is_mcp_shaped(row["config"])
+        }
+        return {"mcpServers": servers}
+    except Exception:
+        logger.warning("[mcp_config] tools-table read failed — falling back to hardcoded config",
+                       exc_info=True)
+        return _hardcoded_mcp_config(stage)
+
+
+def tool_env_overrides(stage: int) -> dict:
+    """Vault-backed env var overrides for this stage's tools (SOF-81) — an operator-attached key on
+    a `tools` row whose attached_to includes this stage is injected as that row's config.env_key,
+    superseding the console's own env passthrough for stage agents that use the tool. No key
+    attached -> {} (current env passthrough behavior, unchanged). Best-effort: never blocks a
+    launch on a registry/vault hiccup."""
+    try:
+        from .tools import ToolStore
+        return ToolStore().env_overrides(f"STAGE-{stage}")
+    except Exception:
+        logger.debug("[tool_env_overrides] lookup failed — env passthrough used", exc_info=True)
+        return {}
+
+
+# Back-compat alias (stage-1 view, hardcoded fallback shape); prefer mcp_config(stage).
+MCP_CONFIG = _hardcoded_mcp_config(1)
 
 CLAUDE_SETTINGS = {"enableAllProjectMcpServers": True}
 

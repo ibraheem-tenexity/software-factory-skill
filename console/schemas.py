@@ -229,20 +229,17 @@ class AgentPatchIn(BaseModel):
 
 class ToolIn(BaseModel):
     name: str = ""
-    type: str | None = None
-    provider: str | None = None
-    scope: str | None = None
-    auth: str | None = None
-    status: str = "available"
+    config: dict = {}
+    attached_to: list | None = None
 
 
 class ToolPatchIn(BaseModel):
-    name: str | None = None
-    type: str | None = None
-    provider: str | None = None
-    scope: str | None = None
-    auth: str | None = None
-    status: str | None = None
+    config: dict | None = None
+    attached_to: list | None = None
+
+
+class ToolKeyIn(BaseModel):
+    value: str = ""
 
 
 class SowIn(BaseModel):

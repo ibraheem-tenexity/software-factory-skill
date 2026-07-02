@@ -1,39 +1,46 @@
-"""Pure CRUD for `mcp_tools` (SQLAlchemy Core) — the tools/MCP registry consumed by tools.ToolStore."""
+"""Pure CRUD for `tools` (SQLAlchemy Core) — the real tools/MCP registry (SOF-81) consumed by
+tools.ToolStore and, at workspace-prep time, workspace_setup.mcp_config()."""
 from __future__ import annotations
 
-from sqlalchemy import select, insert, update, delete
+from sqlalchemy import select, insert, update, delete, func
 
-from ..models import mcp_tools
+from ..models import tools
+from ._compile import serialize_jsonb
 
-_TOOL_COLS = (mcp_tools.c.id, mcp_tools.c.name, mcp_tools.c.type, mcp_tools.c.provider,
-              mcp_tools.c.scope, mcp_tools.c.status, mcp_tools.c.auth)
+_COLS = (tools.c.name, tools.c.config, tools.c.attached_to, tools.c.key_vault_id,
+          tools.c.key_last4, tools.c.updated_by, tools.c.updated_at)
 
 
 class ToolRepository:
     def __init__(self, exec_):
         self._x = exec_
 
-    def any_row(self) -> bool:
-        return self._x.fetchone(select(mcp_tools.c.id).limit(1)) is not None
-
-    def insert(self, name, type, provider, scope, status, auth) -> None:
-        self._x.execute(insert(mcp_tools).values(name=name, type=type, provider=provider,
-                                                 scope=scope, status=status, auth=auth))
-
     def all(self) -> list:
-        return self._x.fetchall(select(*_TOOL_COLS).order_by(mcp_tools.c.id))
+        return self._x.fetchall(select(*_COLS).order_by(tools.c.name))
 
-    def insert_returning(self, name, type, provider, scope, status, auth) -> dict:
-        stmt = insert(mcp_tools).values(name=name, type=type, provider=provider, scope=scope,
-                                        status=status, auth=auth).returning(*_TOOL_COLS)
-        return self._x.fetchone(stmt)
+    def by_name(self, name: str):
+        return self._x.fetchone(select(*_COLS).where(tools.c.name == name))
 
-    def update_fields(self, tool_id, **cols) -> None:
-        if cols:
-            self._x.execute(update(mcp_tools).where(mcp_tools.c.id == tool_id).values(**cols))
+    def upsert(self, name: str, config: dict, attached_to: list | None, by: str | None) -> None:
+        existing = self._x.fetchone(select(tools.c.name).where(tools.c.name == name))
+        if existing:
+            values = {"config": serialize_jsonb(config), "updated_by": by, "updated_at": func.now()}
+            if attached_to is not None:
+                values["attached_to"] = serialize_jsonb(attached_to)
+            self._x.execute(update(tools).where(tools.c.name == name).values(**values))
+        else:
+            self._x.execute(insert(tools).values(name=name, config=serialize_jsonb(config),
+                                                 attached_to=serialize_jsonb(attached_to, default=[]),
+                                                 updated_by=by))
 
-    def by_id(self, tool_id):
-        return self._x.fetchone(select(*_TOOL_COLS).where(mcp_tools.c.id == tool_id))
+    def set_key(self, name: str, vault_id: str, last4: str, by: str | None) -> None:
+        self._x.execute(update(tools).where(tools.c.name == name)
+                        .values(key_vault_id=vault_id, key_last4=last4, updated_by=by,
+                                updated_at=func.now()))
 
-    def delete(self, tool_id) -> None:
-        self._x.execute(delete(mcp_tools).where(mcp_tools.c.id == tool_id))
+    def clear_key(self, name: str) -> None:
+        self._x.execute(update(tools).where(tools.c.name == name)
+                        .values(key_vault_id=None, key_last4=None, updated_at=func.now()))
+
+    def delete(self, name: str) -> None:
+        self._x.execute(delete(tools).where(tools.c.name == name))
