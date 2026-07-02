@@ -78,9 +78,9 @@ class ProjectState:
     # JSON blob (not through ProjectState) — both paths agree because ProjectState.save() writes
     # this field into that same blob.
     memory_overview: str = ""
-    # SOF-37: unreferenced key_facts candidates become interview questions here instead of
-    # stated facts (the trust gate) — [{id, fact, document_blob_id, section_path_claimed,
-    # status: "open"|"answered"|"dismissed", answer, created_at}]. promote_draft's route
+    # SOF-37/SOF-60: interview questions the Concierge raises from its own analysis (the
+    # trust gate) — [{id, fact, document_blob_id, section_path_claimed,
+    # status: "open"|"answered"|"dismissed", answer, created_at}]. promote_draft
     # refuses to hand off while any entry here has status="open".
     reflection_questions: list = field(default_factory=list)
     # Durable facts the Concierge saves during the interview via its write_to_project_memory tool
