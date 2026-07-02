@@ -25,6 +25,12 @@ const MAP_ARTIFACT = "#8B5CF6";  // artifact purple
 const MAP_EDGE = "#C7C9CF";      // main-path edge grey
 const MAP_SAT_EDGE = "#DCDCD8";  // satellite edge grey
 
+// cytoscape rejects CSS font-family STACKS (a single concrete family name only), so labels styled
+// with T.sans/T.mono silently fell back to the renderer default — feed it the stack's first font.
+const firstFont = (stack: string) => stack.split(",")[0].trim().replace(/^['"]|['"]$/g, "");
+const MAP_FONT_SANS = firstFont(T.sans);
+const MAP_FONT_MONO = firstFont(T.mono);
+
 type SpineState = "done" | "active" | "deps" | "todo" | "skipped" | "gate";
 
 function NewBadge() {
@@ -236,7 +242,7 @@ export function MapView({ graph, onOpenArtifact }:
             shape: "round-rectangle", width: "label", height: 14, padding: "7px",
             "background-color": T.sunken, "border-width": 1, "border-color": T.borderDefault,
             label: "data(label)", color: T.tertiary, "font-size": "10px", "font-weight": 600,
-            "font-family": T.mono, "text-valign": "center", "text-halign": "center" } },
+            "font-family": MAP_FONT_MONO, "text-valign": "center", "text-halign": "center" } },
         { selector: "node[kind = 'phase'][status = 'done']", style: {
             "background-color": T.success, "border-width": 0, color: "#fff" } },
         { selector: "node[kind = 'phase'][status = 'active']", style: {
@@ -253,25 +259,25 @@ export function MapView({ graph, onOpenArtifact }:
         { selector: "node[kind = 'orchestrator']", style: {
             shape: "ellipse", width: 30, height: 30, "background-color": MAP_ORCH,
             label: "data(label)", color: T.fg, "font-size": "10px", "font-weight": 600,
-            "font-family": T.sans, "text-valign": "bottom", "text-margin-y": 5 } },
+            "font-family": MAP_FONT_SANS, "text-valign": "bottom", "text-margin-y": 5 } },
         // gates: teal diamonds
         { selector: "node[kind = 'gate']", style: {
             shape: "diamond", width: 18, height: 18, "background-color": T.cHigh,
-            label: "data(label)", color: T.tertiary, "font-size": "9px", "font-family": T.sans,
+            label: "data(label)", color: T.tertiary, "font-size": "9px", "font-family": MAP_FONT_SANS,
             "text-valign": "bottom", "text-margin-y": 5 } },
         { selector: "node[kind = 'gate'][status = 'awaiting']", style: { "background-color": T.warning } },
         // satellites: green agents, purple clickable artifacts, danger blockers
         { selector: "node[kind = 'agent']", style: {
             shape: "ellipse", width: 13, height: 13, "background-color": T.success,
-            label: "data(label)", color: T.secondary, "font-size": "9px", "font-family": T.sans,
+            label: "data(label)", color: T.secondary, "font-size": "9px", "font-family": MAP_FONT_SANS,
             "text-valign": "bottom", "text-margin-y": 4 } },
         { selector: "node[kind = 'artifact']", style: {
             shape: "ellipse", width: 13, height: 13, "background-color": MAP_ARTIFACT,
-            label: "data(label)", color: T.secondary, "font-size": "9px", "font-family": T.sans,
+            label: "data(label)", color: T.secondary, "font-size": "9px", "font-family": MAP_FONT_SANS,
             "text-valign": "bottom", "text-margin-y": 4 } },
         { selector: "node[kind = 'blocker']", style: {
             shape: "ellipse", width: 13, height: 13, "background-color": T.danger,
-            label: "data(label)", color: T.danger, "font-size": "9px", "font-family": T.sans,
+            label: "data(label)", color: T.danger, "font-size": "9px", "font-family": MAP_FONT_SANS,
             "text-valign": "bottom", "text-margin-y": 4 } },
         // edges: curved; the active path in brand blue, satellites fainter, feedback dashed
         { selector: "edge", style: {
