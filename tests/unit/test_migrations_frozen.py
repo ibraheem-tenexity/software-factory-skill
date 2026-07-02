@@ -21,6 +21,9 @@ _LIVE_MODELS_IMPORT = re.compile(
 
 
 def test_no_revision_imports_the_live_models_module():
+    # A relocated/renamed versions dir would make the glob below match nothing and this test would
+    # silently pass with zero offenders — assert the directory is actually there so that fails loud.
+    assert VERSIONS_DIR.is_dir(), f"expected migrations/versions at {VERSIONS_DIR}"
     offenders = []
     for path in sorted(VERSIONS_DIR.glob("*.py")):
         if _LIVE_MODELS_IMPORT.search(path.read_text()):

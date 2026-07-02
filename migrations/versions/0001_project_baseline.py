@@ -17,6 +17,11 @@ commit d9fa7b3e (the commit that added this migration) — every table below is 
 idempotent, matching every other revision in this chain. `users` is intentionally still the OLD
 shape here (email PRIMARY KEY, no uuid `id`) — 0003 drops and rebuilds it to the new shape, and a
 from-scratch upgrade must replay that same transition, not skip straight to the new shape.
+
+This is intentionally NOT the full current schema — only the tables `models.metadata` held at this
+revision's commit. `checkpoint`/`sow`/`doc_summary`/`chunk`/`conversation`/`org_secrets` etc. arrive
+in 0005-0010, each in its own already-frozen (or, after SOF-61, now-frozen) revision; this file
+being "incomplete" relative to the present-day schema is correct, not a gap to fill in.
 """
 from alembic import op
 
