@@ -169,31 +169,6 @@ function MiniBar({ pct }: { pct: number }) {
   );
 }
 
-export function AdminFilter({ children, w = 150 }: { children: React.ReactNode; w?: number }) {
-  return (
-    <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 7,
-        height: 36,
-        padding: "0 11px",
-        width: w,
-        justifyContent: "space-between",
-        borderRadius: T.rMd,
-        border: `1px solid ${T.borderDefault}`,
-        background: T.raised,
-        font: `500 12px/1 ${T.sans}`,
-        color: T.secondary,
-        cursor: "pointer",
-      }}
-    >
-      {children}
-      <Icon name="chevronDown" size={13} color={T.tertiary} />
-    </div>
-  );
-}
-
 export function FilterSelect({
   label,
   options,

@@ -11,6 +11,16 @@
 
 export type PhaseStatus = "pending" | "active" | "done" | "skipped";
 
+// The halted-run tone mapping, shared by Dashboard.statusOf() and FactoryConsole's phase pill —
+// duplicating this if-chain in both places let them drift (fixed in #128: the dashboard card
+// fell through to "Building" for stopped/crashed/paused because it lacked this branch).
+export function toneForHaltedPhase(phase?: string): "success" | "warning" | "danger" | undefined {
+  if (phase === "done") return "success";
+  if (phase === "stopped" || phase === "crashed") return "danger";
+  if (phase === "paused") return "warning";
+  return undefined;
+}
+
 export const STAGES: { stage: number; title: string; phases: { id: string; label: string }[] }[] = [
   {
     stage: 1, title: "Research",
