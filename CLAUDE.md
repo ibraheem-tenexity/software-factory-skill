@@ -107,11 +107,8 @@ The file is a long-term store for information sharing between agents — a centr
 Do not theorize. If you think you know why something is breaking, look at the code or logs to confirm before proposing a fix.
 
 ## Worktrees
-* Git worktree should be used by sessions and agents so that their work doesn't conflict with other sessions and/or agents.
-
-* Worktrees Must Be Checked out in ~/software-factory-skill-bare Not in Home Dir
-
-~/software-factory-skill-bare is a bare clone of the software factory skill repository and worktree should be checked out there and not in the home dir.
+- **All sessions and agents MUST work in a git worktree** so their work doesn't conflict with other sessions and/or agents.
+- **Worktrees MUST be checked out in `~/software-factory-skill-bare`** (a bare clone of this repository) — never in the home dir.
 
 
 ## Seeding test/verify projects (SOF-23)
@@ -139,11 +136,11 @@ Edits by the operator are authoritative. If in between sessions you realise that
 ## Task Tracking — Source of Truth
 The **Linear** project "Software Factory" (https://linear.app/tenexity/project/software-factory-f19bffa5f61f, team **Software Factory / SOF**, project id `2c6a2f7c-72db-4258-a98a-44b6757f2655`) is the **single source of truth for task status**. Keep it up to date: when work starts, advances, lands, or a new issue is found, reflect it in Linear (status + assignee). Every ticket is **assigned to Ibraheem**, and each carries an `existing` vs `new` classification. The internal task board and `docs/KNOWN_ISSUES.md` are working mirrors — Linear is authoritative.
 
-## Design System: 
+## Design System
 Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
 https://claude.ai/design/p/b4af3934-9633-4d26-bade-e53b92d7cc49?file=Software+Factory+Onboarding.html
 
-That is the design system contain prototypes of all screens and tokens and
+That is the design system: it contains the prototypes of all screens and the design tokens. It is the canonical reference for what any screen should look like.
 
 ## Deploy (SOF-16)
 `factory-console` auto-deploys on push to `main` via Railway's native GitHub source connect
@@ -152,4 +149,4 @@ manual step. `scripts/deploy.sh` (preflight → bake `SF_GIT_SHA` → `railway u
 for a hand-driven deploy (hotfix, re-deploy without a new commit, or if auto-deploy is disconnected). 
 
 ## Python Imports
-Python imports should be at the top of a file unless you want to stop something from inadvertantly executing. 
+Python imports should be at the top of a file unless you want to stop something from inadvertently executing.
