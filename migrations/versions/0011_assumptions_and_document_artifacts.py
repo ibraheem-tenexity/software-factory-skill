@@ -15,13 +15,24 @@ Two changes (SOF-60 / concierge memory substrate):
 
 ADDITIVE apart from the column rename (which preserves data). No row rewrites, no drops.
 
+SOF-64 amendment: this revision's own id is 39 chars, but Alembic auto-creates
+`alembic_version.version_num` as VARCHAR(32) — recording this revision therefore failed with
+StringDataRightTruncation on every Alembic-created DB (prod included; the original rehearsal
+missed it by hand-seeding the version table as TEXT). upgrade() now widens the column FIRST —
+safe to amend in place because no real DB ever successfully recorded this revision (the failure
+is precisely that none could). NOTE: env.py runs the whole pending batch in ONE transaction, so
+on a fresh DB the pre-fix failure at 0011 also rolled back 0001-0010 — expected Alembic
+behavior, but disorienting when reproducing.
+
 REHEARSAL PROTOCOL:
-  1. alembic upgrade 0011_assumptions_and_document_artifacts  (on a DB stamped 0010_org_secrets)
+  1. alembic upgrade 0011_assumptions_and_document_artifacts  (on a DB stamped 0010_org_secrets,
+     with the version table Alembic-created — VARCHAR(32) — not hand-seeded).
   2. Assert doc_summary.assumptions exists and rows that had key_facts data kept it.
   3. Assert artifacts has content/source_blob_id/origin and every pre-existing row reads
      origin='agent'.
   4. Insert an origin='user' artifacts row with content + source_blob_id set; read it back.
-  5. Deploy to prod only after rehearsal passes.
+  5. Also rehearse the EMPTY-DB path: alembic upgrade head must now run 0001->0011 clean.
+  6. Deploy to prod only after both rehearsals pass.
 """
 from alembic import op
 
@@ -32,6 +43,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # SOF-64: widen Alembic's own bookkeeping column before it records this revision's 39-char
+    # id (default VARCHAR(32) truncates -> StringDataRightTruncation aborts the whole batch).
+    # Runs inside the same transaction, before Alembic's version-row write at revision end.
+    op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(255)")
     op.execute("ALTER TABLE doc_summary RENAME COLUMN key_facts TO assumptions")
     op.execute("ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS content TEXT")
     op.execute("ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS source_blob_id INTEGER "
