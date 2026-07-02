@@ -2,16 +2,23 @@
 // "Step 2 — ProcessingScreen"). Shows real per-file ingest progress over the SOF-49/T3.2 SSE
 // channel and calls onDone() once every attached file reaches a terminal status. If the draft
 // has no attached files at all, there is nothing to process — call onDone() immediately.
+// SOF-72: if ingest emits no SSE events (worker died pre-first-event, connection drop, wedged
+// summarize) the user gets an explicit "Continue to interview" escape hatch instead of hanging
+// forever — never auto-skipped, and still-running rows keep their real backend-reported status.
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
-import { T, Icon, CategoryLabel, Wordmark } from "./design";
+import { T, Icon, CategoryLabel, Wordmark, Btn } from "./design";
 
 type FileRow = { blobId: number; name: string; pct: number; stage: string; status: "running" | "ready" | "failed" };
+
+const STALL_MS = 20_000;
 
 export function ProcessingScreen({ draftId, projectName, onDone }: { draftId: string; projectName: string; onDone: () => void }) {
   const [files, setFiles] = useState<FileRow[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [stalled, setStalled] = useState(false);
   const firedDoneRef = useRef(false);
+  const lastEventAtRef = useRef(Date.now());
 
   // Seed the file list from the draft's attached materials so we know how many rows to wait for
   // even before the first SSE frame arrives for each one.
@@ -33,6 +40,8 @@ export function ProcessingScreen({ draftId, projectName, onDone }: { draftId: st
     es.onmessage = (ev) => {
       let data: { blob_id: number; doc_name?: string; stage: string; pct: number; status: string };
       try { data = JSON.parse(ev.data); } catch { return; }
+      lastEventAtRef.current = Date.now();
+      setStalled(false);
       setFiles((rows) => {
         const known = rows.some((r) => r.blobId === data.blob_id);
         return known
@@ -53,6 +62,22 @@ export function ProcessingScreen({ draftId, projectName, onDone }: { draftId: st
     const t = setTimeout(onDone, files.length ? 900 : 0);
     return () => clearTimeout(t);
   }, [allDone, files.length, onDone]);
+
+  // SOF-72: watch for a stalled ingest — no SSE event within STALL_MS of mount, or since the
+  // last event mid-run. Detection only surfaces the notice + button; the user decides.
+  useEffect(() => {
+    if (allDone) { setStalled(false); return; }
+    const t = setInterval(() => {
+      if (Date.now() - lastEventAtRef.current > STALL_MS) setStalled(true);
+    }, 2000);
+    return () => clearInterval(t);
+  }, [allDone]);
+
+  const continueAnyway = () => {
+    if (firedDoneRef.current) return;
+    firedDoneRef.current = true;
+    onDone();
+  };
 
   const totalPct = files.length ? Math.round(files.reduce((s, f) => s + (f.status === "running" ? f.pct : 100), 0) / files.length) : 100;
   const active = files.find((f) => f.status === "running");
@@ -82,6 +107,18 @@ export function ProcessingScreen({ draftId, projectName, onDone }: { draftId: st
           <div style={{ height: 8, borderRadius: 5, background: T.sunken, overflow: "hidden" }}>
             <div style={{ height: "100%", width: `${totalPct}%`, borderRadius: 5, background: allDone ? T.success : T.brand, transition: "width 300ms ease" }} />
           </div>
+
+          {stalled && !allDone && (
+            <div style={{ marginTop: 16, borderRadius: T.rLg, background: T.warningSoft, border: `1px solid ${T.warning}`, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ font: `600 13px/1.4 ${T.sans}`, color: T.fg }}>Processing is taking longer than expected</div>
+                <div style={{ font: `400 12px/1.4 ${T.sans}`, color: T.secondary }}>
+                  You can continue to the interview now — any documents still processing will keep going in the background.
+                </div>
+              </div>
+              <Btn variant="secondary" size="sm" onClick={continueAnyway}>Continue to interview</Btn>
+            </div>
+          )}
 
           {files.length > 0 && (
             <div style={{ marginTop: 20, borderRadius: T.rLg, background: T.ink, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
