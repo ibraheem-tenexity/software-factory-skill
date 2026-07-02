@@ -16,10 +16,13 @@ Idempotent on BOTH paths despite the rebuild:
   - STAMPED PROD (0002): users is the OLD shape (has `tenexity`) → dropped and rebuilt to the new shape;
     roles/role_permissions/trigger created.
   - RE-RUN after 0003: users is already new shape (no `tenexity`) → DROP skipped → all no-ops (no data loss).
+
+SOF-61: the two `models.metadata.create_all(...)` calls (roles/role_permissions, then the rebuilt
+users) are frozen to inline DDL — byte-for-byte the schema `models.metadata` produced at commit
+36e1d768 (the commit that added this migration). Everything else (the pgcrypto extension, the seed
+INSERT, the guarded DROP, the updated_at trigger) was already raw SQL and is untouched.
 """
 from alembic import op
-
-from software_factory import models
 
 revision = "0003_auth_rbac"
 down_revision = "0002_tenexity_os"
@@ -28,12 +31,25 @@ depends_on = None
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
     # gen_random_uuid() is core in PG13+; this provides it on older servers and no-ops otherwise.
     op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
 
-    # 1) RBAC tables first (users.role_id FKs roles.id). checkfirst = no-op if the baseline built them.
-    models.metadata.create_all(bind, tables=[models.roles, models.role_permissions], checkfirst=True)
+    # 1) RBAC tables first (users.role_id FKs roles.id). IF NOT EXISTS = no-op if the baseline built them.
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS roles (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name        TEXT NOT NULL UNIQUE,
+            description TEXT,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """)
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS role_permissions (
+            role_id     UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+            permission  TEXT NOT NULL,
+            PRIMARY KEY (role_id, permission)
+        )
+    """)
     op.execute("""
         INSERT INTO public.roles (id, name, description) VALUES
           (gen_random_uuid(), 'admin',  'Full administrative access'),
@@ -53,8 +69,27 @@ def upgrade() -> None:
         END $$;
     """)
 
-    # 3) Build the new users table (checkfirst: skipped on a fresh DB that already has it).
-    models.metadata.create_all(bind, tables=[models.users], checkfirst=True)
+    # 3) Build the new users table (IF NOT EXISTS: skipped on a fresh DB that already has it).
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            google_sub        TEXT UNIQUE,
+            email             TEXT NOT NULL UNIQUE,
+            role_id           UUID NOT NULL REFERENCES roles(id),
+            is_internal       BOOLEAN NOT NULL DEFAULT false,
+            status            TEXT NOT NULL DEFAULT 'invited',
+            token_version     INTEGER NOT NULL DEFAULT 0,
+            metadata          JSONB NOT NULL DEFAULT '{}'::jsonb,
+            invited_by        UUID REFERENCES users(id),
+            onboarded_at      TIMESTAMPTZ,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+            org_id            TEXT,
+            designation       TEXT,
+            role_description  TEXT,
+            CONSTRAINT users_status_check CHECK (status in ('invited', 'active', 'disabled'))
+        )
+    """)
 
     # 4) Auto-maintain updated_at (create_all cannot emit a trigger). Idempotent.
     op.execute("""
