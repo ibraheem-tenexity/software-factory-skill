@@ -81,11 +81,10 @@ COPY . /app
 # uvicorn resolve it at runtime).
 RUN PYTHONPATH=/app/src:/app python3 /app/scripts/verify_deps.py
 
-# Build the React console SPA (served when SF_CONSOLE=react). Node is already in the base image,
-# so this is build-time only — the runtime is still uvicorn. Non-fatal: legacy index.html serves
-# if the build is skipped/fails.
-RUN cd /app/console/web && npm ci --no-audit --no-fund && npm run build || \
-    echo "[build] React console build skipped/failed — legacy index.html will serve"
+# Build the React console SPA — the only console. Node is already in the base image, so this is
+# build-time only (runtime is still uvicorn). FATAL on failure: there is no legacy fallback, so a
+# failed build must fail the image rather than ship one that serves a blank page.
+RUN cd /app/console/web && npm ci --no-audit --no-fund && npm run build
 
 RUN mkdir -p /home/node/.claude/skills /ms-puppeteer \
     && ln -sfn /app /home/node/.claude/skills/software-factory \

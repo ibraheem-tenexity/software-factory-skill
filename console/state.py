@@ -19,7 +19,6 @@ import threading
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from software_factory.console import Console  # noqa: E402
-from software_factory import auth  # noqa: E402
 from software_factory.users import UserStore  # noqa: E402
 from software_factory.blobs import BlobStore  # noqa: E402
 from software_factory.system_agents import SystemAgentStore  # noqa: E402
@@ -38,8 +37,8 @@ from console.throttle import LoginThrottle  # noqa: E402
 from console.chat_dock import ChatDock  # noqa: E402
 
 HERE = os.path.dirname(__file__)
-# The React SPA (console/web/dist) is served when SF_CONSOLE=react AND it's been built; otherwise the
-# legacy single-file console (index.html) is the default — so the migration is opt-in and safe.
+# The React SPA (console/web/dist) is the console — the only console. Built at image time
+# (Dockerfile) and served unconditionally; there is no legacy fallback and no SF_CONSOLE switch.
 _REACT_DIST = os.path.join(HERE, "web", "dist")
 
 # Populated by reset() (called at import + on every app reload). Declared here for clarity.
@@ -120,14 +119,8 @@ def _push_ingest_sse(project_id: str, event: dict):
         q.append(f"data: {data}\n\n")
 
 
-def _react_enabled() -> bool:
-    return (os.environ.get("SF_CONSOLE", "").strip().lower() == "react"
-            and os.path.isfile(os.path.join(_REACT_DIST, "index.html")))
-
-
 def _index_html() -> bytes:
-    path = os.path.join(_REACT_DIST, "index.html") if _react_enabled() else os.path.join(HERE, "index.html")
-    with open(path, "rb") as f:
+    with open(os.path.join(_REACT_DIST, "index.html"), "rb") as f:
         return f.read()
 
 
@@ -141,6 +134,3 @@ def _artifact_viewer_html() -> bytes:
         return f.read()
 
 
-def _login_html() -> str:
-    with open(os.path.join(HERE, "login.html")) as f:
-        return f.read().replace("{{CLIENT_ID}}", auth.client_id())

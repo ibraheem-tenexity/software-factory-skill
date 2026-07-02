@@ -68,7 +68,7 @@ def _login(mod, client, monkeypatch, email="op@tenexity.ai"):
 
 
 def _enable_react(mod, monkeypatch):
-    monkeypatch.setattr(mod.state, "_react_enabled", lambda: True)
+    # React is the only console now; just stub the built SPA bytes so the test doesn't need dist.
     monkeypatch.setattr(mod.state, "_admin_html", lambda: b"<admin-spa>")
 
 
