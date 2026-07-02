@@ -87,9 +87,14 @@ def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None) -
                          "summary": ds.get("summary_md"), "summary_status": ds.get("status")})
     # SOF-60: origin='user' artifact rows are user-deposited document markdown (agent reading
     # material), not factory output — they'd double-list next to their own upload here.
+    # SOF-70: kind='context' rows (Console._provision_and_launch's "input" artifacts, e.g.
+    # input/interview.md, input/context.md) are Stage-1's OWN reading material — composed by the
+    # console from the intake, not something the factory produced — so they default origin='agent'
+    # (unlike SOF-60's user-deposited markdown) and slipped past the origin-only filter above.
     produced = [{"id": a.get("id"), "title": a.get("title", ""), "path": a.get("path", ""),
                  "kind": a.get("kind", ""), "agent": a.get("agent", ""), "ts": a.get("ts")}
-                for a in (artifacts or []) if a.get("origin") != "user"]
+                for a in (artifacts or [])
+                if a.get("origin") != "user" and a.get("kind") != "context"]
     return {"uploaded": uploaded, "produced": produced}
 
 
