@@ -30,6 +30,14 @@ body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-s
 @keyframes sfPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 @keyframes sfSpin { to { transform: rotate(360deg); } }
 
+/* SOF-70: artifact/file tile (design: orgproject.jsx FileTile's className="sf-artchip") — the
+   class was referenced by the design but never ported into the app's own stylesheet. Only
+   :focus-visible lives here; hover is JS-state-driven in DocumentsTab.tsx's FileTile itself,
+   since the tile's border/box-shadow are set INLINE and inline always beats a stylesheet
+   selector regardless of specificity — a :hover rule here could never actually win (confirmed
+   live: only `transform`, which had no inline counterpart, was ever applying). */
+.sf-artchip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
 .app { display: flex; flex-direction: column; height: 100%; }
 
 /* Toolbar */

@@ -19,21 +19,43 @@ function fmtBytes(n?: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function FileTile({ label, kind, sub, tag, onOpen, scope, onScope, summary, summarizing, onSummarize }:
-  { label: string; kind?: string; sub?: string; tag?: string; onOpen?: () => void;
+function FileTile({ label, kind, sub, used, tag, onOpen, scope, onScope, summary, summarizing, onSummarize }:
+  { label: string; kind?: string; sub?: string; used?: string; tag?: string; onOpen?: () => void;
     scope?: "project" | "org"; onScope?: (s: "project" | "org") => void;
     summary?: string; summarizing?: boolean; onSummarize?: () => void }) {
   const k = FILE_KIND[kind || "doc"] || FILE_KIND.doc;
   const stop = (e: React.MouseEvent) => e.stopPropagation();
+  // Design (orgproject.jsx FileTile) renders a real <button> with the sf-artchip hover class —
+  // native keyboard handling (Enter/Space) for free, not a div+tabIndex+onKeyDown reimplementation.
+  const Tile = onOpen ? "button" : "div";
+  // Hover is JS-state-driven, not the sf-artchip CSS class (index.css) — this tile's border/
+  // box-shadow are already set INLINE below, and inline styles always beat a stylesheet
+  // selector's border-color/box-shadow regardless of specificity, so .sf-artchip:hover could
+  // never actually win (confirmed live: only `transform`, which has no inline counterpart,
+  // was ever applying). Every other interactive element in this codebase is inline-driven the
+  // same way, so this matches the established convention rather than fighting the cascade.
+  const [hovered, setHovered] = useState(false);
+  const hoverActive = !!onOpen && hovered;
   return (
-    <div role={onOpen ? "button" : undefined} tabIndex={onOpen ? 0 : undefined} onClick={onOpen}
-      style={{ textAlign: "left", cursor: onOpen ? "pointer" : "default", background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, padding: "13px 14px", display: "flex", flexDirection: "column", gap: 10, boxShadow: T.shadowXs }}>
+    <Tile onClick={onOpen} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
+      className={onOpen ? "sf-artchip" : undefined}
+      style={{ textAlign: "left", cursor: onOpen ? "pointer" : "default", background: T.raised,
+        border: `1px solid ${hoverActive ? T.brand : T.borderSubtle}`, borderRadius: T.rLg, padding: "13px 14px",
+        display: "flex", flexDirection: "column", gap: 10,
+        boxShadow: hoverActive ? T.shadowMd : T.shadowXs,
+        transform: hoverActive ? "translateY(-1px)" : "none",
+        transition: "border-color .12s, transform .12s, box-shadow .12s",
+        width: "100%", font: "inherit" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{ font: `700 9px/1 ${T.mono}`, letterSpacing: "0.05em", color: k[2], background: k[1], padding: "4px 6px", borderRadius: 4 }}>{k[0]}</span>
         {tag && <CategoryLabel style={{ fontSize: 9.5 }}>{tag}</CategoryLabel>}
       </div>
       <span style={{ font: `600 13px/1.3 ${T.sans}`, color: T.fg, wordBreak: "break-word" }}>{label}</span>
-      {sub && <span style={{ font: `400 11px/1 ${T.mono}`, color: T.tertiary }}>{sub}</span>}
+      {(sub || used) && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", font: `400 11px/1 ${T.mono}`, color: T.tertiary }}>
+          <span>{sub}</span>{used && <span>{used}</span>}
+        </div>
+      )}
       {summary && (
         <span style={{ font: `400 11.5px/1.4 ${T.sans}`, color: T.secondary, display: "-webkit-box",
           WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{summary}</span>
@@ -54,7 +76,7 @@ function FileTile({ label, kind, sub, tag, onOpen, scope, onScope, summary, summ
           })}
         </div>
       )}
-    </div>
+    </Tile>
   );
 }
 
@@ -119,8 +141,8 @@ export function DocumentsTab({ projectId }: { projectId: string }) {
           <CategoryLabel>Project documents · {total}</CategoryLabel>
           <Btn variant="primary" size="sm" onClick={() => inputRef.current?.click()}><Icon name="upload" size={14} color="#fff" /> Upload material</Btn>
         </div>
-        {err && <div style={{ font: `500 12px/1.4 ${T.sans}`, color: T.tertiary, marginBottom: 10 }}>{err}</div>}
-        {summarizeErr && <div style={{ font: `500 12px/1.4 ${T.sans}`, color: T.tertiary, marginBottom: 10 }}>{summarizeErr}</div>}
+        {err && <div style={{ font: `500 12px/1.4 ${T.sans}`, color: T.danger, marginBottom: 10 }}>{err}</div>}
+        {summarizeErr && <div style={{ font: `500 12px/1.4 ${T.sans}`, color: T.danger, marginBottom: 10 }}>{summarizeErr}</div>}
         {loading && (
           <>
             <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Uploaded by you</h3>
