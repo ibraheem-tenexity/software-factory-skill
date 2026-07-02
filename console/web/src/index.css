@@ -33,7 +33,13 @@ body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-s
 /* SOF-70: artifact/file tile hover (design: orgproject.jsx FileTile's className="sf-artchip") —
    the class was referenced by the design but never ported into the app's own stylesheet. */
 .sf-artchip { transition: border-color .12s, transform .12s, box-shadow .12s; }
-.sf-artchip:hover { border-color: var(--primary); transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.sf-artchip:hover {
+  border-color: var(--primary); transform: translateY(-1px);
+  /* --shadow-md doesn't resolve here (tokens.css's :root lives inside @tailwind's @layer base,
+     which this app's plain-CSS pipeline doesn't process) — inlined the same value as T.shadowMd
+     in theme.ts so this doesn't silently drop with an unresolved var(). */
+  box-shadow: 0 8px 24px -8px hsl(240 6% 10% / 0.10), 0 2px 6px -2px hsl(240 6% 10% / 0.06);
+}
 .sf-artchip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 .app { display: flex; flex-direction: column; height: 100%; }
