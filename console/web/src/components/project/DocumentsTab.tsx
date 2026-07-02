@@ -28,9 +28,24 @@ function FileTile({ label, kind, sub, used, tag, onOpen, scope, onScope, summary
   // Design (orgproject.jsx FileTile) renders a real <button> with the sf-artchip hover class —
   // native keyboard handling (Enter/Space) for free, not a div+tabIndex+onKeyDown reimplementation.
   const Tile = onOpen ? "button" : "div";
+  // Hover is JS-state-driven, not the sf-artchip CSS class (index.css) — this tile's border/
+  // box-shadow are already set INLINE below, and inline styles always beat a stylesheet
+  // selector's border-color/box-shadow regardless of specificity, so .sf-artchip:hover could
+  // never actually win (confirmed live: only `transform`, which has no inline counterpart,
+  // was ever applying). Every other interactive element in this codebase is inline-driven the
+  // same way, so this matches the established convention rather than fighting the cascade.
+  const [hovered, setHovered] = useState(false);
+  const hoverActive = !!onOpen && hovered;
   return (
-    <Tile onClick={onOpen} className={onOpen ? "sf-artchip" : undefined}
-      style={{ textAlign: "left", cursor: onOpen ? "pointer" : "default", background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, padding: "13px 14px", display: "flex", flexDirection: "column", gap: 10, boxShadow: T.shadowXs, width: "100%", font: "inherit" }}>
+    <Tile onClick={onOpen} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
+      className={onOpen ? "sf-artchip" : undefined}
+      style={{ textAlign: "left", cursor: onOpen ? "pointer" : "default", background: T.raised,
+        border: `1px solid ${hoverActive ? T.brand : T.borderSubtle}`, borderRadius: T.rLg, padding: "13px 14px",
+        display: "flex", flexDirection: "column", gap: 10,
+        boxShadow: hoverActive ? T.shadowMd : T.shadowXs,
+        transform: hoverActive ? "translateY(-1px)" : "none",
+        transition: "border-color .12s, transform .12s, box-shadow .12s",
+        width: "100%", font: "inherit" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{ font: `700 9px/1 ${T.mono}`, letterSpacing: "0.05em", color: k[2], background: k[1], padding: "4px 6px", borderRadius: 4 }}>{k[0]}</span>
         {tag && <CategoryLabel style={{ fontSize: 9.5 }}>{tag}</CategoryLabel>}
