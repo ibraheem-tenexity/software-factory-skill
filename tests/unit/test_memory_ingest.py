@@ -106,15 +106,8 @@ def test_estimate_cost_usd_embedding_estimates_tokens_from_char_count():
     assert cost == (4000 / ingest._ESTIMATED_CHARS_PER_TOKEN) * 0.0000002
 
 
-def test_maybe_ingest_async_is_a_noop_when_sf_memory_is_not_set(monkeypatch):
-    monkeypatch.delenv("SF_MEMORY", raising=False)
-    with patch.object(ingest.threading, "Thread") as thread_cls:
-        ingest.maybe_ingest_async(1, console=object())
-    thread_cls.assert_not_called()
-
-
-def test_maybe_ingest_async_spawns_a_daemon_thread_when_enabled(monkeypatch):
-    monkeypatch.setenv("SF_MEMORY", "1")
+def test_maybe_ingest_async_always_spawns_a_daemon_thread():
+    """SOF-71: no flag to gate this anymore — every call spawns."""
     with patch.object(ingest.threading, "Thread") as thread_cls:
         ingest.maybe_ingest_async(7, console=object())
     thread_cls.assert_called_once()

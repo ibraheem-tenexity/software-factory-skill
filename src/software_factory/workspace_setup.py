@@ -42,17 +42,16 @@ _OPEN_ROUTER = { "type":"http", "url": "https://mcp.openrouter.ai/mcp" }
 # Project Memory — console-hosted (SOF-41/T4.2), not a third-party MCP. The URL/token are per-run,
 # not console-static, so both are env-var'd (resolved from SF_MEMORY_MCP_URL/SF_MEMORY_TOKEN,
 # injected by console.py::_launch_stage — see env._STAGE_ESSENTIAL's docstring for why a per-run
-# value can't just live in the console's own static env like EXA_API_KEY does). SF_MEMORY-gated:
-# absent when the flag is off, so a stage with no memory token configured never even sees the
-# server offered (memory/mcp_server.py enforces the token boundary regardless, this is belt+braces).
+# value can't just live in the console's own static env like EXA_API_KEY does). Always offered
+# (SOF-71 — memory is core, not opt-in); if SF_APP_URL was unset at launch the env vars never got
+# injected, so the placeholders below are literally unresolved and the server call fails auth —
+# memory/mcp_server.py enforces the token boundary regardless, this is belt+braces either way.
 _MEMORY = {"type": "http", "url": "${SF_MEMORY_MCP_URL}",
           "headers": {"Authorization": "Bearer ${SF_MEMORY_TOKEN}"}}
 
 
 def mcp_config(stage: int) -> dict:
-    servers = {"playwright": _PLAYWRIGHT, "exa": _EXA, "openrouter": _OPEN_ROUTER}
-    if os.environ.get("SF_MEMORY") == "1":
-        servers["memory"] = _MEMORY
+    servers = {"playwright": _PLAYWRIGHT, "exa": _EXA, "openrouter": _OPEN_ROUTER, "memory": _MEMORY}
     if stage >= 3:
         servers["railway"] = _RAILWAY
     return {"mcpServers": servers}

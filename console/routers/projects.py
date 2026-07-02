@@ -206,8 +206,8 @@ def project_overview(pid: str, v: tuple = Depends(authorize_project)):
 
 def _project_documents(pid: str) -> dict:
     """Documents tab payload, enriched with each doc's AI summary (SOF-36) when memory has one —
-    `list_doc_summaries` returns {} if SF_MEMORY is off or nothing's been ingested yet, so this
-    degrades gracefully either way."""
+    `list_doc_summaries` returns {} if nothing's been ingested yet (or ingestion is still running),
+    so this degrades gracefully."""
     from software_factory.memory.store import MemoryStore
     doc_summaries = MemoryStore().list_doc_summaries("project", pid)
     return project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid),
@@ -245,8 +245,6 @@ def project_document_summarize(pid: str, blob_id: int, v: tuple = Depends(author
     fresh summary. The user is waiting on this, unlike the upload path's fire-and-forget
     maybe_ingest_async — small enough (one document) to just block on."""
     from software_factory.memory import ingest as memory_ingest
-    if not memory_ingest.enabled():
-        raise HTTPException(status_code=404, detail="project memory is not enabled")
     blob = state.blobs.get_blob(blob_id)
     if not blob or blob["scope"] != "project" or blob["scope_id"] != pid:
         raise HTTPException(status_code=404, detail="document not found")
