@@ -1,21 +1,32 @@
 """The Concierge's tool belt (concierge-agent-spec.md §5) — every tool hits a real backend.
 
 `build_project_tools(console, project_id)` binds the current project's Console + memory store into
-the six tools the agent may call:
+the tools the agent may call:
   · project memory — write_to_project_memory / get_from_project_memory / create_project_summary
   · pipeline       — check_project_status (returns live state so the agent reasons about progress)
   · company research — exa_search (quick) / fusion_search (deep), from research.py
+  · document reading (SOF-62) — search_document_summaries (coarse, pick 2-3 relevant documents) /
+    fetch_document_markdown (read one in full) / flag_for_verification (raise a question for the
+    user, replacing SOF-37's automatic per-document escalation) / finalize_product_brief (the
+    Concierge's final brief — the single kind='product_brief' artifact Stage 1 builds from)
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import time
 from dataclasses import asdict
 
 from software_factory.console import Console
+from software_factory.db import ProjectStore
 from software_factory.memory import search as memory_search
-from software_factory.memory.ingest import _recompute_project_rollup
+from software_factory.memory.ingest import _recompute_project_rollup, estimate_tokens
 from software_factory.memory.store import MemoryStore
 from software_factory.research import ResearchError, research_company
+
+# Above this estimated-token size, fetch_document_markdown refuses to dump the whole document into
+# context and points the agent at search/summary tools instead (concierge-memory plan §7).
+_MAX_FULL_DOCUMENT_TOKENS = 500_000
 
 # Deferred at module level intentionally: langchain_core is a heavy import and this module is
 # imported by console-side code paths that don't always need the agent. Kept local to the factory.
@@ -79,5 +90,74 @@ def build_project_tools(console: Console, project_id: str) -> list:
         except ResearchError as exc:
             return f"research unavailable: {exc}"
 
+    @tool
+    def search_document_summaries(query: str) -> str:
+        """Find which 2-3 uploaded documents are relevant to `query` by searching document-level
+        summaries (fast, coarse). Call this BEFORE fetch_document_markdown or chunk-level search
+        once there are several documents — don't search everything by default."""
+        try:
+            hits = memory_search.search_documents("project", project_id, query)
+        except ValueError as exc:
+            return f"search failed: {exc}"
+        return json.dumps(hits, default=str)
+
+    @tool
+    def fetch_document_markdown(blob_id: int) -> str:
+        """Read one uploaded document in full, in its original order (chunk search loses
+        whole-document structure). Use when a summary isn't enough to answer a specific question.
+        Tells you to use search_document_summaries or get_from_project_memory instead if the
+        document is too large to read whole."""
+        content = store.get_document_markdown(blob_id)
+        if content is None:
+            return f"document {blob_id} has no readable markdown (not ingested, or not a document)"
+        tokens = estimate_tokens(content)
+        if tokens > _MAX_FULL_DOCUMENT_TOKENS:
+            return (f"document {blob_id} is too large to read whole (~{tokens} estimated tokens) "
+                    "— use search_document_summaries to confirm it's relevant, or "
+                    "get_from_project_memory for exact passages, instead.")
+        return content
+
+    @tool
+    def flag_for_verification(question: str, related_document_blob_id: int | None = None) -> str:
+        """Raise something you're not confident about for the user to confirm or correct — an
+        inference, a gap, or a contradiction across documents. Appears as an open question the
+        user must answer or dismiss before hand-off. This is now the ONLY way reflection
+        questions are created (ingest no longer auto-generates them) — use it whenever you're
+        unsure, not just when explicitly asked."""
+        text = (question or "").strip()
+        if not text:
+            return "question is empty — nothing flagged"
+        state = console._load_state(project_id)
+        questions = list(state.reflection_questions or [])
+        # Same id convention ingest used to use: sha256(document_blob_id-or-'concierge' : question),
+        # first 12 hex chars — keeps re-raising the identical question idempotent.
+        seed = f"{related_document_blob_id if related_document_blob_id is not None else 'concierge'}:{text}"
+        qid = hashlib.sha256(seed.encode()).hexdigest()[:12]
+        if any(q["id"] == qid for q in questions):
+            return "already flagged"
+        questions.append({
+            "id": qid, "fact": text, "document_blob_id": related_document_blob_id,
+            "section_path_claimed": None, "status": "open", "answer": None,
+            "created_at": time.time(),
+        })
+        state.reflection_questions = questions
+        state.save()
+        return "flagged"
+
+    @tool
+    def finalize_product_brief(markdown: str) -> str:
+        """Save your final, detailed product brief — the single source Stage 1 builds from
+        (supersedes the raw intake composition). Call once you're genuinely confident in the
+        scope, pain points, business problem, and audience; a later call supersedes an earlier
+        one (Console.product_brief always reads the newest)."""
+        md = (markdown or "").strip()
+        if not md:
+            return "markdown is empty — nothing saved"
+        paths = console._paths(project_id)
+        ProjectStore(paths["db"]).record_artifact(
+            "Product Brief", "", kind="product_brief", agent="concierge", content=md)
+        return "saved"
+
     return [write_to_project_memory, get_from_project_memory, create_project_summary,
-            check_project_status, exa_search, fusion_search]
+            check_project_status, exa_search, fusion_search, search_document_summaries,
+            fetch_document_markdown, flag_for_verification, finalize_product_brief]

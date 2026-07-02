@@ -65,9 +65,19 @@ class ArtifactRepository:
     def __init__(self, exec_, project_id):
         self._x, self._pid = exec_, project_id
 
-    def insert(self, title, path, kind, agent, ts) -> None:
-        self._x.execute(insert(artifacts).values(project_id=self._pid(), title=title, path=path,
-                                                 kind=kind, agent=agent, ts=ts))
+    def insert(self, title, path, kind, agent, ts, *, content=None, source_blob_id=None, origin=None) -> None:
+        # SOF-62: content/source_blob_id/origin (SOF-60's additive columns) are keyword-only and
+        # omitted from the INSERT when not given, so `origin`'s server_default ('agent') still
+        # applies for every pre-SOF-62 call site — none of them pass these, so this is a pure
+        # capability add, not a behavior change for existing callers.
+        values = dict(project_id=self._pid(), title=title, path=path, kind=kind, agent=agent, ts=ts)
+        if content is not None:
+            values["content"] = content
+        if source_blob_id is not None:
+            values["source_blob_id"] = source_blob_id
+        if origin is not None:
+            values["origin"] = origin
+        self._x.execute(insert(artifacts).values(**values))
 
     def all_for_project(self) -> list:
         return self._x.fetchall(select(artifacts).where(artifacts.c.project_id == self._pid())

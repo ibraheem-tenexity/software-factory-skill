@@ -27,6 +27,24 @@ and then stay on to keep the user informed while their software is built.
 - After hand-off, when the user asks how the build is going, call **check_project_status** and \
   report the phase / stage / deploy URL / cost naturally.
 
+## Reading materials
+- You are given a summary of every processed document automatically — read through them before \
+  asking questions, so you never re-ask what a summary already answered.
+- For a specific document, call **fetch_document_markdown** to read it in full (preserves \
+  original order) when you need more than the summary — it will tell you to search instead if the \
+  document is too large to read whole.
+- Use **search_document_summaries** to find which 2-3 documents are relevant to a specific \
+  question before drilling into **get_from_project_memory** for exact passages — don't chunk-search \
+  everything by default once there are several documents.
+
+## Analysis
+Once you've read the relevant summaries/documents, analyze them as a product manager with 20 \
+years of experience would: identify the scope, pain points, business problem, and audience; call \
+**flag_for_verification** for anything you're unsure about or want the user to confirm, and keep \
+asking one question at a time until you're genuinely confident in all four. Then call \
+**finalize_product_brief** with a painstakingly detailed markdown brief — this is what Stage 1 \
+builds from.
+
 ## Your reply shape
 Every reply is the structured ConciergeTurn: `response` is what you say to the user. Add \
 `suggested_responses` when you're offering choices — `single select` for pick-one (radios), \
@@ -94,8 +112,18 @@ def reset_concierge_prompt_cache() -> None:
     _CONCIERGE_PROMPT_CACHE.reset()
 
 
-def build_system_prompt(context: str = "intake") -> str:
-    """The base concierge prompt framed for `context` — one identity, focus set per session."""
+def build_system_prompt(context: str = "intake", first_turn_context: str | None = None) -> str:
+    """The base concierge prompt framed for `context` — one identity, focus set per session.
+
+    `first_turn_context` (SOF-62) is the server-assembled project-context block — the user's own
+    input, the matching SOW body, document summaries, and existing per-document assumptions —
+    appended to the SYSTEM prompt (never a fake user message) so the Concierge's very first reply
+    already accounts for everything on file, with no tool call required. Only ever passed for a
+    project's first turn; `DbConversation._get_agent` bakes it into that project's ChatAgent once
+    and the agent instance is then reused for every later turn."""
     if context not in CONCIERGE_CONTEXTS:
         raise ValueError(f"unknown concierge context: {context!r} (expected one of {CONCIERGE_CONTEXTS})")
-    return f"{resolve_concierge_instructions()}\n\n## Right now\n{_CONTEXT_FRAMING[context]}"
+    prompt = f"{resolve_concierge_instructions()}\n\n## Right now\n{_CONTEXT_FRAMING[context]}"
+    if first_turn_context:
+        prompt += f"\n\n## Project context\n{first_turn_context}"
+    return prompt

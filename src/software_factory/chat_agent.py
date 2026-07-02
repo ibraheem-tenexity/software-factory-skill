@@ -112,14 +112,17 @@ class ChatAgent:
 
     `context` sets the focus (same identity everywhere). `tools`/`model` are injectable — pass a
     per-project belt from `concierge_tools.build_project_tools`, or a fake model in tests.
+    `first_turn_context` (SOF-62) is baked into the system prompt at construction — see
+    `default_prompt.build_system_prompt`'s docstring for why this is construction-time, not per-run.
     """
 
-    def __init__(self, context: str = "intake", tools: list | None = None, model=None):
+    def __init__(self, context: str = "intake", tools: list | None = None, model=None,
+                 first_turn_context: str | None = None):
         self.last_usage: dict = {}   # set by run(): {model, provider, input/output_tokens, cost_usd}
         self._agent = create_agent(
             model or choose_chat_model(),
             tools or [],
-            system_prompt=build_system_prompt(context),
+            system_prompt=build_system_prompt(context, first_turn_context),
             response_format=ToolStrategy(ConciergeTurn),
         )
 
