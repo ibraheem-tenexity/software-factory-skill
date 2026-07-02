@@ -72,7 +72,15 @@ export function App() {
   // Open run ⇒ the §2.5 Project View (Overview/Documents tabs) is the default; its "Factory console"
   // peer-tab flips to the Factory Console (PRD §2.6), whose back returns to the Project View.
   if (openView === "factory") {
-    return <FactoryConsole projectId={projectId} onBack={() => setOpenView("project")} />;
+    // The console's peer-tab strip navigates back to the ProjectView with the chosen tab: seed the
+    // ?tab= param (ProjectView reads it on mount) then flip the open view.
+    const switchTab = (tab: "overview" | "documents") => {
+      const p = new URLSearchParams(location.search);
+      if (tab === "overview") p.delete("tab"); else p.set("tab", tab);
+      history.replaceState(null, "", "?" + p.toString());
+      setOpenView("project");
+    };
+    return <FactoryConsole projectId={projectId} onBack={() => setOpenView("project")} onSwitchTab={switchTab} />;
   }
   return <ProjectView projectId={projectId} onBack={backToProjects} onOpenFactory={() => setOpenView("factory")}
     onResume={() => { setResumeProjectId(projectId); setShowProjects(false); setShowOnboarding(true); }} onOpen={openProject} />;

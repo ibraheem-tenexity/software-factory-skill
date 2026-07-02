@@ -34,6 +34,9 @@ export type Ticket = {
   diff_lines: number;
   app: string | null;
   description?: string;
+  // Optional confidence band (exact|high|med|low|none). The backend may not send this yet —
+  // the board renders a ConfidencePill only when it is actually present (no fabrication).
+  confidence?: string;
 };
 
 export type TicketsResponse = { tickets: Ticket[]; waves: number[] };

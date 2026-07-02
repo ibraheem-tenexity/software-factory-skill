@@ -11,7 +11,7 @@
 // A QA bounce is qa_reject -> back to `open` with a markdown bug report written into the ticket's
 // `description`; those re-opened tickets land in Backlog and we surface the BUG tag (the design's
 // red "bug" badge + Testing→Building loop note in the footer).
-import { T, Avatar, Icon } from "../onboarding/design";
+import { T, Avatar, Icon, ConfidencePill } from "../onboarding/design";
 import { Ticket } from "../../api";
 
 type Col = "backlog" | "claimed" | "building" | "testing" | "done";
@@ -43,10 +43,22 @@ function hasBug(t: Ticket): boolean {
 
 // Derive the small tag badge from REAL fields only (design: bug / needs key / e2e).
 type TagKind = "bug" | "deps" | "pr";
+// "needs key" is real when the ticket's own title says it is blocked on a key/dependency.
+function needsKey(t: Ticket): boolean {
+  return /\bneeds?[ -]key\b|\bblocked on (a )?(key|creds?|deps?)\b|\bmissing (api[ -]?)?key\b/i.test(t.title);
+}
 function tagOf(t: Ticket): TagKind | null {
   if (hasBug(t)) return "bug";
+  if (needsKey(t)) return "deps";
   if (t.provenance_type === "pr" && t.provenance) return "pr";
   return null;
+}
+
+// Confidence band, rendered only when the backend actually sent a valid one.
+const BANDS = ["exact", "high", "med", "low", "none"] as const;
+function confBand(t: Ticket): (typeof BANDS)[number] | null {
+  const c = t.confidence;
+  return c && (BANDS as readonly string[]).includes(c) ? (c as (typeof BANDS)[number]) : null;
 }
 function TagBadge({ tag, prov }: { tag: TagKind; prov?: string | null }) {
   const map: Record<TagKind, [string, string, string]> = {
@@ -62,6 +74,7 @@ function TagBadge({ tag, prov }: { tag: TagKind; prov?: string | null }) {
 function TicketCard({ t, onOpen }: { t: Ticket; onOpen: (t: Ticket) => void }) {
   const col = columnOf(t);
   const tag = tagOf(t);
+  const conf = confBand(t);
   return (
     <article onClick={() => onOpen(t)} style={{ background: T.bg, border: `1px solid ${tag === "bug" ? T.danger + "66" : T.borderSubtle}`,
       borderRadius: T.rMd, padding: 9, boxShadow: T.shadowXs, cursor: "pointer", display: "flex", flexDirection: "column", gap: 7 }}>
@@ -75,7 +88,9 @@ function TicketCard({ t, onOpen }: { t: Ticket; onOpen: (t: Ticket) => void }) {
           {t.agent && <Avatar name={t.agent} size={18} />}
           {t.diff_lines > 0 && <span style={{ font: `500 10px/1 ${T.mono}`, color: T.success }}>+{t.diff_lines}</span>}
         </div>
-        {col === "building" && <span style={{ font: `500 10px/1 ${T.mono}`, color: T.warning }}>● working</span>}
+        {col === "building" && (conf
+          ? <ConfidencePill band={conf} />
+          : <span style={{ font: `500 10px/1 ${T.mono}`, color: T.warning }}>● working</span>)}
         {col === "testing" && <span style={{ font: `500 10px/1 ${T.mono}`, color: T.brandDeep }}>● testing</span>}
         {col === "done" && <Icon name="check" size={14} color={T.success} />}
       </div>

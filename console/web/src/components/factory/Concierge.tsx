@@ -1,12 +1,17 @@
 // Concierge.tsx — the left rail. v1 is relay/observe + steer:
+//   · the design's ConciergeHeader band (concierge.jsx): 30px sparkle avatar with a pulsing green
+//     presence dot, "Concierge" + context subtitle, online StatusPill vs Working pill.
 //   · prior Concierge conversation (GET /api/chat/{id}/history → {messages:[{role,content,ts}]})
+//     rendered through the shared Message primitive — plus 1-2 status bubbles synthesized from the
+//     LIVE build state (tickets done, blocker heads-up from real events) so the rail always relays
+//     the build and the feed is never blank.
 //   · recent real run activity (GET /api/projects/{id}/events → {events:[{ts,type,payload}]})
-//   · a steer composer that POSTs to /api/chat (api.chat) with the project_id so the operator can
-//     nudge the build mid-flight.
+//   · QuickReplies suggestion chips + the "Steer the build" promo card (design: concierge.jsx
+//     ProjectConcierge), and a steer composer that POSTs to /api/chat (api.chat).
 //   · the produced-artifacts list (passed in from the real graph).
 //   · Feed / Tray / Latest view toggle to switch between conversation, artifacts, and activity.
 import { useEffect, useRef, useState } from "react";
-import { T, Icon, Sparkle, Avatar, Composer } from "../onboarding/design";
+import { T, Icon, Sparkle, Composer, Message, CategoryLabel, StatusPill, WorkingPill, QuickReplies } from "../onboarding/design";
 import { api, ProjectEvent } from "../../api";
 import { ArtifactList, ArtifactRef } from "./Artifacts";
 
@@ -18,6 +23,8 @@ const RAIL_TABS: { id: Rail; label: string }[] = [
   { id: "tray", label: "Tray" },
   { id: "latest", label: "Latest" },
 ];
+
+const SUGGESTIONS = ["Summarize progress", "What's blocking the build?", "Reprioritize a ticket"];
 
 const EVENT_ICON: Record<string, string> = { phase: "layers", artifact: "file", blocker: "x", done: "check" };
 function eventText(e: ProjectEvent): string {
@@ -31,8 +38,32 @@ function eventText(e: ProjectEvent): string {
   }
 }
 
-export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, isBuilding }:
-  { projectId: string; projectName?: string; artifacts: ArtifactRef[]; onOpenArtifact: (a: ArtifactRef) => void; isBuilding?: boolean }) {
+// 1-2 relay bubbles derived ONLY from real state (design copy tone: buildprogress.jsx:84-96).
+function synthBubbles(args: { buildDone?: boolean; deployed?: boolean; ticketsDone?: number;
+  ticketsTotal?: number; phase?: string; events: ProjectEvent[] }): string[] {
+  const { buildDone, deployed, ticketsDone = 0, ticketsTotal = 0, phase, events } = args;
+  const out: string[] = [];
+  if (buildDone) {
+    out.push(ticketsTotal > 0
+      ? `All ${ticketsTotal} tickets are green${deployed ? " and the app is deployed" : ""}. Ask me anything about the build.`
+      : `The build is complete${deployed ? " and the app is deployed" : ""}. Ask me anything about it.`);
+  } else if (ticketsTotal > 0) {
+    out.push(`Build is underway — ${ticketsDone}/${ticketsTotal} tickets done. I'll relay updates from the build team here.`);
+  } else if (phase) {
+    out.push(`The factory is working — the run is in the ${phase} phase. I'll relay updates here as they land.`);
+  } else {
+    out.push("I'm watching this project — I'll relay build updates here as they land.");
+  }
+  const blocker = events.find((e) => e.type === "blocker" && e.payload?.what);
+  if (blocker) out.push(`Heads up: ${blocker.payload.what} — the build team has it flagged.`);
+  return out.slice(0, 2);
+}
+
+export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, isBuilding,
+  ticketsDone, ticketsTotal, buildDone, deployed, phase }:
+  { projectId: string; projectName?: string; artifacts: ArtifactRef[];
+    onOpenArtifact: (a: ArtifactRef) => void; isBuilding?: boolean;
+    ticketsDone?: number; ticketsTotal?: number; buildDone?: boolean; deployed?: boolean; phase?: string }) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [events, setEvents] = useState<ProjectEvent[]>([]);
   const [draft, setDraft] = useState("");
@@ -54,18 +85,18 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
 
   useEffect(() => { if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight; }, [messages]);
 
-  const steer = async () => {
-    const text = draft.trim();
-    if (!text || sending) return;
+  const steer = async (text?: string) => {
+    const msg = (text ?? draft).trim();
+    if (!msg || sending) return;
     setSending(true);
     setSendErr("");
-    setMessages((m) => [...m, { role: "user", content: text, ts: Date.now() / 1000 }]);
+    setMessages((m) => [...m, { role: "user", content: msg, ts: Date.now() / 1000 }]);
     setDraft("");
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 90_000);
     try {
       const resp = await api.chatStream(
-        { project_id: projectId, project_name: projectName || "", message: text },
+        { project_id: projectId, project_name: projectName || "", message: msg },
         ctrl.signal,
       );
       const reader = resp.body!.getReader();
@@ -105,23 +136,28 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
     }
   };
 
+  const synth = synthBubbles({ buildDone, deployed, ticketsDone, ticketsTotal, phase, events });
+
   return (
-    <aside style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%", minHeight: 0 }}>
-      {/* header: icon + title + Working chip */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ width: 26, height: 26, borderRadius: "50%", display: "grid", placeItems: "center",
-          background: T.brandSoft, color: T.brand, boxShadow: `inset 0 0 0 1px ${T.brand}33` }}><Sparkle size={12} color={T.brand} /></span>
-        <span style={{ font: `600 14px/1 ${T.sans}`, color: T.fg, flex: 1 }}>Concierge</span>
-        {isBuilding && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 7px", borderRadius: 99, background: T.brandSoft, border: `1px solid ${T.brand}33` }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.brand, flexShrink: 0, animation: "pulse 1.4s ease-in-out infinite" }} />
-            <span style={{ font: `600 10px/1 ${T.mono}`, letterSpacing: "0.06em", color: T.brand }}>Working</span>
-          </span>
-        )}
+    <aside style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      {/* ── header band (design: concierge.jsx ConciergeHeader) ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "14px 18px",
+        borderBottom: `1px solid ${T.borderSubtle}`, flexShrink: 0 }}>
+        <span style={{ position: "relative", width: 30, height: 30, borderRadius: "50%", display: "grid", placeItems: "center",
+          background: T.brandSoft, color: T.brand, boxShadow: `inset 0 0 0 1px ${T.brand}33` }}>
+          <Sparkle size={14} color={T.brand} />
+          <span style={{ position: "absolute", right: -1, bottom: -1, width: 9, height: 9, borderRadius: "50%",
+            background: T.success, boxShadow: `0 0 0 2px ${T.raised}`, animation: "sfPulse 1.6s ease-in-out infinite" }} />
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: "block", font: `600 13px/1.2 ${T.sans}`, color: T.fg }}>Concierge</span>
+          <CategoryLabel style={{ fontSize: 10 }}>{buildDone ? "Build complete" : "Relaying the build"}</CategoryLabel>
+        </div>
+        {sending ? <WorkingPill label="Thinking" /> : isBuilding ? <WorkingPill /> : <StatusPill tone="success">online</StatusPill>}
       </div>
 
       {/* Feed / Tray / Latest toggle */}
-      <div style={{ display: "flex", gap: 2, background: T.sunken, borderRadius: T.rMd, padding: 3 }}>
+      <div style={{ display: "flex", gap: 2, background: T.sunken, borderRadius: T.rMd, padding: 3, margin: "10px 16px 0", flexShrink: 0 }}>
         {RAIL_TABS.map((t) => (
           <button key={t.id} onClick={() => setRail(t.id)}
             style={{ flex: 1, padding: "5px 0", borderRadius: T.rSm, border: "none", cursor: "pointer",
@@ -136,21 +172,15 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
 
       {/* main rail body */}
       {rail === "feed" && (
-        <div ref={feedRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div ref={feedRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 16px",
+          display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* status bubbles synthesized from the live run — the rail relays the build, never blank */}
+          {synth.map((text, i) => <Message key={`s${i}`} who="agent" text={text} anim={i === 0} />)}
           {messages.map((m, i) => (
-            <article key={i} style={{ display: "flex", gap: 9 }}>
-              {m.role === "assistant"
-                ? <span style={{ marginTop: 1, width: 24, height: 24, flexShrink: 0, borderRadius: "50%", display: "grid", placeItems: "center", background: T.brandSoft, color: T.brand, boxShadow: `inset 0 0 0 1px ${T.brand}33` }}><Sparkle size={11} color={T.brand} /></span>
-                : <Avatar name="You" size={24} />}
-              <div style={{ flex: 1, minWidth: 0, border: `1px solid ${m.role === "assistant" ? T.brand + "33" : T.borderSubtle}`,
-                background: m.role === "assistant" ? T.brandSoft + "4d" : T.raised, borderRadius: T.rLg, padding: "8px 11px" }}>
-                <span style={{ font: `600 11px/1 ${T.sans}`, color: T.fg }}>{m.role === "assistant" ? "Concierge" : "You"}</span>
-                <p style={{ margin: "5px 0 0", font: `400 12.5px/1.5 ${T.sans}`, color: m.role === "assistant" ? T.secondary : T.fg, whiteSpace: "pre-wrap" }}>{m.content}</p>
-              </div>
-            </article>
+            <Message key={i} who={m.role === "assistant" ? "agent" : "user"} text={m.content} />
           ))}
           {events.length > 0 && (
-            <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ font: `500 10px/1 ${T.sans}`, letterSpacing: "0.1em", textTransform: "uppercase", color: T.tertiary, padding: "2px 0" }}>Recent activity</span>
               {events.map((e, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: T.rMd, background: T.sunken }}>
@@ -160,17 +190,33 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
               ))}
             </div>
           )}
+          {/* suggestion chips (design: concierge.jsx QuickReplies, build context) */}
+          {!sending && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              <CategoryLabel>Try asking</CategoryLabel>
+              <QuickReplies options={SUGGESTIONS} onPick={(o) => steer(o)} />
+            </div>
+          )}
+          {/* Steer-the-build promo card (design: concierge.jsx ProjectConcierge) */}
+          <div style={{ padding: 11, borderRadius: T.rLg, border: `1px solid ${T.brand}33`, background: T.brandSoft + "66" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+              <Sparkle size={11} color={T.brandDeep} /><CategoryLabel tone="brand">Steer the build</CategoryLabel>
+            </div>
+            <p style={{ font: `400 12px/1.5 ${T.sans}`, color: T.secondary, margin: 0 }}>
+              Ask me to reprioritize a ticket, change scope, or pause an agent — I'll pass it straight to the build team.
+            </p>
+          </div>
         </div>
       )}
 
       {rail === "tray" && (
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 16px" }}>
           <ArtifactList artifacts={artifacts} onOpen={onOpenArtifact} />
         </div>
       )}
 
       {rail === "latest" && (
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 16px", display: "flex", flexDirection: "column", gap: 4 }}>
           {events.length === 0
             ? <span style={{ font: `400 12.5px/1.5 ${T.sans}`, color: T.tertiary }}>No activity yet.</span>
             : events.map((e, i) => (
@@ -182,9 +228,10 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
         </div>
       )}
 
-      {sendErr && <span style={{ font: `400 11.5px/1.4 ${T.sans}`, color: T.danger }}>{sendErr}</span>}
-      <div>
-        <Composer placeholder="Steer the build…" value={draft} onChange={setDraft} onSend={steer} loading={sending} />
+      {/* ── composer band ── */}
+      <div style={{ flexShrink: 0, padding: "12px 16px", borderTop: `1px solid ${T.borderSubtle}` }}>
+        {sendErr && <span style={{ display: "block", marginBottom: 6, font: `400 11.5px/1.4 ${T.sans}`, color: T.danger }}>{sendErr}</span>}
+        <Composer placeholder="Ask or steer the build team…" value={draft} onChange={setDraft} onSend={() => steer()} loading={sending} />
       </div>
     </aside>
   );

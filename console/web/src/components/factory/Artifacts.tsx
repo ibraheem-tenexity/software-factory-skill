@@ -1,54 +1,114 @@
 // Artifacts.tsx — the produced-artifacts list (left rail) + the DocViewer modal.
 //
 // Artifacts are the artifact-kind nodes in the real graph (projected from the project store's artifacts
-// table). Each carries { label, path, status, url }. An http path is an external link (repo /
-// live app) opened in a new tab; a file path opens in the DocViewer, which fetches the content
-// from /api/projects/{id}/artifact?path=… (api.artifact) and renders by extension:
+// table). Each carries { label, path, status, url } plus, followed through the hierarchy edges, the
+// agent that produced it and the pipeline node that agent ran under (artifact ← agent ← phase).
+// An http path is an external link (repo / live app) opened in a new tab; a file path opens in the
+// DocViewer, which fetches the content from /api/projects/{id}/artifact?path=… (api.artifact) and
+// renders by extension:
 //   .md/.mdx → rich Markdown (shared MarkdownBody, SOF-21) · .svg → inline · everything else → text.
 import { useEffect, useState } from "react";
-import { T, Icon } from "../onboarding/design";
+import { T, Icon, CategoryLabel, ArtifactChip, kindBadgeFor } from "../onboarding/design";
 import { api, Graph, GraphNode } from "../../api";
 import { MarkdownBody } from "../../markdown";
 
-export type ArtifactRef = { label: string; path: string; url: string | null; status?: string; id?: number };
+export type ArtifactRef = {
+  label: string; path: string; url: string | null; status?: string; id?: number;
+  kind?: string;          // badge kind (md/svg/fig/repo/…), derived from path/url
+  agent?: string;         // producing agent role (hierarchy parent), if recorded
+  node?: string;          // pipeline node label the producing agent ran under
+};
 
 // Open the standalone artifact viewer in a new tab by artifact id.
 export function openArtifact(id: number | string) {
   window.open(`/ArtifactViewer.html?doc=${id}`, "_blank");
 }
 
-export function artifactsFromGraph(graph: Graph): ArtifactRef[] {
-  return graph.nodes
-    .filter((n: GraphNode) => n.data.kind === "artifact")
-    .map((n) => ({ label: n.data.label, path: n.data.path || "", url: n.data.url || null, status: n.data.status, id: n.data.artifact_id }));
+// Badge kind from the artifact's path/url (design KIND_BADGE keys; unknown ⇒ the raw extension).
+export function artifactKind(path: string, url?: string | null): string {
+  const p = (path || "").toLowerCase();
+  if (url || p.startsWith("http")) return /github/i.test(url || p) ? "repo" : "link";
+  if (p.endsWith(".md") || p.endsWith(".mdx")) return "md";
+  if (p.endsWith(".svg")) return "svg";
+  if (p.endsWith(".fig")) return "fig";
+  const ext = p.includes(".") ? p.split(".").pop()! : "";
+  return ext || "doc";
 }
 
+export function artifactsFromGraph(graph: Graph): ArtifactRef[] {
+  // hierarchy edges: phase → agent and agent/orchestrator → artifact. Resolve each artifact's
+  // producing agent (edge source) and that agent's pipeline node (its own hierarchy source).
+  const byId: Record<string, GraphNode> = {};
+  for (const n of graph.nodes) byId[n.data.id] = n;
+  const parentOf: Record<string, string> = {};
+  for (const e of graph.edges) {
+    if (e.data.etype === "hierarchy") parentOf[e.data.target] = e.data.source;
+  }
+  return graph.nodes
+    .filter((n: GraphNode) => n.data.kind === "artifact")
+    .map((n) => {
+      const owner = byId[parentOf[n.data.id] || ""];
+      const isAgent = owner?.data.kind === "agent";
+      const phase = isAgent ? byId[parentOf[owner.data.id] || ""] : undefined;
+      return {
+        label: n.data.label, path: n.data.path || "", url: n.data.url || null,
+        status: n.data.status, id: n.data.artifact_id,
+        kind: artifactKind(n.data.path || "", n.data.url),
+        agent: isAgent ? owner.data.label : undefined,
+        node: phase?.data.kind === "phase" ? phase.data.label : undefined,
+      };
+    });
+}
+
+// Concierge-surfaced list of produced artifacts, grouped by the pipeline node that made them
+// (design: artifacts.jsx:137-160 ArtifactList) — header "Artifacts produced · N files".
 export function ArtifactList({ artifacts, onOpen }:
   { artifacts: ArtifactRef[]; onOpen: (a: ArtifactRef) => void }) {
   if (!artifacts.length) {
     return <p style={{ margin: 0, font: `400 12px/1.5 ${T.sans}`, color: T.tertiary }}>No artifacts produced yet.</p>;
   }
+  // Group per producing node (insertion order); un-attributed artifacts fall into "factory".
+  const groups: { node: string; agent?: string; items: ArtifactRef[] }[] = [];
+  for (const a of artifacts) {
+    const node = a.node || "factory";
+    let g = groups.find((x) => x.node === node);
+    if (!g) { g = { node, agent: a.agent, items: [] }; groups.push(g); }
+    g.items.push(a);
+  }
+  const open = (a: ArtifactRef) => (a.url ? window.open(a.url, "_blank") : onOpen(a));
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {artifacts.map((a, i) => {
-        const isLink = !!a.url;
-        return (
-          <button key={i} onClick={() => (isLink ? window.open(a.url!, "_blank") : onOpen(a))}
-            style={{ display: "flex", alignItems: "center", gap: 9, textAlign: "left", cursor: "pointer",
-              padding: "8px 10px", borderRadius: T.rMd, border: `1px solid ${T.borderSubtle}`, background: T.raised }}>
-            <Icon name={isLink ? "external" : "file"} size={14} color={isLink ? T.brandDeep : T.tertiary} />
-            <span style={{ flex: 1, font: `500 12.5px/1.3 ${T.sans}`, color: T.fg, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.label}</span>
-            {a.status === "missing" && <span style={{ font: `400 10px/1 ${T.mono}`, color: T.danger }}>missing</span>}
-          </button>
-        );
-      })}
+    <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden" }}>
+      <div style={{ padding: "9px 12px", borderBottom: `1px solid ${T.borderSubtle}`, background: T.sunken,
+        display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <CategoryLabel>Artifacts produced</CategoryLabel>
+        <span style={{ font: `500 10px/1 ${T.mono}`, color: T.tertiary }}>{artifacts.length} files</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {groups.map((g) => (
+          <div key={g.node} style={{ padding: "10px 12px", borderBottom: `1px solid ${T.borderSubtle}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7 }}>
+              <span style={{ font: `500 11px/1 ${T.mono}`, color: T.tertiary }}>{g.node}</span>
+              {g.agent && <span style={{ font: `400 11px/1 ${T.sans}`, color: T.tertiary }}>· {g.agent}</span>}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch" }}>
+              {g.items.map((a, i) => (
+                <ArtifactChip key={`${a.path}-${i}`} small onOpen={open}
+                  a={{ ...a, note: a.status === "missing" ? "missing" : undefined }} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 // DocViewer — modal that fetches + renders one artifact (or arbitrary content, e.g. a ticket body).
+// Header (design: artifacts.jsx:118-123): KIND badge · mono filename · "· produced by {agent}".
 export function DocViewer({ projectId, doc, onClose }:
-  { projectId: string; doc: { label: string; path?: string; content?: string; id?: number } | null; onClose: () => void }) {
+  { projectId: string;
+    doc: { label: string; path?: string; content?: string; id?: number; agent?: string; kind?: string } | null;
+    onClose: () => void }) {
   const [content, setContent] = useState<string | null>(doc?.content ?? null);
   const [loading, setLoading] = useState(false);
 
@@ -67,16 +127,20 @@ export function DocViewer({ projectId, doc, onClose }:
   const lowerPath = (doc.path || "").toLowerCase();
   const isSvg = lowerPath.endsWith(".svg");
   const isMd = lowerPath.endsWith(".md") || lowerPath.endsWith(".mdx");
+  const k = kindBadgeFor(doc.kind || (doc.path ? artifactKind(doc.path) : "doc"));
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(6,7,9,0.45)", zIndex: 50,
       display: "grid", placeItems: "center", padding: 24 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "min(820px, 100%)", maxHeight: "86vh",
         background: T.raised, borderRadius: T.rXl, boxShadow: T.shadowMd, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <header style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 16px", borderBottom: `1px solid ${T.borderSubtle}` }}>
-          <Icon name="file" size={15} color={T.tertiary} />
-          <span style={{ flex: 1, font: `600 14px/1.2 ${T.sans}`, color: T.fg }}>{doc.label}</span>
-          {doc.path && <span style={{ font: `400 11px/1 ${T.mono}`, color: T.tertiary }}>{doc.path}</span>}
+        <header style={{ display: "flex", alignItems: "center", gap: 9, padding: "13px 16px", borderBottom: `1px solid ${T.borderSubtle}` }}>
+          <span style={{ font: `700 9px/1 ${T.mono}`, letterSpacing: "0.04em", color: k[2], background: k[1],
+            padding: "4px 5px", borderRadius: 3, flexShrink: 0 }}>{k[0]}</span>
+          <span title={doc.path || undefined} style={{ font: `600 14px/1.2 ${T.mono}`, color: T.fg,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.label}</span>
+          {doc.agent && <span style={{ font: `400 12px/1 ${T.sans}`, color: T.tertiary, whiteSpace: "nowrap" }}>· produced by {doc.agent}</span>}
+          <span style={{ flex: 1 }} />
           {doc.id != null && (
             <button onClick={() => openArtifact(doc.id!)} title="Open full viewer"
               style={{ width: 28, height: 28, display: "grid", placeItems: "center", borderRadius: T.rMd,

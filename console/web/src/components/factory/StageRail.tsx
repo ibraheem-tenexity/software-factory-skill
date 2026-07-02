@@ -2,14 +2,15 @@
 // of mono-label pills + the two Stage-gate diamonds + the wait-for-deps pill. Every node's
 // state (done / active / queued / waiting) comes from the server-derived graph
 // (phaseStatesFromGraph), never invented client-side — the rail reflects the run's ACTUAL
-// progress. The active phase gets the pulsing brand pill + a NEW badge.
+// progress. The active phase gets the pulsing brand pill; the NEW badge is reserved for phases
+// flagged in pipeline.ts NEW_PHASES (new node kinds — SOF-73), never the merely-active one.
 //
 // Recovery extension: when `haltedNode` is set (run is paused/crashed), the halted pill shows
 // in danger-red and downstream pills are faded/queued. Done pills become clickable for rewind
 // when `onRewind` is provided.
 import React from "react";
 import { T, Icon } from "../onboarding/design";
-import { PIPELINE_ORDER, STAGES, PhaseStatus, gatePassedFromGraph, isDownstreamOf } from "./pipeline";
+import { PIPELINE_ORDER, STAGES, NEW_PHASES, PhaseStatus, gatePassedFromGraph, isDownstreamOf } from "./pipeline";
 import { Graph } from "../../api";
 
 function Connector({ faded }: { faded?: boolean }) {
@@ -95,7 +96,7 @@ export function StageRail({ graph, phaseStates, depsSatisfied, atDeps, haltedNod
     const rewindable = !!onRewind && st === "done" && !isHalted;
     if (i > 0) items.push(<Connector key={`c${i}`} faded={isDownstream} />);
     items.push(
-      <PhasePill key={id} label={PHASE_LABEL[id] || id} status={st} isNew={st === "active" && !isHalted}
+      <PhasePill key={id} label={PHASE_LABEL[id] || id} status={st} isNew={NEW_PHASES.has(id)}
         halted={isHalted} faded={faded}
         onClick={rewindable ? () => onRewind(id) : undefined} />
     );
