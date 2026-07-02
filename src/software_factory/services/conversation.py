@@ -13,6 +13,7 @@ import time
 import uuid
 
 from software_factory.services.errors import Invalid
+from software_factory import dbshim
 
 # Scripted agent turns, walked by the count of prior agent turns. Each entry is (message, choices);
 # `choices` empty ⇒ a plain-text turn, otherwise ≤4 single-select options. The real agent decides
@@ -67,6 +68,75 @@ def _onboarding_session_id(project_id: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"onboarding:{project_id}"))
 
 
+def _matching_sow_bodies(project_name: str) -> list[dict]:
+    """SOW row(s) whose free-text `project` matches this project's name (SOF-62). No user-facing
+    "choose an SOW" mechanism exists yet — sow.project is free-text, staff-authored (Tenexity OS
+    §3.4b) — so name-match is the nearest-term linkage; a real `sow_id` on the draft is a separate,
+    later fix. Read via dbshim like MemoryStore does — sow is a global table, not project-scoped
+    storage, so this is a plain query, not a MemoryStore method."""
+    name = (project_name or "").strip()
+    if not name:
+        return []
+    conn = dbshim.connect(".")
+    try:
+        rows = conn.execute(
+            "SELECT title, body FROM sow WHERE project = ? AND body IS NOT NULL", (name,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [{"title": r["title"], "body": r["body"]} for r in rows]
+
+
+def _build_first_turn_context(console, project_id: str) -> str:
+    """SOF-62: the server-assembled project-context block for the Concierge's first turn — the
+    user's own project input, the matching SOW body, every document summary, and existing
+    per-document assumptions. Pushed into the system prompt (see default_prompt.build_system_prompt),
+    never a fake user message, so the first reply already accounts for everything on file with no
+    tool call required. Missing pieces (no SOW match, no documents yet) are stated as such, never
+    silently omitted, so the agent doesn't have to guess whether a section was skipped or is
+    genuinely empty."""
+    from software_factory.memory.store import MemoryStore
+
+    state = console._load_state(project_id)
+    sections = []
+
+    sections.append(
+        "### The user's own input\n"
+        f"- Project name: {state.name or '(untitled)'}\n"
+        f"- Goal: {state.goal or '(not given yet)'}\n"
+        f"- Scope: {', '.join(state.scope) if state.scope else '(not given yet)'}\n"
+        f"- Description: {state.description or '(not composed yet)'}"
+    )
+
+    sow_rows = _matching_sow_bodies(state.name)
+    if sow_rows:
+        sow_text = "\n\n".join(f"**{r['title']}**\n{r['body']}" for r in sow_rows)
+    else:
+        sow_text = "(no SOW on file matching this project's name)"
+    sections.append(f"### Statement of Work\n{sow_text}")
+
+    summaries = MemoryStore().list_doc_summaries("project", project_id)
+    if summaries:
+        summary_text = "\n\n".join(
+            f"- {row['summary_md'] or '(summary pending — status: ' + row['status'] + ')'}"
+            for row in summaries.values()
+        )
+    else:
+        summary_text = "(no documents uploaded yet)"
+    sections.append(f"### Document summaries\n{summary_text}")
+
+    assumptions = MemoryStore().assumptions("project", project_id)
+    if assumptions:
+        assumption_text = "\n".join(
+            f"- {a['fact']} (from {a['document_name']})" for a in assumptions
+        )
+    else:
+        assumption_text = "(no per-document assumptions extracted yet)"
+    sections.append(f"### Existing per-document assumptions\n{assumption_text}")
+
+    return "\n\n".join(sections)
+
+
 class DbConversation:
     """DB-backed Concierge conversation (SOF-31/T1.3) — the SAME turn()/history() contract as the
     mock above, now durable via ConversationStore. Storage-only swap per the ticket's own scope:
@@ -89,16 +159,20 @@ class DbConversation:
         self._console = console  # needed to bind the per-project tool belt
         self._agents: dict = {}  # project_id → ChatAgent (tools bind project_id at construction)
 
-    def _get_agent(self, project_id: str):
+    def _get_agent(self, project_id: str, is_first_turn: bool = False):
         if self._agent is not None:
             return self._agent
         if project_id not in self._agents:
             from software_factory.chat_agent import ChatAgent
             tools = []
+            first_turn_context = None
             if self._console is not None:
                 from software_factory.concierge_tools import build_project_tools
                 tools = build_project_tools(self._console, project_id)
-            self._agents[project_id] = ChatAgent(context="intake", tools=tools)
+                if is_first_turn:
+                    first_turn_context = _build_first_turn_context(self._console, project_id)
+            self._agents[project_id] = ChatAgent(
+                context="intake", tools=tools, first_turn_context=first_turn_context)
         return self._agents[project_id]
 
     def history(self, project_id: str) -> list[dict]:
@@ -115,6 +189,10 @@ class DbConversation:
         if not text:
             raise Invalid("message is empty")
         session_id = _onboarding_session_id(project_id)
+        # Checked BEFORE appending this message: an empty history means this call IS turn one —
+        # that's the signal _get_agent uses to bake the first-turn context block into the system
+        # prompt (SOF-62). Checking after the append below would always see >=1 row.
+        is_first_turn = not self._store.history(session_id)
 
         self._store.append(session_id, "user", [{"type": "text", "text": text}],
                           project_id=project_id)
@@ -123,7 +201,7 @@ class DbConversation:
         rows = self._store.history(session_id)
         messages = to_provider(rows, "openai")   # OpenRouter (Kimi) also uses the OpenAI shape
 
-        agent = self._get_agent(project_id)
+        agent = self._get_agent(project_id, is_first_turn=is_first_turn)
         turn = await agent.run(messages)
         usage = getattr(agent, "last_usage", None) or {}
 

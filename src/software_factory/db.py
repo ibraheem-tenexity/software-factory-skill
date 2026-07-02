@@ -115,8 +115,10 @@ class ProjectStore:
         self._phase_repo.insert(name, status, stage, time.time())
 
     def record_artifact(self, title: str, path: str, kind: Optional[str] = None,
-                        agent: Optional[str] = None) -> None:
-        self._artifact_repo.insert(title, path, kind, agent, time.time())
+                        agent: Optional[str] = None, *, content: Optional[str] = None,
+                        source_blob_id: Optional[int] = None, origin: Optional[str] = None) -> None:
+        self._artifact_repo.insert(title, path, kind, agent, time.time(),
+                                   content=content, source_blob_id=source_blob_id, origin=origin)
 
     def add_blocker(self, what: str, blocks: Optional[str] = None) -> None:
         self._blocker_repo.insert(what, blocks, time.time())
