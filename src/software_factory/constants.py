@@ -15,8 +15,8 @@ PROJECT_ID_RE = re.compile(r"project-[A-Za-z0-9-]+")
 PROJECT_ID_STRICT_RE = re.compile(r"project-[0-9a-f]{8,}")
 
 # ── Pipeline stages ───────────────────────────────────────────────────────────
-STAGE_1 = ["extract", "provision", "research"]
-STAGE_2 = ["architect", "tickets"]
+STAGE_1 = ["extract", "provision", "research", "product"]
+STAGE_2 = ["architect", "design", "tickets"]
 STAGE_3 = ["build", "deploy", "test", "teardown"]
 PIPELINE = STAGE_1 + STAGE_2 + STAGE_3
 

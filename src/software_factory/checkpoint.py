@@ -6,9 +6,9 @@ Retrying or rewinding a node deletes its checkpoint and all downstream ones, the
 stage relaunches — upstream nodes whose checkpoints survive are skipped.
 
 NODE_ORDER is the canonical pipeline sequence. Nodes are addressed by their existing
-`phases` names (extract / provision / research / architect / tickets / build / deploy /
-test / teardown) plus "stage:1" / "stage:2" / "stage:3" as coarse stage-boundary markers
-that are set by the console when it detects stage completion.
+`phases` names (extract / provision / research / product / architect / design / tickets /
+build / deploy / test / teardown) plus "stage:1" / "stage:2" / "stage:3" as coarse
+stage-boundary markers that are set by the console when it detects stage completion.
 """
 from __future__ import annotations
 
@@ -28,8 +28,10 @@ NODE_ORDER: tuple[str, ...] = (
     "extract",
     "provision",
     "research",
+    "product",
     "stage:2",          # coarse: whole stage 2 done
     "architect",
+    "design",
     "tickets",
     "stage:3",          # coarse: whole stage 3 done
     "build",

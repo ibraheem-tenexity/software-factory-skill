@@ -205,3 +205,68 @@ def test_parse_required_tokens_numbered_dependencies_heading():
     tokens = artifacts.parse_required_tokens(text)
     assert len(tokens) == 1
     assert tokens[0]["name"] == "STRIPE_SECRET_KEY"
+
+
+# ── SOF-73: product-phase PRD lock-in verdict ─────────────────────────────────────────────────
+
+def test_prd_lock_in_verdict_reads_the_real_council_prd_format():
+    # The exact format the synthesizer writes: "PRD lock-in: SHIP_AS_IS (3/3 seats agreed)".
+    assert artifacts.prd_lock_in_verdict(COUNCIL_PRD) == "SHIP_AS_IS"
+
+
+def test_prd_lock_in_verdict_reads_ship_with_edits():
+    text = "# PRD\nPRD lock-in: SHIP_WITH_EDITS (2/3 agreed, VANGUARD dissented)\n"
+    assert artifacts.prd_lock_in_verdict(text) == "SHIP_WITH_EDITS"
+
+
+def test_prd_lock_in_verdict_reads_send_back():
+    text = "# PRD\nPRD lock-in: SEND_BACK (seats diverged on scope)\n"
+    assert artifacts.prd_lock_in_verdict(text) == "SEND_BACK"
+
+
+def test_prd_lock_in_verdict_none_when_absent():
+    assert artifacts.prd_lock_in_verdict(GOOD_PRD) is None
+    assert artifacts.prd_lock_in_verdict("") is None
+    assert artifacts.prd_lock_in_verdict(None) is None
+
+
+# ── SOF-73: design-phase screen coverage ──────────────────────────────────────────────────────
+
+SCREEN_CATALOG_PRD = """# PRD
+## Screen catalog
+| ID | Title | app | V1? |
+|----|-------|-----|-----|
+| S1 | Login | web | Yes |
+| S2 | Dashboard | web | Yes |
+| S3 | Settings | web | Future |
+"""
+
+
+def test_parse_screen_ids_reads_the_first_table_column():
+    assert artifacts.parse_screen_ids(SCREEN_CATALOG_PRD) == ["S1", "S2", "S3"]
+
+
+def test_parse_screen_ids_empty_when_no_catalog():
+    assert artifacts.parse_screen_ids(GOOD_PRD) == []
+    assert artifacts.parse_screen_ids("") == []
+
+
+def test_design_spec_is_complete_when_every_screen_referenced():
+    design = "# Design Spec\n## S1 Login\nLayout.\n## S2 Dashboard\nLayout.\n## S3 Settings\nLayout.\n"
+    ok, reasons = artifacts.design_spec_is_complete(design, ["S1", "S2", "S3"])
+    assert ok is True, reasons
+
+
+def test_design_spec_is_complete_flags_missing_screens():
+    design = "# Design Spec\n## S1 Login\nLayout.\n"
+    ok, reasons = artifacts.design_spec_is_complete(design, ["S1", "S2", "S3"])
+    assert ok is False
+    assert any("S2" in r and "S3" in r for r in reasons)
+
+
+def test_design_spec_is_complete_does_not_hard_fail_on_empty_screen_ids():
+    # An unparseable/absent screen catalog is reported but doesn't fail this check on its own —
+    # artifacts.verify() already gates design-spec.md's existence separately.
+    ok, reasons = artifacts.design_spec_is_complete("# Design Spec\nsomething", [])
+    assert ok is True
+    assert reasons  # still surfaced for visibility

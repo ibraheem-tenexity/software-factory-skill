@@ -39,7 +39,7 @@ from .repositories._exec import PathExec
 from .repositories.canvas import ProjectStateRepository, PhaseRepository, BlockerRepository, ArtifactRepository
 from .repositories.runtime_agents import AgentRepository
 from .tickets import TicketStore
-from .workspace_setup import prepare_workspace, tool_env_overrides
+from .workspace_setup import prepare_workspace, tool_env_overrides, write_agent_file
 from .log import get_logger
 
 logger = get_logger(__name__)
@@ -441,9 +441,9 @@ class Console:
 
         closed = set()
         if state.stage1_done:
-            closed.update(("extract", "provision", "research"))
+            closed.update(STAGE_1)
         if state.stage2_done:
-            closed.update(("architect", "tickets"))
+            closed.update(STAGE_2)
         if any((a.get("kind") or "").lower() == "deploy" for a in db.artifacts()):
             closed.add("deploy")
         if db.has_passing_verification():
@@ -487,7 +487,7 @@ class Console:
         if state.stage2_done:
             implied.add("tickets")
         elif state.stage1_done:
-            implied.add("research")
+            implied.add("product")
         idx = {n: i for i, n in enumerate(PIPELINE)}
         active = [n for n in PIPELINE if n in recorded] + [n for n in implied]
         if not active:
@@ -597,7 +597,7 @@ class Console:
         if state.stage2_done:
             implied.add("tickets")
         elif state.stage1_done:
-            implied.add("research")
+            implied.add("product")
         idx = {n: i for i, n in enumerate(PIPELINE)}
         active = [n for n in PIPELINE if n in recorded] + [n for n in implied]
         if not active:
@@ -978,10 +978,17 @@ class Console:
         # key (was STAGE-1::claude / STAGE-1::opencode) — the claude & opencode SKILL.md variants now
         # share the single stored prompt for this stage.
         override = None
+        agent_row = None   # SOF-73: PRODUCT (stage 1) / DESIGN (stage 2) — claude runtime only
         try:
             from .system_agents import SystemAgentStore
-            row = SystemAgentStore().get(f"STAGE-{stage}")
+            store = SystemAgentStore()
+            row = store.get(f"STAGE-{stage}")
             override = row["prompt"] if row and (row.get("prompt") or "").strip() else None
+            if runtime == "claude" and stage in (1, 2):
+                callsign = "PRODUCT" if stage == 1 else "DESIGN"
+                candidate = store.get(callsign)
+                if candidate and (candidate.get("prompt") or "").strip():
+                    agent_row = (callsign, candidate)
         except Exception:
             logger.debug("[launch] %s prompt-override lookup failed — using on-disk default",
                          project_id, exc_info=True)
@@ -989,6 +996,12 @@ class Console:
         ws = prepare_workspace(
             self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
         )
+        if agent_row is not None:
+            try:
+                write_agent_file(ws, agent_row[0], agent_row[1])
+            except Exception:
+                logger.debug("[launch] %s %s agent-file materialization failed",
+                             project_id, agent_row[0], exc_info=True)
         # Stage 3 with a database dependency provisions its OWN Railway Postgres via the
         # `provision-db` db-CLI verb (which wraps deploy_db.provision and persists the teardown
         # handles to ProjectState) — see skills/stage-3-build. The console no longer provisions;
@@ -1502,6 +1515,8 @@ class Console:
                 with open(os.path.join(root, "PRD.md")) as f:
                     text = f.read()
                 ok, _reasons = artifacts.prd_is_complete(text)
+                if ok and artifacts.prd_lock_in_verdict(text) not in ("SHIP_AS_IS", "SHIP_WITH_EDITS"):
+                    return False   # SEND_BACK or missing verdict — the product phase isn't done
                 if ok:
                     state.stage1_done = True
                     state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
@@ -1535,15 +1550,28 @@ class Console:
             return True
         if not self.stage_finished(project_id):
             return False   # SPEC §1: gate + finished process, never mid-flight
+        required = ["PRD.md", "architecture.md", "architecture.svg", "design-spec.md"]
         base = self._paths(project_id)["base"]
-        ok, _missing = artifacts.verify(base, ["PRD.md", "architecture.md", "architecture.svg"])
+        found_root = base
+        ok, _missing = artifacts.verify(base, required)
         if not ok:
+            found_root = None
             for root, _dirs, files in os.walk(base):
-                ok2, _ = artifacts.verify(root, ["PRD.md", "architecture.md", "architecture.svg"])
+                ok2, _ = artifacts.verify(root, required)
                 if ok2:
                     ok = True
+                    found_root = root
                     break
         if not ok:
+            return False
+        # design-spec.md must actually cover the PRD's screen catalog, not just exist.
+        with open(os.path.join(found_root, "PRD.md")) as f:
+            prd_text = f.read()
+        with open(os.path.join(found_root, "design-spec.md")) as f:
+            design_text = f.read()
+        design_ok, _reasons = artifacts.design_spec_is_complete(
+            design_text, artifacts.parse_screen_ids(prd_text))
+        if not design_ok:
             return False
         # The store must hold real, buildable tickets (acceptance + DoD) — not just
         # ticket *events* on the canvas. An empty/hollow store is NOT a done Stage 2.
@@ -2295,7 +2323,7 @@ class Console:
                                    "kind": "phase", "status": st, "stage": PHASE_STAGE.get(name)}})
             edges.append({"data": {"source": prev, "target": pid, "etype": "flow"}})
             prev = pid
-            if name == "research":
+            if name == "product":
                 gid = "gate:stage1"
                 nodes.append({"data": {"id": gid, "label": "Stage 1 Gate", "kind": "gate",
                                        "status": "passed" if state.stage1_done else "pending"}})

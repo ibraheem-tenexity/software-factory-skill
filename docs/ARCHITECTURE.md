@@ -71,16 +71,25 @@ each a separate agent subprocess launched by the console, gated mechanically (no
 Stage 0 INTERVIEW  concierge interviews the user → a structured 7-section BRIEF + transcript,
                    persisted on a DRAFT project (canonical project-<8hex>, poller-invisible). On "proceed"
                    the draft is PROMOTED → Stage 1. (Brief editable via the form or the chat.)
-Stage 1 RESEARCH   brief + interview + attachments → COUNCIL (3 drafting seats → synthesizer) →
-                   PRD.md            gate: PRD complete (≥3 real product URLs, acceptance criteria,
-                                           ticket seeds). The PRD targets the harness Input Contract.
-Stage 2 DESIGN     PRD → architecture.md + architecture.svg  gate: artifacts exist AND ≥1 buildable
-                          + tickets (TicketStore, each tagged   ticket; then the deps gate
-                          with its target app)
+Stage 1 RESEARCH   brief + interview + attachments → Research agent (fusion_research: market-scan.md,
+                   → PRODUCT           existing-solutions.md, requirements-fit.md) → COUNCIL (3 drafting
+                                       seats grounded in those + a PRODUCT Task-subagent synthesizer) →
+                                       PRD.md   gate: PRD complete (≥3 real product URLs, acceptance
+                                                criteria, ticket seeds) AND lock-in verdict ≠ SEND_BACK.
+Stage 2 DESIGN     PRD → architecture.md + architecture.svg → design-spec.md (a DESIGN Task-subagent,
+                   → TICKETS          every PRD screen ID referenced) → tickets (TicketStore, each
+                                       tagged with its target app)  gate: all 3 artifacts exist + design
+                                       covers every screen ID AND ≥1 buildable ticket; then the deps gate
 Stage 3 BUILD      tickets → built app(s) → deploy → verify  gate: done tickets trace to agents AND a
                    (1..N deliverables: sf-<project_id>-<app>)        recorded PASSING Playwright happy-flow
                                                                   per deliverable
 ```
+
+`PRODUCT` and `DESIGN` are DB-backed `system_agents` rows (like `CONCIERGE`/`STAGE-N`), operator-editable
+in Tenexity OS and materialized at workspace-prep time into a native Claude Code subagent file
+(`ws/.claude/agents/{product,design}.md`) the orchestrator dispatches via `Task(subagent_type=...)`.
+Opencode (no subagent concept) customizes these steps at the existing whole-stage `STAGE-N` prompt
+granularity instead.
 
 - **Autonomy (poller, every 3s):** flips a stage to done only when its gate passes *and* its process
   has exited; auto-launches the next stage; auto-satisfies dependencies when no human secret is
