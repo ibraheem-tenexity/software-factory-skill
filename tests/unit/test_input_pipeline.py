@@ -271,3 +271,36 @@ def test_docx_extractor_real_pandoc_on_singer_sow():
         pytest.skip("pypandoc/mammoth not installed locally")
     assert len(md) > 2000
     assert "82,500" in md or "82.5" in md or "$82" in md   # the milestone pricing survives
+
+
+def test_product_brief_supersedes_raw_composition_as_context(tmp_path):
+    """SOF-63: a Concierge-finalized product brief IS the Stage-1 input — context.md is the
+    brief itself, not make_prompt's description+raw-doc concatenation. The per-document .md
+    extraction is still written to disk (nothing lost), just not dumped inline."""
+    input_dir = str(tmp_path / "input")
+    written = persist_and_compose(
+        input_dir, "analyze this brief",
+        [{"name": "brief.pdf", "content_b64": _b64(b"%PDF-1.4 ...")}],
+        extract=lambda path: "# Extracted\n\nthe contract terms",
+        product_brief_md="# Product Brief\n\nQuote follow-up automation for Singer.",
+    )
+    ctx = open(os.path.join(input_dir, "context.md")).read()
+    assert ctx == "# Product Brief\n\nQuote follow-up automation for Singer."
+    assert "the contract terms" not in ctx          # raw doc text NOT inlined
+    assert "analyze this brief" not in ctx          # raw description NOT inlined
+    assert os.path.exists(os.path.join(input_dir, "brief.pdf.md"))   # extraction still on disk
+    assert "context.md" in written
+
+
+def test_blank_product_brief_falls_back_to_legacy_composition(tmp_path):
+    """No/blank brief (API-created projects, no interview) -> the legacy composition, unchanged."""
+    input_dir = str(tmp_path / "input")
+    persist_and_compose(
+        input_dir, "analyze this brief",
+        [{"name": "brief.pdf", "content_b64": _b64(b"%PDF-1.4 ...")}],
+        extract=lambda path: "# Extracted\n\nthe contract terms",
+        product_brief_md="   ",
+    )
+    ctx = open(os.path.join(input_dir, "context.md")).read()
+    assert "analyze this brief" in ctx
+    assert "the contract terms" in ctx

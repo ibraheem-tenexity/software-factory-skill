@@ -1098,7 +1098,8 @@ class Console:
         return self._provision_and_launch(project_id, req, gated=req.gated)
 
     def _provision_and_launch(self, project_id: str, req: ProjectRequest, *, gated: bool = False,
-                              brief: dict | None = None, interview_md: str | None = None) -> str:
+                              brief: dict | None = None, interview_md: str | None = None,
+                              product_brief_md: str | None = None) -> str:
         """Provision a run dir (id already minted), persist state, and launch Stage 1 (unless
         gated). Shared by start_project (fresh mint) and promote_draft (existing draft id)."""
         paths = self._paths(project_id)
@@ -1106,9 +1107,11 @@ class Console:
 
         # input -> (pdf/docx->markdown[+images]) -> markdown + prompt -> composed Stage 1 input,
         # plus the structured brief + interview transcript when promoting an interviewed draft.
+        # SOF-63: a Concierge-finalized product brief supersedes the raw composition as context.md.
         written = persist_and_compose(
             paths["input_dir"], req.description, req.context_files or [],
             extract=self._extract, brief=brief, interview_md=interview_md,
+            product_brief_md=product_brief_md,
         )
         input_db = ProjectStore(paths["db"])
         for name in written:
@@ -1376,7 +1379,8 @@ class Console:
         state.phase = "provision"
         state.held = False
         state.save()
-        return self._provision_and_launch(project_id, req, brief=brief, interview_md=interview_md)
+        return self._provision_and_launch(project_id, req, brief=brief, interview_md=interview_md,
+                                          product_brief_md=state.product_brief_md or None)
 
     def relaunch_project(self, source_id: str, owner: str = "") -> str:
         """Mint a fresh run from the same spec as a stopped/done project.
