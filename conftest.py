@@ -8,7 +8,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 import pytest
 
 # Postgres everywhere. The suite runs against a PG SERVER (the dev container by default); override
-# DATABASE_URL to point at a different server. The db NAME in that URL is ignored — each pytest
+# DATABASE_URL to point at a different server. The server MUST be pgvector-capable (models.py has
+# Vector columns; the schema build below runs CREATE EXTENSION vector) — run scripts/setup-test-db.sh
+# to provision it (SOF-53). The db NAME in that URL is ignored — each pytest
 # PROCESS (and each pytest-xdist worker) mints its OWN throwaway database below, so two concurrent
 # runs NEVER share the `public` schema. This is the permanent fix for the cross-run TRUNCATE/DROP
 # contamination that made the suite flaky under any concurrency.
