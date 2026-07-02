@@ -1,9 +1,12 @@
-"""Tests for software_factory.transcription — the OpenRouter Whisper Large v3 proxy (SOF-14)."""
+"""Tests for software_factory.transcription — the OpenAI gpt-4o-transcribe proxy (SOF-14/SOF-75)."""
+import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from software_factory.transcription import transcribe_audio, TranscriptionError
+
+_B64 = base64.b64encode(b"fake-audio-bytes").decode()
 
 
 def _mock_response(json_body, status_ok=True):
@@ -15,44 +18,53 @@ def _mock_response(json_body, status_ok=True):
 
 
 def test_transcribe_audio_raises_without_api_key(monkeypatch):
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(TranscriptionError):
-        transcribe_audio("AAAA", "webm")
+        transcribe_audio(_B64, "webm")
 
 
-def test_transcribe_audio_sends_correct_request_shape(monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+def test_transcribe_audio_sends_multipart_request_shape(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     with patch("software_factory.transcription.httpx.post",
               return_value=_mock_response({"text": "hello world"})) as mock_post:
-        text = transcribe_audio("AAAA", "webm", language="en")
+        text = transcribe_audio(_B64, "webm", language="en")
     assert text == "hello world"
     _, kwargs = mock_post.call_args
-    assert mock_post.call_args[0][0] == "https://openrouter.ai/api/v1/audio/transcriptions"
+    assert mock_post.call_args[0][0] == "https://api.openai.com/v1/audio/transcriptions"
     assert kwargs["headers"]["Authorization"] == "Bearer test-key"
-    assert kwargs["json"]["model"] == "openai/whisper-large-v3"
-    assert kwargs["json"]["input_audio"] == {"data": "AAAA", "format": "webm"}
-    assert kwargs["json"]["language"] == "en"
+    # multipart file upload (decoded bytes), not a JSON body
+    assert "json" not in kwargs
+    fname, content, ctype = kwargs["files"]["file"]
+    assert fname == "audio.webm" and content == b"fake-audio-bytes" and ctype == "audio/webm"
+    assert kwargs["data"]["model"] == "gpt-4o-transcribe"
+    assert kwargs["data"]["language"] == "en"
 
 
 def test_transcribe_audio_omits_language_when_not_given(monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     with patch("software_factory.transcription.httpx.post",
               return_value=_mock_response({"text": "hi"})) as mock_post:
-        transcribe_audio("AAAA", "webm")
-    assert "language" not in mock_post.call_args.kwargs["json"]
+        transcribe_audio(_B64, "webm")
+    assert "language" not in mock_post.call_args.kwargs["data"]
+
+
+def test_transcribe_audio_raises_on_invalid_base64(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    with pytest.raises(TranscriptionError):
+        transcribe_audio("not valid base64!!!", "webm", language="en")
 
 
 def test_transcribe_audio_raises_on_http_error(monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     with patch("software_factory.transcription.httpx.post",
               return_value=_mock_response({}, status_ok=False)):
         with pytest.raises(TranscriptionError):
-            transcribe_audio("AAAA", "webm")
+            transcribe_audio(_B64, "webm")
 
 
 def test_transcribe_audio_raises_when_no_text_in_response(monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     with patch("software_factory.transcription.httpx.post",
               return_value=_mock_response({"usage": {}})):
         with pytest.raises(TranscriptionError):
-            transcribe_audio("AAAA", "webm")
+            transcribe_audio(_B64, "webm")

@@ -510,9 +510,15 @@ export function DictateButton({ value, onChange, disabled }:
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported("audio/webm")
-        ? "audio/webm" : "";
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      // SOF-75: pick opus explicitly (better speech quality than the browser's default codec) and
+      // pin a real bitrate — MediaRecorder's default can drop to ~24-40kbps, which noticeably
+      // degrades Whisper's accuracy on short dictation. 128kbps opus is plenty for speech.
+      const preferred = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+      const mimeType = (typeof MediaRecorder.isTypeSupported === "function"
+        ? preferred.find((t) => MediaRecorder.isTypeSupported(t)) : undefined) || "";
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 128000 })
+        : new MediaRecorder(stream);
       chunksRef.current = [];
       recorder.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
       recorder.onstop = async () => {
@@ -522,7 +528,12 @@ export function DictateButton({ value, onChange, disabled }:
         setTranscribing(true);
         try {
           const b64 = await blobToBase64(blob);
-          const { text } = await api.transcribe(b64, format);
+          // SOF-75: send a language hint — unhinted Whisper misdetects on short clips and garbles
+          // the tail (the reported dangling-letter symptom). Derive from the browser locale, "en"
+          // fallback; Whisper wants the ISO-639-1 primary subtag ("en", not "en-US").
+          const language = (typeof navigator !== "undefined" && navigator.language)
+            ? navigator.language.split("-")[0] : "en";
+          const { text } = await api.transcribe(b64, format, language);
           if (text && onChange) onChange(value ? `${value} ${text}` : text);
         } catch {
           // transcription failed (network/upstream) — draft is untouched, user can retype or retry
