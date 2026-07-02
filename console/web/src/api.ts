@@ -378,8 +378,8 @@ export const api = {
     return r;
   },
   chatHistory: (id: string) => get<{ messages: any[] }>(`/api/chat/${id}/history`),
-  transcribe: (audio_base64: string, format: string) =>
-    send<{ text: string }>("/api/transcribe", "POST", { audio_base64, format }),
+  transcribe: (audio_base64: string, format: string, language?: string) =>
+    send<{ text: string }>("/api/transcribe", "POST", { audio_base64, format, language }),
   deps: (id: string) => get<DepsResponse>(`/api/projects/${id}/deps`),
   submitDeps: (id: string, deps: DepSubmit) =>
     send<DepsSubmitResponse>(`/api/projects/${id}/deps`, "POST", { deps }),
