@@ -8,7 +8,7 @@ from software_factory.repositories._compile import to_sql
 from software_factory.repositories.canvas import (
     ProjectStateRepository, PhaseRepository, GateRepository, VerificationRepository,
     BlockerRepository, ArtifactRepository)
-from software_factory.models import tickets, agents, checkpoint
+from software_factory.models import tickets, runtime_agents, checkpoint
 
 
 class FakeExec:
@@ -69,7 +69,7 @@ def test_verifications_passing_count_shape():
 
 
 def test_flat_tables_delete_loop_scopes_each_table():
-    for table in (tickets, agents, checkpoint):
+    for table in (tickets, runtime_agents, checkpoint):
         stmt = delete(table).where(table.c.project_id == "p1")
         sql, params = to_sql(stmt)
         assert sql.startswith(f"DELETE FROM {table.name}")

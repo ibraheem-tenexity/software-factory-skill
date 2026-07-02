@@ -23,23 +23,23 @@ def test_agent_rollups_labels_and_filter():
     AggregatesRepository(fx).agent_rollups()
     for label in ("AS runs", "AS cost_usd", "AS total", "AS active", "AS successes", "AS model"):
         assert label in fx.sql, fx.sql
-    assert "FILTER (WHERE agents.status = %s)" in fx.sql
-    assert "FILTER (WHERE agents.outcome IN (%s, %s))" in fx.sql
-    assert "GROUP BY agents.role" in fx.sql
+    assert "FILTER (WHERE runtime_agents.status = %s)" in fx.sql
+    assert "FILTER (WHERE runtime_agents.outcome IN (%s, %s))" in fx.sql
+    assert "GROUP BY runtime_agents.role" in fx.sql
 
 
 def test_agents_active_count_label():
     fx = FakeExec()
     AggregatesRepository(fx).agents_active_count()
-    assert "AS n" in fx.sql and "agents.status = %s" in fx.sql
+    assert "AS n" in fx.sql and "runtime_agents.status = %s" in fx.sql
 
 
 def test_today_burn_coalesce_label():
     fx = FakeExec()
     AggregatesRepository(fx).today_burn(100.0)
-    assert "coalesce(sum(agents.cost_usd), %s)" in fx.sql.lower() or "coalesce(sum" in fx.sql.lower()
+    assert "coalesce(sum(runtime_agents.cost_usd), %s)" in fx.sql.lower() or "coalesce(sum" in fx.sql.lower()
     assert "AS burn" in fx.sql
-    assert "agents.started_at >=" in fx.sql
+    assert "runtime_agents.started_at >=" in fx.sql
 
 
 def test_open_tickets_by_project_label_and_in():

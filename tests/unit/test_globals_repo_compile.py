@@ -1,12 +1,12 @@
-"""Pure (no-DB) checks for the B5 global-lane repositories: blobs, sow, agent_prompts, registries.
+"""Pure (no-DB) checks for the global-lane repositories: blobs, sow, system_agents, tools.
 FakeExec mirrors GlobalExec's real contract exactly: fetchall/fetchone return captured rows,
 execute() returns None — this is what caught the .execute(stmt).fetchone() bug (GlobalExec.execute
 discards rows; RETURNING writes must go through fetchone/fetchall directly)."""
 from software_factory.repositories._compile import to_sql
 from software_factory.repositories.blobs import BlobRepository
 from software_factory.repositories.sow import SowRepository
-from software_factory.repositories.agent_prompts import AgentPromptRepository
-from software_factory.repositories.registries import ToolRepository, AgentRegistryRepository
+from software_factory.repositories.system_agents import SystemAgentRepository
+from software_factory.repositories.tools import ToolRepository
 
 
 class FakeExec:
@@ -77,31 +77,27 @@ def test_sow_update_sets_updated_at_now():
     assert "sow.updated_at" in fx.sql and "now()" in fx.sql.lower()
 
 
-# -- agent_prompts --------------------------------------------------------------------------------
-def test_prompt_upsert_version_self_increment_not_excluded():
+# -- system_agents --------------------------------------------------------------------------------
+def test_system_agent_upsert_version_self_increment_not_excluded():
     fx = FakeExec()
-    AgentPromptRepository(fx).upsert("ATLAS", "new prompt", "op@x.com")
+    SystemAgentRepository(fx).upsert("CONCIERGE", prompt="new prompt", by="op@x.com")
     _clean(fx.sql)
-    assert "ON CONFLICT (agent_prompts.callsign)" in fx.sql or "ON CONFLICT (callsign)" in fx.sql
+    assert "ON CONFLICT (system_agents.callsign)" in fx.sql or "ON CONFLICT (callsign)" in fx.sql
     # version increments relative to the table's OWN column, not the inserted literal
-    assert "agent_prompts.version" in fx.sql
+    assert "system_agents.version" in fx.sql
+    assert "DO UPDATE SET" in fx.sql
 
 
-# -- registries -----------------------------------------------------------------------------------
+def test_system_agent_upsert_only_updates_provided_fields():
+    fx = FakeExec()
+    SystemAgentRepository(fx).upsert("CONCIERGE", model_id="gpt-5.4", by="op@x.com")
+    # model_id provided -> updated on conflict; prompt/name NOT provided -> untouched on conflict
+    assert "model_id" in fx.sql.split("DO UPDATE SET", 1)[1]
+    assert "prompt" not in fx.sql.split("DO UPDATE SET", 1)[1]
+
+
+# -- tools ----------------------------------------------------------------------------------------
 def test_tool_insert_returning_via_fetchone():
     fx = FakeExec(fetchone_result={"id": 1, "name": "X"})
     row = ToolRepository(fx).insert_returning("X", "MCP", "P", "s", "available", "none")
     assert row == {"id": 1, "name": "X"}
-
-
-def test_agent_registry_upsert_excluded_columns():
-    fx = FakeExec()
-    AgentRegistryRepository(fx).upsert("STAGE-1", "Stage 1", "stage-orchestrator", "opus", 3, "d")
-    _clean(fx.sql)
-    assert "DO UPDATE SET" in fx.sql
-
-
-def test_agent_registry_insert_if_absent_do_nothing():
-    fx = FakeExec()
-    AgentRegistryRepository(fx).insert_if_absent("STAGE-2", "Stage 2", "stage-orchestrator", "opus", 3, "d")
-    assert "DO NOTHING" in fx.sql

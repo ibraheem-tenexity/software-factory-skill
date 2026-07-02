@@ -17,7 +17,7 @@ after — safe to run against a shared scratch DB.
 """
 from software_factory import dbshim
 from software_factory.repositories._exec import GlobalExec
-from software_factory.repositories.agent_prompts import AgentPromptRepository
+from software_factory.repositories.system_agents import SystemAgentRepository
 from software_factory.repositories.blobs import BlobRepository
 from software_factory.repositories.conversation import ConversationRepository
 from software_factory.repositories.sow import SowRepository
@@ -43,10 +43,10 @@ def test_sow_repo_created_at_and_updated_at_are_float_not_decimal_or_datetime():
             conn.close()
 
 
-def test_agent_prompts_repo_updated_at_is_float_not_decimal():
-    repo = AgentPromptRepository(GlobalExec())
+def test_system_agents_repo_updated_at_is_float_not_decimal():
+    repo = SystemAgentRepository(GlobalExec())
     try:
-        repo.upsert("SOF55TYPETEST", "a test prompt", "op@tenexity.ai")
+        repo.upsert("SOF55TYPETEST", name="Type Test", prompt="a test prompt", by="op@tenexity.ai")
         row = repo.by_callsign("SOF55TYPETEST")
         assert isinstance(row["updated_at"], float)
     finally:

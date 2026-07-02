@@ -19,7 +19,6 @@ import threading
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from software_factory.console import Console  # noqa: E402
-from software_factory.chat_agent import ChatDockRunner  # noqa: E402
 from software_factory import auth  # noqa: E402
 from software_factory.users import UserStore  # noqa: E402
 from software_factory.blobs import BlobStore  # noqa: E402
@@ -36,6 +35,7 @@ from software_factory.repositories.conversation import ConversationRepository  #
 from software_factory.services.files import doc_kind as _doc_kind  # noqa: E402,F401
 
 from console.throttle import LoginThrottle  # noqa: E402
+from console.chat_dock import ChatDock  # noqa: E402
 
 HERE = os.path.dirname(__file__)
 # The React SPA (console/web/dist) is served when SF_CONSOLE=react AND it's been built; otherwise the
@@ -93,19 +93,18 @@ def reset():
     # DbConversation (SOF-31/T1.3) is the durable swap for the onboarding mock — same turn()/
     # history() contract, backed by ConversationStore. Opt-in via SF_CONVERSATION_DB so tests and
     # existing deploys stay on the in-memory mock until the flag is flipped.
-    conversation_svc = (DbConversation(users=users) if os.environ.get("SF_CONVERSATION_DB") == "1"
-                        else Conversation())
+    conversation_svc = (DbConversation(users=users, console=console)
+                        if os.environ.get("SF_CONVERSATION_DB") == "1" else Conversation())
     # Admin history table (SOF-34/T1.5) reads the conversation table directly — independent of
     # conversation_svc/SF_CONVERSATION_DB, since it's a cross-tenant query surface, not the
     # onboarding Concierge's own storage path.
     admin_service = AdminService(console, users, agent_store, tool_store, sow_store,
                                  ConversationRepository(GlobalExec()))
-    # The concierge runs on OpenAI (gpt-4o) or OpenRouter (Kimi) — either key enables chat.
+    # The concierge runs on OpenAI or OpenRouter (Kimi) — either key enables chat.
     _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
-    # SOF-35 removed the OpenAI-Agents-SDK ChatAgentRunner; SOF-39/40 restores /api/chat on
-    # ChatDockRunner (LangChain ConciergeAgent, still chat.jsonl-backed — folding onto the
-    # conversation table is T1.4, a later follow-up, not done here).
-    _chat_runner = ChatDockRunner(console, users) if _has_chat_key else None
+    # The /api/chat dock: ChatAgent behind ChatDock (console/chat_dock.py), history + persistence
+    # on the conversation table (chat.jsonl/ChatStore retired).
+    _chat_runner = ChatDock(console, users) if _has_chat_key else None
     _sse_clients = {}
     _sse_lock = threading.Lock()
     _ingest_sse_clients = {}
@@ -115,10 +114,6 @@ def reset():
 
 
 reset()
-
-
-def _chat_path(project_id: str) -> str:
-    return os.path.join(PROJECTS_DIR, project_id, "chat.jsonl")
 
 
 def _push_sse(project_id: str, msgs):

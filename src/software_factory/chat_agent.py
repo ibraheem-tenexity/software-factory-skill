@@ -2,7 +2,7 @@
 (concierge-agent-spec.md §2). https://docs.langchain.com/oss/python/langchain/agents
 
 Everything else lives where it belongs: the output-contract data classes in
-`data_transfer_objects/concierge.py`, the prompts + operator-override cache in `default_prompt.py`,
+`data_transfer_objects/chat_agent.py`, the prompts + operator-override cache in `default_prompt.py`,
 the model/context constants in `constants.py`, and the tool belt in `concierge_tools.py`.
 """
 from __future__ import annotations
@@ -80,6 +80,32 @@ def chat_model_label() -> str:
     return os.environ.get("SF_CHAT_MODEL") or CONCIERGE_DEFAULT_MODEL
 
 
+def _extract_usage(messages: list) -> dict:
+    """Real token counts from the newest AIMessage carrying `usage_metadata`, priced via the live
+    OpenRouter catalog (SOF-57 ledger). cost_usd is None — never a fabricated 0 — when pricing is
+    unavailable."""
+    model = chat_model_label()
+    provider = "openrouter" if "/" in model else "openai"
+    for m in reversed(messages):
+        um = getattr(m, "usage_metadata", None)
+        if um:
+            input_tokens = um.get("input_tokens") or 0
+            output_tokens = um.get("output_tokens") or 0
+            cost = None
+            try:
+                from software_factory.memory import pricing
+                lookup_id = model if provider == "openrouter" else f"openai/{model}"
+                price = pricing.openrouter_price(lookup_id, kind="chat")
+                if price is not None:
+                    cost = input_tokens * price["input"] + output_tokens * price["output"]
+            except Exception:
+                cost = None
+            return {"model": model, "provider": provider, "input_tokens": input_tokens,
+                    "output_tokens": output_tokens, "cost_usd": cost}
+    return {"model": model, "provider": provider, "input_tokens": 0, "output_tokens": 0,
+            "cost_usd": None}
+
+
 class ChatAgent:
     """One context-parameterized LangChain agent (spec §2/§4.6). `_agent` is exactly what
     `create_agent` returns; `run` feeds it the conversation history and returns a ConciergeTurn.
@@ -89,6 +115,7 @@ class ChatAgent:
     """
 
     def __init__(self, context: str = "intake", tools: list | None = None, model=None):
+        self.last_usage: dict = {}   # set by run(): {model, provider, input/output_tokens, cost_usd}
         self._agent = create_agent(
             model or choose_chat_model(),
             tools or [],
@@ -98,10 +125,12 @@ class ChatAgent:
 
     async def run(self, messages: list) -> ConciergeTurn:
         """Run the agent over the conversation history and return the terminal ConciergeTurn.
-        One retry, then a safe fallback — a bad generation never 500s the turn (spec §3)."""
+        One retry, then a safe fallback — a bad generation never 500s the turn (spec §3).
+        Side effect: `self.last_usage` carries this turn's real model/token/cost usage."""
         for _ in range(2):
             try:
                 result = await self._agent.ainvoke({"messages": messages})
+                self.last_usage = _extract_usage(result.get("messages") or [])
                 return result["structured_response"]
             except Exception:
                 continue

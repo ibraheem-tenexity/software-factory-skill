@@ -1,5 +1,6 @@
 """Concierge chat: /api/chat (send), /api/chat/{pid}/history, /api/chat/{pid}/deps, SSE stream."""
 import asyncio
+import inspect
 import json
 import os
 import time
@@ -117,13 +118,14 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
 
 
 @router.post("/api/projects/{pid}/converse", response_model=ConverseOut)
-def converse(pid: str, body: ConverseIn, v: tuple = Depends(authorize_project)):
+async def converse(pid: str, body: ConverseIn, v: tuple = Depends(authorize_project)):
     """One onboarding-Concierge turn: record the user's message, return the agent's reply as a
     ConciergeTurn — {response, suggested_responses[]} (T2.2; no `choices`/`done`). Backed by the
-    in-memory mock `Conversation` or the DB-backed `DbConversation` (SF_CONVERSATION_DB) — the
-    latter delegates to the real LangChain ConciergeAgent (T2.1); the mock stays scripted.
-    `authorize_project` gates cross-org access."""
+    in-memory mock `Conversation` (sync) or the DB-backed `DbConversation` (async ChatAgent,
+    SF_CONVERSATION_DB) — the mock stays scripted. `authorize_project` gates cross-org access."""
     result = state.conversation_svc.turn(pid, body.message)
+    if inspect.isawaitable(result):
+        result = await result
     if "response" in result:
         return result   # DbConversation already returns the new ConciergeTurn shape
     # Conversation (the mock) still returns its ORIGINAL {message, choices, done} — untouched,

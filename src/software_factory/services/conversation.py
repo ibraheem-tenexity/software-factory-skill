@@ -79,33 +79,38 @@ class DbConversation:
     `choices` list per row (the existing test contract only asserts `role` values from
     `history()`, never `choices`/`content`, so this is a safe, surgical simplification)."""
 
-    def __init__(self, users=None, store=None, agent=None):
+    def __init__(self, users=None, store=None, agent=None, console=None):
         if store is not None:
             self._store = store
         else:
             from software_factory.conversation_store import ConversationStore
             self._store = ConversationStore(users=users)
-        self._agent = agent   # ConciergeAgent, injectable; lazily built on first use if None
+        self._agent = agent      # injectable ChatAgent (tests); used for every project when set
+        self._console = console  # needed to bind the per-project tool belt
+        self._agents: dict = {}  # project_id → ChatAgent (tools bind project_id at construction)
 
-    def _get_agent(self):
-        if self._agent is None:
-            from software_factory.chat_agent import ConciergeAgent
-            self._agent = ConciergeAgent()
-        return self._agent
+    def _get_agent(self, project_id: str):
+        if self._agent is not None:
+            return self._agent
+        if project_id not in self._agents:
+            from software_factory.chat_agent import ChatAgent
+            tools = []
+            if self._console is not None:
+                from software_factory.concierge_tools import build_project_tools
+                tools = build_project_tools(self._console, project_id)
+            self._agents[project_id] = ChatAgent(context="intake", tools=tools)
+        return self._agents[project_id]
 
     def history(self, project_id: str) -> list[dict]:
         """The full transcript for a project (oldest first). Empty if none yet."""
         rows = self._store.history(_onboarding_session_id(project_id))
         return [{"role": r["role"], "content": r["input"] or "", "choices": []} for r in rows]
 
-    def turn(self, project_id: str, message: str) -> dict:
-        """Record the user's message, run it through the real LangChain ConciergeAgent (T2.1/T2.2,
-        "intake" context), and return a ConciergeTurn dict: {response, suggested_responses,
-        message_id, session_id}. Raises `Invalid` on an empty message — persists nothing on that
-        path, matching the mock.
-
-        Replaces T1.3's scripted `_SCRIPT` reply (agent rewrite, explicitly out of T1.3's scope,
-        now in scope here) — storage via ConversationStore is unchanged from T1.3."""
+    async def turn(self, project_id: str, message: str) -> dict:
+        """Record the user's message, run it through the real LangChain ChatAgent ("intake"
+        context, per-project tool belt), and return a ConciergeTurn dict: {response,
+        suggested_responses, message_id, session_id}. Raises `Invalid` on an empty message —
+        persists nothing on that path, matching the mock."""
         text = (message or "").strip()
         if not text:
             raise Invalid("message is empty")
@@ -118,11 +123,18 @@ class DbConversation:
         rows = self._store.history(session_id)
         messages = to_provider(rows, "openai")   # OpenRouter (Kimi) also uses the OpenAI shape
 
-        turn = self._get_agent().run("intake", messages)
+        agent = self._get_agent(project_id)
+        turn = await agent.run(messages)
+        usage = getattr(agent, "last_usage", None) or {}
 
         suggested = [sr.model_dump() for sr in turn.suggested_responses]
         block = {"type": "text", "text": turn.response, "suggested_responses": suggested}
-        message_id = self._store.append(session_id, "agent", [block], project_id=project_id)
+        message_id = self._store.append(
+            session_id, "agent", [block], project_id=project_id,
+            model=usage.get("model"), provider=usage.get("provider"),
+            input_tokens=usage.get("input_tokens", 0), output_tokens=usage.get("output_tokens", 0),
+            cost_usd=usage.get("cost_usd", 0.0),
+        )
 
         return {"response": turn.response, "suggested_responses": suggested,
                 "message_id": message_id, "session_id": session_id}
