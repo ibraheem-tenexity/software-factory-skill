@@ -76,12 +76,15 @@ def auth_client(auth_mod):
     return TestClient(auth_mod.app, base_url="https://testserver")
 
 
-def test_auth_enabled_root_serves_login_not_console(auth_client):
+def test_auth_enabled_root_serves_spa_to_unauthed(auth_mod, auth_client, monkeypatch):
+    # React-only: root always serves the SPA bundle, even auth-on + unauthed — the React app gates
+    # login itself (via /api/auth/config + /api/me, rendering its own LoginScreen on 401). There is
+    # no server-rendered login page anymore.
+    monkeypatch.setattr(auth_mod.state, "_index_html", lambda: b"<div id='root'></div><!--SPA-->")
     r = auth_client.get("/")
     assert r.status_code == 200
-    assert "accounts.google.com" in r.text          # the Google sign-in page
-    assert "cid-123" in r.text                       # client id injected
-    assert "Factory Concierge" not in r.text         # console NOT exposed
+    assert "SPA" in r.text
+    assert "accounts.google.com" not in r.text       # no server-rendered Google sign-in page
 
 
 def test_auth_enabled_api_requires_session(auth_client):
@@ -97,13 +100,14 @@ def _login(auth_mod, client, monkeypatch, email="op@tenexity.ai"):
 
 
 def test_google_login_sets_cookie_and_opens_console(auth_mod, auth_client, monkeypatch):
+    monkeypatch.setattr(auth_mod.state, "_index_html", lambda: b"<div id='root'></div><!--SPA-->")
     r = _login(auth_mod, auth_client, monkeypatch)
     assert r.status_code == 200
     cookie = r.headers.get("set-cookie", "")
     assert "sf_session=" in cookie and "HttpOnly" in cookie
     # TestClient persists the cookie on its jar → subsequent requests are authed.
     r2 = auth_client.get("/")
-    assert r2.status_code == 200 and "Factory Concierge" in r2.text
+    assert r2.status_code == 200 and "SPA" in r2.text
     r3 = auth_client.get("/api/projects")
     assert r3.status_code == 200
 
@@ -246,32 +250,12 @@ def test_me_open_when_auth_disabled(client):
     assert r.json() == {"email": None, "role": "admin", "name": None, "is_internal": True, "auth": False}
 
 
-def test_react_mode_serves_spa_to_unauthed(auth_mod, auth_client, monkeypatch):
-    # Option B gate-rework: in React mode the SPA gates login itself (via /api/auth/config +
-    # /api/me), so root() serves the bundle to UNAUTHED users too — not the server login page.
-    monkeypatch.setattr(auth_mod.state, "_react_enabled", lambda: True)
-    monkeypatch.setattr(auth_mod.state, "_index_html", lambda: b"<div id='root'></div><!--SPA-->")
-    r = auth_client.get("/")
-    assert r.status_code == 200
-    assert "SPA" in r.text                       # the React bundle
-    assert "accounts.google.com" not in r.text   # NOT the server-rendered login page
-
-
-def test_legacy_mode_still_serves_server_login_to_unauthed(auth_client):
-    # Guard the gate: with React OFF (default in tests), unauthed root() must still serve the
-    # server-rendered Google sign-in page — the Option B change must not leak into legacy mode.
-    r = auth_client.get("/")
-    assert r.status_code == 200
-    assert "accounts.google.com" in r.text
-
-
-def test_artifact_viewer_served_to_authed_user_in_react_mode(auth_mod, auth_client, monkeypatch):
+def test_artifact_viewer_served_to_authed_user(auth_mod, auth_client, monkeypatch):
     from software_factory import auth as a
     monkeypatch.setattr(a, "verify_google_id_token",
                         lambda tok: {"sub": "sub-op", "email": "op@tenexity.ai",
                                      "email_verified": True})
     auth_client.post("/api/auth/google", json={"credential": "t"})
-    monkeypatch.setattr(auth_mod.state, "_react_enabled", lambda: True)
     monkeypatch.setattr(auth_mod.state, "_artifact_viewer_html",
                         lambda: b"<artifact-viewer-spa>")
     r = auth_client.get("/ArtifactViewer.html")
@@ -279,16 +263,9 @@ def test_artifact_viewer_served_to_authed_user_in_react_mode(auth_mod, auth_clie
     assert b"artifact-viewer-spa" in r.content
 
 
-def test_artifact_viewer_redirects_unauthenticated_in_react_mode(auth_mod, auth_client, monkeypatch):
-    monkeypatch.setattr(auth_mod.state, "_react_enabled", lambda: True)
+def test_artifact_viewer_redirects_unauthenticated(auth_mod, auth_client, monkeypatch):
     r = auth_client.get("/ArtifactViewer.html", follow_redirects=False)
     assert r.status_code == 303
-
-
-def test_artifact_viewer_404_in_legacy_mode(auth_client):
-    # React mode OFF (default) — the built SPA doesn't exist, must not try to serve it.
-    r = auth_client.get("/ArtifactViewer.html")
-    assert r.status_code == 404
 
 
 def test_create_draft_rejects_empty_name(client):
