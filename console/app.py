@@ -2,7 +2,7 @@
 
 Modularized: this file is now ONLY the FastAPI app + access-log middleware + lifespan + the static
 mounts + router includes. The pieces live in sibling modules:
-  console/state.py            — shared singletons (console/users/blobs/prompts/tool_store/agent_store/
+  console/state.py            — shared singletons (console/users/blobs/tool_store/agent_store/
                                 _chat_runner), the SSE registry + _push_sse, and the SPA/serving helpers
   console/deps.py             — auth dependencies (viewer/require_authed/authorize_project/require_admin/
                                 _staff_session/require_staff)
@@ -58,7 +58,7 @@ from console.routers import open_routes, auth, org, admin_os, projects, chat  # 
 # Re-exported so the public `console.app` surface (and the tests that read/patch object attributes
 # on them) is preserved across the split. Bound AFTER reset() → the current instances; the same
 # objects the routers use (the routers read them late via `state.<name>`).
-from console.state import (console, users, blobs, prompts, tool_store, agent_store,  # noqa: E402,F401
+from console.state import (console, users, blobs, tool_store, agent_store,  # noqa: E402,F401
                            _push_sse, _sse_clients, _sse_lock)
 
 app = FastAPI(title="software-factory console", lifespan=lifespan)
