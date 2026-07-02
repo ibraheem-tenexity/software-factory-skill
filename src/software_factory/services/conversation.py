@@ -38,18 +38,43 @@ def _matching_sow_bodies(project_name: str) -> list[dict]:
     return [{"title": r["title"], "body": r["body"]} for r in rows]
 
 
-def _build_first_turn_context(console, project_id: str) -> str:
+def _build_first_turn_context(console, project_id: str, users=None) -> str:
     """SOF-62: the server-assembled project-context block for the Concierge's first turn — the
-    user's own project input, the matching SOW body, every document summary, and existing
-    per-document assumptions. Pushed into the system prompt (see default_prompt.build_system_prompt),
-    never a fake user message, so the first reply already accounts for everything on file with no
-    tool call required. Missing pieces (no SOW match, no documents yet) are stated as such, never
-    silently omitted, so the agent doesn't have to guess whether a section was skipped or is
-    genuinely empty."""
+    owning company's profile, the user's own project input, the matching SOW body, every document
+    summary, and existing per-document assumptions. Pushed into the system prompt (see
+    default_prompt.build_system_prompt), never a fake user message, so the first reply already
+    accounts for everything on file with no tool call required. Missing pieces (no company profile,
+    no SOW match, no documents yet) are stated as such, never silently omitted, so the agent doesn't
+    have to guess whether a section was skipped or is genuinely empty."""
     from software_factory.memory.store import MemoryStore
 
     state = console._load_state(project_id)
     sections = []
+
+    # The company that owns this project — everything captured on the org profile at signup, so the
+    # Concierge leads with company context and never re-asks what the org record already answers.
+    org = None
+    if users is not None and getattr(state, "owner", ""):
+        try:
+            org = users.org_for_user(state.owner)
+        except Exception:
+            org = None
+    if org:
+        sub_focus = ", ".join(org.get("sub_focus") or []) or "(none listed)"
+        systems = ", ".join(org.get("connected_systems") or []) or "(none listed)"
+        company_text = (
+            f"- Company: {org.get('name') or '(unnamed)'}\n"
+            f"- Industry: {org.get('industry') or '(not provided)'}\n"
+            f"- Focus areas: {sub_focus}\n"
+            f"- Headcount: {org.get('headcount') or '(not provided)'}\n"
+            f"- Revenue: {org.get('revenue') or '(not provided)'}\n"
+            f"- Location: {org.get('location') or '(not provided)'}\n"
+            f"- Website: {org.get('website') or '(not provided)'}\n"
+            f"- Connected systems: {systems}"
+        )
+    else:
+        company_text = "(no company profile on file for this project's owner)"
+    sections.append(f"### The company\n{company_text}")
 
     sections.append(
         "### The user's own input\n"
@@ -108,6 +133,7 @@ class DbConversation:
             self._store = ConversationStore(users=users)
         self._agent = agent      # injectable ChatAgent (tests); used for every project when set
         self._console = console  # needed to bind the per-project tool belt
+        self._users = users      # org profile lookup for the first-turn company context
         self._agents: dict = {}  # project_id → ChatAgent (tools bind project_id at construction)
 
     def _get_agent(self, project_id: str, is_first_turn: bool = False):
@@ -127,7 +153,7 @@ class DbConversation:
                 from software_factory.concierge_tools import build_project_tools
                 tools = build_project_tools(self._console, project_id)
                 if is_first_turn:
-                    first_turn_context = _build_first_turn_context(self._console, project_id)
+                    first_turn_context = _build_first_turn_context(self._console, project_id, self._users)
             self._agents[project_id] = ChatAgent(
                 context="intake", tools=tools, first_turn_context=first_turn_context)
         return self._agents[project_id]
