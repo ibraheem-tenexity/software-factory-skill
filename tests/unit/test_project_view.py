@@ -77,6 +77,30 @@ def test_documents_produced_id_is_none_when_missing():
     assert d["produced"][0]["id"] is None
 
 
+def test_documents_excludes_user_deposited_document_markdown_from_produced():
+    # SOF-60: origin='user' is the agent's own reading material (the uploaded doc's full
+    # markdown), not factory output — must not double-list next to the upload it came from.
+    artifacts = [{"id": 1, "title": "spec.pdf", "kind": "document_markdown", "agent": None,
+                 "ts": 1.0, "origin": "user"},
+                {"id": 2, "title": "Arch", "kind": "plan", "agent": "architect", "ts": 2.0,
+                 "origin": "agent"}]
+    d = pv.documents([], artifacts)
+    assert [a["id"] for a in d["produced"]] == [2]
+
+
+def test_documents_excludes_stage1_context_artifacts_from_produced():
+    # SOF-70: Console._provision_and_launch records the composed intake context/interview
+    # markdown as kind='context' artifacts (title="input", path="input/..."). These default
+    # origin='agent' (unlike SOF-60's user-deposited markdown) so the origin-only filter let
+    # them through — they're Stage-1's OWN reading material, not something the factory produced.
+    artifacts = [{"id": 1, "title": "input", "path": "input/context.md", "kind": "context",
+                 "agent": None, "ts": 1.0, "origin": "agent"},
+                {"id": 2, "title": "Arch", "path": "workspace/ARCHITECTURE.md", "kind": "plan",
+                 "agent": "architect", "ts": 2.0, "origin": "agent"}]
+    d = pv.documents([], artifacts)
+    assert [a["id"] for a in d["produced"]] == [2]
+
+
 def test_brief_block_pulls_goal_scope_from_project_and_owner_from_status():
     project = {"name": "Quote-to-Epicor", "goal": "automate quoting",
                "scope": ["Quoting / RFQ", "Pricing"], "description": "composed"}
