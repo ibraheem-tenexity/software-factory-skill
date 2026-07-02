@@ -9,7 +9,7 @@
 // already tested; onboarding just never called them before hand-off, which is why every hand-off
 // 409'd regardless of project name.
 import React, { useEffect, useState } from "react";
-import { api, LearnedFact, ReflectionQuestion } from "../../api";
+import { api, Assumption, ReflectionQuestion } from "../../api";
 import { T, Icon, CategoryLabel, Wordmark, Btn, TextArea, StatusPill } from "./design";
 
 // Mirrors brief.py's REQUIRED_SECTIONS minus "goals" (already collected by the intake form's
@@ -26,14 +26,14 @@ type QueueItem =
 export function InterviewView({ draftId, projectName, goal, onBack, onHandoff, submitting, error }: {
   draftId: string; projectName: string; goal: string; onBack: () => void; onHandoff: () => void; submitting: boolean; error: string;
 }) {
-  const [learnedFacts, setLearnedFacts] = useState<LearnedFact[]>([]);
+  const [assumptions, setAssumptions] = useState<Assumption[]>([]);
   const [questions, setQuestions] = useState<ReflectionQuestion[]>([]);
   const [coverage, setCoverage] = useState<Record<string, boolean>>({});
   const [loaded, setLoaded] = useState(false);
   const [answeredCount, setAnsweredCount] = useState(0);
 
   const refresh = () => api.brief(draftId).then((d) => {
-    setLearnedFacts(d.learned_facts || []);
+    setAssumptions(d.assumptions || []);
     setQuestions(d.reflection_questions || []);
     setCoverage(d.coverage || {});
     setLoaded(true);
@@ -87,17 +87,21 @@ export function InterviewView({ draftId, projectName, goal, onBack, onHandoff, s
           <div style={{ flex: 1, overflow: "auto", padding: "32px" }}>
             <div style={{ maxWidth: 640, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
               <div>
-                <CategoryLabel tone="brand" style={{ marginBottom: 9 }}>Reviewing your materials</CategoryLabel>
-                <h1 style={{ font: `700 26px/1.2 ${T.display}`, letterSpacing: "-0.02em", color: T.fg, margin: 0 }}>What I learned from your materials</h1>
+                <CategoryLabel tone="brand" style={{ marginBottom: 9 }}>Materials processed · Interviewing</CategoryLabel>
+                <h1 style={{ font: `700 26px/1.2 ${T.display}`, letterSpacing: "-0.02em", color: T.fg, margin: 0 }}>Let's confirm what I learned</h1>
+                <p style={{ font: `400 14px/1.5 ${T.sans}`, color: T.secondary, margin: "8px 0 0", maxWidth: 560 }}>
+                  I read everything you gave me and drafted the assumptions below. Answer my questions on the right to confirm or correct them — then we hand off to the factory.
+                </p>
               </div>
 
-              {learnedFacts.length === 0 ? (
+              {assumptions.length === 0 ? (
                 <p style={{ font: `400 13px/1.5 ${T.sans}`, color: T.tertiary, margin: 0 }}>Nothing referenced yet — that's fine, the rail on the right covers what's still needed.</p>
               ) : (
                 <section style={{ background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rXl, padding: "20px 22px" }}>
+                  <CategoryLabel tone="brand" style={{ marginBottom: 10 }}>What I learned from your materials</CategoryLabel>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {learnedFacts.map((f, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "8px 0", borderBottom: i < learnedFacts.length - 1 ? `1px solid ${T.borderSubtle}` : "none" }}>
+                    {assumptions.map((f, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "8px 0", borderBottom: i < assumptions.length - 1 ? `1px solid ${T.borderSubtle}` : "none" }}>
                         <p style={{ flex: 1, margin: 0, font: `400 13px/1.5 ${T.sans}`, color: T.fg }}>{f.fact}</p>
                         <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4, font: `500 11px/1 ${T.sans}`, color: T.brandDeep, background: T.brandSoft, padding: "4px 10px", borderRadius: 9999, whiteSpace: "nowrap" }}>
                           <Icon name="file" size={10} color={T.brandDeep} /> {f.document_name}{f.section_path ? ` · ${f.section_path}` : ""}

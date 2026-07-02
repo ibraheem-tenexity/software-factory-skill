@@ -1,5 +1,5 @@
 """SOF-32: the ingestion pipeline — blob -> parse -> chunk -> embed -> fts -> summarize ->
-reference-backed key_facts -> project overview rollup -> cost. Console-side (never in a stage
+reference-backed assumptions -> project overview rollup -> cost. Console-side (never in a stage
 agent), feature-flag-gated behind SF_MEMORY=1 so `main` stays shippable without it.
 
 Layering: this module is classified CORE (tests/unit/test_boundary.py) and must never import
@@ -9,12 +9,10 @@ parameter rather than importing a global singleton.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import tempfile
 import threading
-import time
 from typing import Callable
 
 from .. import docx_extract, pdf_extract, storage
@@ -29,6 +27,12 @@ logger = get_logger(__name__)
 SUMMARIZE_MODEL = "anthropic/claude-haiku-4.5"
 _OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 _ESTIMATED_CHARS_PER_TOKEN = 4  # standard rough heuristic for pre-call cost estimation
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate (chars/4) for gating decisions like "is this document small enough
+    to read whole" — same heuristic _estimate_cost_usd already uses. Not for billing."""
+    return len(text or "") // _ESTIMATED_CHARS_PER_TOKEN
 
 
 def enabled() -> bool:
@@ -99,11 +103,13 @@ def _record_extracted_images(blob: dict, image_paths: list[str], blobs_store: Bl
 
 def _summarize_and_extract_facts(chunks: list[tuple[int, str | None, str]], doc_name: str,
                                  client=None) -> tuple[str, list[dict], list[dict], dict]:
-    """One OpenRouter chat-completions call -> (summary_md, outline, key_facts, usage).
-    `key_facts` returned here is UNFILTERED — the caller (ingest_blob) is responsible for
-    dropping any fact whose section_path doesn't match a real chunk section_path and for
+    """One OpenRouter chat-completions call -> (summary_md, outline, assumptions, usage).
+    The assumptions returned here are UNFILTERED — the caller (ingest_blob) is responsible for
+    dropping any entry whose section_path doesn't match a real chunk section_path and for
     attaching document_blob_id itself; this function never trusts the model for provenance,
-    only for the fact text + which section it claims to come from."""
+    only for the claim text + which section it claims to come from. (The model-facing JSON key
+    stays `key_facts` — it's a good extraction framing for the LLM; the product-facing name for
+    what these become is "assumptions", confirmed or corrected by the customer.)"""
     if not chunks:
         return "", [], [], {}
     client = client or _default_chat_client()
@@ -143,16 +149,17 @@ def _default_chat_client():
     return OpenAI(base_url=_OPENROUTER_BASE_URL, api_key=os.environ["OPENROUTER_API_KEY"])
 
 
-def _filter_key_facts(raw_facts: list[dict], blob_id: int,
-                      valid_section_paths: set[str]) -> tuple[list[dict], list[dict]]:
-    """The trust boundary (product spec: no confidence scores, no unreferenced facts). A fact
+def _filter_assumptions(raw_facts: list[dict], blob_id: int,
+                        valid_section_paths: set[str]) -> tuple[list[dict], list[dict]]:
+    """The trust boundary (product spec: no confidence scores, no unreferenced claims). A claim
     whose section_path isn't a real section_path from THIS document's own chunks is never
-    stored as a fact — but it's NOT discarded either (SOF-37 needs it): it comes back as an
-    unreferenced candidate, which the caller turns into a reflection question instead of a
-    stated fact. document_blob_id is attached here, by code, never asked of the model, for
-    both lists.
+    stored as an assumption — it comes back as an unreferenced candidate. SOF-60: ingest no
+    longer auto-escalates those into blocking reflection questions (that was SOF-37's blind
+    per-document pass); the Concierge raises reflection questions itself, from its own analysis,
+    via its tool belt — same reflection_questions state, gate, and Interview UI, better source.
+    document_blob_id is attached here, by code, never asked of the model, for both lists.
 
-    Returns (referenced_facts, unreferenced_candidates)."""
+    Returns (referenced_assumptions, unreferenced_candidates)."""
     referenced, unreferenced = [], []
     for f in raw_facts:
         fact = (f.get("fact") or "").strip()
@@ -165,36 +172,6 @@ def _filter_key_facts(raw_facts: list[dict], blob_id: int,
         else:
             unreferenced.append(entry)
     return referenced, unreferenced
-
-
-def _reflection_question_id(document_blob_id: int, fact: str) -> str:
-    """Deterministic — the same unreferenced candidate re-extracted on a re-ingest collapses
-    onto the same question id instead of spawning a duplicate."""
-    return hashlib.sha256(f"{document_blob_id}:{fact}".encode()).hexdigest()[:12]
-
-
-def _record_reflection_questions(console, project_id: str, unreferenced: list[dict]) -> None:
-    """SOF-37: an unreferenced candidate never becomes a stated fact — it becomes an
-    interview question the operator must answer or dismiss before build/hand-off (see the
-    promote-route gate in console/routers/projects.py). Deduped by content-derived id, so a
-    re-ingest of the same document never spawns duplicate questions for the same candidate."""
-    state = console._load_state(project_id)
-    existing_ids = {q["id"] for q in (state.reflection_questions or [])}
-    added = False
-    for candidate in unreferenced:
-        qid = _reflection_question_id(candidate["document_blob_id"], candidate["fact"])
-        if qid in existing_ids:
-            continue
-        state.reflection_questions = list(state.reflection_questions or []) + [{
-            "id": qid, "fact": candidate["fact"],
-            "document_blob_id": candidate["document_blob_id"],
-            "section_path_claimed": candidate["section_path"],
-            "status": "open", "answer": None, "created_at": time.time(),
-        }]
-        existing_ids.add(qid)
-        added = True
-    if added:
-        state.save()
 
 
 def _estimate_cost_usd(model: str, kind: str, *, input_chars: int = 0,
@@ -264,6 +241,11 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
         push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "parsing", "pct": 100, "status": "failed"})
         return {"blob_id": blob_id, "status": "failed", "error": str(exc)}
 
+    # SOF-60: persist the full converted markdown (chunking loses whole-document order) as an
+    # origin='user' artifact so agents can read the document exactly as written.
+    if project_id:
+        memory_store.record_document_markdown(project_id, blob_id, doc_name, md_text)
+
     push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "chunking", "pct": 20, "status": "running"})
     chunks = chunker.chunk_markdown(md_text)
     valid_section_paths = {path for _o, path, _t in chunks if path}
@@ -296,9 +278,7 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
         push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "summarizing", "pct": 100, "status": "failed"})
         return {"blob_id": blob_id, "status": "failed", "error": str(exc)}
 
-    key_facts, unreferenced = _filter_key_facts(raw_facts, blob_id, valid_section_paths)
-    if unreferenced and scope == "project":
-        _record_reflection_questions(console, scope_id, unreferenced)
+    assumptions, _unreferenced = _filter_assumptions(raw_facts, blob_id, valid_section_paths)
 
     if usage:
         summarize_cost = _estimate_cost_usd(SUMMARIZE_MODEL, "chat", prompt_tokens=usage.get("prompt_tokens", 0),
@@ -312,7 +292,7 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
                                   output_tokens=usage.get("completion_tokens", 0), usd=summarize_cost)
 
     memory_store.upsert_doc_summary(
-        blob_id, scope, scope_id, summary_md=summary_md, key_facts=key_facts, outline=outline,
+        blob_id, scope, scope_id, summary_md=summary_md, assumptions=assumptions, outline=outline,
         content_sha256=blob.get("sha256"), status="ready",
     )
 
@@ -320,7 +300,7 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
         _recompute_project_rollup(console, scope_id, memory_store)
 
     push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "done", "pct": 100, "status": "ready"})
-    return {"blob_id": blob_id, "status": "ready", "chunks": len(chunks), "key_facts": len(key_facts)}
+    return {"blob_id": blob_id, "status": "ready", "chunks": len(chunks), "assumptions": len(assumptions)}
 
 
 def _recompute_project_rollup(console, project_id: str, memory_store: MemoryStore) -> None:

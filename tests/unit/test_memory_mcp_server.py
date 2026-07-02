@@ -166,6 +166,18 @@ def test_search_memory_always_scopes_to_project_never_org():
     assert out == [{"content": "hit"}]
 
 
+def test_search_document_summaries_always_scopes_to_project_never_org():
+    calls = []
+
+    def fake_search(scope, scope_id, query, k):
+        calls.append((scope, scope_id, query, k))
+        return [{"blob_id": 7}]
+
+    out = m.search_document_summaries("project-a", "pricing docs", k=4, search_fn=fake_search)
+    assert calls == [("project", "project-a", "pricing docs", 4)]
+    assert out == [{"blob_id": 7}]
+
+
 # ── add_memory_note — the only writer; reuses an existing notes blob rather than duplicating ────
 
 def test_add_memory_note_rejects_empty_body():

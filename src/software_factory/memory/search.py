@@ -90,3 +90,48 @@ def search(scope: str, scope_id: str, query: str, k: int = 8, *, connect=None, e
         conn.close()
     return [{"content": r["content"], "document": r["document"],
              "section_path": r["section_path"], "score": float(r["score"])} for r in rows]
+
+
+def search_documents(scope: str, scope_id: str, query: str, k: int = 8, *,
+                     connect=None, embed=None) -> list[dict]:
+    """SOF-60: coarse, whole-document search — which documents are relevant to `query`, ranked
+    by cosine similarity over `doc_summary.embedding` (written at ingest, previously never
+    queried). The document-level tier of coarse-to-fine retrieval: call this to pick the 2-3
+    relevant documents, then `search()` for exact passages. Dense-only by design — summaries
+    have no single canonical text column to generate a tsvector from the way `chunk.content`
+    does, and keyword precision is already covered by `search()`. No vector index needed:
+    one row per document is a few hundred rows at most, an exact sequential scan.
+
+    Each hit: `{"blob_id", "document", "summary_excerpt", "score"}` — blob_id is the pointer
+    for the follow-up call (get_document_summary / full-document read), unlike search()'s
+    chunk hits which carry their content directly. Same no-CTE + `?::vector` cast constraints
+    as search() (see module docstring)."""
+    if scope not in ("project", "org"):
+        raise ValueError(f"unsupported scope {scope!r} — must be 'project' or 'org'")
+    text = (query or "").strip()
+    if not text:
+        raise ValueError("query is empty")
+
+    connect = connect or (lambda: dbshim.connect("."))
+    embed = embed or embed_texts
+    qvec = embed([text])[0]
+
+    scope_sql, scope_params = _scope_where(scope, scope_id)
+    sql = f"""
+    SELECT ds.blob_id, b.name AS document,
+           coalesce(left(ds.summary_md, 300), '') AS summary_excerpt,
+           1 - (ds.embedding <=> ?::vector) AS score
+    FROM doc_summary ds
+    JOIN blobs b ON b.id = ds.blob_id
+    WHERE ({scope_sql}) AND ds.status = 'ready' AND ds.embedding IS NOT NULL
+    ORDER BY ds.embedding <=> ?::vector LIMIT ?
+    """
+    params = [qvec, *scope_params, qvec, k]
+
+    conn = connect()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+    return [{"blob_id": r["blob_id"], "document": r["document"],
+             "summary_excerpt": r["summary_excerpt"], "score": float(r["score"])} for r in rows]

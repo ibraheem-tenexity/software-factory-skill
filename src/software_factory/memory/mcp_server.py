@@ -1,8 +1,9 @@
 """SOF-41 (T4.2): console-hosted Project Memory MCP — project-memory-integration.md §4,
 project-memory-design.md §7/§8.
 
-Exposes six tools over streamable-HTTP MCP: `get_project_overview`, `list_documents`,
-`get_document_summary`, `search_memory` (T4.1), `get_chunk`, `add_memory_note` (the ONLY writer).
+Exposes seven tools over streamable-HTTP MCP: `get_project_overview`, `list_documents`,
+`get_document_summary`, `search_memory` (T4.1), `search_document_summaries` (SOF-60),
+`get_chunk`, `add_memory_note` (the ONLY writer).
 Every tool is scoped from the request's bearer token (`auth.verify_scope_token`), never from a
 caller-supplied argument — no tool signature below even HAS a `project_id` parameter, so an agent
 cannot ask for another project's memory by passing one.
@@ -32,6 +33,7 @@ from .. import auth, dbshim
 from ..blobs import BlobStore
 from .embed import embed_texts
 from .search import search as search_memory_rrf
+from .search import search_documents as search_documents_dense
 from .store import MemoryStore
 
 _NOTES_BLOB_KIND = "memory_note"
@@ -128,6 +130,12 @@ def search_memory(project_id: str, query: str, k: int = 8, *, search_fn=None) ->
     return search_fn("project", project_id, query, k)
 
 
+def search_document_summaries(project_id: str, query: str, k: int = 8, *, search_fn=None) -> list[dict]:
+    """Wraps SOF-60's search_documents() — same enforced project scoping as search_memory."""
+    search_fn = search_fn or search_documents_dense
+    return search_fn("project", project_id, query, k)
+
+
 def _notes_blob_id(project_id: str, *, blobs=None) -> int:
     """The (at most one) sentinel blob that holds this project's agent-authored notes, created
     lazily on first use. Notes become chunk rows on this blob — same table search_memory already
@@ -201,8 +209,8 @@ def build_mcp() -> FastMCP:
     mcp = FastMCP("project-memory")
 
     @mcp.tool(name="get_project_overview",
-             description="Project brief + rollup summary + key-facts digest. Call this first in "
-                         "almost every run.")
+             description="Project brief + rollup summary + assumptions digest. Call this first "
+                         "in almost every run.")
     def _get_project_overview() -> dict:
         return get_project_overview(_current_project_id())
 
@@ -214,8 +222,9 @@ def build_mcp() -> FastMCP:
         return list_documents(_current_project_id())
 
     @mcp.tool(name="get_document_summary",
-             description="summary_md, outline, and key_facts for one document — call after "
-                         "deciding (via list_documents/search_memory) that it's relevant.")
+             description="summary_md, outline, and assumptions for one document — call after "
+                         "deciding (via list_documents/search_document_summaries) that it's "
+                         "relevant.")
     def _get_document_summary(blob_id: int) -> dict:
         return get_document_summary(_current_project_id(), blob_id)
 
@@ -225,6 +234,13 @@ def build_mcp() -> FastMCP:
                          "document and section — the workhorse retrieval tool.")
     def _search_memory(query: str, k: int = 8) -> list[dict]:
         return search_memory(_current_project_id(), query, k)
+
+    @mcp.tool(name="search_document_summaries",
+             description="Coarse, whole-document semantic search — which documents are relevant "
+                         "to this query, before drilling into search_memory for passages. "
+                         "Semantic-only; exact-keyword queries should use search_memory.")
+    def _search_document_summaries(query: str, k: int = 8) -> list[dict]:
+        return search_document_summaries(_current_project_id(), query, k)
 
     @mcp.tool(name="get_chunk",
              description="One chunk plus `window` neighboring chunks (by ordinal) from the same "

@@ -50,6 +50,13 @@ artifacts = Table(
     Column("kind", Text),
     Column("agent", Text),
     Column("ts", Float, nullable=False),
+    # SOF-60: user-deposited documents live here too, distinguished from agent-produced
+    # artifacts by `origin`. `content` holds the full converted markdown inline (text, not
+    # binary — no storage round-trip needed to read a document whole); `source_blob_id`
+    # links back to the uploaded document's blobs row.
+    Column("content", Text),
+    Column("source_blob_id", Integer, ForeignKey("blobs.id", ondelete="CASCADE")),
+    Column("origin", Text, nullable=False, server_default="agent"),  # 'agent' | 'user'
 )
 
 blockers = Table(
@@ -236,9 +243,9 @@ doc_summary = Table(
     Column("scope", Text, nullable=False),          # 'project' | 'org'  (mirrors blobs)
     Column("scope_id", Text, nullable=False),
     Column("summary_md", Text),                     # map-reduce summary -> PRD "AI auto-summarize"
-    Column("key_facts", JSONB, server_default=text("'{}'::jsonb")),  # -> PRD "What I learned"; each
-    # entry carries its own source reference (document_blob_id + section_path/page) -- no
-    # confidence scores (product-spec decision): an unreferenced inference is never stored here.
+    Column("assumptions", JSONB, server_default=text("'{}'::jsonb")),  # -> "Let's confirm what I
+    # learned"; each entry carries its own source reference (document_blob_id + section_path/page)
+    # -- no confidence scores (product-spec decision): an unreferenced inference is never stored here.
     Column("outline", JSONB, server_default=text("'[]'::jsonb")),    # section titles + one-line gist
     Column("embedding", Vector(1024)),
     Column("token_count", Integer),
