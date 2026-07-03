@@ -27,11 +27,44 @@ def test_cost_uses_result_total_when_present():
 
 
 def test_cost_sums_result_totals_across_appended_stages():
-    # project.log APPENDS each stage's claude -p session; each session emits its own authoritative
-    # result line. True run cost = SUM of every session's total_cost_usd, not just the last one
-    # (the old "last result wins" lost Stage 1's cost the moment Stage 2 finished).
-    two_stages = stream(ASSIST_USAGE, RESULT, ASSIST_USAGE, RESULT)
+    # project.log APPENDS each stage's claude -p session; each stage is a DISTINCT real session_id
+    # (a fresh, non-resumed `claude -p` invocation) and emits its own authoritative result line.
+    # True run cost = SUM of every DISTINCT session's total_cost_usd, not just the last one (the
+    # old "last result wins" lost Stage 1's cost the moment Stage 2 finished).
+    usage1 = '{"type":"assistant","session_id":"stage1","message":{"model":"claude-sonnet-4-6","content":[],"usage":{"input_tokens":1000,"output_tokens":500}}}'
+    stage1 = '{"type":"result","subtype":"success","total_cost_usd":0.0731,"session_id":"stage1"}'
+    usage2 = '{"type":"assistant","session_id":"stage2","message":{"model":"claude-sonnet-4-6","content":[],"usage":{"input_tokens":1000,"output_tokens":500}}}'
+    stage2 = '{"type":"result","subtype":"success","total_cost_usd":0.0731,"session_id":"stage2"}'
+    two_stages = stream(usage1, stage1, usage2, stage2)
     assert cost_usd(two_stages) == round(0.0731 * 2, 6)
+
+
+def test_cost_takes_max_not_sum_across_resumes_of_the_same_session():
+    # SOF-87 live incident: `claude -p --resume <session>` resends the full prior conversation, so
+    # a resumed session's total_cost_usd is CUMULATIVE — a later result already includes every
+    # earlier turn. A stage retried/resumed N times under the SAME session_id therefore emits N
+    # monotonically-increasing result lines; summing them double/triple/N-x counts the earliest
+    # turns. Confirmed live: project-8394d197a111467f's session emitted 15 results
+    # ($0.94..$12.59, non-monotonic num_turns/duration_ms proving separate invocations) whose SUM
+    # was $83.83 against the true $12.59 — inflating that project's total spend from ~$19 to
+    # $100.64. The parser must take the MAX per session, never sum a single session's results.
+    same_session = stream(
+        '{"type":"result","subtype":"success","total_cost_usd":0.94,"session_id":"resumed"}',
+        '{"type":"result","subtype":"success","total_cost_usd":1.74,"session_id":"resumed"}',
+        '{"type":"result","subtype":"success","total_cost_usd":12.59,"session_id":"resumed"}',
+    )
+    assert cost_usd(same_session) == 12.59
+
+
+def test_cost_max_within_session_still_sums_across_distinct_sessions():
+    # Combine both real-world shapes in one log: one session resumed 3x (max, not sum) plus one
+    # fresh, distinct session (added on top) — mirrors project-8394d197a111467f's actual log shape.
+    mixed = stream(
+        '{"type":"result","subtype":"success","total_cost_usd":0.94,"session_id":"resumed"}',
+        '{"type":"result","subtype":"success","total_cost_usd":12.59,"session_id":"resumed"}',
+        '{"type":"result","subtype":"success","total_cost_usd":4.16,"session_id":"other"}',
+    )
+    assert cost_usd(mixed) == round(12.59 + 4.16, 6)
 
 
 def test_cost_adds_inflight_stage_after_last_result():

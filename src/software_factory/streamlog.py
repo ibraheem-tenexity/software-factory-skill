@@ -32,19 +32,28 @@ def cost_usd(text: str, prices: dict | None = None) -> float:
     # project.log APPENDS every stage's session, keyed per session; the log may be claude
     # stream-json or opencode --format json (one runtime per run — ProjectState.runtime pins it —
     # but one parser handles both vocabularies; the schemas are disjoint).
-    # claude: per session, `result.total_cost_usd` is authoritative; usage after a session's
-    # result is the next logical session's estimate. A session that NEVER emitted a result
-    # (killed/OOM) keeps its token estimate — a later session's result must not discard it
-    # (the run-d329e57c under-count scar).
-    # opencode: each `step_finish` event carries authoritative `part.cost` (+ `part.tokens`
-    # for the rare cost-less step, priced at the Kimi rate; reasoning bills as output).
+    # claude: `result.total_cost_usd` is CUMULATIVE for the whole resumed conversation, not a
+    # per-invocation delta — `claude -p --resume <session>` must resend the full prior history,
+    # so each resume's reported total already includes every earlier turn. A stage that gets
+    # resumed/retried N times under the SAME session_id therefore emits N result events, each a
+    # superset of the last (confirmed live 2026-07-02: project-8394d197a111467f's session
+    # 21a542e7-... emitted 15 results with monotonically increasing totals [$0.94 .. $12.59] and
+    # NON-monotonic num_turns/duration_ms per event — proof these are separate resumed invocations,
+    # not one session's final total; SUMMING them gave $83.83 against the true $12.59, inflating
+    # that project's reported spend from ~$19 to $100.64). Take the MAX per session, never sum —
+    # a session's result-event sequence.
+    # opencode: each `step_finish` event carries authoritative `part.cost` as a genuine PER-STEP
+    # delta (not cumulative) — summing those remains correct.
+    # A session that NEVER emitted a result (killed/OOM) keeps its token estimate — a later
+    # session's result must not discard it (the run-d329e57c under-count scar); unaffected by the
+    # sum-vs-max choice above, which only concerns multiple results for the SAME session.
     prices = prices or PRICES
-    finished: dict = {}             # session id -> Σ authoritative totals (results / step costs)
+    finished: dict = {}             # session id -> authoritative total (max of results / Σ of opencode steps)
     tail: dict = {}                 # session id -> token estimate since that session's last result
     for ev in _events(text):
         sid = ev.get("session_id") or ev.get("sessionID") or "?"
         if ev.get("type") == "result" and ev.get("total_cost_usd") is not None:
-            finished[sid] = finished.get(sid, 0.0) + ev["total_cost_usd"]
+            finished[sid] = max(finished.get(sid, 0.0), ev["total_cost_usd"])
             tail[sid] = 0.0
             continue
         part = ev.get("part") or {}
