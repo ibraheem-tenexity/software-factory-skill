@@ -221,7 +221,6 @@ Proof (project.db + project.log) at the base survives.
 
 ## Guardrails
 
-- **Budget:** on `BudgetExceeded`, stop and report shipped-vs-pending.
 - **No hollow done:** empty diff = no-op = retry; `merge_if_green` + `mark_done` enforce real diffs/PRs;
   done REQUIRES a recorded passing Playwright verification AND every ticket `approved` via the QA loop.
 - **One ticket at a time:** each bracketed by `spawn-agent`/`claim`/…/`finish-agent` with the same id.

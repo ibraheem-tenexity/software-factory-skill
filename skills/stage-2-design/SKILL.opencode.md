@@ -109,7 +109,6 @@ dependencies from the user, and launches Stage 3. (No "done" event — the datas
 
 ## Guardrails
 
-- **Budget:** on `BudgetExceeded`, stop and report.
 - **No hollow done:** an empty ticket store does NOT advance; redo the unit properly before `finish-agent`.
 - **Fully autonomous** — no human approval gates within this stage.
 - **Sequential and recorded** — each unit bracketed by `spawn-agent`/`finish-agent`.

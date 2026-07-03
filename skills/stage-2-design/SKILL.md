@@ -110,7 +110,6 @@ dependencies from the user, and launches Stage 3. (No "done" event — the datas
 
 ## Guardrails
 
-- **Budget:** on `BudgetExceeded`, stop and report.
 - **No hollow done:** empty turn = retry/escalate; an empty ticket store does NOT advance.
 - **Fully autonomous** — no human approval gates within this stage.
 - **Workers are native Task sub-agents** — never architect/write tickets yourself in the main session.
