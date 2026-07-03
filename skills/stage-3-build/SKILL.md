@@ -224,7 +224,6 @@ Proof (project.db + project.log) at the base survives.
 
 ## Guardrails
 
-- **Budget:** on `BudgetExceeded`, stop and report shipped-vs-pending.
 - **No hollow done:** empty turn = retry/escalate; `merge_if_green` + `mark_done` enforce real diffs/PRs;
   done REQUIRES a recorded passing Playwright verification AND every ticket `approved` via the QA loop.
 - **Orchestrator-only:** never edit app code in the main session — one native Task sub-agent per ticket.

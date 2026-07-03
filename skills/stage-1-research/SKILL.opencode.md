@@ -146,7 +146,6 @@ Stage 2. (No "done" event — the committed PRD in the datastore IS the signal.)
 
 ## Guardrails
 
-- **Budget:** on `BudgetExceeded`, stop and report.
 - **No hollow done:** a unit that produced nothing = no-op = redo it properly before `finish-agent`.
 - **Hard block** (missing input/authority): record it (`add-blocker`), continue the rest.
 - **Fully autonomous** — no human approval gates.
