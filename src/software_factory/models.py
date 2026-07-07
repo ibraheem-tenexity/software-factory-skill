@@ -11,7 +11,7 @@ Flat schema: one set of tables, every per-project table keyed by `project_id`. `
 """
 from __future__ import annotations
 
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import (Boolean, CheckConstraint, Column, Computed, DateTime, Float,
                         ForeignKey, Integer, MetaData, Table, Text, UniqueConstraint, func, text)
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
@@ -247,7 +247,7 @@ doc_summary = Table(
     # learned"; each entry carries its own source reference (document_blob_id + section_path/page)
     # -- no confidence scores (product-spec decision): an unreferenced inference is never stored here.
     Column("outline", JSONB, server_default=text("'[]'::jsonb")),    # section titles + one-line gist
-    Column("embedding", Vector(1024)),
+    Column("embedding", HALFVEC(3072)),
     Column("token_count", Integer),
     Column("content_sha256", Text),                 # staleness vs blobs.sha256
     Column("status", Text, nullable=False, server_default="pending"),  # pending|ready|failed
@@ -266,7 +266,7 @@ chunk = Table(
     Column("ordinal", Integer, nullable=False),      # position within the document
     Column("section_path", Text),                    # e.g. "2 / 2.3 Auth" -- hierarchical nav
     Column("content", Text, nullable=False),
-    Column("dense", Vector(1024)),                   # OpenRouter dense embedding
+    Column("dense", HALFVEC(3072)),                   # OpenRouter dense embedding
     # Generated in Postgres from `content` -- defined here (not just in the migration) so
     # `metadata.create_all` in tests builds the identical column the Alembic migration does;
     # otherwise prod and tests would drift on exactly this column.

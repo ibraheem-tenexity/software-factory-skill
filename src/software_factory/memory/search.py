@@ -11,12 +11,13 @@ Written as a single SELECT with subqueries in FROM, not a `WITH` CTE: `PgConn.ex
 reading dbshim.py; no existing caller uses a CTE, so this never surfaced before). Subqueries in
 FROM are equivalent for a query with no recursion, and this avoids touching dbshim.py at all.
 
-`dense <=> ?::vector` — the explicit cast is required (found against a real seeded DB, review
+`dense <=> ?::halfvec` — the explicit cast is required (found against a real seeded DB, review
 by y96ilz0o): a bare `?` binds the query vector as a generic param with no column-type context,
 and Postgres has no `vector <=> double precision[]` operator, so the comparison raises
-`UndefinedFunction` at runtime. An INSERT into a `vector` column gets pgvector's assignment cast
+`UndefinedFunction` at runtime. An INSERT into a `halfvec` column gets pgvector's assignment cast
 automatically; a raw operator comparison like this one does not — first time this codebase has
-done the latter.
+done the latter. Columns are `halfvec(3072)` not `vector`, per SOF-84 (plain `vector` can't be
+HNSW-indexed past 2000 dimensions, and this model's real output is 3072-dim).
 """
 from __future__ import annotations
 
@@ -27,18 +28,25 @@ _RRF_K = 60           # RRF's own smoothing constant (not the caller's k) — st
 _CHANNEL_LIMIT = 50    # top-N per channel before fusion, per the design doc
 
 
-def _scope_where(scope: str, scope_id: str) -> tuple[str, list]:
+def _scope_where(scope: str, scope_id: str, *, alias: str = "") -> tuple[str, list]:
     """SQL fragment (no leading AND/WHERE) + its positional params, in the same order the '?'
     placeholders appear in the fragment. Project scope also pulls in org docs imported into the
     project via `blob_uses` (this ticket's own scope note) — org scope has no such expansion
-    (nothing imports FROM a project INTO an org)."""
+    (nothing imports FROM a project INTO an org).
+
+    `alias` qualifies `scope`/`scope_id`/`blob_id` (e.g. "ds") — required whenever the caller's
+    query joins another table that also has `scope`/`scope_id` columns (found live, SOF-84:
+    `search_documents()`'s `doc_summary ds JOIN blobs b` raised `AmbiguousColumn` with the bare
+    names — both tables have `scope`/`scope_id`). `search()`'s subqueries select from `chunk`
+    alone, so they stay unqualified."""
+    prefix = f"{alias}." if alias else ""
     if scope == "project":
         return (
-            "(scope = ? AND scope_id = ?) OR blob_id IN "
+            f"({prefix}scope = ? AND {prefix}scope_id = ?) OR {prefix}blob_id IN "
             "(SELECT blob_id FROM blob_uses WHERE project_id = ?)",
             [scope, scope_id, scope_id],
         )
-    return "scope = ? AND scope_id = ?", [scope, scope_id]
+    return f"{prefix}scope = ? AND {prefix}scope_id = ?", [scope, scope_id]
 
 
 def search(scope: str, scope_id: str, query: str, k: int = 8, *, connect=None, embed=None) -> list[dict]:
@@ -66,10 +74,10 @@ def search(scope: str, scope_id: str, query: str, k: int = 8, *, connect=None, e
     FROM chunk c
     JOIN blobs b ON b.id = c.blob_id
     LEFT JOIN (
-      SELECT id, row_number() OVER (ORDER BY dense <=> ?::vector) AS rnk
+      SELECT id, row_number() OVER (ORDER BY dense <=> ?::halfvec) AS rnk
       FROM chunk
       WHERE {scope_sql}
-      ORDER BY dense <=> ?::vector LIMIT {_CHANNEL_LIMIT}
+      ORDER BY dense <=> ?::halfvec LIMIT {_CHANNEL_LIMIT}
     ) AS dense ON dense.id = c.id
     LEFT JOIN (
       SELECT id, row_number() OVER (
@@ -104,7 +112,7 @@ def search_documents(scope: str, scope_id: str, query: str, k: int = 8, *,
 
     Each hit: `{"blob_id", "document", "summary_excerpt", "score"}` — blob_id is the pointer
     for the follow-up call (get_document_summary / full-document read), unlike search()'s
-    chunk hits which carry their content directly. Same no-CTE + `?::vector` cast constraints
+    chunk hits which carry their content directly. Same no-CTE + `?::halfvec` cast constraints
     as search() (see module docstring)."""
     if scope not in ("project", "org"):
         raise ValueError(f"unsupported scope {scope!r} — must be 'project' or 'org'")
@@ -116,15 +124,15 @@ def search_documents(scope: str, scope_id: str, query: str, k: int = 8, *,
     embed = embed or embed_texts
     qvec = embed([text])[0]
 
-    scope_sql, scope_params = _scope_where(scope, scope_id)
+    scope_sql, scope_params = _scope_where(scope, scope_id, alias="ds")
     sql = f"""
     SELECT ds.blob_id, b.name AS document,
            coalesce(left(ds.summary_md, 300), '') AS summary_excerpt,
-           1 - (ds.embedding <=> ?::vector) AS score
+           1 - (ds.embedding <=> ?::halfvec) AS score
     FROM doc_summary ds
     JOIN blobs b ON b.id = ds.blob_id
     WHERE ({scope_sql}) AND ds.status = 'ready' AND ds.embedding IS NOT NULL
-    ORDER BY ds.embedding <=> ?::vector LIMIT ?
+    ORDER BY ds.embedding <=> ?::halfvec LIMIT ?
     """
     params = [qvec, *scope_params, qvec, k]
 

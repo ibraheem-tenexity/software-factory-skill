@@ -259,7 +259,7 @@ each carry their own source reference (document + section/page) — no bare conf
 | summary_md | Text | map-reduce summary of the whole document |
 | key_facts | jsonb | not null default `'{}'`; extracted facts, each with a source reference |
 | outline | jsonb | not null default `'[]'`; section titles + one-line gist each |
-| embedding | vector(1024) | pgvector; the document-level embedding |
+| embedding | halfvec(3072) | pgvector; the document-level embedding (google/gemini-embedding-2, SOF-84) |
 | token_count | Integer | |
 | content_sha256 | Text | staleness check vs `blobs.sha256` |
 | status | Text | not null default `'pending'` — `pending`\|`ready`\|`failed` |
@@ -281,7 +281,7 @@ migration does.
 | ordinal | Integer | not null; position within the document |
 | section_path | Text | e.g. `"2 / 2.3 Auth"` — hierarchical nav |
 | content | Text | not null |
-| dense | vector(1024) | pgvector; OpenRouter dense embedding |
+| dense | halfvec(3072) | pgvector; OpenRouter dense embedding (google/gemini-embedding-2, SOF-84) |
 | fts | tsvector | generated always as `to_tsvector('english', content)` stored |
 | token_count | Integer | |
 

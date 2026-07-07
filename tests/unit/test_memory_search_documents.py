@@ -81,12 +81,24 @@ def test_default_k_is_eight():
     assert conn.executed_params[-1] == 8
 
 
-def test_dense_comparison_casts_the_param_to_vector():
+def test_dense_comparison_casts_the_param_to_halfvec():
     # Same UndefinedFunction trap search() documents: the SELECT-expression + ORDER BY each
-    # bind the query vector, both need the ::vector cast.
+    # bind the query vector, both need the ::halfvec cast (column is halfvec(3072), SOF-84).
     conn = _FakeConn([])
     search_documents("project", "proj-1", "pricing tiers", connect=lambda: conn, embed=_fake_embed)
-    assert conn.executed_sql.count("<=> ?::vector") == 2
+    assert conn.executed_sql.count("<=> ?::halfvec") == 2
+
+
+def test_scope_filter_is_qualified_against_ambiguous_column():
+    # SOF-84: found live — `doc_summary ds JOIN blobs b` both have `scope`/`scope_id` columns,
+    # so a bare `scope = ?` in the WHERE clause raises `AmbiguousColumn` at runtime (the fake
+    # connection here can't catch that itself; this locks in that the fix — qualifying with
+    # `ds.` — doesn't regress back to the bare, ambiguous form).
+    conn = _FakeConn([])
+    search_documents("project", "proj-1", "pricing tiers", connect=lambda: conn, embed=_fake_embed)
+    assert "ds.scope = ?" in conn.executed_sql
+    assert "ds.scope_id = ?" in conn.executed_sql
+    assert " scope = ?" not in conn.executed_sql
 
 
 def test_sql_is_a_plain_select_so_pgconn_still_detects_it():

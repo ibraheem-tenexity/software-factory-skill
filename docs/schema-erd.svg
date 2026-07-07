@@ -421,30 +421,30 @@
 <!-- doc_summary -->
 <g id="node16" class="node">
 <title>doc_summary</title>
-<polygon fill="white" stroke="transparent" points="40.5,-201.5 40.5,-393.5 281.5,-393.5 281.5,-201.5 40.5,-201.5"/>
-<polygon fill="#ecfdf5" stroke="transparent" points="41,-368.5 41,-393.5 282,-393.5 282,-368.5 41,-368.5"/>
-<polygon fill="none" stroke="black" points="41,-368.5 41,-393.5 282,-393.5 282,-368.5 41,-368.5"/>
+<polygon fill="white" stroke="transparent" points="37.5,-201.5 37.5,-393.5 284.5,-393.5 284.5,-201.5 37.5,-201.5"/>
+<polygon fill="#ecfdf5" stroke="transparent" points="38,-368.5 38,-393.5 285,-393.5 285,-368.5 38,-368.5"/>
+<polygon fill="none" stroke="black" points="38,-368.5 38,-393.5 285,-393.5 285,-368.5 38,-368.5"/>
 <text text-anchor="start" x="114.5" y="-378.3" font-family="Arial" font-weight="bold" font-size="14.00">doc_summary</text>
-<polygon fill="none" stroke="black" points="41,-343.5 41,-368.5 282,-368.5 282,-343.5 41,-343.5"/>
-<text text-anchor="start" x="46" y="-353.3" font-family="Arial" font-weight="bold" font-size="14.00">PK/FK</text>
-<text text-anchor="start" x="87" y="-353.3" font-family="Arial" font-size="14.00"> blob_id → blobs (cascade)</text>
-<polygon fill="none" stroke="black" points="41,-318.5 41,-343.5 282,-343.5 282,-318.5 41,-318.5"/>
-<text text-anchor="start" x="46" y="-327.3" font-family="Arial" font-size="14.00">scope, scope_id</text>
-<polygon fill="none" stroke="black" points="41,-293.5 41,-318.5 282,-318.5 282,-293.5 41,-293.5"/>
-<text text-anchor="start" x="46" y="-302.3" font-family="Arial" font-size="14.00">summary_md, key_facts jsonb</text>
-<polygon fill="none" stroke="black" points="41,-268.5 41,-293.5 282,-293.5 282,-268.5 41,-268.5"/>
-<text text-anchor="start" x="46" y="-277.3" font-family="Arial" font-size="14.00">outline jsonb, embedding vector(1024)</text>
-<polygon fill="none" stroke="black" points="41,-243.5 41,-268.5 282,-268.5 282,-243.5 41,-243.5"/>
-<text text-anchor="start" x="46" y="-252.3" font-family="Arial" font-size="14.00">token_count, content_sha256, status</text>
-<polygon fill="none" stroke="black" points="41,-222.5 41,-243.5 282,-243.5 282,-222.5 41,-222.5"/>
-<text text-anchor="start" x="46" y="-230.5" font-family="Arial" font-size="10.00" fill="#64748b">per&#45;document &quot;2,000&#45;ft view&quot;; key_facts carry</text>
-<polygon fill="none" stroke="black" points="41,-201.5 41,-222.5 282,-222.5 282,-201.5 41,-201.5"/>
-<text text-anchor="start" x="46" y="-209.5" font-family="Arial" font-size="10.00" fill="#64748b">source refs, never bare confidence scores</text>
+<polygon fill="none" stroke="black" points="38,-343.5 38,-368.5 285,-368.5 285,-343.5 38,-343.5"/>
+<text text-anchor="start" x="43" y="-353.3" font-family="Arial" font-weight="bold" font-size="14.00">PK/FK</text>
+<text text-anchor="start" x="84" y="-353.3" font-family="Arial" font-size="14.00"> blob_id → blobs (cascade)</text>
+<polygon fill="none" stroke="black" points="38,-318.5 38,-343.5 285,-343.5 285,-318.5 38,-318.5"/>
+<text text-anchor="start" x="43" y="-327.3" font-family="Arial" font-size="14.00">scope, scope_id</text>
+<polygon fill="none" stroke="black" points="38,-293.5 38,-318.5 285,-318.5 285,-293.5 38,-293.5"/>
+<text text-anchor="start" x="43" y="-302.3" font-family="Arial" font-size="14.00">summary_md, key_facts jsonb</text>
+<polygon fill="none" stroke="black" points="38,-268.5 38,-293.5 285,-293.5 285,-268.5 38,-268.5"/>
+<text text-anchor="start" x="43" y="-277.3" font-family="Arial" font-size="14.00">outline jsonb, embedding halfvec(3072)</text>
+<polygon fill="none" stroke="black" points="38,-243.5 38,-268.5 285,-268.5 285,-243.5 38,-243.5"/>
+<text text-anchor="start" x="43" y="-252.3" font-family="Arial" font-size="14.00">token_count, content_sha256, status</text>
+<polygon fill="none" stroke="black" points="38,-222.5 38,-243.5 285,-243.5 285,-222.5 38,-222.5"/>
+<text text-anchor="start" x="43" y="-230.5" font-family="Arial" font-size="10.00" fill="#64748b">per&#45;document &quot;2,000&#45;ft view&quot;; key_facts carry</text>
+<polygon fill="none" stroke="black" points="38,-201.5 38,-222.5 285,-222.5 285,-201.5 38,-201.5"/>
+<text text-anchor="start" x="43" y="-209.5" font-family="Arial" font-size="10.00" fill="#64748b">source refs, never bare confidence scores</text>
 </g>
 <!-- doc_summary&#45;&gt;blobs -->
 <g id="edge18" class="edge">
 <title>doc_summary:t&#45;&gt;blobs:t</title>
-<path fill="none" stroke="#334155" d="M283,-381.5C366.36,-381.5 389.27,-383.37 468.62,-383.49"/>
+<path fill="none" stroke="#334155" d="M286,-381.5C368.07,-381.5 390.63,-383.37 468.75,-383.49"/>
 <polygon fill="#334155" stroke="#334155" points="469,-386.29 477,-383.5 469,-380.69 469,-386.29"/>
 </g>
 <!-- chunk -->
@@ -463,7 +463,7 @@
 <polygon fill="none" stroke="black" points="41,-74.5 41,-99.5 281,-99.5 281,-74.5 41,-74.5"/>
 <text text-anchor="start" x="46" y="-83.3" font-family="Arial" font-size="14.00">scope, scope_id, ordinal, section_path</text>
 <polygon fill="none" stroke="black" points="41,-49.5 41,-74.5 281,-74.5 281,-49.5 41,-49.5"/>
-<text text-anchor="start" x="46" y="-58.3" font-family="Arial" font-size="14.00">content, dense vector(1024)</text>
+<text text-anchor="start" x="46" y="-58.3" font-family="Arial" font-size="14.00">content, dense halfvec(3072)</text>
 <polygon fill="none" stroke="black" points="41,-24.5 41,-49.5 281,-49.5 281,-24.5 41,-24.5"/>
 <text text-anchor="start" x="46" y="-33.3" font-family="Arial" font-size="14.00">fts tsvector (generated), token_count</text>
 <polygon fill="none" stroke="black" points="41,-3.5 41,-24.5 281,-24.5 281,-3.5 41,-3.5"/>

@@ -168,7 +168,7 @@ digraph SchemaERD {
       <tr><td align="left"><b>PK/FK</b> blob_id → blobs (cascade)</td></tr>
       <tr><td align="left">scope, scope_id</td></tr>
       <tr><td align="left">summary_md, key_facts jsonb</td></tr>
-      <tr><td align="left">outline jsonb, embedding vector(1024)</td></tr>
+      <tr><td align="left">outline jsonb, embedding halfvec(3072)</td></tr>
       <tr><td align="left">token_count, content_sha256, status</td></tr>
       <tr><td align="left"><font color="#64748b" point-size="10">per-document "2,000-ft view"; key_facts carry</font></td></tr>
       <tr><td align="left"><font color="#64748b" point-size="10">source refs, never bare confidence scores</font></td></tr>
@@ -180,7 +180,7 @@ digraph SchemaERD {
       <tr><td align="left"><b>PK</b> id</td></tr>
       <tr><td align="left"><b>FK</b> blob_id → blobs (cascade)</td></tr>
       <tr><td align="left">scope, scope_id, ordinal, section_path</td></tr>
-      <tr><td align="left">content, dense vector(1024)</td></tr>
+      <tr><td align="left">content, dense halfvec(3072)</td></tr>
       <tr><td align="left">fts tsvector (generated), token_count</td></tr>
       <tr><td align="left"><font color="#64748b" point-size="10">leaf retrieval unit; hybrid dense+keyword</font></td></tr>
     </table>>];

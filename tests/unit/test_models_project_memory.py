@@ -13,6 +13,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateTable
 
 from software_factory import models
+from software_factory.memory.embed import DIMENSIONS
 
 
 def test_new_tables_are_registered_in_all_tables():
@@ -74,9 +75,11 @@ def test_doc_summary_and_chunk_cascade_delete_from_blobs():
             assert fk.ondelete == "CASCADE"
 
 
-# ---- DB round-trip smoke test (AC: "Smoke test inserts + selects a Vector(1024) row and a
+# ---- DB round-trip smoke test (AC: "Smoke test inserts + selects a Vector row and a
 # to_tsvector-generated fts row") — written per the acceptance criteria, NEVER RUN in this
 # sandbox (see module docstring). Requires `CREATE EXTENSION vector` on the target Postgres.
+# Column is halfvec(3072) as of SOF-84 (plain vector can't be HNSW-indexed past 2000 dims, and
+# this model's real output is 3072-dim, not the 1024 originally assumed).
 
 def test_smoke_insert_and_select_a_vector_and_generated_fts_row():
     # dbshim.connect(path)'s `path` arg is unused for the actual connection target (it just
@@ -93,7 +96,7 @@ def test_smoke_insert_and_select_a_vector_and_generated_fts_row():
         conn.execute(
             "INSERT INTO chunk (blob_id, scope, scope_id, ordinal, content, dense) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (blob_id, "project", "project-smoke-test", 0, "hello world", [0.0] * 1024),
+            (blob_id, "project", "project-smoke-test", 0, "hello world", [0.0] * DIMENSIONS),
         )
         row = conn.execute(
             "SELECT content, fts, dense FROM chunk WHERE blob_id = ?", (blob_id,)
@@ -101,10 +104,11 @@ def test_smoke_insert_and_select_a_vector_and_generated_fts_row():
         assert row["content"] == "hello world"
         assert row["fts"] is not None          # Postgres generated it from `content`
         # Without pgvector.psycopg.register_vector() on the connection, `dense` reads back as
-        # the raw string Postgres serializes it as (len 2049, not 1024) — confirmed empirically
-        # during #237's review. SOF-29 moved that registration into dbshim._StatePool._configure
-        # (every dbshim connection gets it, once, at creation), which is what makes this a real
-        # array of length 1024 rather than a string.
-        assert len(row["dense"]) == 1024
+        # the raw string Postgres serializes it as — confirmed empirically during #237's review.
+        # SOF-29 moved that registration into dbshim._StatePool._configure (every dbshim
+        # connection gets it, once, at creation), which is what makes this a real HalfVector
+        # rather than a string — .to_list() unwraps it to a plain list (this assertion was never
+        # actually executed before SOF-84; a bare len() on the wrapper raises TypeError).
+        assert len(row["dense"].to_list()) == DIMENSIONS
     finally:
         conn.close()

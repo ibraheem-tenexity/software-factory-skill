@@ -104,13 +104,14 @@ def test_default_k_is_eight():
     assert conn.executed_params[-1] == 8
 
 
-def test_dense_comparison_casts_the_param_to_vector():
+def test_dense_comparison_casts_the_param_to_halfvec():
     """A bare `?` binds the query vector with no column-type context — Postgres has no
     `vector <=> double precision[]` operator and raises UndefinedFunction at runtime (found
-    against a real seeded DB in review). `?::vector` fixes it; lock the cast in."""
+    against a real seeded DB in review). `?::halfvec` fixes it (column is halfvec(3072), SOF-84);
+    lock the cast in."""
     conn = _FakeConn([])
     search("project", "proj-1", "pricing tiers", connect=lambda: conn, embed=_fake_embed)
-    assert conn.executed_sql.count("<=> ?::vector") == 2
+    assert conn.executed_sql.count("<=> ?::halfvec") == 2
 
 
 def test_sql_uses_subqueries_not_a_cte_so_pgconn_still_detects_a_select():

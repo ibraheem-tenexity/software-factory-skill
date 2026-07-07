@@ -190,13 +190,16 @@ prod and `metadata.create_all` builds it in tests, so the two cannot drift.
   the doc's "used by N projects" count is `COUNT(DISTINCT project_id)`.
 - **Project Memory (SOF-26):** `doc_summary` (PK `blob_id`→`blobs.id` cascade) — the per-document
   "2,000-ft view": `summary_md`, `key_facts` jsonb (each fact carries its own source reference,
-  never a bare confidence score), `outline` jsonb, a pgvector `embedding Vector(1024)`, and a
+  never a bare confidence score), `outline` jsonb, a pgvector `embedding halfvec(3072)`, and a
   `status` (`pending|ready|failed`) advanced by the ingestion pipeline. `chunk` (PK `id`) — the leaf
-  retrieval unit: `ordinal`/`section_path`, `content`, a dense `Vector(1024)` embedding, and a
+  retrieval unit: `ordinal`/`section_path`, `content`, a dense `halfvec(3072)` embedding, and a
   Postgres-generated `fts tsvector` (the sparse/keyword channel — no separate learned-sparse model
   yet, see `project-memory-stack-2026.md`). Both are `scope`/`scope_id`-filtered like `blobs`, so
   project- and org-scoped memory share one app-layer filter shape. Requires `CREATE EXTENSION
-  vector` (pgvector) on the target Postgres.
+  vector` (pgvector) on the target Postgres. Embeddings are produced by `google/gemini-embedding-2`
+  via OpenRouter (`memory/embed.py`); its native 3072-dim output is why both columns are `halfvec`
+  rather than plain `vector` — pgvector's HNSW/IVFFlat indexes cap out at 2000 dimensions for
+  `vector`, but `halfvec` (half-precision) raises that to 4000 (SOF-84).
 - **Conversation store (SOF-26):** `conversation` — one row per message/turn (PK `id` = the
   message_id returned to the FE), `session_id`+`seq` (unique together) for deterministic replay
   order, `role`, a canonical `json_blob` content-block list (the source of truth for provider
