@@ -17,6 +17,7 @@ entirely — see the PR description for that transcript. The integrator validate
 tests off-box (scratch DB) before merge, same posture as PR #237/#238.
 """
 from software_factory import dbshim
+from software_factory.memory.embed import DIMENSIONS
 from software_factory.memory.store import MemoryStore
 
 
@@ -38,13 +39,16 @@ def test_add_chunk_and_chunks_for_round_trips_by_blob_id():
     blob_id = _make_blob()
     store = MemoryStore()
     store.add_chunk(blob_id, "project", "project-store-test", 0, "1 Intro",
-                    "hello world", dense=[0.0] * 1024)
+                    "hello world", dense=[0.0] * DIMENSIONS)
     store.add_chunk(blob_id, "project", "project-store-test", 1, "2 Details",
-                    "more content here", dense=[0.1] * 1024)
+                    "more content here", dense=[0.1] * DIMENSIONS)
     chunks = store.chunks_for(blob_id)
     assert [c["ordinal"] for c in chunks] == [0, 1]
     assert chunks[0]["content"] == "hello world"
-    assert len(chunks[0]["dense"]) == 1024
+    # pgvector.psycopg decodes a halfvec column to a HalfVector, not a plain list — .to_list()
+    # first (this assertion was never actually executed before SOF-84; a bare len() on the
+    # wrapper object raises TypeError, since HalfVector has no __len__).
+    assert len(chunks[0]["dense"].to_list()) == DIMENSIONS
 
 
 def test_replace_chunks_deletes_old_rows_before_inserting_new_ones():
