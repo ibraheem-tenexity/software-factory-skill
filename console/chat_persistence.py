@@ -102,7 +102,12 @@ def persist_run_trace(project_id: str, result: dict, input_len: int) -> None:
 def chat_history(project_id: str) -> list[dict]:
     """Read a project's dock conversation back as chat-shaped dicts (newest last). Tool-call rows
     (SOF-90) render as compact bracketed text notes — real, persisted fact the model can read and
-    ground its own self-reports in, not raw tool-role objects re-injected into the live agent."""
+    ground its own self-reports in, not raw tool-role objects re-injected into the live agent.
+
+    Those tool rows carry msg_type "tool_call" / "tool_result" (vs "text" for real utterances) so
+    the two consumers can treat them differently: the model-grounding path (chat_dock rebuilds
+    history as role+content, msg_type ignored) keeps them; the user-facing chat panel filters them
+    out so end users don't see raw `[Called …]` plumbing in their conversation."""
     rows = ConversationStore().history(chat_session_id(project_id))
     out = []
     for r in rows:
@@ -114,14 +119,14 @@ def chat_history(project_id: str) -> list[dict]:
             # calls it actually made, not just the first (SOF-90's whole point is a truthful record).
             for tu in tool_uses:
                 out.append({"role": "assistant", "content": f"[Called {tu['name']}({tu.get('input') or {}})]",
-                            "msg_type": "text", "ts": r["created_at"], "metadata": {}})
+                            "msg_type": "tool_call", "ts": r["created_at"], "metadata": {}})
             continue
         tool_result = next((b for b in blocks if b.get("type") == "tool_result"), None)
         if tool_result:
             text = next((c.get("text", "") for c in (tool_result.get("content") or [])
                         if c.get("type") == "text"), "")
             out.append({"role": "assistant", "content": f"[{r.get('tool_name') or 'Tool'} returned: {text}]",
-                        "msg_type": "text", "ts": r["created_at"], "metadata": {}})
+                        "msg_type": "tool_result", "ts": r["created_at"], "metadata": {}})
             continue
         block = next((b for b in blocks if b.get("type") == "text"), {})
         out.append({
