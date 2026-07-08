@@ -318,9 +318,24 @@ function checkAuth(r: Response): void {
   if (r.status === 401) window.dispatchEvent(new CustomEvent("sf:auth-expired"));
 }
 
+// An Error that also carries the HTTP status and the server's parsed `detail` payload, so callers
+// can report the REAL reason (e.g. the promote 409's open-questions list) instead of a generic
+// guess (SOF-97). The message keeps the `${path} → ${status}` shape so existing `.includes("409")`
+// checks still work; new callers should read `.status` / `.detail`.
+export type ApiError = Error & { status: number; detail?: unknown };
+
+async function httpError(path: string, r: Response): Promise<ApiError> {
+  let detail: unknown;
+  try { detail = (await r.json() as { detail?: unknown }).detail; } catch { /* non-JSON body */ }
+  const e = new Error(`${path} → ${r.status}`) as ApiError;
+  e.status = r.status;
+  e.detail = detail;
+  return e;
+}
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(path, { credentials: "include" });
-  if (!r.ok) { checkAuth(r); throw new Error(`${path} → ${r.status}`); }
+  if (!r.ok) { checkAuth(r); throw await httpError(path, r); }
   return r.json() as Promise<T>;
 }
 
@@ -332,7 +347,7 @@ async function send<T>(path: string, method: string, body?: unknown, signal?: Ab
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   });
-  if (!r.ok) { checkAuth(r); throw new Error(`${path} → ${r.status}`); }
+  if (!r.ok) { checkAuth(r); throw await httpError(path, r); }
   return r.json() as Promise<T>;
 }
 
