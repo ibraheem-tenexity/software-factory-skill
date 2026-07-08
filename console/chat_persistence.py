@@ -10,7 +10,15 @@ from __future__ import annotations
 import uuid
 
 from software_factory.conversation_store import ConversationStore
-from software_factory.data_transfer_objects.chat_agent import ChatMessage
+from software_factory.data_transfer_objects.chat_agent import ChatMessage, ConciergeTurn
+
+# The concierge agent runs with response_format=ToolStrategy(ConciergeTurn): the model emits its
+# final reply by calling an ARTIFICIAL structured-output tool named after the schema class. That
+# call (and its synthetic tool result) shows up in the run's message trace exactly like a real
+# tool call, but it is the response mechanism, not an action the concierge took — persisting it
+# would clutter the concierge's own "what did I do" history with a bogus `[Called ConciergeTurn(…)]`.
+# Derived from the class name so it tracks a rename of the schema.
+_STRUCTURED_OUTPUT_TOOL = ConciergeTurn.__name__
 
 
 def chat_session_id(project_id: str) -> str:
@@ -64,22 +72,30 @@ def persist_run_trace(project_id: str, result: dict, input_len: int) -> None:
     strictly-matching preceding tool_call in the same request)."""
     session_id = chat_session_id(project_id)
     store = ConversationStore()
+    skip_call_ids: set[str] = set()   # tool_result rows whose tool_use we filtered out
     for m in (result.get("messages") or [])[input_len:]:
         mtype = getattr(m, "type", "")
         if mtype == "ai":
-            tool_uses = [{"type": "tool_use", "id": tc.get("id") or "",
-                          "name": tc.get("name") or "", "input": tc.get("args") or {}}
-                         for tc in (getattr(m, "tool_calls", None) or [])]
+            tool_uses = []
+            for tc in (getattr(m, "tool_calls", None) or []):
+                if (tc.get("name") or "") == _STRUCTURED_OUTPUT_TOOL:
+                    skip_call_ids.add(tc.get("id") or "")   # the ConciergeTurn reply mechanism, not an action
+                    continue
+                tool_uses.append({"type": "tool_use", "id": tc.get("id") or "",
+                                  "name": tc.get("name") or "", "input": tc.get("args") or {}})
             if tool_uses:
                 store.append(session_id, "agent", tool_uses, project_id=project_id)
         elif mtype == "tool":
+            call_id = getattr(m, "tool_call_id", "") or ""
+            if call_id in skip_call_ids or getattr(m, "name", None) == _STRUCTURED_OUTPUT_TOOL:
+                continue
             content_text = m.content if isinstance(m.content, str) else str(m.content)
             store.append(
                 session_id, "tool",
-                [{"type": "tool_result", "tool_use_id": getattr(m, "tool_call_id", "") or "",
+                [{"type": "tool_result", "tool_use_id": call_id,
                   "is_error": False, "content": [{"type": "text", "text": content_text}]}],
                 project_id=project_id, tool_name=getattr(m, "name", None),
-                tool_call_id=getattr(m, "tool_call_id", None),
+                tool_call_id=call_id or None,
             )
 
 
