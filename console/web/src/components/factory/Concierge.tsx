@@ -15,7 +15,7 @@ import { T, Icon, Sparkle, Composer, Message, CategoryLabel, StatusPill, Working
 import { api, ProjectEvent } from "../../api";
 import { ArtifactList, ArtifactRef } from "./Artifacts";
 
-type ChatMsg = { role: string; content: string; ts: number };
+type ChatMsg = { role: string; content: string; ts: number; msg_type?: string };
 type Rail = "feed" | "tray" | "latest";
 
 const RAIL_TABS: { id: Rail; label: string }[] = [
@@ -72,7 +72,14 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
   const [rail, setRail] = useState<Rail>("feed");
   const feedRef = useRef<HTMLDivElement>(null);
 
-  const loadHistory = () => api.chatHistory(projectId).then((d) => setMessages((d.messages || []) as ChatMsg[])).catch(() => {});
+  // SOF-90: the concierge now persists its real tool-call trace, and /api/chat/{id}/history returns
+  // it (rows tagged msg_type "tool_call"/"tool_result") so the model can ground its self-reports.
+  // Those are internal plumbing — hide them from the user's chat feed; the concierge reports what it
+  // did in prose when asked. Only "text" utterances are shown.
+  const loadHistory = () => api.chatHistory(projectId)
+    .then((d) => setMessages(((d.messages || []) as ChatMsg[])
+      .filter((m) => m.msg_type !== "tool_call" && m.msg_type !== "tool_result")))
+    .catch(() => {});
 
   useEffect(() => {
     let live = true;
