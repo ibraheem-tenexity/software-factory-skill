@@ -130,6 +130,19 @@ PRs are a two-way conversation, not a fire-and-forget hand-off:
 - **The integrator MUST leave review comments on every PR** — concrete, actionable suggested improvements (not a silent merge or a bare reject). Even when merging, note what could be better; when bouncing, say exactly what to change.
 - **The build agent that opened the PR MUST poll its own PR in a loop** until the PR is merged/closed, checking for the integrator's comments and suggested improvements, and address each one (push fixes, reply, re-request review). Do not consider the task done while the PR is open with unaddressed feedback. Use `gh pr view <n> --comments` / `gh pr checks` to poll.
 
+## Subagents
+
+### `software-qa` — browser QA agent (`.claude/agents/software-qa.md`)
+Destructive-mode QA agent that tests a **running** web app through a real browser (Playwright MCP): drives the actual UI, creates/edits/deletes test records, probes edge cases, invalid inputs, refresh/back/duplicate-tab flows, and reports reproducible bugs with console/network evidence. It does not change application code. Hard stop: it never completes real payments or financially binding actions.
+
+**When to use it:**
+- Before claiming any UI feature or fix is done — hand it the app URL + the flow and its acceptance criteria, and treat its pass/fail report as the E2E verification (complements the "Verify feature end-to-end" rule; per-PR green tests are not enough).
+- After a deploy, to smoke-test the live console against the flows a change touched.
+- When a bug report is vague — have it reproduce the issue and return concrete repro steps before anyone writes a fix.
+- For regression sweeps over flows adjacent to a merged change (archive/delete, onboarding, drafts, etc.).
+
+**When NOT to use it:** static code review, writing/fixing code, or anything where no app is running — it tests behavior in a browser, nothing else. Give it the URL, credentials/auth route, the flow under test, and whether the environment's data is disposable.
+
 ## Edits by the operator
 Edits by the operator are authoritative. If in between sessions you realise that code has changed, check with the operator to make sure if the code was manually edited by the operator, if it was, then you MUST surface errors or assumptions inherent in those edits and make sure that they were explicitly and correctly made, or if the code is correct then defer to the operator. 
 
