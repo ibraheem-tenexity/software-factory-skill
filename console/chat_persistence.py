@@ -42,12 +42,68 @@ def persist_chat_turn(project_id: str, msg: ChatMessage, *, owner_email: str = "
     )
 
 
+def persist_run_trace(project_id: str, result: dict, input_len: int) -> None:
+    """Persist the REAL tool-call trace of one dock agent run (SOF-90): every tool_use the model
+    emitted and every tool_result it got back, in order, on the project's dock session — using the
+    canonical conversation_blocks shapes (tool_use / tool_result), the SAME format the onboarding
+    /converse path already writes (services/conversation.py), and the table's existing
+    tool_name/tool_call_id columns (previously 100% unused on this path).
+
+    `result` is exactly what ChatAgent.run() returns; `input_len` is how many messages we fed it,
+    so result["messages"][input_len:] is only what THIS run produced. The caller persists the user
+    message BEFORE this and the final reply AFTER it, so table order (rows sort by `seq` /
+    insertion) is user -> tool_use -> tool_result -> reply. Intermediate assistant *text* is
+    intentionally dropped (the dock only ever surfaced the final reply); only the tool audit trail
+    is newly captured.
+
+    Without this the concierge had no durable record of its own actions and confabulated when asked
+    what it did (confirmed live: a claimed tool call had zero matching evidence in this table, and a
+    ~20 ms turnaround far too fast for any real call). chat_history() renders these rows back as
+    plain bracketed text so a later turn is grounded in fact WITHOUT re-injecting raw tool-role
+    dicts into the live LangChain invocation (some providers reject a tool-role message with no
+    strictly-matching preceding tool_call in the same request)."""
+    session_id = chat_session_id(project_id)
+    store = ConversationStore()
+    for m in (result.get("messages") or [])[input_len:]:
+        mtype = getattr(m, "type", "")
+        if mtype == "ai":
+            tool_uses = [{"type": "tool_use", "id": tc.get("id") or "",
+                          "name": tc.get("name") or "", "input": tc.get("args") or {}}
+                         for tc in (getattr(m, "tool_calls", None) or [])]
+            if tool_uses:
+                store.append(session_id, "agent", tool_uses, project_id=project_id)
+        elif mtype == "tool":
+            content_text = m.content if isinstance(m.content, str) else str(m.content)
+            store.append(
+                session_id, "tool",
+                [{"type": "tool_result", "tool_use_id": getattr(m, "tool_call_id", "") or "",
+                  "is_error": False, "content": [{"type": "text", "text": content_text}]}],
+                project_id=project_id, tool_name=getattr(m, "name", None),
+                tool_call_id=getattr(m, "tool_call_id", None),
+            )
+
+
 def chat_history(project_id: str) -> list[dict]:
-    """Read a project's dock conversation back as chat-shaped dicts (newest last)."""
+    """Read a project's dock conversation back as chat-shaped dicts (newest last). Tool-call rows
+    (SOF-90) render as compact bracketed text notes — real, persisted fact the model can read and
+    ground its own self-reports in, not raw tool-role objects re-injected into the live agent."""
     rows = ConversationStore().history(chat_session_id(project_id))
     out = []
     for r in rows:
-        block = next((b for b in (r["json_blob"] or []) if b.get("type") == "text"), {})
+        blocks = r["json_blob"] or []
+        tool_use = next((b for b in blocks if b.get("type") == "tool_use"), None)
+        if tool_use:
+            out.append({"role": "assistant", "content": f"[Called {tool_use['name']}({tool_use.get('input') or {}})]",
+                        "msg_type": "text", "ts": r["created_at"], "metadata": {}})
+            continue
+        tool_result = next((b for b in blocks if b.get("type") == "tool_result"), None)
+        if tool_result:
+            text = next((c.get("text", "") for c in (tool_result.get("content") or [])
+                        if c.get("type") == "text"), "")
+            out.append({"role": "assistant", "content": f"[{r.get('tool_name') or 'Tool'} returned: {text}]",
+                        "msg_type": "text", "ts": r["created_at"], "metadata": {}})
+            continue
+        block = next((b for b in blocks if b.get("type") == "text"), {})
         out.append({
             "role": from_conversation_role(r["role"]),
             "content": r["input"] or block.get("text", ""),
