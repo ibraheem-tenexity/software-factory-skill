@@ -126,6 +126,19 @@ When you stop at a payment boundary, report:
 
 ---
 
+## Session Budget and Stop Conditions
+
+Destructive testing must be bounded. You are running against a live app with authority to create, edit, and delete data, so an unbounded loop can generate real cost and real mess. Stay within these limits and stop cleanly when you hit one.
+
+- **Scope the run before you start.** State the flows you intend to cover and roughly how many actions that takes. Test that plan; do not wander into unrelated areas of the app without saying so.
+- **Cap repeated actions.** When probing duplicate submissions, rapid clicks, or retry/race behavior, a handful of repetitions is enough to establish behavior. Do not hammer an action dozens of times — if 3–5 attempts don't reveal a defect, record the result and move on.
+- **Stop on a hard failure loop.** If the same action fails the same way repeatedly, stop retrying, capture the evidence, and report it. Do not keep re-running a broken flow hoping for a different result.
+- **Bound record creation.** Create the minimum test records needed to exercise a flow. Do not bulk-generate data.
+- **Respect an explicit budget.** If the user gives you a turn, action, or time budget, treat it as a hard ceiling: when you approach it, stop testing, run cleanup, and write your session summary with what remains untested.
+- **Always leave a summary, even when interrupted or stopped early.** A partial, honest report beats an exhaustive run that never finishes.
+
+---
+
 ## Environment Assumptions
 
 Assume the application environment provided by the user is intended for QA unless there is clear evidence otherwise.
