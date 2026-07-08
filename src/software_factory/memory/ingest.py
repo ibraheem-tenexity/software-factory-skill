@@ -123,22 +123,52 @@ def _summarize_and_extract_facts(chunks: list[tuple[int, str | None, str]], doc_
         "values. Do not include confidence levels or hedging language — state facts plainly or "
         "omit them."
     )
-    resp = client.chat.completions.create(
-        model=SUMMARIZE_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-    )
-    usage = {}
-    if getattr(resp, "usage", None) is not None:
-        usage = {"prompt_tokens": resp.usage.prompt_tokens or 0,
-                "completion_tokens": resp.usage.completion_tokens or 0}
-    try:
-        parsed = json.loads(resp.choices[0].message.content)
-    except (ValueError, IndexError, AttributeError):
-        logger.warning("[memory.ingest] summarization response wasn't valid JSON for %s", doc_name)
+    usage = {"prompt_tokens": 0, "completion_tokens": 0}
+    parsed = None
+    # response_format=json_object is not reliably honored through OpenRouter for every provider —
+    # the model can come back with fenced/prose-wrapped JSON. Rescue-parse, and retry once before
+    # giving up (an empty summary silently marked 'ready' downstream is worse than a second call).
+    for attempt in range(2):
+        resp = client.chat.completions.create(
+            model=SUMMARIZE_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        if getattr(resp, "usage", None) is not None:
+            usage["prompt_tokens"] += resp.usage.prompt_tokens or 0
+            usage["completion_tokens"] += resp.usage.completion_tokens or 0
+        try:
+            content = resp.choices[0].message.content or ""
+        except (IndexError, AttributeError):
+            content = ""
+        parsed = _rescue_parse_json(content)
+        if parsed is not None:
+            break
+        logger.warning("[memory.ingest] summarization response wasn't valid JSON for %s (attempt %s)",
+                       doc_name, attempt + 1)
+    if parsed is None:
         return "", [], [], usage
     return (parsed.get("summary_md") or "", parsed.get("outline") or [],
            parsed.get("key_facts") or [], usage)
+
+
+def _rescue_parse_json(content: str):
+    """json.loads with a rescue pass for fenced/prose-wrapped replies: strip ``` fences, then
+    fall back to the outermost {...} span. Returns None when nothing parses to a dict."""
+    for candidate in (content, content.strip().strip("`").removeprefix("json")):
+        try:
+            out = json.loads(candidate)
+            return out if isinstance(out, dict) else None
+        except ValueError:
+            pass
+    i, j = content.find("{"), content.rfind("}")
+    if 0 <= i < j:
+        try:
+            out = json.loads(content[i:j + 1])
+            return out if isinstance(out, dict) else None
+        except ValueError:
+            return None
+    return None
 
 
 def _default_chat_client():
