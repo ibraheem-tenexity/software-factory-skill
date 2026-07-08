@@ -4,8 +4,17 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, ProjectDocuments, ProjectMaterial, ProjectArtifact } from "../../api";
 import { openArtifact } from "../factory/Artifacts";
-import { T, CategoryLabel, Btn, Icon } from "../onboarding/design";
+import { T, CategoryLabel, Btn, Icon, StatusPill } from "../onboarding/design";
 import { FileTileSkel } from "../skeleton";
+
+// SOF-91: a document with no visible status looked identical whether it was never ingested,
+// still processing, or had genuinely failed — the only signal was a blank summary line. Map the
+// real summary_status (undefined = no doc_summary row at all yet) to an explicit, distinct badge.
+const INGEST_STATUS: Record<string, { tone: "success" | "warning" | "danger" | "neutral"; label: string }> = {
+  ready: { tone: "success", label: "Ingested" },
+  pending: { tone: "warning", label: "Processing…" },
+  failed: { tone: "danger", label: "Failed to ingest" },
+};
 
 const FILE_KIND: Record<string, [string, string, string]> = {
   pdf: ["PDF", "#fbe3e3", "#c0392f"], xlsx: ["XLS", "#e4f8ef", "#1f8a5b"], csv: ["CSV", "#e4f8ef", "#1f8a5b"],
@@ -19,10 +28,10 @@ function fmtBytes(n?: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function FileTile({ label, kind, sub, used, tag, onOpen, scope, onScope, summary, summarizing, onSummarize }:
+function FileTile({ label, kind, sub, used, tag, onOpen, scope, onScope, summary, summaryStatus, summarizing, onSummarize }:
   { label: string; kind?: string; sub?: string; used?: string; tag?: string; onOpen?: () => void;
     scope?: "project" | "org"; onScope?: (s: "project" | "org") => void;
-    summary?: string; summarizing?: boolean; onSummarize?: () => void }) {
+    summary?: string; summaryStatus?: "pending" | "ready" | "failed"; summarizing?: boolean; onSummarize?: () => void }) {
   const k = FILE_KIND[kind || "doc"] || FILE_KIND.doc;
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   // Design (orgproject.jsx FileTile) renders a real <button> with the sf-artchip hover class —
@@ -51,6 +60,11 @@ function FileTile({ label, kind, sub, used, tag, onOpen, scope, onScope, summary
         {tag && <CategoryLabel style={{ fontSize: 9.5 }}>{tag}</CategoryLabel>}
       </div>
       <span style={{ font: `600 13px/1.3 ${T.sans}`, color: T.fg, wordBreak: "break-word" }}>{label}</span>
+      {onSummarize && (
+        <StatusPill tone={(summaryStatus && INGEST_STATUS[summaryStatus]?.tone) || "neutral"}>
+          {(summaryStatus && INGEST_STATUS[summaryStatus]?.label) || "Not yet ingested"}
+        </StatusPill>
+      )}
       {(sub || used) && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", font: `400 11px/1 ${T.mono}`, color: T.tertiary }}>
           <span>{sub}</span>{used && <span>{used}</span>}
@@ -65,7 +79,7 @@ function FileTile({ label, kind, sub, used, tag, onOpen, scope, onScope, summary
           style={{ alignSelf: "flex-start", padding: "3px 8px", borderRadius: 9999, border: `1px solid ${T.borderDefault}`,
             background: "transparent", color: summarizing ? T.tertiary : T.brandDeep, cursor: summarizing ? "default" : "pointer",
             font: `500 10.5px/1 ${T.sans}` }}>
-          {summarizing ? "Summarizing…" : summary ? "Regenerate" : "Auto-summarize"}
+          {summarizing ? "Summarizing…" : summaryStatus === "failed" ? "Retry ingestion" : summary ? "Regenerate" : "Auto-summarize"}
         </button>
       )}
       {onScope && (
@@ -160,7 +174,7 @@ export function DocumentsTab({ projectId }: { projectId: string }) {
           <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Uploaded by you</h3>
           {uploaded.length ? (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 22 }}>
-              {uploaded.map((d, i) => <FileTile key={(d.id || d.name) + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} scope={d.scope} onScope={d.id ? (s) => setScope(d.id!, s) : undefined} summary={d.summary} summarizing={!!d.id && summarizingId === d.id} onSummarize={d.id ? () => summarize(d.id!) : undefined} />)}
+              {uploaded.map((d, i) => <FileTile key={(d.id || d.name) + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} scope={d.scope} onScope={d.id ? (s) => setScope(d.id!, s) : undefined} summary={d.summary} summaryStatus={d.summary_status} summarizing={!!d.id && summarizingId === d.id} onSummarize={d.id ? () => summarize(d.id!) : undefined} />)}
             </div>
           ) : <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "20px", textAlign: "center", font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary, marginBottom: 22 }}>Nothing uploaded for this project.</div>}
 
