@@ -16,8 +16,8 @@ from software_factory.memory.ingest import maybe_ingest_async
 
 import console.state as state
 from console.deps import require_authed, authorize_project, _can_see
-from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, OrgDocIn,
-                             DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
+from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, MaintenanceToggleIn,
+                             OrgDocIn, DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
                              RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, ReflectionAnswerIn)
 
 router = APIRouter()
@@ -280,6 +280,14 @@ def project_restore(pid: str, v: tuple = Depends(authorize_project)):
 def project_delete_permanent(pid: str, v: tuple = Depends(authorize_project)):
     """Permanently delete a project — removes the run dir + state rows. Cannot be undone."""
     return state.console.delete_project(pid)
+
+
+@router.post("/api/projects/{pid}/maintenance")
+def project_maintenance_toggle(pid: str, body: MaintenanceToggleIn,
+                               v: tuple = Depends(authorize_project)):
+    """SOF-94: set the maintenance-agent placeholder preference. No-op stub — persists the flag but
+    nothing acts on it yet (the maintenance agent isn't built). Surfaced on completed projects."""
+    return {"project_id": pid, "maintenance_enabled": state.console.set_maintenance(pid, body.enabled)}
 
 
 @router.patch("/api/projects/{pid}/materials/{material_id}")

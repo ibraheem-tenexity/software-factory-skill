@@ -18,6 +18,7 @@ export type ProjectSummary = {
   created_by?: string;    // immutable creator email (set-once; backfilled from owner for legacy projects)
   created_at?: number;    // epoch seconds of project creation
   archived?: boolean;     // soft-deleted — rendered in the dashboard's Archived section
+  maintenance_enabled?: boolean;  // SOF-94: no-op maintenance-agent placeholder preference (completed projects)
 };
 
 export type TicketStatus =
@@ -496,6 +497,8 @@ export const api = {
   // Restore an archived project (un-archives it); permanent delete removes the run for good.
   restoreProject: (id: string) => send<{ project_id: string; archived: boolean }>(`/api/projects/${id}/restore`, "POST"),
   deleteProjectPermanently: (id: string) => send<{ project_id: string; deleted: boolean }>(`/api/projects/${id}/permanent`, "DELETE"),
+  // SOF-94: no-op maintenance-agent placeholder toggle (persists a preference on completed projects).
+  setMaintenance: (id: string, enabled: boolean) => send<{ project_id: string; maintenance_enabled: boolean }>(`/api/projects/${id}/maintenance`, "POST", { enabled }),
   // ── Recovery endpoints (bkkc52v5 PR #89) ──
   pauseProject: (id: string) => send<Record<string, any>>(`/api/projects/${id}/pause`, "POST"),
   resumeProject: (id: string) => send<Record<string, any>>(`/api/projects/${id}/resume`, "POST"),

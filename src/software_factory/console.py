@@ -1906,6 +1906,7 @@ class Console:
             "crashed_at_node": state.crashed_at_node or "",
             "held": state.held,
             "owner": state.owner,
+            "maintenance_enabled": state.maintenance_enabled,
         }
 
     def project_exists(self, project_id: str) -> bool:
@@ -2049,6 +2050,15 @@ class Console:
                     pass  # best-effort: archive write must never fail due to Vault hiccup
             self._maybe_teardown_deploy_db(project_id, state)
         return state.archived
+
+    def set_maintenance(self, project_id: str, enabled: bool) -> bool:
+        """SOF-94: toggle the maintenance-agent placeholder preference. Persists the flag on project
+        state; it is a no-op stub — the maintenance agent does not exist yet, so nothing reads this
+        to drive behavior. Surfaced on completed projects so an owner can opt in ahead of ship."""
+        state = self._load_state(project_id)
+        state.maintenance_enabled = bool(enabled)
+        state.save()
+        return state.maintenance_enabled
 
     def delete_project(self, project_id: str) -> dict:
         """Permanently remove a run (DELETE /api/projects/{id}/permanent). Runs the same external

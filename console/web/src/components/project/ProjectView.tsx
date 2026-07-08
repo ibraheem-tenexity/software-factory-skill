@@ -8,10 +8,11 @@ import { T, Icon, Btn, StatusPill, Wordmark, TextInput } from "../onboarding/des
 import { AccountMenu } from "../AccountMenu";
 import { OverviewTab } from "./OverviewTab";
 import { DocumentsTab } from "./DocumentsTab";
+import { MaintenanceTab } from "./MaintenanceTab";
 import { Concierge } from "../factory/Concierge";
 import { artifactsFromGraph, openArtifact, ArtifactRef } from "../factory/Artifacts";
 
-type Tab = "overview" | "documents";
+type Tab = "overview" | "documents" | "maintenance";
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 
 function statusOf(s: ProjectSummary & Record<string, any>): { label: string; tone: Tone } {
@@ -22,11 +23,15 @@ function statusOf(s: ProjectSummary & Record<string, any>): { label: string; ton
   return { label: "Building", tone: "info" };
 }
 
-const TABS: { id: Tab | "factory"; label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "factory", label: "Factory console" },
-  { id: "documents", label: "Documents" },
-];
+// The Maintenance tab (SOF-94) only appears once a project is completed — it's a post-ship surface.
+function tabsFor(isDone: boolean): { id: Tab | "factory"; label: string }[] {
+  return [
+    { id: "overview", label: "Overview" },
+    { id: "factory", label: "Factory console" },
+    { id: "documents", label: "Documents" },
+    ...(isDone ? [{ id: "maintenance" as const, label: "Maintenance" }] : []),
+  ];
+}
 
 function setParam(key: string, value: string | null) {
   const p = new URLSearchParams(location.search);
@@ -37,7 +42,7 @@ function setParam(key: string, value: string | null) {
 export function ProjectView({ projectId, onBack, onOpenFactory, onResume, onOpen }: { projectId: string; onBack: () => void; onOpenFactory: () => void; onResume?: () => void; onOpen?: (id: string) => void }) {
   const [tab, setTab] = useState<Tab>(() => {
     const t = new URLSearchParams(location.search).get("tab");
-    return (t === "documents" ? t : "overview") as Tab;
+    return (t === "documents" || t === "maintenance" ? t : "overview") as Tab;
   });
   const [status, setStatus] = useState<(ProjectSummary & Record<string, any>) | null>(null);
   const [menu, setMenu] = useState(false);
@@ -88,7 +93,15 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume, onOpen
     setRenaming(false);
   };
   const isDraft = status?.phase === "draft";
+  const isDone = !!(status && (status.done || status.phase === "done" || status.deploy_url));
   const canRelaunch = status?.phase === "stopped" || status?.phase === "done";
+  // Deep-linked ?tab=maintenance on a project that isn't completed: fall back to Overview once
+  // status loads, since the Maintenance tab isn't offered there.
+  useEffect(() => {
+    if (status && tab === "maintenance" && !isDone) setTab("overview");
+  }, [status, tab, isDone]);
+  const doToggleMaintenance = (next: boolean) =>
+    setStatus((s) => (s ? { ...s, maintenance_enabled: next } : s));
   const doRelaunch = async () => {
     setRelaunchError(null);
     try {
@@ -153,7 +166,7 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume, onOpen
           </div>
         </div>
         <div style={{ display: "flex", gap: 2, padding: "0 24px" }}>
-          {TABS.map((t) => {
+          {tabsFor(isDone).map((t) => {
             const on = t.id === tab;
             return (
               <button key={t.id} onClick={() => (t.id === "factory" ? onOpenFactory() : setTab(t.id as Tab))}
@@ -171,6 +184,7 @@ export function ProjectView({ projectId, onBack, onOpenFactory, onResume, onOpen
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
           {tab === "overview" && <OverviewTab projectId={projectId} onOpenFactory={onOpenFactory} onOpenDocuments={() => setTab("documents")} onResume={onResume} onDiscard={isDraft ? doArchive : undefined} />}
           {tab === "documents" && <DocumentsTab projectId={projectId} />}
+          {tab === "maintenance" && isDone && <MaintenanceTab projectId={projectId} enabled={!!status?.maintenance_enabled} onToggle={doToggleMaintenance} />}
         </div>
         <aside style={{ width: 340, flexShrink: 0, borderLeft: `1px solid ${T.borderSubtle}`, background: T.raised, display: "flex", flexDirection: "column", minHeight: 0 }}>
           <Concierge projectId={projectId} projectName={name} artifacts={artifacts}

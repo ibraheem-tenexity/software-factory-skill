@@ -46,7 +46,7 @@ _PERSISTED = {
     "planning_model", "impl_model", "opencode_model",
     "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
     "budget_ceiling", "deploy_db_attempts", "deploy_db_service_id", "deploy_db_volume_id", "held", "owner",
-    "goal", "scope", "is_demo", "archived",
+    "goal", "scope", "is_demo", "archived", "maintenance_enabled",
     "summary",
     "created_by", "created_at",
     "creds_vault_ids",
@@ -149,6 +149,11 @@ class ProjectState:
 
     # Soft-delete: archived projects are hidden from every listing (DELETE /api/runs/{id}).
     archived: bool = False
+    # SOF-94: maintenance-agent placeholder toggle. The maintenance agent (log review, user
+    # feedback/ticket ingestion, security patches) is not built yet — this is a persisted no-op
+    # preference surfaced on completed projects so an owner can opt in ahead of the agent
+    # shipping. Nothing reads it to drive behavior yet.
+    maintenance_enabled: bool = False
     # IMMUTABLE creator attribution — set ONCE at creation, NEVER mutated (unlike `owner`, which is the
     # reassignable current owner). created_by = the email that created the project; created_at = epoch.
     created_by: str = ""
