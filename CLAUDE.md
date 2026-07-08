@@ -50,10 +50,17 @@ The test: Every changed line should trace directly to the user's request.
 
 **Define success criteria. Loop until verified.**
 
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
+> **OPERATOR DIRECTIVE (2026-07-08): NO UNIT/INTEGRATION TESTS.** Do not write, run, or wait on
+> unit/integration tests — they are not required for PRs or merges right now and must not block
+> or delay any work. This overrides every test-related instruction in this file and in ticket
+> acceptance criteria. Verification = LIVE verification instead: compile/build, run the real
+> app/flow (browser for UI, real API calls for backend), confirm observed behavior. The
+> browser-verify-before-Done rule stands. (Revisit when the operator lifts this.)
+
+Transform tasks into verifiable goals (verify by exercising the real flow, not by test suites):
+- "Add validation" → "Drive the real endpoint/UI with invalid inputs and observe the rejection"
+- "Fix the bug" → "Reproduce it live, apply the fix, confirm it no longer reproduces"
+- "Refactor X" → "Exercise the affected flow end-to-end before and after"
 
 For multi-step tasks, state a brief plan:
 ```
