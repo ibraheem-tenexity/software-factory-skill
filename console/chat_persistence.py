@@ -107,10 +107,14 @@ def chat_history(project_id: str) -> list[dict]:
     out = []
     for r in rows:
         blocks = r["json_blob"] or []
-        tool_use = next((b for b in blocks if b.get("type") == "tool_use"), None)
-        if tool_use:
-            out.append({"role": "assistant", "content": f"[Called {tool_use['name']}({tool_use.get('input') or {}})]",
-                        "msg_type": "text", "ts": r["created_at"], "metadata": {}})
+        tool_uses = [b for b in blocks if b.get("type") == "tool_use"]
+        if tool_uses:
+            # One row can carry SEVERAL tool_use blocks (the model calling tools in parallel in a
+            # single turn) — render EVERY one, so the concierge's self-report reflects all the
+            # calls it actually made, not just the first (SOF-90's whole point is a truthful record).
+            for tu in tool_uses:
+                out.append({"role": "assistant", "content": f"[Called {tu['name']}({tu.get('input') or {}})]",
+                            "msg_type": "text", "ts": r["created_at"], "metadata": {}})
             continue
         tool_result = next((b for b in blocks if b.get("type") == "tool_result"), None)
         if tool_result:
