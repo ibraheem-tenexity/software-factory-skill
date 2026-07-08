@@ -23,6 +23,19 @@ from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, Org
 router = APIRouter()
 
 
+# ── Scope genres (SOF-108): the intake chips, DB-backed ──────────────────────────────────────
+@router.get("/api/scope-genres")
+def scope_genres(v: tuple = Depends(require_authed)):
+    """Genre recipes for the intake scope chips: sow rows with status='Template' (authored on the
+    SOW admin screen). name = chip label; description = the genre recipe body."""
+    from software_factory.sow import SowStore
+    rows = SowStore().list_all()
+    return {"genres": [
+        {"name": r["title"], "description": r.get("body") or ""}
+        for r in rows if r.get("status") == "Template" and (r.get("title") or "").strip()
+    ]}
+
+
 # ── Runs: list + create ───────────────────────────────────────────────────────────────────────
 @router.get("/api/projects")
 def projects_list(include_archived: bool = False, v: tuple = Depends(require_authed)):

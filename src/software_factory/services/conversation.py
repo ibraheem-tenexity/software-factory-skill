@@ -38,6 +38,26 @@ def _matching_sow_bodies(project_name: str) -> list[dict]:
     return [{"title": r["title"], "body": r["body"]} for r in rows]
 
 
+def _genre_recipes(scope: list) -> list[dict]:
+    """SOF-108: recipe rows for the scope genres the user selected. A genre recipe is a sow row
+    with status='Template' whose title matches a selected chip (case-insensitive) — authored on
+    the SOW admin screen. Custom '+ Add' scopes have no row and are simply absent here."""
+    names = [s.strip().lower() for s in (scope or []) if s and s.strip()]
+    if not names:
+        return []
+    conn = dbshim.connect(".")
+    try:
+        placeholders = ",".join("?" for _ in names)
+        rows = conn.execute(
+            f"SELECT title, body FROM sow WHERE status = 'Template' AND body IS NOT NULL "
+            f"AND lower(title) IN ({placeholders})",
+            tuple(names),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [{"title": r["title"], "body": r["body"]} for r in rows]
+
+
 def _build_first_turn_context(console, project_id: str, users=None) -> str:
     """SOF-62: the server-assembled project-context block for the Concierge's first turn — the
     owning company's profile, the user's own project input, the matching SOW body, every document
@@ -90,6 +110,15 @@ def _build_first_turn_context(console, project_id: str, users=None) -> str:
     else:
         sow_text = "(no SOW on file matching this project's name)"
     sections.append(f"### Statement of Work\n{sow_text}")
+
+    # SOF-108: genre recipes for the scope areas the user actually selected. A recipe describes
+    # what that class of tool typically looks like (screens, entities, flows) — a guide for the
+    # agent's questioning and the PRD skeleton, never a spec; the user's own words always win.
+    # Custom "+ Add" scopes simply have no recipe row and appear only in the scope list above.
+    recipe_rows = _genre_recipes(state.scope or [])
+    if recipe_rows:
+        recipe_text = "\n\n".join(f"**{r['title']}**\n{r['body']}" for r in recipe_rows)
+        sections.append(f"### Genre recipes for the selected scope areas\n{recipe_text}")
 
     summaries = MemoryStore().list_doc_summaries("project", project_id)
     if summaries:

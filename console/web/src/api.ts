@@ -470,6 +470,8 @@ export const api = {
   // Pydantic); the real BYOK path is submitCreds.
   createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number }) =>
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),
+  // SOF-108: DB-backed scope chips — genre recipes authored on the SOW screen (status='Template').
+  scopeGenres: () => get<{ genres: { name: string; description: string }[] }>("/api/scope-genres"),
   patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number }) =>
     send<{ name: string; goal: string; scope: string[]; description: string }>(`/api/projects/${id}/draft`, "PATCH", body),
   // Read counterpart to PATCH /draft (qsvigmth's run-control PR #48) — rehydrates the intake form

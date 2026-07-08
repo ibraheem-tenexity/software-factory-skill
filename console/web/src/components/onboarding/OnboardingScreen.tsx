@@ -290,7 +290,16 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const [orgEdit, setOrgEdit] = useState<{ company: string; industry: string; scale: string; systems: string; subFocus: string; website: string }>(
     { company: "", industry: "", scale: "", systems: "", subFocus: "", website: "" });
   // Scope-of-work options; grows when the user adds a custom scope/software via "+ Add".
+  // SOF-108: seeded from the DB (genre recipes authored on the SOW screen, status='Template');
+  // the SCOPE constant is only the fallback while loading / when no recipes exist yet.
   const [scopeOptions, setScopeOptions] = useState<string[]>(SCOPE);
+  useEffect(() => {
+    api.scopeGenres().then((r) => {
+      const names = (r.genres || []).map((g) => g.name).filter(Boolean);
+      if (names.length) setScopeOptions((prev) => [...names, ...prev.filter((o) => !names.includes(o) && !SCOPE.includes(o))]);
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // fresh-user company setup
   const [f, setF] = useState<{ industry: string; sub: string[]; name: string; size: string; revenue: string; role: string; site: string; ints: string[] }>(
