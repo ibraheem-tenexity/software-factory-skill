@@ -125,6 +125,10 @@ class MaterialScopeIn(BaseModel):
     scope: str = "project"     # "project" | "org"
 
 
+class MaintenanceToggleIn(BaseModel):
+    enabled: bool = False      # SOF-94: no-op maintenance-agent placeholder preference
+
+
 class BudgetIn(BaseModel):
     ceiling: float | None = None
 
