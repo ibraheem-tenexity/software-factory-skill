@@ -563,10 +563,19 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       const { project_id } = await api.promote(draftId, { target: "railway" });
       onComplete(project_id);
     } catch (e: any) {
-      const msg = String(e?.message || e);
-      setError(msg.includes("409")
-        ? "That project name is already taken, this draft was already handed off, or a new question appeared just now — check the questions above and try again."
-        : `Couldn’t hand off: ${msg}`);
+      // Report the REAL gate reason (SOF-97) — the server's 409 detail, not a three-way guess.
+      // Open reflection questions come back as {error, open_questions:[…]}; other 409s (e.g. an
+      // already-promoted draft) come back as a plain string. Anything else is a generic failure.
+      const detail = e?.detail;
+      const openQs = detail && typeof detail === "object" ? (detail as any).open_questions : null;
+      if (e?.status === 409 && Array.isArray(openQs)) {
+        const n = openQs.length;
+        setError(`Hand-off needs ${n} open question${n === 1 ? "" : "s"} resolved first — answer or dismiss ${n === 1 ? "it" : "them"} above, then hand off again.`);
+      } else if (e?.status === 409 && typeof detail === "string") {
+        setError(detail);
+      } else {
+        setError(`Couldn’t hand off: ${String(e?.message || e)}`);
+      }
       setSubmitting(false);
     }
   };

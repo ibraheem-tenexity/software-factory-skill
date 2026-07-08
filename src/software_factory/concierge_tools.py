@@ -127,11 +127,16 @@ def build_project_tools(console: Console, project_id: str) -> list:
 
     @tool
     def flag_for_verification(question: str, related_document_blob_id: int | None = None) -> str:
-        """Raise something you're not confident about for the user to confirm or correct — an
-        inference, a gap, or a contradiction across documents. Appears as an open question the
-        user must answer or dismiss before hand-off. This is now the ONLY way reflection
-        questions are created (ingest no longer auto-generates them) — use it whenever you're
-        unsure, not just when explicitly asked."""
+        """Raise a genuine, unresolved ambiguity that the USER must adjudicate — specifically a
+        contradiction or a material gap ACROSS the uploaded documents. It appears as an open
+        question that BLOCKS hand-off until the user answers or dismisses it in the UI, and you
+        have NO tool to clear it yourself — so use this sparingly.
+
+        Do NOT use it as a scratchpad: never flag a conversational turn (e.g. "user asked for
+        examples"), never flag something you can simply ask as your one question this turn, and
+        never flag the same point twice. If you just need the user to decide something, ask it in
+        chat instead. When the user answers a flagged question in chat, save the answer with
+        write_to_project_memory (the user still dismisses the flag in the UI)."""
         text = (question or "").strip()
         if not text:
             return "question is empty — nothing flagged"
