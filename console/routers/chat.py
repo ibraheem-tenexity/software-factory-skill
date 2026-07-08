@@ -66,16 +66,13 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
         except Exception:
             pass  # a bad attachment must not 500 the chat turn
 
-    user_msg = ChatMessage(role="user", content=body.message, msg_type="text", ts=time.time())
-    if body.files:
-        user_msg.metadata["files"] = [f.get("name", "file") for f in body.files]
-    if body.images:
-        user_msg.metadata["images"] = [i.get("name", "image") for i in body.images]
-
     pid = project_id  # capture for closure
 
     async def generate():
-        result: dict = {}
+        # SOF-90: the whole turn (user message, the REAL tool-call trace, and the reply) is now
+        # persisted inside handle_message_streamed, in chronological order, so conversation rows
+        # sort correctly by insertion `seq`. The route just streams — it no longer persists (which
+        # previously discarded the tool-call trace and wrote the user message after the stream).
         try:
             async with asyncio.timeout(_CHAT_TIMEOUT):
                 async for line in state._chat_runner.handle_message_streamed(
@@ -85,31 +82,10 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
                     owner=v[0] or "", role=v[1] or "member",
                 ):
                     yield line
-                    try:
-                        evt = json.loads(line)
-                        if evt.get("type") == "done":
-                            result.update(evt)
-                    except Exception:
-                        pass
         except asyncio.TimeoutError:
             yield json.dumps({"type": "error", "detail": "chat turn timed out — try again"}) + "\n"
         except Exception as e:
             yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
-
-        # Persist (chat.jsonl and/or the conversation table, per the flags above) + push SSE
-        # after stream completes.
-        final_pid = result.get("project_id") or pid
-        if final_pid and result.get("type") == "done":
-            _persist_chat_turn(final_pid, user_msg, owner_email=v[0] or "")
-            # SOF-57: ChatDockRunner's "done" event now carries the real LangChain usage
-            # (model/provider/token counts/cost) for the assistant turn it just produced.
-            usage = result.get("usage") or {}
-            msgs = [ChatMessage.from_dict(m) for m in (result.get("messages") or [])]
-            for m in msgs:
-                _persist_chat_turn(final_pid, m, model=usage.get("model"), provider=usage.get("provider"),
-                                   input_tokens=usage.get("input_tokens", 0),
-                                   output_tokens=usage.get("output_tokens", 0),
-                                   cost_usd=usage.get("cost_usd", 0.0))
 
     return StreamingResponse(generate(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-cache"})
