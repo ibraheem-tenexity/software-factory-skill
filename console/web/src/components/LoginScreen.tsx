@@ -3,14 +3,14 @@
 //
 // FUNCTIONAL sign-in paths: GOOGLE (GIS ID token → POST /api/auth/google) and EMAIL+PASSWORD
 // (POST /api/auth/password — both set the same sf_session cookie → the App.tsx Gate re-resolves
-// /api/me → dashboard). Org-SSO remains rendered-but-mocked ("coming soon"). The SSO
-// mode toggle + show/hide password are pure UI.
+// /api/me → dashboard). SOF-15 de-risk: ONLY real affordances render — Google's own SDK button
+// (never a styled replica), no mock SSO mode, no fake trust badges. A login page on a shared
+// *.up.railway.app host must never imitate a provider or offer dead credential affordances.
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { T, Icon, CategoryLabel, Field, TextInput, Btn } from "./onboarding/design";
 
 const GIS_SRC = "https://accounts.google.com/gsi/client";
-const MOCK_NOTICE = "Email and SSO sign-in are coming soon — continue with Google.";
 
 // Load Google Identity Services once; resolve when the global is ready.
 function loadGis(): Promise<void> {
@@ -32,28 +32,6 @@ function loadGis(): Promise<void> {
   });
 }
 
-function GoogleLogo({ size = 17 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
-      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-    </svg>
-  );
-}
-function ProviderButton({ logo, children, onClick }:
-  { logo: React.ReactNode; children: React.ReactNode; onClick?: () => void }) {
-  return (
-    <button onClick={onClick} style={{ width: "100%", height: 46, display: "flex", alignItems: "center", justifyContent: "center", gap: 11, cursor: "pointer",
-      border: `1px solid ${T.borderDefault}`, borderRadius: T.rMd, background: T.raised, color: T.fg, font: `500 14px/1 ${T.sans}`, transition: "background .12s, border-color .12s" }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = T.sunken; e.currentTarget.style.borderColor = T.borderDefault; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = T.raised; }}>
-      {logo}{children}
-    </button>
-  );
-}
-
 const Divider = ({ children }: { children: React.ReactNode }) => (
   <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "4px 0" }}>
     <span style={{ flex: 1, height: 1, background: T.borderSubtle }} />
@@ -63,12 +41,10 @@ const Divider = ({ children }: { children: React.ReactNode }) => (
 );
 
 export function LoginScreen({ clientId, onAuthed }: { clientId: string; onAuthed: () => void }) {
-  const [mode, setMode] = useState<"default" | "sso">("default");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
-  const [domain, setDomain] = useState("");
   const [showPw, setShowPw] = useState(false);
-  const [notice, setNotice] = useState("");   // mocked-path "coming soon" affordance
+  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");     // Google rejected (not authorized / failed)
   const gisRef = useRef<HTMLDivElement | null>(null);
 
@@ -88,10 +64,10 @@ export function LoginScreen({ clientId, onAuthed }: { clientId: string; onAuthed
     }
   };
 
-  // Render the real (invisible) GIS button as an overlay over the faithful design button, so the
-  // custom UI is what's seen but the click triggers Google's credential flow.
+  // Render Google's own GIS button, visible (SOF-15: the official SDK-rendered button is the
+  // sanctioned pattern for third-party sites; a hand-styled replica is a phishing signal).
   useEffect(() => {
-    if (mode !== "default" || !clientId) return;
+    if (!clientId) return;
     let cancelled = false;
     loadGis().then(() => {
       if (cancelled) return;
@@ -101,9 +77,9 @@ export function LoginScreen({ clientId, onAuthed }: { clientId: string; onAuthed
       const w = Math.max(200, Math.min(400, gisRef.current.offsetWidth || 360));
       gisRef.current.innerHTML = "";
       g.accounts.id.renderButton(gisRef.current, { type: "standard", theme: "outline", size: "large", text: "continue_with", width: w });
-    }).catch(() => { /* GIS unreachable — custom button shows the loading notice on click */ });
+    }).catch(() => { /* GIS unreachable — email+password remains available below */ });
     return () => { cancelled = true; };
-  }, [clientId, mode]);
+  }, [clientId]);
 
   const [signingIn, setSigningIn] = useState(false);
   // Real email+password sign-in. 200 sets the session cookie ⇒ onAuthed (gate → dashboard);
@@ -124,7 +100,6 @@ export function LoginScreen({ clientId, onAuthed }: { clientId: string; onAuthed
     setSigningIn(false);
   };
 
-  const mock = () => { setError(""); setNotice(MOCK_NOTICE); };
 
   return (
     <div style={{ height: "100vh", display: "flex", background: T.bg, fontFamily: T.sans }}>
@@ -152,30 +127,29 @@ export function LoginScreen({ clientId, onAuthed }: { clientId: string; onAuthed
           </p>
         </div>
         <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 8, font: `400 12px/1 ${T.sans}`, color: "#6b7693" }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.success }} />SOC 2 Type II · data stays in your tenant
+          A Tenexity product · <a href="https://tenexity.ai" style={{ color: "#9aa6c0", textDecoration: "none" }}>tenexity.ai</a>
         </div>
       </div>
 
       {/* auth form */}
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "32px" }}>
         <div style={{ width: "100%", maxWidth: 380 }}>
-          <CategoryLabel style={{ marginBottom: 12 }}>{mode === "sso" ? "Single sign-on" : "Welcome back"}</CategoryLabel>
+          <CategoryLabel style={{ marginBottom: 12 }}>Welcome back</CategoryLabel>
           <h1 style={{ font: `700 30px/1.12 ${T.display}`, letterSpacing: "-0.02em", color: T.fg, margin: 0 }}>
-            {mode === "sso" ? "Sign in with your organization" : "Sign in to Software Factory"}
+            Sign in to Software Factory
           </h1>
           <p style={{ font: `400 14px/1.5 ${T.sans}`, color: T.secondary, margin: "8px 0 26px" }}>
-            {mode === "sso" ? "Enter your work domain and we’ll route you to your identity provider." : "Continue with your work account to reach your projects."}
+            Continue with your work account to reach your projects.
           </p>
 
-          {mode === "default" ? (
+          {(
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {/* Google = real. Custom button is the visible design; the GIS button is an
-                    invisible overlay that captures the click and runs the credential flow. */}
-                <div style={{ position: "relative" }}>
-                  <ProviderButton logo={<GoogleLogo />} onClick={() => setNotice("Loading Google sign-in…")}>Continue with Google</ProviderButton>
-                  <div ref={gisRef} aria-label="Google sign-in" style={{ position: "absolute", inset: 0, opacity: 0, overflow: "hidden", colorScheme: "light" }} />
-                </div>
+                {/* Google sign-in renders GOOGLE'S OWN button (GIS renderButton), visible — never a
+                    hand-styled replica. SOF-15: a recreated provider button + logo on a shared host
+                    is a textbook Safe-Browsing phishing signal; the official SDK-rendered button is
+                    the sanctioned pattern for third-party sites. */}
+                <div ref={gisRef} aria-label="Google sign-in" style={{ display: "flex", justifyContent: "center", minHeight: 44, colorScheme: "light" }} />
               </div>
 
               <Divider>or</Divider>
@@ -187,25 +161,7 @@ export function LoginScreen({ clientId, onAuthed }: { clientId: string; onAuthed
                   <button onClick={() => setShowPw((v) => !v)} style={{ position: "absolute", right: 10, top: 0, bottom: 0, font: `500 12px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>{showPw ? "Hide" : "Show"}</button>
                 </div>
               </Field>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -4 }}>
-                <button onClick={mock} style={{ font: `500 12.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>Forgot password?</button>
-              </div>
               <Btn variant="primary" size="lg" full onClick={handlePassword} disabled={signingIn || !email.trim() || !pw} style={{ height: 46, marginTop: 2 }}>{signingIn ? "Signing in…" : "Sign in"} <Icon name="arrowRight" size={15} color="#fff" /></Btn>
-
-              <button onClick={() => { setNotice(""); setError(""); setMode("sso"); }} style={{ width: "100%", height: 44, display: "flex", alignItems: "center", justifyContent: "center", gap: 9, cursor: "pointer",
-                border: `1px solid ${T.borderDefault}`, borderRadius: T.rMd, background: "transparent", color: T.fg, font: `500 13.5px/1 ${T.sans}` }}>
-                <Icon name="building" size={15} color={T.secondary} /> Use organization SSO
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <Field label="Organization domain" hint="e.g. acme-industrial.com — we support SAML & OIDC.">
-                <TextInput value={domain} onChange={setDomain} placeholder="yourcompany.com" mono style={{ height: 44 }} />
-              </Field>
-              <Btn variant="primary" size="lg" full onClick={mock} style={{ height: 46 }}>Continue with SSO <Icon name="arrowRight" size={15} color="#fff" /></Btn>
-              <button onClick={() => { setNotice(""); setError(""); setMode("default"); }} style={{ width: "100%", height: 44, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", border: "none", background: "transparent", color: T.secondary, font: `500 13.5px/1 ${T.sans}` }}>
-                <Icon name="arrowLeft" size={15} color={T.secondary} /> Back to all sign-in options
-              </button>
             </div>
           )}
 
@@ -217,7 +173,7 @@ export function LoginScreen({ clientId, onAuthed }: { clientId: string; onAuthed
           )}
 
           <p style={{ font: `400 12.5px/1.5 ${T.sans}`, color: T.tertiary, margin: "26px 0 0", textAlign: "center" }}>
-            New to Software Factory? <button onClick={mock} style={{ font: `600 12.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer", padding: 0 }}>Request access</button>
+            New to Software Factory? <a href="mailto:hello@tenexity.ai?subject=Software%20Factory%20access" style={{ font: `600 12.5px/1 ${T.sans}`, color: T.brandDeep, textDecoration: "none" }}>Request access</a>
           </p>
         </div>
       </div>
