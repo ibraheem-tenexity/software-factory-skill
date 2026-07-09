@@ -79,6 +79,11 @@ delivery reports pass/fail against each — that's what the integrator judges.
   target `staging`; after live verification there, fast-forward/merge `staging` → `main`. `main`
   is the stable environment Nick & Graham test on — never push work directly to it (docs-only
   changes exempt at operator discretion). Both branches auto-deploy to their Railway environments.
+- **Supabase gotcha (staging setup, 2026-07-09):** a new Supabase project's DIRECT db host
+  (`db.<ref>.supabase.co`) is IPv6-only — Railway can't reach it ("Network is unreachable" crash
+  loop at migration). Use the POOLER host in SESSION mode (port 5432, `aws-1-us-west-2.pooler.supabase.com`
+  for our region; transaction mode 6543 breaks psycopg prepared statements). Never paste DB
+  passwords on the peer bus.
 - **Deploy:** prod is **https://softwarefactory-console.up.railway.app** (the old
   `factory-console-…up.railway.app` host was Safe-Browsing-flagged and dropped, SOF-15 — never
   resurrect it; never render provider-replica sign-in buttons, mock SSO/credential affordances,
