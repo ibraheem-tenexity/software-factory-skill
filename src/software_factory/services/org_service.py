@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 
 from software_factory import notify, storage
 from ..memory.ingest import maybe_ingest_async
 from .errors import Invalid, NotFound
 from .files import doc_kind
 
-CONSOLE_URL = "https://softwarefactory-console.up.railway.app"
+# Env-driven so an invite sent from staging links the invitee to staging, not prod; the default
+# covers prod (staging sets SF_CONSOLE_URL).
+CONSOLE_URL = os.environ.get("SF_CONSOLE_URL", "https://softwarefactory-console.up.railway.app")
 
 def summarize(org: dict | None, runs: list[dict]) -> dict:
     """Roll the org's runs into the Usage & billing payload.
