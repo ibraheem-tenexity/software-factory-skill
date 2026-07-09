@@ -74,6 +74,11 @@ delivery reports pass/fail against each — that's what the integrator judges.
   auto-resumes anything that looks mid-pipeline and has launched real, costly stage agents
   against seeded rows. Always `Console.create_draft()` (drafts are ignored); promote only to
   actually run. Test runs start with `budget_ceiling=10`.
+- **Deploy flow (STAGING FIRST — operator directive 2026-07-09):** all changes land on the
+  `staging` branch and are tested on the staging deployment BEFORE promotion to `main`. PRs
+  target `staging`; after live verification there, fast-forward/merge `staging` → `main`. `main`
+  is the stable environment Nick & Graham test on — never push work directly to it (docs-only
+  changes exempt at operator discretion). Both branches auto-deploy to their Railway environments.
 - **Deploy:** prod is **https://softwarefactory-console.up.railway.app** (the old
   `factory-console-…up.railway.app` host was Safe-Browsing-flagged and dropped, SOF-15 — never
   resurrect it; never render provider-replica sign-in buttons, mock SSO/credential affordances,
