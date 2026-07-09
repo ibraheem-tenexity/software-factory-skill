@@ -2291,6 +2291,13 @@ class Console:
         return items
 
     def artifact(self, project_id: str, path: str) -> dict:
+        # SOF-138: prefer the inline `content` recorded in the DB at record time — it survives
+        # workspace teardown, unlike the file on disk. Fall back to the filesystem for older rows
+        # recorded before content was persisted (and while their workspace still exists).
+        row = ProjectStore(self._paths(project_id)["db"]).artifact_by_path(path)
+        if row and row.get("content") is not None:
+            return {"path": path, "content": row["content"][:200000]}
+
         # Artifact paths arrive relative to wherever the recording agent worked: the run base
         # (host: "input/..."), the workspace (orchestrator: "architecture.md"), or the cloned
         # project repo INSIDE the workspace (S1 agents: "PRD.md", "research/x.md"). Resolve

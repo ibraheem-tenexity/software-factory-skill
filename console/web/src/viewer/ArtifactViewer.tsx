@@ -64,16 +64,23 @@ function ContentBody({ artifact }: { artifact: ArtifactDetail }) {
   const { kind, path, content } = artifact;
 
   if (content === null) {
+    // SOF-139: don't conflate "external link", "binary", and "content is gone" — and never show a
+    // Download link that 404s. A URL artifact opens externally; anything else with no content is
+    // honestly unavailable (its file wasn't stored and the workspace was cleaned up — SOF-138).
+    const isUrl = path.startsWith("http");
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, gap: 14, color: T.tertiary }}>
         <Icon name="file" size={36} color={T.tertiary} />
-        <span style={{ font: `400 13.5px/1.5 ${T.sans}` }}>Binary file or content too large to preview.</span>
-        {path && (
-          <a href={path.startsWith("http") ? path : `/api/projects/${artifact.project_id}/artifact?path=${encodeURIComponent(path)}`}
-            download target="_blank" rel="noreferrer"
+        <span style={{ font: `400 13.5px/1.5 ${T.sans}`, textAlign: "center", maxWidth: 380 }}>
+          {isUrl
+            ? "This artifact is an external link."
+            : "This file’s content is no longer available — it wasn’t stored and its workspace has been cleaned up."}
+        </span>
+        {isUrl && (
+          <a href={path} target="_blank" rel="noreferrer"
             style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: T.rMd,
               border: `1px solid ${T.borderDefault}`, background: T.raised, font: `500 13px/1 ${T.sans}`, color: T.fg, textDecoration: "none" }}>
-            <Icon name="external" size={14} color={T.secondary} /> Download / Open
+            <Icon name="external" size={14} color={T.secondary} /> Open link
           </a>
         )}
       </div>

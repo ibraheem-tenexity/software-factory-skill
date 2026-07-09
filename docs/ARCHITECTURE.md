@@ -159,7 +159,9 @@ prod and `metadata.create_all` builds it in tests, so the two cannot drift.
   the store keeps them out of the JSON blob — `summary` is the customer-facing blurb shown on the
   dashboard card, populated externally). This table doubles as the **project registry** — discovery
   (`dbshim.registry_projects()`) lists it.
-- `phases`, `artifacts` (metadata: title + path + kind, not the bytes), `blockers`, `gates`
+- `phases`, `artifacts` (title + path + kind, **plus the `content` column** — the produced/uploaded
+  text is persisted inline at record time (SOF-138) so it survives workspace teardown; the read path
+  serves `content` and only falls back to the workspace file for pre-content rows), `blockers`, `gates`
   (composite PK `(project_id, name)`), `verifications`, **`deployments`** (one row per deliverable:
   `app`, `service_name`, `url`, `status`, `verified`).
 - `tickets` — each with an `app` tag, a **6-state `status`** `open → in_progress → done → deployed →

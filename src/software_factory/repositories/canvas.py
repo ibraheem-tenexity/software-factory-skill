@@ -88,6 +88,15 @@ class ArtifactRepository:
         project_id (mirrors the original: a fresh global connection, not this store's path)."""
         return self._x.fetchone(select(artifacts).where(artifacts.c.id == artifact_id))
 
+    def by_path(self, path: str):
+        """The most recently recorded artifact for this project at `path` (SOF-138: lets the read
+        endpoint serve the inline `content` column, which survives workspace teardown, instead of
+        depending on the file still existing on disk). Newest id wins if a path was re-recorded."""
+        return self._x.fetchone(
+            select(artifacts).where((artifacts.c.project_id == self._pid())
+                                    & (artifacts.c.path == path))
+            .order_by(artifacts.c.id.desc()))
+
     @staticmethod
     def batch_for_projects(exec_, project_ids: list) -> list:
         """Artifacts across many projects in one round-trip (console.py's repo-url lookup)."""
