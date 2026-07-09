@@ -419,7 +419,7 @@ export const api = {
   // Org-admin §2.3 — org-scoped (resolve org from session). Backend in progress (tjyb5gmy);
   // callers degrade to empty/null until live. NOT /api/users (that's the global cross-org dir).
   orgMembers: () => get<{ members: Member[] }>("/api/org/members"),
-  inviteMember: (body: { email: string; role: string; designation?: string }) => send<{ members?: Member[] }>("/api/org/members", "POST", body),
+  inviteMember: (body: { email: string; role: string; designation?: string }) => send<{ members?: Member[]; invite_email_sent?: boolean }>("/api/org/members", "POST", body),
   updateMember: (email: string, body: { role?: string; designation?: string }) => send<{ members?: Member[] }>(`/api/org/members/${encodeURIComponent(email)}`, "PATCH", body),
   removeMember: (email: string) => send<{ ok?: boolean }>(`/api/org/members/${encodeURIComponent(email)}`, "DELETE"),
   orgDocs: () => get<{ docs: OrgDoc[] }>("/api/org/docs"),

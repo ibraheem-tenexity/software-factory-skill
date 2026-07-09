@@ -10,11 +10,14 @@ in the router as a FastAPI dependency — that's a transport concern, not busine
 from __future__ import annotations
 
 import base64
+import logging
 
-from software_factory import storage
+from software_factory import notify, storage
 from ..memory.ingest import maybe_ingest_async
 from .errors import Invalid, NotFound
 from .files import doc_kind
+
+CONSOLE_URL = "https://softwarefactory-console.up.railway.app"
 
 def summarize(org: dict | None, runs: list[dict]) -> dict:
     """Roll the org's runs into the Usage & billing payload.
@@ -141,11 +144,33 @@ class OrgService:
 
     def invite_member(self, email: str, body, me: str, by: str) -> dict:
         org = self._require_org(email)
-        if not (body.email or "").strip():
+        invitee = (body.email or "").strip()
+        if not invitee:
             raise Invalid("email required")
-        self.users.invite_member(body.email, org["id"], role=body.role or "member",
+        self.users.invite_member(invitee, org["id"], role=body.role or "member",
                                  designation=body.designation, by=by or "")
-        return self._members_payload(org["id"], me)
+        # SOF-140: tell the invitee they were invited. Fire-and-forget — send_to never raises, and
+        # an email failure must NOT fail the invite (the member row is already created). The UI
+        # reads invite_email_sent and says so honestly rather than pretending. No invite token /
+        # link: auth is Google/password on the invited email, so signing in with it IS acceptance.
+        payload = self._members_payload(org["id"], me)
+        payload["invite_email_sent"] = self._send_invite_email(invitee, org, by or me)
+        return payload
+
+    def _send_invite_email(self, invitee: str, org: dict, inviter: str) -> bool:
+        org_name = org.get("name") or "Software Factory"
+        subject = f"You've been invited to {org_name} on Software Factory"
+        body = (
+            f"{inviter or 'A teammate'} invited you to join {org_name} on Software Factory.\n\n"
+            f"Sign in with this email address ({invitee}) to get started — no invite link needed:\n"
+            f"{CONSOLE_URL}\n"
+        )
+        sent = notify.send_to(invitee, subject, body)
+        if not sent:
+            logging.getLogger(__name__).warning(
+                "invite email to %s not sent (Resend disabled or rejected — check RESEND_API_KEY / "
+                "SF_NOTIFY_FROM verified sender); invite still succeeded", invitee)
+        return sent
 
     def update_member(self, email: str, target: str, body, me: str, by: str) -> dict:
         org = self._require_org(email)

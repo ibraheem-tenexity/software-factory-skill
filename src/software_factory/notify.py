@@ -44,3 +44,26 @@ def send(subject: str, body: str) -> bool:
             {"Authorization": f"Bearer {key}"})
     except Exception:
         return False
+
+
+def send_to(to: str, subject: str, body: str) -> bool:
+    """Send one email to an ARBITRARY recipient (e.g. a team-invite notice), not the fixed
+    operator address `send()` uses. Same Resend transport; gated only on RESEND_API_KEY (the
+    recipient is explicit). Returns True iff Resend accepted it; never raises — an email failure
+    must never break the caller (SOF-140: an invite must still succeed if the email can't send).
+
+    NOTE: with the default sandbox sender (`onboarding@resend.dev`), Resend delivers only to the
+    account owner; delivering to arbitrary invitees needs SF_NOTIFY_FROM set to a verified-domain
+    sender. That's an env/config concern, not this function's."""
+    key = os.environ.get("RESEND_API_KEY")
+    to = (to or "").strip()
+    if not key or not to:
+        return False
+    try:
+        return _post(
+            "https://api.resend.com/emails",
+            {"from": os.environ.get("SF_NOTIFY_FROM", "Factory <onboarding@resend.dev>"),
+             "to": [to], "subject": subject, "text": body},
+            {"Authorization": f"Bearer {key}"})
+    except Exception:
+        return False
