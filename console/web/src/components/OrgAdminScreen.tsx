@@ -229,7 +229,15 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
   const sendInvite = async () => {
     const email = inviteEmail.trim().toLowerCase();
     if (!email) return;
-    try { await api.inviteMember({ email, role: inviteRole }); await loadMembers(); setInviteEmail(""); setInviting(false); }
+    try {
+      const d = await api.inviteMember({ email, role: inviteRole });
+      await loadMembers(); setInviteEmail(""); setInviting(false);
+      // SOF-140: the member is created regardless; only speak up when the invite email couldn't
+      // be sent, so an admin knows to tell the invitee out-of-band (the member row is the success signal).
+      setNotice(d.invite_email_sent === false
+        ? `Invited ${email}, but the invitation email couldn’t be sent — tell them to sign in with this email at the console.`
+        : "");
+    }
     catch { setNotice("Invite failed (admin only)."); }
   };
   const changeRole = async (email: string, role: string) => {
