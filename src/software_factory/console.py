@@ -1291,11 +1291,15 @@ class Console:
         return [w for w in written if w != "context.md"]
 
     def draft_project(self, project_id: str) -> dict:
-        """Read-only project projection of a draft (name + goal + scope + composed description) —
-        the counterpart of set_draft_project, for the concierge's get_intake_state."""
+        """Read-only project projection of a draft (name + goal + scope + budget + composed
+        description) — the counterpart of set_draft_project, for the concierge's get_intake_state.
+
+        SOF-137: budget_ceiling is included here — since scope became optional, budget is one of
+        the intake form's three required fields (name+goal+budget), and a RESUMED draft must
+        rehydrate it or the Continue gate can never be satisfied again after leaving the page."""
         state = self._load_state(project_id)
         return {"name": state.name, "goal": state.goal or "", "scope": list(state.scope or []),
-                "description": state.description or ""}
+                "description": state.description or "", "budget": state.budget_ceiling}
 
     def set_draft_project(self, project_id: str, name: str | None = None,
                           goal: str | None = None, scope: list | None = None,
