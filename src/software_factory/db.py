@@ -184,6 +184,11 @@ def artifact_by_id(artifact_id: int) -> Optional[dict]:
 
 
 # --- CLI the headless orchestrator uses instead of emitting events --------------------
+# SOF-138 follow-up: cap how much artifact text we inline into the DB `content` column at record
+# time. Produced docs are KB; this is a sanity ceiling so a pathologically large file falls back to
+# path-only rather than bloating the row (the read side already caps its own output at 200k chars).
+_MAX_INLINE_ARTIFACT_BYTES = 1_000_000
+
 _USAGE = (
     "usage: python3 -m software_factory.db <verb> <projects_dir> <project_id> [args]\n"
     "  (<projects_dir> <project_id> ALWAYS come first, before the verb's own args)\n"
@@ -327,11 +332,15 @@ def main(argv: list[str]) -> int:
                 return 1
             # SOF-138: persist the artifact's CONTENT inline at record time, so a produced document
             # survives workspace teardown (the read path no longer depends on the file still being
-            # on disk). Text read (errors="replace") matches the read side; a file we can't read as
-            # text just records with no content (path-only, as before).
+            # on disk). Follow-up guards: skip BINARY files (a NUL byte → storing a decoded blob
+            # would be mojibake; leave content NULL and fall back to the path) and skip files over
+            # the inline cap (path-only). Text is decoded utf-8 with errors="replace".
             try:
-                with open(_path, "r", errors="replace") as f:
-                    _content = f.read()
+                if os.path.getsize(_path) <= _MAX_INLINE_ARTIFACT_BYTES:
+                    with open(_path, "rb") as f:
+                        raw = f.read()
+                    if b"\x00" not in raw:
+                        _content = raw.decode("utf-8", errors="replace")
             except OSError:
                 _content = None
         db.record_artifact(rest[0], _path,
