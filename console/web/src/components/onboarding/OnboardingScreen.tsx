@@ -459,6 +459,11 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   // Continue on them would trap a resumed draft that already has open questions before the user
   // ever sees the screen that lets them resolve them.
   const ready = fresh ? !!(f.industry && f.name && f.size && projReady) : projReady;
+  // Don't let the user leave the materials step while a walkthrough/doc is still uploading — else
+  // they'd advance toward hand-off before the file is captured and ingested (SOF-275 reimplemented
+  // against the current flow: the gate moved from the old materials-screen "Hand off" button to the
+  // "Continue" action, since hand-off now lives in InterviewView, reached after uploads finish).
+  const filesUploading = mats.video.concat(mats.docs).some((f) => f.uploading);
 
   // Returning org card: "Manage" seeds the inline editor from onFile; "Done" commits via PATCH /api/org
   // (the same org-patch the OrgAdmin screen uses) and refreshes the on-file card.
@@ -871,7 +876,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {onBack && <Btn variant="ghost" onClick={onBack}>Save & finish later</Btn>}
-              <Btn variant="primary" onClick={() => setView("processing")} disabled={!ready || !draftId} title={ready ? "Continue to processing" : (fresh ? "Set up your company & project to continue" : "Answer the project questions to continue")} style={ready ? { background: T.success } : undefined}>Continue <Icon name="arrowRight" size={14} color="#fff" /></Btn>
+              <Btn variant="primary" onClick={() => setView("processing")} disabled={!ready || !draftId || filesUploading} title={filesUploading ? "Wait for uploads to finish" : ready ? "Continue to processing" : (fresh ? "Set up your company & project to continue" : "Answer the project questions to continue")} style={ready ? { background: T.success } : undefined}>Continue <Icon name="arrowRight" size={14} color="#fff" /></Btn>
             </div>
           </div>
         </div>
