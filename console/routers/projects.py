@@ -18,7 +18,7 @@ import console.state as state
 from console.deps import require_authed, authorize_project, _can_see
 from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, MaintenanceToggleIn,
                              OrgDocIn, DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
-                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, ReflectionAnswerIn)
+                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn)
 
 router = APIRouter()
 
@@ -77,16 +77,15 @@ def project_tickets(pid: str, v: tuple = Depends(authorize_project)):
 
 @router.get("/api/projects/{pid}/brief")
 def project_brief(pid: str, v: tuple = Depends(authorize_project)):
-    """The concierge-finalized product brief (markdown; null until the concierge records the
-    kind='product_brief' artifact). SOF-37/SOF-60: also carries the reflection surface —
-    assumptions (reference-backed, from ready doc_summary rows) and reflection_questions
-    (raised by the Concierge, awaiting an answer/dismissal — see the promote-route gate below)."""
+    """The concierge-finalized product brief — markdown (null until the concierge records the
+    kind='product_brief' artifact) plus its durable-storage URL (SOF-137) — and reference-backed
+    assumptions from ready doc_summary rows."""
     from software_factory.memory.store import MemoryStore
-    project_state = state.console._load_state(pid)
+    brief_rows = [a for a in state.console.artifacts(pid) if (a.get("kind") or "") == "product_brief"]
     return {
         "brief_markdown": state.console.product_brief(pid),
+        "brief_url": brief_rows[-1].get("path") if brief_rows else None,
         "assumptions": MemoryStore().assumptions("project", pid),
-        "reflection_questions": project_state.reflection_questions,
     }
 
 
@@ -454,7 +453,7 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
             # SOF-32: this is the actual live onboarding upload path (draft-only, pre-promotion)
             # — the /materials route below is a separate, any-phase path. Missing this hook here
             # means real user uploads during the interview never get ingested at all, which is
-            # exactly when SOF-37's reflection step needs facts to already exist.
+            # exactly when the Concierge's first-turn context needs the real document text.
             maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
     return {"attached": written}
 
@@ -467,37 +466,16 @@ def store_draft_creds(pid: str, body: CredsIn, v: tuple = Depends(authorize_proj
     return state.console.store_draft_creds(pid, body.credentials)
 
 
-@router.patch("/api/projects/{pid}/reflection/{question_id}")
-def resolve_reflection_question(pid: str, question_id: str, body: ReflectionAnswerIn,
-                                v: tuple = Depends(authorize_project)):
-    """SOF-37/SOF-60: resolve one outstanding reflection question (raised by the Concierge
-    during its analysis) — "answer" records the supplied text, "dismiss" says it isn't needed. Either
-    way flips status off "open", which is what the promote-route gate below checks."""
-    if body.action not in ("answer", "dismiss"):
-        raise HTTPException(status_code=400, detail="action must be 'answer' or 'dismiss'")
-    project_state = state.console._load_state(pid)
-    questions = list(project_state.reflection_questions or [])
-    match = next((q for q in questions if q["id"] == question_id), None)
-    if match is None:
-        raise HTTPException(status_code=404, detail="reflection question not found")
-    match["status"] = "answered" if body.action == "answer" else "dismissed"
-    match["answer"] = body.answer if body.action == "answer" else None
-    project_state.reflection_questions = questions
-    project_state.save()
-    return {"reflection_questions": questions}
-
-
 @router.post("/api/projects/{pid}/promote")
 def promote_draft(pid: str, body: PromoteIn, v: tuple = Depends(authorize_project)):
     """Hand off to the factory: promote the draft into a real run and launch Stage 1. The composed
     state.description + concierge-finalized product brief are the payload (description override
     optional).
 
-    SOF-52: the open-reflection-questions (SOF-37) trust gate now
-    lives in console.promote_draft() itself, not here — it raises services.errors.Conflict, which
-    app.py's global ServiceError handler serializes to the exact same 409 shape this route used
-    to build inline. Gate-by-construction: every caller of that method is covered, not just this
-    route (the concierge's hand_off_to_factory tool included — see chat_agent.py)."""
+    SOF-137 (Minimum Machinery): the only gate — a product brief exists — lives in
+    console.promote_draft() itself, not here, so it raises the SAME services.errors.Conflict (409,
+    identical wire shape) for every caller: this route AND the concierge's hand_off_to_factory tool
+    (concierge_tools.py). Neither the button nor the agent sees a different reason."""
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
     try:

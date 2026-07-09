@@ -1236,10 +1236,11 @@ class Console:
 
     def product_brief(self, project_id: str) -> str | None:
         """The concierge-finalized product brief (markdown), read from the NEWEST artifact row
-        with kind='product_brief' (recorded by the concierge's finalize_product_brief tool).
-        The artifact's `content` column carries the markdown when present (PR #277); a
-        path-only row falls back to reading that file under the run base dir. None = no brief
+        with kind='product_brief' (recorded by the concierge's finalize_product_brief tool, which
+        writes the MD to durable storage and records its URL as `path`, SOF-137). A legacy row
+        with inline `content` (PR #277, pre-SOF-137) still reads back directly. None = no brief
         has been finalized for this project."""
+        from . import storage
         paths = self._paths(project_id)
         rows = [a for a in ProjectStore(paths["db"]).artifacts()
                 if (a.get("kind") or "") == "product_brief"]
@@ -1249,11 +1250,10 @@ class Console:
         content = row.get("content")
         if content:
             return content
-        path = row.get("path") or ""
-        if path:
+        url = row.get("path") or ""
+        if url:
             try:
-                with open(os.path.join(paths["base"], path)) as f:
-                    return f.read()
+                return storage.get_by_url(url).decode()
             except OSError:
                 return None
         return None
@@ -1362,20 +1362,15 @@ class Console:
         the concierge-finalized product brief + interview transcript into the Stage-1 input. No
         new id is minted.
 
-        SOF-52: the trust gate lives HERE, not just at the HTTP router (SOF-51/SOF-37) — every
-        caller (the promote route, the concierge's hand_off_to_factory tool, any future one) goes
-        through this method, so raising here gates by construction instead of by each caller
-        remembering to check first. The USER decides readiness; the only gate is open reflection
-        questions. Raises Conflict (409, same wire shape the router used to build inline —
-        app.py's global ServiceError handler serializes exc.detail verbatim) when a reflection
-        question is still open."""
+        SOF-137 (Minimum Machinery): the only gate is a mechanical fact — a product brief exists
+        (`self.product_brief(project_id)` returns non-None) — checked HERE, not just at the HTTP
+        router, so every caller (the promote route, the concierge's `hand_off_to_factory` tool) is
+        gated by construction and sees the SAME honest reason. Raises Conflict (409, same wire
+        shape app.py's global ServiceError handler serializes exc.detail verbatim)."""
         from .services.errors import Conflict
+        if self.product_brief(project_id) is None:
+            raise Conflict("no product brief exists yet — finalize one first")
         state = self._load_state(project_id)
-        open_questions = [q for q in (state.reflection_questions or []) if q["status"] == "open"]
-        if open_questions:
-            detail = {"error": "project is not ready to promote",
-                      "open_questions": open_questions}
-            raise Conflict(detail)
         # The description anchors the prompt; prefer an explicit one, else the plain goal.
         desc = (description or state.description or state.goal or "").strip()
         req = ProjectRequest(

@@ -8,6 +8,15 @@ import uuid
 
 from software_factory import dbshim
 
+# SOF-137: the first-turn context is baked into the system prompt and re-sent EVERY turn (the
+# cached agent instance reuses it for the whole conversation) — unlike fetch_document_markdown's
+# one-shot 500k-token ceiling (concierge_tools._MAX_FULL_DOCUMENT_TOKENS), inlining anywhere near
+# that size here would overflow the chat model's context on every turn, forever, for that
+# project. A dedicated, much smaller budget: per-doc AND a running total across all documents —
+# over-budget documents fall back to summary + search/fetch tools, same as an oversized single doc.
+_INLINE_CONTEXT_PER_DOC_TOKENS = 20_000
+_INLINE_CONTEXT_TOTAL_TOKENS = 40_000
+
 
 def _onboarding_session_id(project_id: str) -> str:
     """Deterministic session_id for the (exactly one) onboarding conversation per project —
@@ -56,6 +65,25 @@ def _genre_recipes(scope: list) -> list[dict]:
     finally:
         conn.close()
     return [{"title": r["title"], "body": r["body"]} for r in rows]
+
+
+def _document_context_rows(project_id: str) -> list[dict]:
+    """blob_id/name/summary_md/status for every ingested document in this project (SOF-137: the
+    full-doc-context first-turn block needs the display name doc_summary rows alone don't carry).
+    A blobs+doc_summary join, mirroring MemoryStore.assumptions()'s pattern — raw SQL rather than
+    MemoryStore because this module is CORE and must not import console.*, and MemoryStore has no
+    combined name+summary read."""
+    conn = dbshim.connect(".")
+    try:
+        rows = conn.execute(
+            "SELECT b.id AS blob_id, b.name AS document_name, ds.summary_md, ds.status "
+            "FROM blobs b JOIN doc_summary ds ON ds.blob_id = b.id "
+            "WHERE ds.scope = 'project' AND ds.scope_id = ?",
+            (project_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
 
 
 def _build_first_turn_context(console, project_id: str, users=None) -> str:
@@ -120,15 +148,36 @@ def _build_first_turn_context(console, project_id: str, users=None) -> str:
         recipe_text = "\n\n".join(f"**{r['title']}**\n{r['body']}" for r in recipe_rows)
         sections.append(f"### Genre recipes for the selected scope areas\n{recipe_text}")
 
-    summaries = MemoryStore().list_doc_summaries("project", project_id)
-    if summaries:
-        summary_text = "\n\n".join(
-            f"- {row['summary_md'] or '(summary pending — status: ' + row['status'] + ')'}"
-            for row in summaries.values()
-        )
+    # SOF-137: the FULL document text, not just its summary, unless it would blow the dedicated
+    # inline-context budget above (per-doc AND running total across all documents) — under budget,
+    # the agent never has to call a tool just to read what it was already given.
+    from software_factory.memory.ingest import estimate_tokens
+
+    doc_rows = _document_context_rows(project_id)
+    if doc_rows:
+        doc_sections = []
+        inline_budget_used = 0
+        for row in doc_rows:
+            name = row["document_name"]
+            if row["status"] != "ready":
+                doc_sections.append(f"**{name}** (not ready yet — status: {row['status']})")
+                continue
+            full_text = MemoryStore().get_document_markdown(row["blob_id"])
+            tokens = estimate_tokens(full_text) if full_text else None
+            fits = (full_text and tokens <= _INLINE_CONTEXT_PER_DOC_TOKENS
+                    and inline_budget_used + tokens <= _INLINE_CONTEXT_TOTAL_TOKENS)
+            if fits:
+                inline_budget_used += tokens
+                doc_sections.append(f"**{name}** (full text below)\n{full_text}")
+            else:
+                doc_sections.append(
+                    f"**{name}** (too large for full text here — use search_document_summaries, "
+                    "fetch_document_markdown, or get_from_project_memory for exact passages)\n"
+                    f"{row['summary_md'] or '(summary pending)'}")
+        summary_text = "\n\n".join(doc_sections)
     else:
         summary_text = "(no documents uploaded yet)"
-    sections.append(f"### Document summaries\n{summary_text}")
+    sections.append(f"### Documents\n{summary_text}")
 
     assumptions = MemoryStore().assumptions("project", project_id)
     if assumptions:

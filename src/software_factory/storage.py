@@ -126,6 +126,18 @@ def get(scope_id: str, key: str) -> bytes:
     return get_by_path(_object_path(scope_id, key))
 
 
+def get_by_url(url: str) -> bytes:
+    """Fetch an object's bytes given the URL `put()`/`url_by_path()` returned — a `file://` URL
+    (local fallback) or a Supabase signed `https://` URL (works with a plain GET, no auth headers;
+    the token is embedded in the query string). For callers that only kept the URL a writer
+    returned, not the original scope_id/key/path."""
+    if url.startswith("file://"):
+        with open(url[len("file://"):], "rb") as f:
+            return f.read()
+    with urllib.request.urlopen(url, timeout=30) as r:
+        return r.read()
+
+
 def listing(scope_id: str) -> list[str]:
     """Object keys (relative to `scope_id`) stored under a scope. Local fallback only walks
     the directory; the Supabase listing is left to the manifest (BlobStore) which is the
