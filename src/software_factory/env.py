@@ -69,11 +69,10 @@ _STAGE_ESSENTIAL = {
     # instead injects the run-app project id (software-factory-projects) below.
     "RAILWAY_TOKEN",
     # Langfuse stage-run tracing — the official Stop hook (resources/langfuse_hook.py, copied into
-    # each stage workspace's .claude/hooks/ when TRACE_TO_LANGFUSE="true") authenticates with these
+    # each stage workspace's .claude/hooks/ whenever the keys are set) authenticates with these
     # keys and ships the session transcript to Langfuse. Scrubbed, the hook exits early and tracing
     # is silently disabled (safe default). LANGFUSE_BASE_URL is optional (defaults to cloud.langfuse.com).
     "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL",
-    "TRACE_TO_LANGFUSE",
 }
 
 
@@ -94,7 +93,7 @@ def sf_environment() -> str:
 def stage_env_baseline(provided: dict | None = None) -> dict:
     """Return a scrubbed environment for a stage subprocess.
 
-    Stops workspace agents from inheriting the console's SF_DB, DATABASE_URL,
+    Stops workspace agents from inheriting the console's DATABASE_URL,
     RAILWAY_TOKEN, ANTHROPIC_API_KEY, etc. unless the run explicitly declared them as
     credentials (which are passed in ``provided``).
 

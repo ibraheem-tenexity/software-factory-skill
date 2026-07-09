@@ -132,7 +132,7 @@ def _write_langfuse_hook(ws: str) -> None:
     process env) never get committed to the customer's app repo that stage-3
     pushes to GitHub.
 
-    Only called when TRACE_TO_LANGFUSE="true" is set on the factory-console.
+    Called whenever the Langfuse keys are configured — tracing is default behavior, not a toggle.
     The hook itself gates on that same env var at runtime (silently skips if
     absent), and reads LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_BASE_URL
     from os.environ (forwarded via env._STAGE_ESSENTIAL).
@@ -259,7 +259,8 @@ def prepare_workspace(
     else:
         with open(os.path.join(ws, "claude-settings.json"), "w") as f:
             json.dump(CLAUDE_SETTINGS, f, indent=2)
-        if os.environ.get("TRACE_TO_LANGFUSE") == "true":
+        from software_factory import langfuse_tracing
+        if langfuse_tracing.enabled():  # tracing is DEFAULT behavior when keys exist — no toggle var
             _write_langfuse_hook(ws)
 
     # Stage contract → ws/SKILL.md (both the prompt and opencode.json `instructions` reference that
