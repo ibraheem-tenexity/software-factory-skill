@@ -168,6 +168,10 @@ https://claude.ai/design/p/b4af3934-9633-4d26-bade-e53b92d7cc49?file=Software+Fa
 That is the design system: it contains the prototypes of all screens and the design tokens. It is the canonical reference for what any screen should look like.
 
 ## Deploy (SOF-16)
+**Prod URL: https://softwarefactory-console.up.railway.app** (since 2026-07-09 — the old
+`factory-console-software-factory-as-skill.up.railway.app` host was dropped after a Google Safe
+Browsing flag, SOF-15; never resurrect it, and never render provider-replica buttons or mock
+credential affordances on the login page — that's what got the old host flagged).
 `factory-console` auto-deploys on push to `main` via Railway's native GitHub source connect
 (armed once by an operator running `scripts/enable-auto-deploy.sh`) — this is the norm, not a
 manual step. `scripts/deploy.sh` (preflight → bake `SF_GIT_SHA` → `railway up`) is the **fallback**
