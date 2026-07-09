@@ -36,5 +36,6 @@ def test_reading_materials_and_analysis_sections_present():
     prompt = build_system_prompt("intake")
     assert "fetch_document_markdown" in prompt
     assert "search_document_summaries" in prompt
-    assert "flag_for_verification" in prompt
     assert "finalize_product_brief" in prompt
+    assert "read_product_brief" in prompt
+    assert "hand_off_to_factory" in prompt

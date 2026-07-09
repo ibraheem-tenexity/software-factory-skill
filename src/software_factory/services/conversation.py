@@ -58,6 +58,25 @@ def _genre_recipes(scope: list) -> list[dict]:
     return [{"title": r["title"], "body": r["body"]} for r in rows]
 
 
+def _document_context_rows(project_id: str) -> list[dict]:
+    """blob_id/name/summary_md/status for every ingested document in this project (SOF-137: the
+    full-doc-context first-turn block needs the display name doc_summary rows alone don't carry).
+    A blobs+doc_summary join, mirroring MemoryStore.assumptions()'s pattern — raw SQL rather than
+    MemoryStore because this module is CORE and must not import console.*, and MemoryStore has no
+    combined name+summary read."""
+    conn = dbshim.connect(".")
+    try:
+        rows = conn.execute(
+            "SELECT b.id AS blob_id, b.name AS document_name, ds.summary_md, ds.status "
+            "FROM blobs b JOIN doc_summary ds ON ds.blob_id = b.id "
+            "WHERE ds.scope = 'project' AND ds.scope_id = ?",
+            (project_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
 def _build_first_turn_context(console, project_id: str, users=None) -> str:
     """SOF-62: the server-assembled project-context block for the Concierge's first turn — the
     owning company's profile, the user's own project input, the matching SOW body, every document
@@ -120,15 +139,33 @@ def _build_first_turn_context(console, project_id: str, users=None) -> str:
         recipe_text = "\n\n".join(f"**{r['title']}**\n{r['body']}" for r in recipe_rows)
         sections.append(f"### Genre recipes for the selected scope areas\n{recipe_text}")
 
-    summaries = MemoryStore().list_doc_summaries("project", project_id)
-    if summaries:
-        summary_text = "\n\n".join(
-            f"- {row['summary_md'] or '(summary pending — status: ' + row['status'] + ')'}"
-            for row in summaries.values()
-        )
+    # SOF-137: the FULL document text, not just its summary, unless it's too large — same
+    # threshold fetch_document_markdown uses, so a document that's "full text here" is never ALSO
+    # "too large" if the agent fetches it again mid-conversation. Under the threshold, the agent
+    # never has to call a tool just to read what it was already given.
+    from software_factory.concierge_tools import _MAX_FULL_DOCUMENT_TOKENS
+    from software_factory.memory.ingest import estimate_tokens
+
+    doc_rows = _document_context_rows(project_id)
+    if doc_rows:
+        doc_sections = []
+        for row in doc_rows:
+            name = row["document_name"]
+            if row["status"] != "ready":
+                doc_sections.append(f"**{name}** (not ready yet — status: {row['status']})")
+                continue
+            full_text = MemoryStore().get_document_markdown(row["blob_id"])
+            if full_text and estimate_tokens(full_text) <= _MAX_FULL_DOCUMENT_TOKENS:
+                doc_sections.append(f"**{name}** (full text below)\n{full_text}")
+            else:
+                doc_sections.append(
+                    f"**{name}** (too large for full text here — use search_document_summaries, "
+                    "fetch_document_markdown, or get_from_project_memory for exact passages)\n"
+                    f"{row['summary_md'] or '(summary pending)'}")
+        summary_text = "\n\n".join(doc_sections)
     else:
         summary_text = "(no documents uploaded yet)"
-    sections.append(f"### Document summaries\n{summary_text}")
+    sections.append(f"### Documents\n{summary_text}")
 
     assumptions = MemoryStore().assumptions("project", project_id)
     if assumptions:

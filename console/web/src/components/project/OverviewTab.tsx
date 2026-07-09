@@ -206,6 +206,9 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
   const [scopeDraft, setScopeDraft] = useState("");
   const [capEditing, setCapEditing] = useState(false);
   const [capInput, setCapInput] = useState("");
+  // The concierge's finalized product brief (SOF-137: a real MD file in storage) — distinct from
+  // `brief` below, which is the intake-composed goal/scope/phase projection from GET /overview.
+  const [productBriefUrl, setProductBriefUrl] = useState<string | null>(null);
   const addInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadDocs = () => api.documents(projectId).then(setDocs).catch(() => setDocs(null));
@@ -217,6 +220,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
       api.overview(projectId).then(setOv).catch(() => setOv(null)),       // backend pending → graceful empty
       api.documents(projectId).then(setDocs).catch(() => setDocs(null)),  // materials + produced lists
     ]).finally(() => setLoading(false));
+    api.brief(projectId).then((b) => setProductBriefUrl(b.brief_url)).catch(() => setProductBriefUrl(null));
   }, [projectId]);
 
   const brief = ov?.brief || {};
@@ -315,6 +319,15 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                     <CategoryLabel style={{ marginBottom: 6 }}>Goal</CategoryLabel>
                     <div style={{ margin: 0, font: `400 14px/1.55 ${T.sans}`, color: T.fg }}><Markdown>{brief.goal || brief.description || ""}</Markdown>{!(brief.goal || brief.description) && <Empty>No goal captured yet.</Empty>}</div>
                   </div>
+                  {productBriefUrl && (
+                    <div>
+                      <CategoryLabel style={{ marginBottom: 6 }}>Product brief</CategoryLabel>
+                      <a href={productBriefUrl} target="_blank" rel="noopener noreferrer"
+                         style={{ display: "inline-flex", alignItems: "center", gap: 6, font: `500 12.5px/1 ${T.sans}`, color: T.brandDeep, textDecoration: "none" }}>
+                        <Icon name="file" size={13} color={T.brandDeep} /> View the concierge's finalized brief <Icon name="external" size={11} color={T.brandDeep} />
+                      </a>
+                    </div>
+                  )}
                   {!!(brief.scope && brief.scope.length) ? (
                     <div>
                       <CategoryLabel style={{ marginBottom: 7 }}>Scope</CategoryLabel>

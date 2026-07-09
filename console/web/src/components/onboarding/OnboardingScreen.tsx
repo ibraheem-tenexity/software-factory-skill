@@ -325,10 +325,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const [mats, setMats] = useState<{ video: MatFile[]; docs: MatFile[] }>({ video: [], docs: [] });
   const setProj = (k: string, v: any) => setP((x) => ({ ...x, [k]: v }));
 
-  // Reflection Q&A (SOF-37) and brief-completeness Q&A now live in InterviewView (Step 3) —
-  // moved there so they're an active gate the user must clear before hand-off, not an inline
-  // aside on the intake form.
-
   // concierge rail chat (shares draftId)
   const [composer, setComposer] = useState("");
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -442,10 +438,12 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
 
   const fresh = mode === "fresh";
 
+  // SOF-137 (Minimum Machinery): scope is optional — the chips stay available (ScopeOfWork below)
+  // for whoever wants to use them, but Continue no longer requires one. name+goal+budget suffice.
   const projChecks: Check[] = [
     { id: "name", label: "Project name", done: !!p.name },
     { id: "goal", label: "What you’re building", done: p.goal.length > 20 },
-    { id: "scope", label: "Scope of work", done: p.scope.length > 0 },
+    { id: "budget", label: "Budget cap", done: budget != null },
   ];
   const companyChecks: Check[] = [
     { id: "industry", label: "Industry", done: !!f.industry },
@@ -453,11 +451,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     { id: "systems", label: "Connect a system", done: f.ints.length > 0, optional: true, nudge: "Optional — lets the factory pull real SKUs & pricing." },
   ];
   const projReady = projChecks.every((c) => c.done);
-  // SOF-37 trust gate: the client-side disable mirrors the /promote route's own 409 (the real
-  // enforcement point — this is only a proactive UX nicety, not the security boundary).
-  // Reflection questions are resolved in the Interview step now, not before Continue — gating
-  // Continue on them would trap a resumed draft that already has open questions before the user
-  // ever sees the screen that lets them resolve them.
+  // The client-side disable is a proactive UX nicety, mirroring the /promote route's real gate
+  // (a product brief exists) loosely — Continue here is about the intake form being fillable,
+  // not the hand-off gate itself, which is enforced server-side regardless.
   const ready = fresh ? !!(f.industry && f.name && f.size && projReady) : projReady;
 
   // Returning org card: "Manage" seeds the inline editor from onFile; "Done" commits via PATCH /api/org
@@ -563,15 +559,11 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       const { project_id } = await api.promote(draftId, { target: "railway" });
       onComplete(project_id);
     } catch (e: any) {
-      // Report the REAL gate reason (SOF-97) — the server's 409 detail, not a three-way guess.
-      // Open reflection questions come back as {error, open_questions:[…]}; other 409s (e.g. an
-      // already-promoted draft) come back as a plain string. Anything else is a generic failure.
+      // SOF-137: report the REAL gate reason verbatim — the server's 409 detail is always the
+      // honest string (e.g. "no product brief exists yet — finalize one first"), the SAME string
+      // the concierge's hand_off_to_factory tool result carries. No guessing at the cause here.
       const detail = e?.detail;
-      const openQs = detail && typeof detail === "object" ? (detail as any).open_questions : null;
-      if (e?.status === 409 && Array.isArray(openQs)) {
-        const n = openQs.length;
-        setError(`Hand-off needs ${n} open question${n === 1 ? "" : "s"} resolved first — answer or dismiss ${n === 1 ? "it" : "them"} above, then hand off again.`);
-      } else if (e?.status === 409 && typeof detail === "string") {
+      if (e?.status === 409 && typeof detail === "string") {
         setError(detail);
       } else {
         setError(`Couldn’t hand off: ${String(e?.message || e)}`);

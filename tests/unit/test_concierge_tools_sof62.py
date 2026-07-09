@@ -1,7 +1,9 @@
-"""SOF-62: the four new/changed Concierge tools (search_document_summaries,
-fetch_document_markdown, flag_for_verification, finalize_product_brief). Written fresh against the
-CURRENT chat_agent/concierge_tools APIs — not mirrored off test_concierge_agent.py's imports,
-which fail at import time post-c97c7eb (filed separately as SOF-67; not this ticket's scope).
+"""SOF-62: the Concierge tools search_document_summaries and fetch_document_markdown. Written
+fresh against the CURRENT chat_agent/concierge_tools APIs — not mirrored off
+test_concierge_agent.py's imports, which fail at import time post-c97c7eb (filed separately as
+SOF-67; not this ticket's scope). flag_for_verification and its tests were deleted with the
+reflection-question machinery (SOF-137, Minimum Machinery); finalize_product_brief's coverage
+here was deleted too since SOF-137 changed it to write through storage.py.
 
 No DB, no network: `console` and `MemoryStore` are mocked/patched throughout. Each `@tool`-wrapped
 function is invoked via `.func(...)` (langchain_core.tools.tool's underlying callable) so these
@@ -45,85 +47,6 @@ class TestFetchDocumentMarkdown:
         result = by_name["fetch_document_markdown"].func(blob_id=7)
         assert "too large to read whole" in result
         assert "search_document_summaries" in result
-
-
-class TestFlagForVerification:
-    def test_appends_a_new_open_question_with_the_expected_shape(self):
-        console = MagicMock()
-        state = MagicMock(reflection_questions=[])
-        console._load_state.return_value = state
-        by_name, _store = _tools(console)
-
-        result = by_name["flag_for_verification"].func(
-            question="Is this really the bottleneck?", related_document_blob_id=42)
-
-        assert result == "flagged"
-        state.save.assert_called_once()
-        assert len(state.reflection_questions) == 1
-        q = state.reflection_questions[0]
-        assert q["fact"] == "Is this really the bottleneck?"
-        assert q["document_blob_id"] == 42
-        assert q["section_path_claimed"] is None
-        assert q["status"] == "open"
-        assert q["answer"] is None
-        assert isinstance(q["created_at"], float)
-        assert len(q["id"]) == 12
-
-    def test_reraising_the_identical_question_is_idempotent(self):
-        console = MagicMock()
-        state = MagicMock(reflection_questions=[])
-        console._load_state.return_value = state
-        by_name, _store = _tools(console)
-
-        by_name["flag_for_verification"].func(question="same question", related_document_blob_id=1)
-        first_count = len(state.reflection_questions)
-        result = by_name["flag_for_verification"].func(question="same question", related_document_blob_id=1)
-
-        assert result == "already flagged"
-        assert len(state.reflection_questions) == first_count == 1
-
-    def test_no_document_uses_the_concierge_seed(self):
-        console = MagicMock()
-        state = MagicMock(reflection_questions=[])
-        console._load_state.return_value = state
-        by_name, _store = _tools(console)
-
-        by_name["flag_for_verification"].func(question="general question")
-        assert state.reflection_questions[0]["document_blob_id"] is None
-
-    def test_empty_question_flags_nothing(self):
-        console = MagicMock()
-        state = MagicMock(reflection_questions=[])
-        console._load_state.return_value = state
-        by_name, _store = _tools(console)
-
-        result = by_name["flag_for_verification"].func(question="   ")
-        assert result == "question is empty — nothing flagged"
-        state.save.assert_not_called()
-
-
-class TestFinalizeProductBrief:
-    def test_records_a_product_brief_artifact_via_projectstore(self):
-        console = MagicMock()
-        console._paths.return_value = {"db": "/fake/db/path"}
-        by_name, _store = _tools(console)
-
-        with patch("software_factory.concierge_tools.ProjectStore") as PS:
-            result = by_name["finalize_product_brief"].func(markdown="# Brief\n\ndetails")
-
-        assert result == "saved"
-        console._paths.assert_called_once_with("proj-1")
-        PS.assert_called_once_with("/fake/db/path")
-        PS.return_value.record_artifact.assert_called_once_with(
-            "Product Brief", "", kind="product_brief", agent="concierge", content="# Brief\n\ndetails")
-
-    def test_empty_markdown_saves_nothing(self):
-        console = MagicMock()
-        by_name, _store = _tools(console)
-        with patch("software_factory.concierge_tools.ProjectStore") as PS:
-            result = by_name["finalize_product_brief"].func(markdown="   ")
-        assert result == "markdown is empty — nothing saved"
-        PS.assert_not_called()
 
 
 class TestSearchDocumentSummaries:

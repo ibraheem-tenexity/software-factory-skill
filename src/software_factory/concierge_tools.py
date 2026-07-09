@@ -6,23 +6,26 @@ the tools the agent may call:
   · pipeline       — check_project_status (returns live state so the agent reasons about progress)
   · company research — exa_search (quick) / fusion_search (deep), from research.py
   · document reading (SOF-62) — search_document_summaries (coarse, pick 2-3 relevant documents) /
-    fetch_document_markdown (read one in full) / flag_for_verification (raise a question for the
-    user, replacing SOF-37's automatic per-document escalation) / finalize_product_brief (the
-    Concierge's final brief — the single kind='product_brief' artifact Stage 1 builds from)
+    fetch_document_markdown (read one in full)
+  · product brief (SOF-137, Minimum Machinery) — finalize_product_brief (writes the brief MD to
+    storage, the single kind='product_brief' artifact Stage 1 builds from) / read_product_brief
+    (read it back to self-check against the system prompt's criteria) / hand_off_to_factory (calls
+    the SAME Console.promote_draft the UI button calls — no separate agent-side approval machinery;
+    doubt is expressed in chat, the user (or the agent) can always hand off once a brief exists)
 """
 from __future__ import annotations
 
-import hashlib
 import json
-import time
 from dataclasses import asdict
 
+from software_factory import storage
 from software_factory.console import Console
 from software_factory.db import ProjectStore
 from software_factory.memory import search as memory_search
 from software_factory.memory.ingest import _recompute_project_rollup, estimate_tokens
 from software_factory.memory.store import MemoryStore
 from software_factory.research import ResearchError, research_company
+from software_factory.services.errors import ServiceError
 
 # Above this estimated-token size, fetch_document_markdown refuses to dump the whole document into
 # context and points the agent at search/summary tools instead (concierge-memory plan §7).
@@ -126,51 +129,44 @@ def build_project_tools(console: Console, project_id: str) -> list:
         return content
 
     @tool
-    def flag_for_verification(question: str, related_document_blob_id: int | None = None) -> str:
-        """Raise a genuine, unresolved ambiguity that the USER must adjudicate — specifically a
-        contradiction or a material gap ACROSS the uploaded documents. It appears as an open
-        question that BLOCKS hand-off until the user answers or dismisses it in the UI, and you
-        have NO tool to clear it yourself — so use this sparingly.
-
-        Do NOT use it as a scratchpad: never flag a conversational turn (e.g. "user asked for
-        examples"), never flag something you can simply ask as your one question this turn, and
-        never flag the same point twice. If you just need the user to decide something, ask it in
-        chat instead. When the user answers a flagged question in chat, save the answer with
-        write_to_project_memory (the user still dismisses the flag in the UI)."""
-        text = (question or "").strip()
-        if not text:
-            return "question is empty — nothing flagged"
-        state = console._load_state(project_id)
-        questions = list(state.reflection_questions or [])
-        # Same id convention ingest used to use: sha256(document_blob_id-or-'concierge' : question),
-        # first 12 hex chars — keeps re-raising the identical question idempotent.
-        seed = f"{related_document_blob_id if related_document_blob_id is not None else 'concierge'}:{text}"
-        qid = hashlib.sha256(seed.encode()).hexdigest()[:12]
-        if any(q["id"] == qid for q in questions):
-            return "already flagged"
-        questions.append({
-            "id": qid, "fact": text, "document_blob_id": related_document_blob_id,
-            "section_path_claimed": None, "status": "open", "answer": None,
-            "created_at": time.time(),
-        })
-        state.reflection_questions = questions
-        state.save()
-        return "flagged"
-
-    @tool
     def finalize_product_brief(markdown: str) -> str:
         """Save your final, detailed product brief — the single source Stage 1 builds from
         (supersedes the raw intake composition). Call once you're genuinely confident in the
-        scope, pain points, business problem, and audience; a later call supersedes an earlier
-        one (Console.product_brief always reads the newest)."""
+        scope, pain points, business problem, and audience (your own system-prompt criteria —
+        use read_product_brief to check your latest save against them before hand-off). A later
+        call supersedes an earlier one (read_product_brief/Console.product_brief always read the
+        newest). Writes the MD to the project's durable storage, not just the database."""
         md = (markdown or "").strip()
         if not md:
             return "markdown is empty — nothing saved"
+        url = storage.put(project_id, "product-brief.md", md.encode())
         paths = console._paths(project_id)
         ProjectStore(paths["db"]).record_artifact(
-            "Product Brief", "", kind="product_brief", agent="concierge", content=md)
+            "Product Brief", url, kind="product_brief", agent="concierge")
         return "saved"
+
+    @tool
+    def read_product_brief() -> str:
+        """Read back your own finalized product brief in full, so you can check it against your
+        system prompt's criteria (scope, pain points, business problem, audience) before hand-off.
+        Returns a message saying none exists yet if finalize_product_brief hasn't been called."""
+        brief = console.product_brief(project_id)
+        return brief if brief else "no product brief exists yet — call finalize_product_brief first"
+
+    @tool
+    def hand_off_to_factory() -> str:
+        """Promote this project into the factory and launch Stage 1 — the SAME action the user's
+        "Hand off to the factory" button performs (calls the identical Console.promote_draft).
+        Call this yourself once you and the user agree you're ready, instead of only ever offering
+        the button. Refuses with the real reason (identical to what the button shows) if there is
+        no finalized product brief yet — call finalize_product_brief first."""
+        try:
+            console.promote_draft(project_id)
+        except ServiceError as exc:
+            return str(exc.detail)
+        return "handed off — Stage 1 is launching"
 
     return [write_to_project_memory, get_from_project_memory, create_project_summary,
             check_project_status, exa_search, fusion_search, search_document_summaries,
-            fetch_document_markdown, flag_for_verification, finalize_product_brief]
+            fetch_document_markdown, finalize_product_brief, read_product_brief,
+            hand_off_to_factory]

@@ -47,12 +47,11 @@ export type GraphEdge = { data: Record<string, any> };
 export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
 
 // SOF-37/SOF-60: assumptions are reference-backed (every entry links to a real source document
-// + section, never a confidence score); reflection_questions are raised by the Concierge and
-// await an answer/dismissal — building cannot proceed while any is "open" (the /promote 409).
+// + section, never a confidence score).
 export type Assumption = { fact: string; document_blob_id: number; section_path: string | null; document_name: string };
-export type ReflectionQuestion = { id: string; fact: string; document_blob_id: number; section_path_claimed: string | null; status: "open" | "answered" | "dismissed"; answer: string | null; created_at: number };
-// brief_markdown is the concierge-finalized product brief (null until finalized).
-export type BriefResponse = { brief_markdown: string | null; assumptions: Assumption[]; reflection_questions: ReflectionQuestion[] };
+// brief_markdown/brief_url are the concierge-finalized product brief (SOF-137: written to durable
+// storage; both null until finalized).
+export type BriefResponse = { brief_markdown: string | null; brief_url: string | null; assumptions: Assumption[] };
 
 export type Me = { email: string; role: string; auth: boolean; name?: string; is_internal?: boolean };
 
@@ -376,9 +375,6 @@ export const api = {
   // Thin goal/scope editor (post-promote "Edit brief"); returns the draft-projection shape.
   putBrief: (id: string, brief: { goals?: string; scope?: string[] }) =>
     send<{ name: string; goal: string; scope: string[]; description: string }>(`/api/projects/${id}/brief`, "PUT", brief),
-  resolveReflection: (id: string, questionId: string, action: "answer" | "dismiss", answer?: string) =>
-    send<{ reflection_questions: ReflectionQuestion[] }>(
-      `/api/projects/${id}/reflection/${questionId}`, "PATCH", { action, answer: answer || "" }),
   chat: (body: Record<string, unknown>, signal?: AbortSignal) =>
     send<{ project_id: string; messages: any[] }>("/api/chat", "POST", body, signal),
   // Onboarding Concierge conversation turn: one user message -> the agent's ConciergeTurn reply

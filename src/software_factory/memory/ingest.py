@@ -180,10 +180,9 @@ def _filter_assumptions(raw_facts: list[dict], blob_id: int,
                         valid_section_paths: set[str]) -> tuple[list[dict], list[dict]]:
     """The trust boundary (product spec: no confidence scores, no unreferenced claims). A claim
     whose section_path isn't a real section_path from THIS document's own chunks is never
-    stored as an assumption — it comes back as an unreferenced candidate. SOF-60: ingest no
-    longer auto-escalates those into blocking reflection questions (that was SOF-37's blind
-    per-document pass); the Concierge raises reflection questions itself, from its own analysis,
-    via its tool belt — same reflection_questions state, gate, and Interview UI, better source.
+    stored as an assumption — it comes back as an unreferenced candidate. SOF-60/SOF-137: ingest
+    never auto-escalates those into anything blocking — the Concierge raises doubt itself, in
+    conversation, from its own analysis (Minimum Machinery: no reflection-question state or gate).
     document_blob_id is attached here, by code, never asked of the model, for both lists.
 
     Returns (referenced_assumptions, unreferenced_candidates)."""
