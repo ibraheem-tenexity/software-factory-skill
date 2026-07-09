@@ -351,6 +351,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       api.getDraft(resumeProjectId).then((d) => {
         setP((x) => ({ ...x, name: d.name || "", goal: d.goal || d.description || "", scope: d.scope || [] }));
         if (d.scope) setScopeOptions((opts) => Array.from(new Set([...opts, ...d.scope])));
+        // SOF-137: budget is now a required intake field (scope became optional) — a resumed
+        // draft must rehydrate it, or Continue can never be satisfied again after leaving the page.
+        if (d.budget != null) setBudget(d.budget);
       }).catch(() => {});
       api.documents(resumeProjectId).then((docs) => {
         const ups = docs.uploaded || [];
