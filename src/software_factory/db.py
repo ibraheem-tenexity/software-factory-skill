@@ -153,6 +153,12 @@ class ProjectStore:
     def artifacts(self) -> list[dict]:
         return [dict(r) for r in self._artifact_repo.all_for_project()]
 
+    def artifact_by_path(self, path: str) -> Optional[dict]:
+        """The artifact row recorded at `path` (or None). SOF-138: the read path prefers the inline
+        `content` column here over the workspace file, so a produced artifact survives teardown."""
+        row = self._artifact_repo.by_path(path)
+        return dict(row) if row else None
+
     def blockers(self) -> list[dict]:
         return [dict(r) for r in self._blocker_repo.all_for_project()]
 
@@ -314,13 +320,24 @@ def main(argv: list[str]) -> int:
         db.set_phase(rest[0], rest[1] if len(rest) > 1 else "active")
     elif verb == "record-artifact":
         _path = rest[1]
+        _content = None
         if not _path.startswith("http://") and not _path.startswith("https://"):
             if not os.path.exists(_path):
                 sys.stderr.write(f"error: record-artifact: file not found: {_path!r}\n")
                 return 1
+            # SOF-138: persist the artifact's CONTENT inline at record time, so a produced document
+            # survives workspace teardown (the read path no longer depends on the file still being
+            # on disk). Text read (errors="replace") matches the read side; a file we can't read as
+            # text just records with no content (path-only, as before).
+            try:
+                with open(_path, "r", errors="replace") as f:
+                    _content = f.read()
+            except OSError:
+                _content = None
         db.record_artifact(rest[0], _path,
                            rest[2] if len(rest) > 2 else None,
-                           rest[3] if len(rest) > 3 else None)
+                           rest[3] if len(rest) > 3 else None,
+                           content=_content)
     elif verb == "add-blocker":
         db.add_blocker(rest[0], rest[1] if len(rest) > 1 else None)
     elif verb == "clear-blocker":

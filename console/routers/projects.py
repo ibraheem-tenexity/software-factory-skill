@@ -139,6 +139,12 @@ def artifact_detail(artifact_id: int, v: tuple = Depends(require_authed)):
 @router.get("/api/projects/{pid}/artifact")
 def project_artifact(pid: str, path: str = "", raw: str = "", v: tuple = Depends(authorize_project)):
     result = state.console.artifact(pid, path)
+    # SOF-139: missing content is an honest 404 (with the reason), never a 200 carrying an error
+    # body — a 200 made dead download links look like successful downloads of a JSON error blob.
+    if "content" not in result:
+        raise HTTPException(status_code=404,
+                            detail=f"artifact content not available for {path!r} — the file is no "
+                                   "longer stored (it may have been lost when its workspace was torn down)")
     if raw and "content" in result:
         # Raw mode: serve the file itself (right Content-Type) so e.g. the architecture SVG
         # opens full-size in its own browser tab.
