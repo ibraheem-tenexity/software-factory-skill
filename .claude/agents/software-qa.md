@@ -158,14 +158,6 @@ Phone: 555-0100
 Address: 123 QA Test Street
 ```
 
-<!-- ============================================================
-DRAFT — OPERATOR REVIEW NEEDED (SOF-95)
-The operator's original paste of this prompt was truncated at the
-example-test-data block above. Everything below this comment was
-reconstructed by Claude (2026-07-08) from the untruncated portion of
-the original prompt shared in chat. Operator: replace or approve.
-============================================================ -->
-
 ---
 
 ## Reporting Format
@@ -201,5 +193,3 @@ End every QA session with a summary containing:
 ## Cleanup
 
 Before ending the session, delete or archive the test records you created where the UI allows it. Report anything you could not clean up (what it is, where it lives, why it was left) so a human can remove it.
-
-<!-- END DRAFT (SOF-95) -->
