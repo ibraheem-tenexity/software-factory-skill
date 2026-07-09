@@ -1,181 +1,86 @@
-# CLAUDE.md
+# CLAUDE.md — Software Factory
 
-Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+## The Philosophy: Minimum Machinery
 
-## 1. Think Before Coding
+This product's bet is that **agent intelligence is the product**. Every piece of machinery that
+substitutes for an agent's judgment weakens the product and adds code nobody asked for.
 
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
+1. **Agent judgment over machinery.** If a behavior can live in a system prompt, it lives in the
+   system prompt. "The agent should stop when it has enough", "the agent decides what to ask",
+   "the agent knows when the brief is ready" are PROMPT conditions — never state machines, never
+   DB-materialized flags, never gates keyed to agent-generated state. Do not build `resolve_*`
+   flows, readiness trackers, or approval queues around an agent decision. The recurring failure
+   mode: an instruction like "the interview must not end early" pattern-matches to
+   validation-and-state; resist it. When you feel the pull to materialize a judgment, write a
+   prompt line instead.
+2. **Code is plumbing.** Tools, storage, transport, rendering. A tool does one real thing against
+   a real backend and returns the truth (including error text — a broken tool degrades the
+   answer, never kills the conversation). Decisions route through agents; code moves data.
+3. **Gates check facts, not judgment.** A hard block is allowed only for a mechanical
+   prerequisite, expressed as one honest check — e.g. hand-off requires that a product brief
+   artifact EXISTS (`SELECT … WHERE kind='product_brief'`), nothing more. Machinery IS correct
+   where money and process lifecycle live: budget ceilings, retry caps, heartbeats, dead-stage
+   detection. Judgment for product decisions; hard invariants for money and lifecycle.
+4. **Honest errors, everywhere, to everyone.** When something refuses, the refusal states the
+   actual reason — to the user in the UI and to the agent in the tool result (agents act on
+   errors too; a tool and the button it mirrors must call the SAME function and surface the SAME
+   error). Never a plausible-sounding guess ("name might be taken"), never a dead affordance,
+   never a mock that looks real.
+5. **Minimum code that solves the problem.** No speculative abstractions, flexibility, or
+   error-handling for impossible cases. If 200 lines could be 50, write 50. Would a senior
+   engineer call it overcomplicated? Simplify.
+6. **Surgical changes.** Touch only what the task needs. Match existing style. Don't refactor
+   the unbroken; don't clean up other people's dead code (mention it); do remove orphans YOUR
+   change created. Every changed line traces to the request.
+7. **Don't assume — surface.** State assumptions; if multiple interpretations exist, present
+   them; if something is confusing, say what and ask. When code has changed between sessions,
+   operator edits are authoritative — surface anything questionable in them, then defer.
 
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
+## Verification (NO unit/integration tests — operator directive, 2026-07-08)
 
-## 2. Verify Data Structures
+Do not write, run, or wait on unit/integration tests; they must not block or delay anything.
+Verify by exercising the real thing: compile/build, then drive the actual flow — browser for UI
+(the `software-qa` subagent in `.claude/agents/` runs destructive browser QA against a live app),
+real API calls for backend — and confirm observed behavior before claiming anything works.
+Do not theorize about a failure you can reproduce and read logs for. Never claim "done" without
+having watched it work; report outcomes faithfully, including what you did not verify.
 
-Before shipping:
-- Verify that the object an API returns is actually the shape you expect.
-- Do not avoid exceptions by attaching try/catches or fail-safes — use the correct return object.
+**No time estimates** (operator directive, 2026-07-08): AI development-time estimates are
+systematically wrong — days of "estimate" are minutes of agent work. Never defer or descope for
+time reasons; report by what is DONE, not by ETA.
 
-## 3. Simplicity First
+Every task states its goal and acceptance criteria up front (define them if not given) and the
+delivery reports pass/fail against each — that's what the integrator judges.
 
-**Minimum code that solves the problem. Nothing speculative.**
+## How we work
 
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
+- **Worktrees:** every session/agent works in a git worktree under `~/software-factory-skill-bare`
+  — never the main working dir.
+- **PR loop:** integrator leaves concrete review comments on every PR (even when merging); the
+  author polls its PR until merged/closed and addresses feedback. Merge at branch HEAD.
+- **Linear is the source of truth** for task status: project "Software Factory" (team SOF,
+  https://linear.app/tenexity/project/software-factory-f19bffa5f61f). Every ticket assigned to
+  Ibraheem, classified `existing` vs `new`. Reflect starts/landings/new findings promptly.
+- **memory.md** is the cross-agent notebook: short entries (what/where/why, ≤4 lines) whenever
+  something significant lands.
+- **docs/ARCHITECTURE.md** is canonical; structural changes update it (and the diagrams in
+  `docs/`) as part of the change, not later.
+- **Blast radius:** when the operator explicitly instructs something, do it — this project is
+  early; big changes are acceptable. Don't self-reject on risk grounds.
 
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+## Domain rules (cost real money when violated)
 
-## 4. Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
-## 5. Goal-Driven Execution
-
-**Define success criteria. Loop until verified.**
-
-> **OPERATOR DIRECTIVE (2026-07-08): NO TIME ESTIMATES.** Do not give or plan around
-> development-time estimates — AI time estimates are systematically wrong. What sounds like days
-> is usually minutes of agent work. Never defer, phase, or descope work because it "would take
-> too long"; just do it now. Report progress by what is DONE, not by ETA.
-
-> **OPERATOR DIRECTIVE (2026-07-08): NO UNIT/INTEGRATION TESTS.** Do not write, run, or wait on
-> unit/integration tests — they are not required for PRs or merges right now and must not block
-> or delay any work. This overrides every test-related instruction in this file and in ticket
-> acceptance criteria. Verification = LIVE verification instead: compile/build, run the real
-> app/flow (browser for UI, real API calls for backend), confirm observed behavior. The
-> browser-verify-before-Done rule stands. (Revisit when the operator lifts this.)
-
-Transform tasks into verifiable goals (verify by exercising the real flow, not by test suites):
-- "Add validation" → "Drive the real endpoint/UI with invalid inputs and observe the rejection"
-- "Fix the bug" → "Reproduce it live, apply the fix, confirm it no longer reproduces"
-- "Refactor X" → "Exercise the affected flow end-to-end before and after"
-
-For multi-step tasks, state a brief plan:
-```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
-```
-
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
-
-### Acceptance Criteria
-
-Every task has a GOAL and explicit SATISFACTION / ACCEPTANCE CRITERIA — the concrete, verifiable conditions that define "done" (tests pass, endpoint returns X, screen renders/behaves like Y, no regression in Z). When you deliver (open the PR / hand off), RETURN both in your report:
-- **Goal** — what the task achieves, in one line.
-- **Acceptance criteria** — the checkable conditions that prove the goal is met, each marked pass/fail.
-
-This lets the integrator JUDGE the delivery against its own criteria before merging — not merely that it builds. If the operator handed you criteria, restate them and report pass/fail against each. If a task arrives without criteria, define them, state them back, and build to them. A PR/hand-off that doesn't state its goal + acceptance criteria gets bounced back.
-
-## 6. Architecture Doc
-
-`docs/ARCHITECTURE.md` is the canonical description of how the system is built. **Update it on every major structural change** — new/removed service, datastore or schema change, a new pipeline stage or runtime, an auth/ownership change, or anything that moves where state lives. Keep it aligned with the diagrams in `docs/` (`docs/schema-erd.svg` is the source-of-truth ERD, with `docs/schema-erd.md` the schema detail; `docs/service-architecture.svg` is the service/storage topology). If your change makes the doc or a diagram wrong, fixing them is part of the change, not a follow-up.
-
-## 7. Blast Radius
-
-If the operator has explicitly instructed you to do something, do not autonomously reject it or defer it based on the blast radius. This project is in its early stages and high blast radius changes are acceptable.
-
----
-
-**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
-
----
-
-## Operational Notes
-
-### Memory Log Format
-
-`memory.md` entries follow this format:
-
-```
-# $AGENT_NAME Update at Time: $DD:MM:YYYY:HH:MM:SS.SSS
-1. Decision taken or work performed in a single line
-2. Related file or artifact location
-3. Reasoning
-4. Summary in 3 lines
-```
-
-The file is a long-term store for information sharing between agents — a central reference, not a detailed log. Each entry should let an agent know enough to find more detail. Write an entry whenever a significant change has been made.
-
-### Verify Before Concluding
-
-Do not theorize. If you think you know why something is breaking, look at the code or logs to confirm before proposing a fix.
-
-## Worktrees
-- **All sessions and agents MUST work in a git worktree** so their work doesn't conflict with other sessions and/or agents.
-- **Worktrees MUST be checked out in `~/software-factory-skill-bare`** (a bare clone of this repository) — never in the home dir.
-
-
-## Seeding test/verify projects (SOF-23)
-Never insert a project row directly (writing state/artifacts straight into the project store) to
-exercise a feature. The live poller auto-resumes any project row that looks mid-pipeline — it has
-launched a real Stage-1 `claude -p` agent against a bare seeded row before, creating a real GitHub
-repo and burning real cost, because a seeded row with an artifact can look identical to a stage
-that "died without finishing."
-- **Always seed via `Console.create_draft()`** — it sets `phase='draft'` and records no artifact,
-  and the poller explicitly ignores drafts (`is_pipeline_project` returns False for any draft).
-  Promote it via `promote_draft()` only when you actually want the pipeline to run.
-- If your fixture needs a non-draft row with a pre-recorded artifact (drafts can't have artifacts),
-  `auto_resume_dead_stage` also refuses any row whose current stage was never actually launched
-  (no `state.launch_attempted` and no `project.log` on disk) — but `create_draft()` remains the
-  required, primary method; this is defense-in-depth, not a green light to skip it.
-
-## PR Review Loop
-PRs are a two-way conversation, not a fire-and-forget hand-off:
-- **The integrator MUST leave review comments on every PR** — concrete, actionable suggested improvements (not a silent merge or a bare reject). Even when merging, note what could be better; when bouncing, say exactly what to change.
-- **The build agent that opened the PR MUST poll its own PR in a loop** until the PR is merged/closed, checking for the integrator's comments and suggested improvements, and address each one (push fixes, reply, re-request review). Do not consider the task done while the PR is open with unaddressed feedback. Use `gh pr view <n> --comments` / `gh pr checks` to poll.
-
-## Subagents
-
-### `software-qa` — browser QA agent (`.claude/agents/software-qa.md`)
-Destructive-mode QA agent that tests a **running** web app through a real browser (Playwright MCP): drives the actual UI, creates/edits/deletes test records, probes edge cases, invalid inputs, refresh/back/duplicate-tab flows, and reports reproducible bugs with console/network evidence. It does not change application code. Hard stop: it never completes real payments or financially binding actions.
-
-**When to use it:**
-- Before claiming any UI feature or fix is done — hand it the app URL + the flow and its acceptance criteria, and treat its pass/fail report as the E2E verification (complements the "Verify feature end-to-end" rule; per-PR green tests are not enough).
-- After a deploy, to smoke-test the live console against the flows a change touched.
-- When a bug report is vague — have it reproduce the issue and return concrete repro steps before anyone writes a fix.
-- For regression sweeps over flows adjacent to a merged change (archive/delete, onboarding, drafts, etc.).
-
-**When NOT to use it:** static code review, writing/fixing code, or anything where no app is running — it tests behavior in a browser, nothing else. Give it the URL, credentials/auth route, the flow under test, and whether the environment's data is disposable.
-
-## Edits by the operator
-Edits by the operator are authoritative. If in between sessions you realise that code has changed, check with the operator to make sure if the code was manually edited by the operator, if it was, then you MUST surface errors or assumptions inherent in those edits and make sure that they were explicitly and correctly made, or if the code is correct then defer to the operator. 
-
-## Task Tracking — Source of Truth
-The **Linear** project "Software Factory" (https://linear.app/tenexity/project/software-factory-f19bffa5f61f, team **Software Factory / SOF**, project id `2c6a2f7c-72db-4258-a98a-44b6757f2655`) is the **single source of truth for task status**. Keep it up to date: when work starts, advances, lands, or a new issue is found, reflect it in Linear (status + assignee). Every ticket is **assigned to Ibraheem**, and each carries an `existing` vs `new` classification. The internal task board and `docs/KNOWN_ISSUES.md` are working mirrors — Linear is authoritative.
-
-## Design System
-Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project:
-https://claude.ai/design/p/b4af3934-9633-4d26-bade-e53b92d7cc49?file=Software+Factory+Onboarding.html
-
-That is the design system: it contains the prototypes of all screens and the design tokens. It is the canonical reference for what any screen should look like.
-
-## Deploy (SOF-16)
-**Prod URL: https://softwarefactory-console.up.railway.app** (since 2026-07-09 — the old
-`factory-console-software-factory-as-skill.up.railway.app` host was dropped after a Google Safe
-Browsing flag, SOF-15; never resurrect it, and never render provider-replica buttons or mock
-credential affordances on the login page — that's what got the old host flagged).
-`factory-console` auto-deploys on push to `main` via Railway's native GitHub source connect
-(armed once by an operator running `scripts/enable-auto-deploy.sh`) — this is the norm, not a
-manual step. `scripts/deploy.sh` (preflight → bake `SF_GIT_SHA` → `railway up`) is the **fallback**
-for a hand-driven deploy (hotfix, re-deploy without a new commit, or if auto-deploy is disconnected). 
-
-## Python Imports
-Python imports should be at the top of a file unless you want to stop something from inadvertently executing.
+- **Seeding test projects (SOF-23):** never insert a project row directly — the poller
+  auto-resumes anything that looks mid-pipeline and has launched real, costly stage agents
+  against seeded rows. Always `Console.create_draft()` (drafts are ignored); promote only to
+  actually run. Test runs start with `budget_ceiling=10`.
+- **Deploy:** prod is **https://softwarefactory-console.up.railway.app** (the old
+  `factory-console-…up.railway.app` host was Safe-Browsing-flagged and dropped, SOF-15 — never
+  resurrect it; never render provider-replica sign-in buttons, mock SSO/credential affordances,
+  or unverifiable trust badges on the login page). Auto-deploys on push to `main`;
+  `scripts/deploy.sh` is the manual fallback. NOTE: a console deploy currently kills in-flight
+  stage agents silently (SOF-116) — avoid pushing while a run you care about is mid-stage.
+- **Design system:** the claude_design project is the canonical look for every screen —
+  https://claude.ai/design/p/b4af3934-9633-4d26-bade-e53b92d7cc49?file=Software+Factory+Onboarding.html
+  (import via the claude_design MCP, auth via /design-login).
+- **Python imports** at the top of the file unless deferral is deliberate.
