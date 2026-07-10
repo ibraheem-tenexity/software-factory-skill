@@ -38,6 +38,15 @@ export type Ticket = {
   // Optional confidence band (exact|high|med|low|none). The backend may not send this yet —
   // the board renders a ConfidencePill only when it is actually present (no fabrication).
   confidence?: string;
+  // SOF-100: ticket depth fields. acceptance/dod always travel with the ticket (older rows have
+  // them non-empty per the hollow gate); the rest are null/[] on a not-yet-upgraded ticket.
+  acceptance?: string;
+  dod?: string;
+  goal?: string;
+  design_refs?: string[] | null;
+  dependencies?: string[] | null;
+  scope_genre?: string | null;
+  implementation_notes?: string;
 };
 
 export type TicketsResponse = { tickets: Ticket[]; waves: number[] };

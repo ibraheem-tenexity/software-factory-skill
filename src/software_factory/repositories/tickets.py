@@ -11,7 +11,9 @@ from ..models import tickets
 # The columns TicketStore maps into its `Ticket` dataclass (excludes the project_id scoping column).
 _TCOLS = (tickets.c.id, tickets.c.title, tickets.c.acceptance, tickets.c.dod, tickets.c.wave,
           tickets.c.status, tickets.c.agent, tickets.c.provenance, tickets.c.provenance_type,
-          tickets.c.diff_lines, tickets.c.app, tickets.c.description)
+          tickets.c.diff_lines, tickets.c.app, tickets.c.description, tickets.c.goal,
+          tickets.c.design_refs, tickets.c.dependencies, tickets.c.scope_genre,
+          tickets.c.implementation_notes)
 
 
 class TicketRepository:

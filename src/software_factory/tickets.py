@@ -24,6 +24,8 @@ from __future__ import annotations
 from .db import project_id_from_path
 from .repositories._exec import PathExec
 from .repositories.tickets import TicketRepository
+import json
+import re
 import time
 import weakref
 from dataclasses import dataclass
@@ -36,6 +38,16 @@ STATES = ("open", "in_progress", "done", "deployed", "qa_testing", "approved")
 _BUILDABLE = ("open", "in_progress")
 # "Built or beyond" — passed the hollow gate. Stage-3 proof + done_tickets() count these.
 _BUILT_OR_BEYOND = ("done", "deployed", "qa_testing", "approved")
+
+
+def _decode_row(row) -> dict:
+    """JSON-decode `design_refs`/`dependencies` for the `Ticket` dataclass — SQL NULL stays
+    Python `None` (never addressed); a JSON array (including `'[]'`) decodes to a real list."""
+    d = dict(row)
+    for key in ("design_refs", "dependencies"):
+        raw = d.get(key)
+        d[key] = json.loads(raw) if raw is not None else None
+    return d
 
 
 class HollowWorkError(Exception):
@@ -60,6 +72,13 @@ class Ticket:
     diff_lines: int
     app: Optional[str] = None   # target deliverable: mobile-web | web | api | ... (multi-deliverable runs)
     description: str = ""       # human-facing detail; on a QA bounce, the markdown bug report
+    goal: str = ""               # SOF-100: one-sentence purpose, alongside the mechanical acceptance/dod
+    # SOF-100: None = never addressed (fails the depth gate); [] = explicitly "no screens apply"
+    # (honest for a backend-only ticket) — real depth gate distinguishes these, so keep the None.
+    design_refs: Optional[list] = None    # PRD v1 screen IDs this ticket implements
+    dependencies: Optional[list] = None   # other tickets this one depends on (title/in-batch ref)
+    scope_genre: Optional[str] = None     # the PRD genre-module heading this ticket belongs to
+    implementation_notes: str = ""        # concrete build guidance beyond acceptance/dod
 
 
 class TicketStore:
@@ -75,15 +94,24 @@ class TicketStore:
         self._repo = TicketRepository(PathExec(path), lambda: _self_ref()._project_id)
 
     def create_ticket(self, title: str, acceptance: str, dod: str, wave: int,
-                      app: Optional[str] = None, description: str = "") -> int:
-        return self._repo.insert(title=title, acceptance=acceptance, dod=dod, wave=wave,
-                                 app=app, description=description or "")
+                      app: Optional[str] = None, description: str = "", goal: str = "",
+                      design_refs: Optional[list] = None, dependencies: Optional[list] = None,
+                      scope_genre: Optional[str] = None, implementation_notes: str = "") -> int:
+        """`design_refs`/`dependencies` left as `None` (the default) are stored as SQL NULL — the
+        depth gate reads that as "never addressed." Pass `[]` explicitly to record a real,
+        honest "none apply" (e.g. a backend-only ticket has no screen to reference)."""
+        return self._repo.insert(
+            title=title, acceptance=acceptance, dod=dod, wave=wave, app=app,
+            description=description or "", goal=goal or "",
+            design_refs=None if design_refs is None else json.dumps(design_refs),
+            dependencies=None if dependencies is None else json.dumps(dependencies),
+            scope_genre=scope_genre, implementation_notes=implementation_notes or "")
 
     def get(self, ticket_id: int) -> Ticket:
         row = self._repo.by_id(ticket_id)
         if row is None:
             raise KeyError(f"no ticket {ticket_id}")
-        return Ticket(**dict(row))
+        return Ticket(**_decode_row(row))
 
     # ---- transitions -----------------------------------------------------------------
     def _require(self, ticket_id: int, allowed: tuple, target: str) -> Ticket:
@@ -157,7 +185,7 @@ class TicketStore:
         return [r["wave"] for r in self._repo.distinct_waves(_BUILDABLE)]
 
     def open_tickets(self, wave: int) -> list[Ticket]:
-        return [Ticket(**dict(r)) for r in self._repo.rows_in_wave(wave, _BUILDABLE)]
+        return [Ticket(**_decode_row(r)) for r in self._repo.rows_in_wave(wave, _BUILDABLE)]
 
     def buildable_count(self) -> int:
         """Number of tickets Stage 3 can actually build: a real (non-empty) acceptance
@@ -167,10 +195,16 @@ class TicketStore:
         rows = self._repo.acceptance_dod_rows()
         return sum(1 for r in rows if (r["acceptance"] or "").strip() and (r["dod"] or "").strip())
 
+    def depth_ok(self, v1_screen_ids: Optional[list] = None,
+                genres: Optional[list] = None) -> tuple[bool, list[str]]:
+        """SOF-100: the depth gate, separate from (and in addition to) `buildable_count()`'s
+        bare-hollow check. See `tickets_meet_depth_bar` for what it actually checks."""
+        return tickets_meet_depth_bar(self.all_tickets(), v1_screen_ids, genres)
+
     def done_tickets(self) -> list[Ticket]:
         """Tickets that passed the hollow-done gate — `done` and everything beyond it
         (deployed/qa_testing/approved). Stage-3 proof counts these."""
-        return [Ticket(**dict(r)) for r in self._repo.rows_by_status(_BUILT_OR_BEYOND)]
+        return [Ticket(**_decode_row(r)) for r in self._repo.rows_by_status(_BUILT_OR_BEYOND)]
 
     def reset_in_progress_tickets(self) -> int:
         """Reset all 'in_progress' tickets back to 'open', clearing the agent assignment.
@@ -185,7 +219,7 @@ class TicketStore:
 
     def all_tickets(self) -> list[Ticket]:
         """Every ticket regardless of status, in wave then id order — the kanban projection."""
-        return [Ticket(**dict(r)) for r in self._repo.all_rows()]
+        return [Ticket(**_decode_row(r)) for r in self._repo.all_rows()]
 
     def render_markdown(self) -> str:
         rows = self._repo.all_rows()
@@ -193,3 +227,53 @@ class TicketStore:
         for r in rows:
             lines.append(f"| {r['id']} | {r['wave']} | {r['status']} | {r['title']} | {r['acceptance']} |")
         return "\n".join(lines) + "\n"
+
+
+def _normalize_genre(s: str) -> str:
+    """Case/whitespace/punctuation-insensitive form — same normalization as artifacts.py's
+    genre-heading matching, so 'AP/AR' on a ticket and 'AP / AR' in the PRD compare equal."""
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def tickets_meet_depth_bar(tickets: list[Ticket], v1_screen_ids: Optional[list] = None,
+                          genres: Optional[list] = None) -> tuple[bool, list[str]]:
+    """SOF-100: the ticket depth gate — mechanical presence/structure checks only, same spirit as
+    SOF-96/99's PRD and mockup gates. What it checks:
+    - `goal`/`acceptance`/`dod` are real, non-empty text on every ticket.
+    - `design_refs`/`dependencies` were explicitly addressed (not SQL NULL) — `[]` is an honest
+      answer for a ticket with no screen or no dependency, and passes; never having been set does
+      not.
+    - When `design_refs` is non-empty, every ID must exist in the real v1 screen catalog — a
+      reference to a screen that was never built (typo or hallucination) fails the gate.
+    - `dependencies` entries are NOT validated against real ticket IDs — deliberately lenient,
+      since tickets are written before IDs are assigned; a title-level reference is enough.
+    - When `genres` (the project's selected scope genres) is non-empty, at least one ticket must
+      carry a matching `scope_genre` for EACH selected genre — the per-area coverage check.
+    Depth/quality of what's IN each field stays the writing agent's judgment; this only catches a
+    ticket that skipped a required field outright."""
+    reasons = []
+    v1_ids = set(v1_screen_ids or [])
+    covered_genres = set()
+    for t in tickets:
+        label = f"ticket #{t.id} ({t.title!r})"
+        if not (t.goal or "").strip():
+            reasons.append(f"{label}: missing goal")
+        if not (t.acceptance or "").strip():
+            reasons.append(f"{label}: missing acceptance criteria")
+        if not (t.dod or "").strip():
+            reasons.append(f"{label}: missing definition of done")
+        if t.design_refs is None:
+            reasons.append(f"{label}: design_refs was never addressed (use [] if no screen applies)")
+        else:
+            bad_refs = [r for r in t.design_refs if r not in v1_ids]
+            if bad_refs:
+                reasons.append(f"{label}: design_refs references nonexistent v1 screen(s): {', '.join(bad_refs)}")
+        if t.dependencies is None:
+            reasons.append(f"{label}: dependencies was never addressed (use [] if none)")
+        if t.scope_genre:
+            covered_genres.add(_normalize_genre(t.scope_genre))
+    for genre in (genres or []):
+        name = (genre or "").strip()
+        if name and _normalize_genre(name) not in covered_genres:
+            reasons.append(f"no ticket carries scope_genre for selected genre: {name}")
+    return (len(reasons) == 0, reasons)
