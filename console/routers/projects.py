@@ -381,6 +381,14 @@ def project_resume(pid: str, v: tuple = Depends(authorize_project)):
     result = state.console.resume_project(pid)
     if result:
         return {"project_id": result, "resumed": True}
+    # SOF-150: resume_project restores paused_at_node/crashed_at_node on a failed attempt, so a
+    # STILL-paused/crashed phase here means the row genuinely was resumable and the retry itself
+    # is what failed — surface the real reason (e.g. the budget blocker), not a stale generic
+    # message that reads as "this was never resumable" when it actually was.
+    if state.console.current_phase(pid) in ("paused", "crashed"):
+        reason = state.console.resume_failure_reason(pid)
+        raise HTTPException(status_code=409, detail=f"resume failed: {reason}" if reason else
+                            "resume failed: no recorded reason — check project.log")
     raise HTTPException(status_code=409, detail="cannot resume: project is not paused or crashed")
 
 

@@ -879,10 +879,14 @@ class Console:
     def resume_project(self, project_id: str) -> str | None:
         """Resume a paused or crashed run from where it left off.
         Determines the right stage from the recorded at-node and calls retry_stage.
-        Clears the paused/crashed markers on success. Returns project_id or None."""
+        Clears the paused/crashed markers ONLY if retry_stage actually launches. Returns
+        project_id or None."""
         state = self._load_state(project_id)
-        if state.phase not in ("paused", "crashed"):
+        original_phase = state.phase
+        if original_phase not in ("paused", "crashed"):
             return None
+        original_paused_at_node = state.paused_at_node
+        original_crashed_at_node = state.crashed_at_node
         resume_node = state.paused_at_node or state.crashed_at_node or ""
         stage = state.stage
         if stage == 3:
@@ -892,7 +896,35 @@ class Console:
         state.auto_resume_count = 0  # SOF-116: explicit operator recovery — a fresh cap
         state.phase = resume_node or "provision"
         state.save()
-        return self.retry_stage(project_id, stage)
+
+        def _restore_recovery_markers() -> None:
+            # SOF-150: a resume attempt that itself fails (refused or raised) must not leave the
+            # row worse off than before the attempt — restore exactly what was cleared above, not
+            # try/finally (that would also fire on a genuine success and undo a legitimate resume).
+            st = self._load_state(project_id)
+            if st.phase not in ("done", "stopped"):  # don't clobber a concurrent terminal
+                st.phase = original_phase
+                st.paused_at_node = original_paused_at_node
+                st.crashed_at_node = original_crashed_at_node
+                st.save()
+
+        try:
+            result = self.retry_stage(project_id, stage)
+        except Exception:
+            _restore_recovery_markers()
+            raise
+        if result is None:
+            _restore_recovery_markers()
+        return result
+
+    def resume_failure_reason(self, project_id: str) -> str | None:
+        """SOF-150: the honest reason a resume attempt failed (the newest uncleared blocker's
+        text — e.g. the budget-refusal message retry_stage's launch attempt recorded), for the
+        router to surface instead of a generic 'not paused or crashed' when the row genuinely
+        WAS paused/crashed and the retry itself is what failed. None if there's no blocker on
+        file (a crash/refusal with no recorded reason — rare, but honestly reported as such)."""
+        blockers = [b for b in ProjectStore(self._paths(project_id)["db"]).blockers() if not b["cleared"]]
+        return blockers[-1]["what"] if blockers else None
 
     def retry_node(self, project_id: str, node: str) -> str | None:
         """Invalidate checkpoints at `node` and downstream, then resume the stage.
@@ -1457,9 +1489,6 @@ class Console:
                 state.phase = "draft"
                 state.held = False
                 state.save()
-            # TEMP DIAGNOSTIC (SOF-98) — remove once the live-staging mystery is resolved.
-            logger.warning("[SOF-98-diag] %s: restore path executed, phase now %r (was %r)",
-                            project_id, self._load_state(project_id).phase, "provision")
             raise
 
     def relaunch_project(self, source_id: str, owner: str = "") -> str:
