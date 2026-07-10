@@ -26,7 +26,7 @@ function kindLabel(kind: string, path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() || "";
   const MAP: Record<string, string> = { deploy: "Deploy", repo: "Repo", "demo-creds": "Creds",
     context: "Context", md: "Markdown", sow: "SOW", svg: "SVG", code: "Code",
-    json: "JSON", csv: "CSV", image: "Image", fig: "Design" };
+    json: "JSON", csv: "CSV", image: "Image", fig: "Design", mockup: "Mockup", "flow-map": "Flow Map" };
   return MAP[kind] || MAP[ext] || kind || "File";
 }
 
@@ -56,6 +56,9 @@ function isImage(kind: string, path: string): boolean {
 }
 function isCode(kind: string, path: string): boolean {
   return ["code", "json", "csv", "repo"].includes(kind) || ["js", "ts", "tsx", "jsx", "py", "json", "csv", "sh", "yml", "yaml", "txt"].includes(extOf(path));
+}
+function isHtml(kind: string, path: string): boolean {
+  return kind === "mockup" || extOf(path) === "html";
 }
 
 // ── Content renderer ─────────────────────────────────────────────────────────
@@ -108,6 +111,15 @@ function ContentBody({ artifact }: { artifact: ArtifactDetail }) {
       <div style={{ flex: 1, overflow: "auto", padding: "24px 28px" }}>
         <MarkdownBody content={content} showToc />
       </div>
+    );
+  }
+
+  if (isHtml(kind, path)) {
+    // SOF-99: mockups are agent-generated static HTML — sandbox with NO allow-scripts, since
+    // they're meant to be static and a script (even benign) should never execute here.
+    return (
+      <iframe title={artifact.title || path} srcDoc={content} sandbox=""
+        style={{ flex: 1, border: "none", background: "#fff" }} />
     );
   }
 

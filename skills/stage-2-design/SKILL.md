@@ -55,22 +55,38 @@ each (`architecture` and `architecture-svg`).
 ## Phase 2: design  (`set-phase design`)
 
 `spawn-agent design design.lead <model> design` → a native **Task** sub-agent — `Task(subagent_type=
-"design")` (the operator-configured DESIGN agent; its prompt lives in Tenexity OS, materialized into
-your workspace as `.claude/agents/design.md`; if unset it falls back to Claude Code's own default
-subagent behavior). It reads `PRD.md`'s screen catalog (every screen ID + its scope/app tag) and
-CHROMA's embedded design guidance, and produces `design-spec.md`: a per-screen breakdown (layout,
-key components, states, a11y notes) that explicitly **references every screen ID from the PRD's
-catalog** — this is what the done-gate cross-checks, so don't invent screens the PRD doesn't list
-and don't skip one it does. Visual guidance follows the same `frontend-design`/`ui-ux-pro-max` skills
-+ `skills/tenexity-design/` brand canon CHROMA already used. If the agent also produces a static
-mockup export (e.g. an HTML/SVG wireframe), record it too — it's a bonus artifact, not gated.
+"design")` (the operator-configured DESIGN agent; its prompt lives in Tenexity OS's `system_agents`
+table — DB-editable, the tuning surface for this step — materialized into your workspace as
+`.claude/agents/design.md`; a starting prompt ships seeded, an operator may have since edited it).
+It reads `PRD.md`'s screen catalog (every screen ID + its scope/app tag) and CHROMA's embedded
+design guidance, and produces THREE things:
+1. `design-spec.md`: a per-screen breakdown (layout, key components, states, a11y notes) that
+   explicitly **references every screen ID from the PRD's catalog** — this is what the done-gate
+   cross-checks, so don't invent screens the PRD doesn't list and don't skip one it does. Visual
+   guidance follows the same `frontend-design`/`ui-ux-pro-max` skills + `skills/tenexity-design/`
+   brand canon CHROMA already used.
+2. **SOF-99 — one real mockup per V1 screen**, at exactly `mockups/<SCREEN_ID>.html` for every
+   screen the PRD's catalog marks `V1? = Yes` (skip `Future`). Each is a single self-contained
+   HTML file (CSS inlined in a `<style>` block, tenexity-design token values pulled in directly —
+   no external stylesheet link, since the artifact viewer renders each mockup in isolation) and
+   **static — no JavaScript** (the console renders mockups in a sandboxed iframe with scripts
+   disabled). This is no longer a "bonus, not gated" artifact — see the DESIGN agent's own prompt
+   for the full contract; the done-gate below is mechanical and blocks Stage 3 without it.
+3. **SOF-99 — `flow-map.md`**: one file, a `## <SCREEN_ID> — <Screen Name>` section per V1 screen
+   listing its mockup path and what it's entered-from/navigates-to — the design stage's own
+   screen-to-screen UX ownership, distinct from the PRD's prose Navigation Map.
 
-Commit; `record-artifact "Design Spec" design-spec.md design-spec design`. `finish-agent design
-success`.
+Commit; `record-artifact "Design Spec" design-spec.md design-spec design`, one
+`record-artifact "Mockup <SCREEN_ID>" mockups/<SCREEN_ID>.html mockup design` per V1 screen, and
+`record-artifact "Flow Map" flow-map.md flow-map design`. `finish-agent design success`.
 
-**Done-gate (mechanical):** `artifacts.verify(run_dir, ["design-spec.md"])` passes AND
-`artifacts.design_spec_is_complete(design-spec.md, screen_ids)` — every screen ID from `PRD.md`'s
-screen catalog is referenced in `design-spec.md`.
+**Done-gate (mechanical):** `artifacts.verify(run_dir, ["design-spec.md", "flow-map.md"])` passes
+AND `artifacts.design_spec_is_complete(design-spec.md, screen_ids)` (every screen ID from `PRD.md`'s
+screen catalog is referenced in `design-spec.md`) AND `artifacts.mockups_cover_v1_screens(run_dir,
+v1_screen_ids)` (every V1 screen has a real, non-empty `mockups/<SCREEN_ID>.html`) AND
+`artifacts.flow_map_is_complete(flow-map.md, v1_screen_ids)` (every V1 screen ID is referenced in
+`flow-map.md`). All four are pure presence/file-existence checks — depth and taste stay the DESIGN
+agent's judgment, never the gate's.
 
 ## Phase 3: tickets  (`set-phase tickets`)
 
@@ -92,7 +108,8 @@ assert TicketStore('<project.db>').buildable_count() >= 1, 'EMPTY/HOLLOW ticket 
 
 ## When done
 
-Once PRD+architecture+svg+design-spec.md all exist (design-spec.md covering every PRD screen ID) AND
+Once PRD+architecture+svg+design-spec.md+flow-map.md all exist (design-spec.md covering every PRD
+screen ID, a real mockup for every V1 screen, flow-map.md covering every V1 screen ID) AND
 `TicketStore.buildable_count() >= 1`, **STOP**. The console detects this, collects required
 dependencies from the user, and launches Stage 3. (No "done" event — the datastore is the signal.)
 
@@ -104,7 +121,10 @@ dependencies from the user, and launches Stage 3. (No "done" event — the datas
 | Architecture diagram | `diagram.render(mermaid_text, out_path)` |
 | Artifact gate | `artifacts.verify(run_dir, paths)` |
 | Screen IDs from the PRD | `artifacts.parse_screen_ids(prd_text)` |
+| V1-only screen IDs from the PRD | `artifacts.parse_v1_screen_ids(prd_text)` |
 | Design-spec done-gate | `artifacts.design_spec_is_complete(design_text, screen_ids)` |
+| Mockup done-gate | `artifacts.mockups_cover_v1_screens(run_dir, v1_screen_ids)` |
+| Flow-map done-gate | `artifacts.flow_map_is_complete(flow_map_text, v1_screen_ids)` |
 | Tickets | `tickets.TicketStore` — `create_ticket` (persist!), `claim`, `mark_done` |
 | Ticket done-gate | `tickets.TicketStore(db).buildable_count()` — must be ≥1 |
 
