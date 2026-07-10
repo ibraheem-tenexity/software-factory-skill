@@ -392,10 +392,40 @@ org_secrets = Table(
     UniqueConstraint("org_id", "name", name="uq_org_secrets_org_name"),
 )
 
+# Run autopsy (SOF-93): each benchmark run is autopsied AT MOST ONCE — `autopsy_processed_runs`
+# is the per-run idempotency ledger (a re-scan of an already-processed project_id is a no-op),
+# separate from `autopsy_signatures`, which is the cross-run dedup ledger (a repeated FAILURE
+# SIGNATURE comments on its existing Linear ticket instead of filing a duplicate). Persisted in the
+# DB, not process memory — SOF-116's lesson: a console/script restart must never re-file a known
+# failure. `linear_issue_id`/`linear_issue_identifier` are NULL when filing degraded honestly
+# (no LINEAR_API_KEY yet) — the signature is still recorded so dedup/occurrence-counting works the
+# moment a key is provisioned, without re-processing already-seen runs.
+autopsy_processed_runs = Table(
+    "autopsy_processed_runs", metadata,
+    Column("project_id", Text, primary_key=True),
+    Column("signature", Text, nullable=False),
+    Column("classification", Text, nullable=False),
+    Column("processed_at", Float, nullable=False),
+)
+
+autopsy_signatures = Table(
+    "autopsy_signatures", metadata,
+    Column("signature", Text, primary_key=True),
+    Column("classification", Text, nullable=False),
+    Column("linear_issue_id", Text),
+    Column("linear_issue_identifier", Text),
+    Column("first_project_id", Text, nullable=False),
+    Column("last_project_id", Text, nullable=False),
+    Column("occurrences", Integer, nullable=False, server_default="1"),
+    Column("first_seen_at", Float, nullable=False),
+    Column("last_seen_at", Float, nullable=False),
+)
+
 # Groupings: the flat per-project tables, the global directory tables, and everything (Alembic + tests).
 PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
 FLAT_TABLES = PROJECTDB + (tickets, runtime_agents, checkpoint)
 GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
                  system_agents, tools, sow,
-                 doc_summary, chunk, conversation, org_secrets)
+                 doc_summary, chunk, conversation, org_secrets,
+                 autopsy_processed_runs, autopsy_signatures)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES
