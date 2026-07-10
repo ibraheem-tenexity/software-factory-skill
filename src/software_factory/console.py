@@ -766,6 +766,14 @@ class Console:
         if stage == 3 and self.detect_stage3_done(project_id):
             return False   # already done — detect_stage3_done just persisted deploy_url + phase
         db = ProjectStore(self._paths(project_id)["db"])
+        # SOF-116: LAYERING — this check runs BEFORE the persisted auto_resume_count cap below.
+        # Two independent money-protections live in this function; budget wins. Once spend+reserve
+        # exceeds the ceiling, every tick returns False here regardless of auto_resume_count, so the
+        # cap can freeze mid-count (e.g. at 1/6) without ever reaching mark_stage_crashed — that is
+        # correct: a budget stop is a deliberate parked state ("operator resumes via /budget +
+        # /retry"), not a crash to auto-heal from. Live-observed on staging (project-87603c93):
+        # the counter froze at 1 across a second container restart because this check started
+        # firing, not because the cap logic broke.
         if any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers()):
             return False   # budget stop is intentional — operator resumes via /budget + /retry
         incomplete = (
