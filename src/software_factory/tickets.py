@@ -1,8 +1,10 @@
 """Ticket store (Postgres) with an enforced 6-state lifecycle + QA loop.
 
     open → in_progress → done → deployed → qa_testing → approved
-                                              │
-                                              └── qa_reject ──▶ open  (carries a bug report)
+                                    │           │
+                                    │           └── qa_reject ──▶ open  (carries a bug report)
+                                    └── review_reject ──▶ open  (SOF-119, carries a bug report)
+                                        (bounce cap exhausted: STAYS deployed — add-blocker instead)
 
 `mark_done` is the gate that makes "done" mean something: it refuses to close a ticket
 without a real merged PR (or commit sha), a non-empty diff, AND (SOF-118) an explicit
@@ -12,6 +14,15 @@ therefore cannot be laundered into "complete". The later transitions drive deplo
 QA loop: a deployed ticket is exercised on its live URL; on a bug it bounces back to
 `open` carrying a markdown bug report (with Supabase Storage screenshot links) in its
 `description`, so the next build agent that grabs it sees exactly what failed.
+
+SOF-119: `review_reject` is a SECOND, EARLIER bounce source — a `deployed` ticket that fails the
+adversarial REVIEW phase (server-side gate checks, role reachability, template substitution,
+WYSIWYG) bounces straight back to `open`, same shape as `qa_reject`, without ever reaching
+`qa_testing`. This deliberately does NOT add a new lifecycle STATE (no touch to `STATES`, no
+6-file ripple through every hardcoded status-set in this codebase) — it reuses the `deployed`→
+`open` edge, which already exists and is already understood everywhere. Once `review_bounce_count`
+exceeds its cap, the ticket stays `deployed` on purpose (bouncing again would just rebuild into the
+same wall) and the caller escalates via the existing `add-blocker` mechanism instead.
 
 Illegal transitions (e.g. approving a ticket that was never QA'd, deploying an open
 ticket) raise `IllegalTransition`.
@@ -27,6 +38,7 @@ from .db import project_id_from_path
 from .repositories._exec import PathExec
 from .repositories.tickets import TicketRepository
 import json
+import os
 import re
 import time
 import weakref
@@ -40,6 +52,10 @@ STATES = ("open", "in_progress", "done", "deployed", "qa_testing", "approved")
 _BUILDABLE = ("open", "in_progress")
 # "Built or beyond" — passed the hollow gate. Stage-3 proof + done_tickets() count these.
 _BUILT_OR_BEYOND = ("done", "deployed", "qa_testing", "approved")
+# SOF-119: how many times the REVIEW stage will bounce a single ticket (deployed -> open) before
+# giving up and escalating via add-blocker instead of retrying forever. Same env-override style as
+# SF_AUTO_RESUME_MAX (SOF-116) — a real, bounded cap, never an unbounded retry loop.
+_DEFAULT_REVIEW_BOUNCE_MAX = 2
 
 
 def _decode_row(row) -> dict:
@@ -109,6 +125,9 @@ class Ticket:
     # assumed/shortcut/left-undone while implementing THIS ticket. mark_done() refuses to close
     # a ticket that never addressed this.
     decision_log: Optional[list] = None
+    # SOF-119: how many times the REVIEW stage has bounced this ticket deployed->open. Always a
+    # real int (0 for "never bounced") — no None/[] "never addressed" ambiguity, see migration 0021.
+    review_bounce_count: int = 0
 
 
 class TicketStore:
@@ -225,6 +244,38 @@ class TicketStore:
         report = (t.description or "").rstrip()
         report = (report + "\n\n" if report else "") + f"## QA bug (rejected {stamp})\n\n{bug_markdown.strip()}\n"
         self._repo.update(ticket_id, status="open", agent=None, description=report)
+
+    def review_reject(self, ticket_id: int, reason_markdown: str,
+                      max_bounces: Optional[int] = None) -> bool:
+        """SOF-119: the in-pipeline REVIEW agent found a real defect (unenforced server-side gate,
+        unreachable role, unsubstituted template, WYSIWYG mismatch) — an EARLIER, adversarial bounce
+        than `qa_reject`, firing on a `deployed` ticket before it ever reaches `qa_testing`.
+
+        While under the cap: bounces back to `open` carrying a markdown bug report (same
+        stamp/append shape as `qa_reject`) and clears `agent` so a fresh build agent re-claims it.
+        Returns True.
+
+        At/over the cap: the ticket deliberately STAYS `deployed` — bouncing again would just
+        rebuild into the same wall — and the count is still persisted. Returns False so the caller
+        knows to escalate via `add-blocker` (an existing project-level mechanism) instead of
+        retrying itself.
+
+        `max_bounces` defaults from `SF_REVIEW_BOUNCE_MAX` (mirrors SOF-116's SF_AUTO_RESUME_MAX
+        precedent), falling back to `_DEFAULT_REVIEW_BOUNCE_MAX`."""
+        if max_bounces is None:
+            max_bounces = int(os.environ.get("SF_REVIEW_BOUNCE_MAX", _DEFAULT_REVIEW_BOUNCE_MAX))
+        t = self._require(ticket_id, ("deployed",), "open")
+        new_count = t.review_bounce_count + 1
+        if new_count > max_bounces:
+            self._repo.update(ticket_id, review_bounce_count=new_count)
+            return False
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+        report = (t.description or "").rstrip()
+        report = (report + "\n\n" if report else "") + (
+            f"## Review bounce (rejected {stamp})\n\n{reason_markdown.strip()}\n")
+        self._repo.update(ticket_id, status="open", agent=None, description=report,
+                          review_bounce_count=new_count)
+        return True
 
     # ---- queries ---------------------------------------------------------------------
     def open_waves(self) -> list[int]:

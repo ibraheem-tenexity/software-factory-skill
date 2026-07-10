@@ -250,11 +250,45 @@ A deploy with NO recorded passing Playwright verification is NOT done — the ho
 (`record-artifact "Demo credentials" demo_credentials.md demo-creds`), and run the Playwright
 happy-flow signed in WITH those credentials.
 
+## Phase 3a: review — adversarial in-pipeline gate, per ticket-wave (`set-phase review`)
+
+**SOF-119.** Before any ticket enters the QA loop below, adversarially review it yourself — recorded
+as a logical agent (`spawn-agent <id> review <model> review` / `finish-agent`), same accounting
+convention as every build/fix unit in this monolithic runtime. There is no separate REVIEW sub-agent
+here (no Task tool in this runtime) — YOU do the adversarial pass, actively trying to disagree with
+"done" rather than confirm it. The existing QA loop drives Playwright clicks against the UI, which
+does NOT catch a gate that hides its button for the wrong role while the underlying API still accepts
+the same request directly. This phase is the check that hits the API, not the button.
+
+**Honest caveat, state it — never let it be a surprise:** deploy is one event for the whole app, not
+one per reviewed wave. The wave you're about to review is already genuinely live at the deployed URL,
+even for a ticket you're about to bounce. A per-wave preview/staging deploy that never exposes
+unreviewed work is a real future improvement, not something this pipeline has today.
+
+For each wave with tickets that are `deployed` but not yet `qa_testing`, once `mark-deployed` has
+been called on all of them:
+- For every ticket in the wave, read its `acceptance`, `dod`, `decision_log` (SOF-118 — an honestly
+  disclosed gap is not a defect to re-find), and `design_refs` (SOF-100 — open
+  `context/mockups/<SCREEN_ID>.html` for WYSIWYG). Check: server-side gate enforcement (hit the API
+  directly, not the button), every declared role actually reachable/logs in, generated content free
+  of unsubstituted template tokens, and WYSIWYG (what's shown = what's actually sent/stored).
+- **Pass** — leave the ticket `deployed`; it proceeds into the QA loop below.
+- **Fail** — call `TicketStore.review_reject(ticket_id, reason_markdown)`:
+  - Returns `True` — bounced to `open` carrying a bug report (bounce count still under
+    `SF_REVIEW_BOUNCE_MAX`, default 2). Rebuild it yourself (a fresh logical agent), fix, `mark_done`
+    → redeploy → review it again next pass.
+  - Returns `False` — the bounce cap is exhausted. The ticket stays `deployed` (deliberately — never
+    becomes `approved`, so `all_approved()` can never go true while it's stuck) — `add-blocker` naming
+    the ticket and its last failure reason, and move on. Do not retry it yourself.
+
+Only tickets that PASS review (remain `deployed`) proceed into Phase 3b.
+
 ## Phase 3b: QA loop — per-ticket approval (`set-phase qa`)
 
 Deliverable-level pass is necessary but not sufficient: **every ticket must reach `approved`** before
 the run is done. Lifecycle: `open → in_progress → done → deployed → qa_testing → approved`; `qa_reject`
-bounces a ticket back to `open` with a bug report. Per ticket, after its app is live:
+bounces a ticket back to `open` with a bug report. Per ticket, after its app is live and it has passed
+review (Phase 3a):
 1. `python3 -m software_factory.db mark-deployed <projects_dir> <project_id> <ticket_id>`
 2. `python3 -m software_factory.db start-qa <projects_dir> <project_id> <ticket_id>`
 3. Drive THAT ticket's acceptance flow on the live URL (Playwright MCP).
@@ -267,7 +301,9 @@ bounces a ticket back to `open` with a bug report. Per ticket, after its app is 
 
 **The run is DONE only when `TicketStore.all_approved()`** (every ticket `approved`) AND a passing
 Playwright verification per deliverable is recorded AND `build-decision-log.md` exists and passes its
-gate (Phase 3c below). `detect_stage3_done` enforces all three.
+gate (Phase 3c below). `detect_stage3_done` enforces all three. A ticket parked at `deployed` after
+exhausting its review-bounce cap (SOF-119) is a real, honest stuck state — it blocks completion
+forever until an operator resolves the `add-blocker` note, exactly as intended.
 
 ## Phase 3c: decision log  (`set-phase decision-log`)
 
@@ -297,7 +333,7 @@ Proof (project.db + project.log) at the base survives.
 | Need | Call |
 |------|------|
 | Record canvas state | `python3 -m software_factory.db <verb> <projects_dir> <project_id> ...` |
-| Tickets | `tickets.TicketStore` — `claim`, `mark_done`, `mark_deployed`, `start_qa`, `qa_approve`, `qa_reject`, `all_approved` |
+| Tickets | `tickets.TicketStore` — `claim`, `mark_done`, `mark_deployed`, `start_qa`, `qa_approve`, `qa_reject`, `review_reject` (SOF-119), `all_approved` |
 | Blob storage | `storage.put/get/url`, `blobs.BlobStore.record` — durable QA screenshots (Supabase Storage; local fallback) |
 | Repo / PR / merge | `repo.GitHub` — `open_pr`, `merge_if_green` |
 | Deploy + health | `deploy.deploy(target, dir)`, `deploy.healthy(url)` |
@@ -312,6 +348,8 @@ Proof (project.db + project.log) at the base survives.
   AND (SOF-118) a real (or explicitly "nothing to declare") stage decision log.
 - **No silent gaps:** `mark_done` refuses to close ANY ticket without its own `decision_log` — a
   real shortcut/gap must be disclosed there, not carried forward unstated.
+- **No infinite review bounce:** `review_reject` enforces `SF_REVIEW_BOUNCE_MAX` (default 2) itself —
+  once exhausted the ticket stays `deployed` and gets `add-blocker`'d, never retried again in a loop.
 - **One ticket at a time:** each bracketed by `spawn-agent`/`claim`/…/`finish-agent` with the same id.
 - **Deploy isolation:** always deploy to `sf-<project_id>`, never the console service.
 - **Fully autonomous** — no human approval gates.

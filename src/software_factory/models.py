@@ -128,6 +128,12 @@ tickets = Table(
     # Same NULL-vs-'[]' convention as design_refs/dependencies: NULL = never addressed (mark_done
     # refuses to close it), '[]' = explicitly "nothing to declare" (an honest, gate-passing close).
     Column("decision_log", Text),
+    # SOF-119: how many times the in-pipeline REVIEW agent has bounced this ticket back to `open`
+    # (deployed -> open, before the QA loop ever starts). A real column, not derivable after the
+    # fact — no per-ticket transition/event history exists elsewhere in this schema, and the bounce
+    # loop spans separate agent processes (review -> rebuild -> redeploy -> review again), so this
+    # must be persisted, not counted in-process.
+    Column("review_bounce_count", Integer, nullable=False, server_default="0"),
 )
 
 runtime_agents = Table(
