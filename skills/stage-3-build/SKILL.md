@@ -44,7 +44,7 @@ ws = os.getcwd()
 project_id = os.path.basename(os.path.dirname(ws))
 projects_dir = os.path.dirname(os.path.dirname(ws))
 try:
-    from software_factory.db import db_path
+    from software_factory.db import db_path, ProjectStore
     from software_factory.tickets import TicketStore
     ts = TicketStore(db_path(projects_dir, project_id))
     ts.reset_in_progress_tickets()   # clear stale in_progress from a prior interrupted run
@@ -52,7 +52,15 @@ try:
     if not tickets:
         print("RESUME:phase0")
     elif ts.all_approved():
-        print("RESUME:done")
+        # SOF-116: "all tickets approved" alone is NOT done — a prior run can reach this ticket
+        # state and still never have called record-verification (killed at teardown, etc). Recheck
+        # the actual DB-backed gate; if it's missing, re-run Phase 3 instead of silently confirming
+        # a "done" that was never recorded — that's the money-burner: a resumed run would otherwise
+        # print RESUME:done, exit without recording anything, and get relaunched again next tick.
+        if ProjectStore(db_path(projects_dir, project_id)).has_passing_verification():
+            print("RESUME:done")
+        else:
+            print("RESUME:phase3")
     else:
         statuses = {t.status for t in tickets}
         all_built = statuses.issubset({"done", "deployed", "qa_testing", "approved"})
