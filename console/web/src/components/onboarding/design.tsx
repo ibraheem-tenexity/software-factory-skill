@@ -470,7 +470,8 @@ export function Message({ who, persona, text, anim, badge }:
           background: T.brandSoft, color: T.brand, boxShadow: `inset 0 0 0 1px ${T.brand}33` }}><Sparkle size={13} color={T.brand} /></span>
       ) : <Avatar name="You" size={28} />}
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6,
-        border: `1px solid ${isAgent ? T.brand + "33" : T.borderSubtle}`, background: isAgent ? T.brandSoft + "4d" : T.raised,
+        border: `1px solid ${isAgent ? T.brand + "40" : T.borderDefault}`, background: isAgent ? T.brandSoft : T.sunken,
+        boxShadow: isAgent ? `inset 3px 0 0 ${T.brand}` : "none",
         borderRadius: T.rLg, padding: "10px 13px" }}>
         <header style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ font: `600 13px/1 ${T.sans}`, color: T.fg }}>{isAgent ? (persona || "Concierge") : "You"}</span>

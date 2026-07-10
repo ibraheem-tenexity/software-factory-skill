@@ -241,6 +241,23 @@ function ProjectList({ projects, onOpen, handlers, empty }:
   );
 }
 
+// SOF-141 (design §6.30): click-to-collapse group header — chevron rotates, count stays visible
+// while collapsed.
+function SectionHeader({ label, count, collapsed, onToggle, aside }:
+  { label: string; count: number; collapsed: boolean; onToggle: () => void; aside?: string }) {
+  return (
+    <button onClick={onToggle} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10, padding: 0, background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <span style={{ display: "inline-flex", transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform .15s ease", color: T.tertiary }}>
+          <Icon name="chevronDown" size={14} color={T.tertiary} />
+        </span>
+        <CategoryLabel>{label} · {count}</CategoryLabel>
+      </span>
+      {aside && !collapsed && <span style={{ font: `400 11.5px/1 ${T.sans}`, color: T.tertiary }}>{aside}</span>}
+    </button>
+  );
+}
+
 export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => void; onNew: () => void; onOrg: () => void }) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const me = useMe();
@@ -251,6 +268,10 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
   const [loading, setLoading] = useState(true);
   const [ownerFilter, setOwnerFilter] = useState<string>(""); // "" = all
   const [confirm, setConfirm] = useState<ConfirmAction | null>(null);
+  // SOF-141: per-group collapse state (design §6.30) — { deployed, active, archived }, chevron
+  // rotates -90deg when collapsed, count stays visible in the header either way.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const toggleGroup = (k: string) => setCollapsed((c) => ({ ...c, [k]: !c[k] }));
   // include_archived=true so the Archived section has rows; statusOf() never sees them (split below).
   const loadProjects = () => api.projects(true).then((d) => setProjects(d.projects || [])).catch(() => setProjects([]));
   useEffect(() => {
@@ -403,34 +424,33 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
             </div>
           )}
 
-          {/* in progress */}
-          <div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-              <CategoryLabel>In progress{loading ? "" : ` · ${active.length}`}</CategoryLabel>
-              <span style={{ font: `400 11.5px/1 ${T.sans}`, color: T.tertiary }}>Sorted by last activity</span>
-            </div>
-            {loading ? (
-              <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden" }}>
-                {[0, 1, 2].map((i) => <ProjectRowSkel key={i} first={i === 0} />)}
-              </div>
-            ) : (
-              <ProjectList projects={active} onOpen={onOpen} handlers={handlers} empty='No projects in progress. Start one with "New project".' />
-            )}
-          </div>
-
-          {/* deployed */}
+          {/* deployed — ordered above In progress (design §6.30) */}
           {shipped.length > 0 && (
             <div>
-              <CategoryLabel style={{ marginBottom: 10 }}>Deployed · {shipped.length}</CategoryLabel>
-              <ProjectList projects={shipped} onOpen={onOpen} handlers={handlers} empty="" />
+              <SectionHeader label="Deployed" count={shipped.length} collapsed={!!collapsed.deployed} onToggle={() => toggleGroup("deployed")} />
+              {!collapsed.deployed && <ProjectList projects={shipped} onOpen={onOpen} handlers={handlers} empty="" />}
             </div>
           )}
+
+          {/* in progress */}
+          <div>
+            <SectionHeader label="In progress" count={active.length} collapsed={!!collapsed.active} onToggle={() => toggleGroup("active")} aside={loading ? undefined : "Sorted by last activity"} />
+            {!collapsed.active && (
+              loading ? (
+                <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden" }}>
+                  {[0, 1, 2].map((i) => <ProjectRowSkel key={i} first={i === 0} />)}
+                </div>
+              ) : (
+                <ProjectList projects={active} onOpen={onOpen} handlers={handlers} empty='No projects in progress. Start one with "New project".' />
+              )
+            )}
+          </div>
 
           {/* archived — only shown when there's at least one archived project */}
           {archived.length > 0 && (
             <div>
-              <CategoryLabel style={{ marginBottom: 10 }}>Archived · {archived.length}</CategoryLabel>
-              <ProjectList projects={archived} onOpen={onOpen} handlers={handlers} empty="" />
+              <SectionHeader label="Archived" count={archived.length} collapsed={!!collapsed.archived} onToggle={() => toggleGroup("archived")} />
+              {!collapsed.archived && <ProjectList projects={archived} onOpen={onOpen} handlers={handlers} empty="" />}
             </div>
           )}
 
