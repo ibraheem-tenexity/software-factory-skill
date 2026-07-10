@@ -1208,10 +1208,17 @@ class Console:
         # by the Concierge's finalize_product_brief tool — the single source, per the operator's
         # storage ruling) supersedes the raw composition as context.md.
         brief_block = self.product_brief(project_id) or ""
+        # SOF-96: selected scope genres' recipe bodies (SOF-108, sow rows with status='Template')
+        # reach Stage 1 as their own input file — until now genre recipes only fed the Concierge's
+        # onboarding chat context, never the product-synthesis phase itself.
+        from .services.conversation import _genre_recipes
+        recipes = _genre_recipes(self._load_state(project_id).scope)
+        recipes_md = "\n\n".join(f"## {r['title']}\n\n{r['body']}" for r in recipes) if recipes else ""
         written = persist_and_compose(
             paths["input_dir"], req.description, req.context_files or [],
             extract=self._extract, interview_md=interview_md,
             product_brief_md=brief_block or None,
+            genre_recipes_md=recipes_md or None,
         )
         input_db = ProjectStore(paths["db"])
         for name in written:
@@ -1631,6 +1638,8 @@ class Console:
                 with open(os.path.join(root, "PRD.md")) as f:
                     text = f.read()
                 ok, _reasons = artifacts.prd_is_complete(text)
+                if ok:
+                    ok, _reasons = artifacts.prd_required_sections_complete(text, state.scope)
                 if ok and artifacts.prd_lock_in_verdict(text) not in ("SHIP_AS_IS", "SHIP_WITH_EDITS"):
                     return False   # SEND_BACK or missing verdict — the product phase isn't done
                 if ok:
