@@ -1060,9 +1060,14 @@ class Console:
         base_url = (os.environ.get("SF_APP_URL") or "").rstrip("/")
         if base_url:
             env = {**env, "SF_MEMORY_TOKEN": _auth.sign_scope_token(project_id),
-                  "SF_MEMORY_MCP_URL": f"{base_url}/mcp/memory"}
+                  "SF_MEMORY_MCP_URL": f"{base_url}/mcp/memory",
+                  # SOF-155: in-stage Fusion research reaches the console proxy with a research-scoped,
+                  # per-run token — OPENROUTER_API_KEY stays in the console, never the scrubbed build
+                  # env. Distinct purpose from the memory token (can't cross to /mcp/memory).
+                  "SF_RESEARCH_TOKEN": _auth.sign_scope_token(project_id, purpose="research"),
+                  "SF_RESEARCH_URL": f"{base_url}/api/research/fusion"}
         else:
-            logger.debug("[launch] %s SF_APP_URL unset — memory MCP not wired", project_id)
+            logger.debug("[launch] %s SF_APP_URL unset — memory MCP + research proxy not wired", project_id)
         # Operator override: if staff edited THIS stage's prompt for THIS runtime in the OS Agents
         # dashboard, that stored text drives the run (written as ws/SKILL.md); else the on-disk
         # default. Per-runtime + best-effort — a store hiccup must never block a launch.

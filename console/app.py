@@ -53,7 +53,7 @@ import console.state as state  # noqa: E402  (also: app_mod.state is the patch h
 state.reset()
 
 from console.poller import lifespan  # noqa: E402
-from console.routers import open_routes, auth, org, admin_os, projects, chat  # noqa: E402
+from console.routers import open_routes, auth, org, admin_os, projects, chat, research  # noqa: E402
 
 # Re-exported so the public `console.app` surface (and the tests that read/patch object attributes
 # on them) is preserved across the split. Bound AFTER reset() → the current instances; the same
@@ -113,6 +113,7 @@ app.include_router(org.router)
 app.include_router(admin_os.router)
 app.include_router(projects.router)
 app.include_router(chat.router)
+app.include_router(research.router)
 
 # Project Memory MCP (SOF-41/T4.2) — console-hosted, not a router (it's a full ASGI sub-app
 # speaking the MCP streamable-HTTP transport, mounted the same way the static SPA assets are
