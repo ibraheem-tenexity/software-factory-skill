@@ -479,7 +479,16 @@ class Console:
     def current_phase(self, project_id: str) -> str:
         """The derived current phase for the header/API — never the stale ProjectState value."""
         state = self._load_state(project_id)
-        if state.phase in ("done", "stopped", "draft"):
+        if state.phase in ("done", "stopped", "draft", "paused", "crashed"):
+            # SOF-149: "crashed"/"paused" must ALSO be trusted directly — found live re-verifying
+            # #332's relaunch fix: crashed_at_node was correctly set, but the DISPLAYED phase still
+            # showed the phases-canvas table's stale last entry (e.g. "provision"), because this
+            # trusted-scalar check didn't include "crashed" yet. The frontend's RecoveryBar gates
+            # strictly on the STRING "paused"/"crashed" (FactoryConsole.tsx's `halted` check) — so
+            # a correct crashed_at_node with a wrong displayed phase means the RecoveryBar never
+            # renders at all, even though the underlying recovery state is fully correct. "paused"
+            # has the identical exposure (nothing ever writes "paused" into the phases table
+            # either) — fixed alongside rather than leaving the same class of bug half-closed.
             # SOF-98: "draft" must be trusted directly, same as "done"/"stopped" — otherwise a
             # promote_draft that failed and restored phase="draft" still reports the phases
             # canvas table's leftover history (e.g. "provision") from the failed attempt, since
