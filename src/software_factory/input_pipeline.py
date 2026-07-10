@@ -6,8 +6,8 @@ input document. Only the *provision of input* lives here; the pipeline stages ar
 untouched — Stage 1 still just reads `input/`.
 
 A malformed attachment or an empty extraction raises by default — a missing Stage-1 input is a
-failure the operator needs to see (`start_project`/`promote_draft`'s call site, where the file
-IS the input the run is about to build from). `tolerate_extract_failures=True` (SOF-56) opts a
+failure the operator needs to see (`promote_draft`'s call site, where the file IS the input the
+run is about to build from). `tolerate_extract_failures=True` (SOF-56) opts a
 DIFFERENT caller — `attach_to_draft`, materials attached mid-interview, any number of files at
 any time — into the SOF-32 ingestion-pipeline pattern instead: one bad file is marked failed and
 skipped, the rest of the request still succeeds. The original binary is still kept + returned
