@@ -92,26 +92,59 @@ judgment, never the gate's.
 
 - `spawn-agent pm-lead pm.lead <model> tickets`, then YOURSELF divide the implementation into steps
   in dependency (wave) order; `finish-agent pm-lead success` when the store is populated.
-- **PERSIST each ticket to the store** — `TicketStore.create_ticket(title, acceptance, dod, wave, app=...)`
-  with a real, non-empty `acceptance` AND `dod`. This is REQUIRED; the store is read by Stage 3 and by the
-  done-gate. (There is no "ticket event" — persisting to the store IS what puts it on the canvas.)
+- **PERSIST each ticket to the store** — `TicketStore.create_ticket(title, acceptance, dod, wave,
+  app=..., goal=..., design_refs=[...], dependencies=[...], scope_genre=..., implementation_notes=...)`
+  with a real, non-empty `acceptance`, `dod`, AND (SOF-100) `goal`. **`design_refs`/`dependencies`
+  must be explicitly passed on every ticket, even as `[]`** — never left unaddressed. This is
+  REQUIRED; the store is read by Stage 3 and by the done-gate. (There is no "ticket event" —
+  persisting to the store IS what puts it on the canvas.)
+- **SOF-100 — design refs:** when a ticket implements a screen, `design_refs` names its PRD v1
+  screen ID(s) (e.g. `["SCR-02"]`) — cross-check every ID against the real screen catalog and
+  `flow-map.md`; a reference to a screen that doesn't exist fails the gate. A backend-only ticket
+  legitimately has no screen — `design_refs=[]` is the honest answer, not a gate failure. Stage 3
+  build agents open the referenced `mockups/<SCREEN_ID>.html` before implementing that ticket's UI.
+- **SOF-100 — scope-genre tag:** when the project selected scope genres at intake
+  (`input/genre-recipes.md` was present), tickets whose screens/features belong to a PRD genre
+  module carry that genre's exact heading name in `scope_genre` — every selected genre needs ≥1
+  ticket tagged with it (the done-gate's per-area coverage check, same spirit as SOF-96's PRD
+  module check and SOF-99's mockup coverage check). Omit entirely for a genre-less/free-form ticket.
+- **`implementation_notes`:** concrete build guidance beyond the acceptance criteria — PRD business
+  rules (cite BR-xx/data-field numbers when the PRD numbers them), repo components to reuse (the
+  PRD's own Reuse Scan section, if present), edge cases the acceptance criteria didn't spell out.
+- **`dependencies`:** other tickets this one needs first, by **title** (not strictly validated
+  against real IDs — be reasonably precise, don't agonize over exact formatting); `[]` for a
+  wave-1 ticket with nothing upstream.
 - **Multi-deliverable:** a project may ship MORE THAN ONE deliverable. The PRD screen catalog tags each
   screen with an `app` (`mobile-web | web | api | …`); set `app=` on each ticket so Stage 3 builds/deploys/
   verifies each app independently and the kanban groups by app.
-- Tickets are derived from the PRD seeds + architecture + `design-spec.md`.
+- Tickets are derived from the PRD seeds + architecture + `design-spec.md` + `flow-map.md` + the
+  mockups themselves.
 
-**Done-gate (mechanical):** waves ordered, no orphan features, AND the store holds buildable tickets — verify:
+**Regenerate, don't ship thin (SOF-100):** before finishing this phase, self-check against
+`TicketStore(db).depth_ok(v1_screen_ids, scope)`. On failure, fix the flagged tickets and re-check
+— up to 2 more passes (mirrors Phase 4's PRD `SEND_BACK` reloop; bounded within this one process,
+no persisted counter needed — the existing `auto_resume_count`/`SF_AUTO_RESUME_MAX` cap already
+bounds cross-process restarts of the whole stage). If still failing after 2 passes, do NOT loop
+forever and do NOT silently ship the thin batch — `add-blocker` naming exactly which tickets/genres
+failed and why, then proceed with the best-available batch.
+
+**Done-gate (mechanical):** waves ordered, no orphan features, the store holds buildable tickets,
+AND (SOF-100) the ticket depth gate passes — verify:
 ```bash
 python3 -c "import sys; sys.path.insert(0,'/app/src'); from software_factory.tickets import TicketStore; \
-assert TicketStore('<project.db>').buildable_count() >= 1, 'EMPTY/HOLLOW ticket store — call create_ticket with real acceptance + dod'"
+s = TicketStore('<project.db>'); \
+assert s.buildable_count() >= 1, 'EMPTY/HOLLOW ticket store — call create_ticket with real acceptance + dod'; \
+ok, reasons = s.depth_ok(v1_screen_ids, scope); \
+assert ok, 'ticket depth gate failed: ' + '; '.join(reasons)"
 ```
 
 ## When done
 
 Once PRD+architecture+svg+design-spec.md+flow-map.md all exist (design-spec.md covering every PRD
 screen ID, a real mockup for every V1 screen, flow-map.md covering every V1 screen ID) AND
-`TicketStore.buildable_count() >= 1`, **STOP**. The console detects this, collects required
-dependencies from the user, and launches Stage 3. (No "done" event — the datastore is the signal.)
+`TicketStore.buildable_count() >= 1` AND `TicketStore.depth_ok(...)` passes, **STOP**. The console
+detects this, collects required dependencies from the user, and launches Stage 3. (No "done"
+event — the datastore is the signal.)
 
 ## Python layer
 
@@ -126,7 +159,8 @@ dependencies from the user, and launches Stage 3. (No "done" event — the datas
 | Mockup done-gate | `artifacts.mockups_cover_v1_screens(run_dir, v1_screen_ids)` |
 | Flow-map done-gate | `artifacts.flow_map_is_complete(flow_map_text, v1_screen_ids)` |
 | Tickets | `tickets.TicketStore` — `create_ticket` (persist!), `claim`, `mark_done` |
-| Ticket done-gate | `tickets.TicketStore(db).buildable_count()` — must be ≥1 |
+| Ticket hollow-gate | `tickets.TicketStore(db).buildable_count()` — must be ≥1 |
+| Ticket depth-gate | `tickets.TicketStore(db).depth_ok(v1_screen_ids, scope)` |
 
 ## Guardrails
 

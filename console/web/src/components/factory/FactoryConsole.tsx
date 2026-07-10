@@ -24,6 +24,34 @@ type Status = ProjectSummary & Record<string, any>;
 type View = "kanban" | "tree" | "map";
 type Doc = { label: string; path?: string; content?: string; id?: number; agent?: string; kind?: string } | null;
 
+// SOF-100: the click-through ticket panel used to dump raw `description` — the goal/acceptance/
+// dod/design_refs/dependencies/scope_genre/implementation_notes fields never rendered anywhere.
+// Reuses the existing DocViewer (path: "ticket.md" so it renders as markdown) rather than a new
+// bespoke component.
+function ticketDetailMarkdown(t: Ticket, projectId: string): string {
+  const lines: string[] = [];
+  if (t.goal) lines.push(`**Goal:** ${t.goal}`, "");
+  if (t.scope_genre) lines.push(`**Scope genre:** ${t.scope_genre}`, "");
+  lines.push("## Acceptance Criteria", "", t.acceptance || "_(none recorded)_", "");
+  lines.push("## Definition of Done", "", t.dod || "_(none recorded)_", "");
+  if (t.design_refs && t.design_refs.length > 0) {
+    lines.push("## Design References", "");
+    for (const scr of t.design_refs) {
+      const href = `/api/projects/${projectId}/artifact?path=${encodeURIComponent(`mockups/${scr}.html`)}&raw=1`;
+      lines.push(`- [${scr}](${href})`);
+    }
+    lines.push("");
+  }
+  if (t.dependencies && t.dependencies.length > 0) {
+    lines.push("## Dependencies", "");
+    for (const dep of t.dependencies) lines.push(`- ${dep}`);
+    lines.push("");
+  }
+  if (t.implementation_notes) lines.push("## Implementation Notes", "", t.implementation_notes, "");
+  if (t.description) lines.push("## Description", "", t.description, "");
+  return lines.join("\n") || "(no ticket detail recorded)";
+}
+
 const VIEWS: { id: View; label: string; icon: string }[] = [
   { id: "kanban", label: "Kanban", icon: "kanban" },
   { id: "tree", label: "Tree", icon: "tree" },
@@ -232,7 +260,8 @@ export function FactoryConsole({ projectId, onBack, onSwitchTab }:
             </div>
           )}
           {view === "kanban" && loaded && <BuildBoard tickets={tickets}
-            onOpenTicket={(t) => setDoc({ label: `#${t.id} ${t.title}`, content: t.description || "(no description)" })} />}
+            onOpenTicket={(t) => setDoc({ label: `#${t.id} ${t.title}`, path: "ticket.md",
+              content: ticketDetailMarkdown(t, projectId) })} />}
           {view === "tree" && <TreeView graph={graph} onOpenArtifact={openDocFromRef}
             ticketsDone={doneTickets} ticketsTotal={tickets.length} onViewBoard={() => setView("kanban")} />}
           {view === "map" && <MapView graph={graph} onOpenArtifact={openDocFromRef} />}

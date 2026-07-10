@@ -114,6 +114,15 @@ tickets = Table(
     Column("diff_lines", Integer, nullable=False, server_default="0"),
     Column("app", Text),
     Column("description", Text, nullable=False, server_default=""),
+    Column("goal", Text, nullable=False, server_default=""),
+    # SOF-100: JSON-encoded arrays. NULL means the writer never addressed the question (fails the
+    # depth gate); '[]' means it explicitly decided "none apply" (an honest pass for e.g. a
+    # backend-only ticket with no screen) — no server_default, so omission is distinguishable
+    # from an explicit empty answer.
+    Column("design_refs", Text),
+    Column("dependencies", Text),
+    Column("scope_genre", Text),
+    Column("implementation_notes", Text, nullable=False, server_default=""),
 )
 
 runtime_agents = Table(

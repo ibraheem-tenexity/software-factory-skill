@@ -1070,17 +1070,21 @@ class Console:
         # key (was STAGE-1::claude / STAGE-1::opencode) — the claude & opencode SKILL.md variants now
         # share the single stored prompt for this stage.
         override = None
-        agent_row = None   # SOF-73: PRODUCT (stage 1) / DESIGN (stage 2) — claude runtime only
+        # SOF-73: PRODUCT (stage 1) / DESIGN (stage 2, Phase 2) — claude runtime only.
+        # SOF-100: stage 2 ALSO materializes TICKETS (Phase 3) — two distinct claude-native
+        # subagent slots now live in one stage, so this is a list, not a single (callsign, row).
+        agent_rows: list = []
         try:
             from .system_agents import SystemAgentStore
             store = SystemAgentStore()
             row = store.get(f"STAGE-{stage}")
             override = row["prompt"] if row and (row.get("prompt") or "").strip() else None
             if runtime == "claude" and stage in (1, 2):
-                callsign = "PRODUCT" if stage == 1 else "DESIGN"
-                candidate = store.get(callsign)
-                if candidate and (candidate.get("prompt") or "").strip():
-                    agent_row = (callsign, candidate)
+                callsigns = ["PRODUCT"] if stage == 1 else ["DESIGN", "TICKETS"]
+                for callsign in callsigns:
+                    candidate = store.get(callsign)
+                    if candidate and (candidate.get("prompt") or "").strip():
+                        agent_rows.append((callsign, candidate))
         except Exception:
             logger.debug("[launch] %s prompt-override lookup failed — using on-disk default",
                          project_id, exc_info=True)
@@ -1088,12 +1092,12 @@ class Console:
         ws = prepare_workspace(
             self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
         )
-        if agent_row is not None:
+        for callsign, row in agent_rows:
             try:
-                write_agent_file(ws, agent_row[0], agent_row[1])
+                write_agent_file(ws, callsign, row)
             except Exception:
                 logger.debug("[launch] %s %s agent-file materialization failed",
-                             project_id, agent_row[0], exc_info=True)
+                             project_id, callsign, exc_info=True)
         # Stage 3 with a database dependency provisions its OWN Railway Postgres via the
         # `provision-db` db-CLI verb (which wraps deploy_db.provision and persists the teardown
         # handles to ProjectState) — see skills/stage-3-build. The console no longer provisions;
@@ -1586,7 +1590,11 @@ class Console:
             {"id": t.id, "title": t.title, "wave": t.wave, "status": t.status,
              "agent": t.agent, "provenance": t.provenance, "provenance_type": t.provenance_type,
              "diff_lines": t.diff_lines, "acceptance": t.acceptance, "dod": t.dod,
-             "app": getattr(t, "app", None), "description": getattr(t, "description", "")}
+             "app": getattr(t, "app", None), "description": getattr(t, "description", ""),
+             "goal": getattr(t, "goal", ""), "design_refs": getattr(t, "design_refs", None),
+             "dependencies": getattr(t, "dependencies", None),
+             "scope_genre": getattr(t, "scope_genre", None),
+             "implementation_notes": getattr(t, "implementation_notes", "")}
             for t in store.all_tickets()
         ]
         waves = sorted({t["wave"] for t in items})
@@ -1714,6 +1722,11 @@ class Console:
         # ticket *events* on the canvas. An empty/hollow store is NOT a done Stage 2.
         tickets = TicketStore(self._paths(project_id)["tickets_db"])
         if tickets.buildable_count() < 1:
+            return False
+        # SOF-100: not just "buildable" (non-empty acceptance/dod) — real ticket depth (goal,
+        # honest design_refs/dependencies, valid screen refs, per-genre coverage).
+        depth_ok, _reasons = tickets.depth_ok(v1_screen_ids, state.scope)
+        if not depth_ok:
             return False
         state.stage2_done = True
         state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)

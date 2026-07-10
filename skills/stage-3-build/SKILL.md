@@ -12,7 +12,8 @@ use claude sonnet 4.6 build, deploy, test, and ship.
 
 **You are an ORCHESTRATOR — you MUST NOT edit app/source files yourself.** For each ticket you launch ONE
 native **Task** sub-agent; it implements the ticket and opens a PR; you coordinate, merge, and record state.
-Read prior-stage artifacts from `context/` (PRD.md, architecture.md, architecture.svg) and the tickets from the store.
+Read prior-stage artifacts from `context/` (PRD.md, architecture.md, architecture.svg, design-spec.md,
+flow-map.md, and the `mockups/` directory — SOF-99/100) and the tickets from the store.
 The sub agents must use sonnet 4.6 as their model not opus 4.8.
 
 **The one definition of done:** the app's primary user journey passes end-to-end in a real browser
@@ -112,7 +113,11 @@ a restyled brand FAILS the happy-flow gate. Include this rule in every UI ticket
 
 For each open ticket in the current wave:
 - `claim` the ticket; `spawn-agent <id> <role> <model> build`
-- launch a native **Task** sub-agent that implements THIS ticket and opens a PR (you do not write the code)
+- launch a native **Task** sub-agent that implements THIS ticket and opens a PR (you do not write the code).
+  **SOF-100:** pass the ticket's `goal`, `design_refs`, and `implementation_notes` into that sub-agent's
+  prompt. If `design_refs` is non-empty, the sub-agent MUST open `context/mockups/<SCREEN_ID>.html` for
+  each referenced screen and build the UI to match it — the mockup is the spec for that screen, not a
+  suggestion; don't build from imagination when a real mockup exists.
 - merge ONLY via `GitHub.merge_if_green(pr, diff_lines)` — refuses red checks and empty diffs
 - `TicketStore.mark_done(pr, diff_lines)` (refuses hollow closes); `finish-agent <id> <outcome> <cost> <pr> <diff_lines>`
 

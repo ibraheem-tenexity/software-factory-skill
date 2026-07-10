@@ -295,7 +295,10 @@ def prepare_workspace(
     if stage >= 2:
         _copy_prior_artifacts(projects_dir, project_id, ws, ["PRD.md", "design-spec.md"])
     if stage >= 3:
-        _copy_prior_artifacts(projects_dir, project_id, ws, ["architecture.md", "architecture.svg"])
+        _copy_prior_artifacts(
+            projects_dir, project_id, ws,
+            ["architecture.md", "architecture.svg", "flow-map.md"])   # flow-map.md: SOF-100
+        _copy_prior_dir(projects_dir, project_id, ws, "mockups")       # SOF-100
 
     return ws
 
@@ -317,3 +320,21 @@ def _copy_prior_artifacts(projects_dir: str, project_id: str, ws: str, names: li
                 if os.path.realpath(src) != os.path.realpath(dst):
                     shutil.copy2(src, dst)
                 break
+
+
+def _copy_prior_dir(projects_dir: str, project_id: str, ws: str, dirname: str) -> None:
+    """SOF-100: same search as `_copy_prior_artifacts` but for a whole directory (e.g. the SOF-99
+    `mockups/` directory) rather than a single file — `shutil.copy2` doesn't handle directories."""
+    base = os.path.join(projects_dir, project_id)
+    ctx_dir = os.path.join(ws, "context")
+    ctx_real = os.path.realpath(ctx_dir)
+    for root, dirs, _files in os.walk(base):
+        if os.path.realpath(root) == ctx_real:
+            continue
+        if dirname in dirs:
+            src = os.path.join(root, dirname)
+            dst = os.path.join(ctx_dir, dirname)
+            if os.path.realpath(src) != os.path.realpath(dst):
+                os.makedirs(ctx_dir, exist_ok=True)
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            break

@@ -15,7 +15,8 @@ Task tool and no sub-agents. For accounting, every ticket (and every bugfix) is 
 LOGICAL agent — `spawn-agent` before you start it, `finish-agent` when it's done — and the ticket
 is `claim`ed with that SAME agent id. The done-gate requires every done ticket to trace to a
 recorded agent; unclaimed or unrecorded work can never finish this stage.
-Read prior-stage artifacts from `context/` (PRD.md, architecture.md, architecture.svg) and the tickets from the store.
+Read prior-stage artifacts from `context/` (PRD.md, architecture.md, architecture.svg, design-spec.md,
+flow-map.md, and the `mockups/` directory — SOF-99/100) and the tickets from the store.
 
 **The one definition of done:** the app's primary user journey passes end-to-end in a real browser
 (Playwright) on the LIVE deployed URL. Code merging is not done. Deploy succeeding is not done. Only a
@@ -106,6 +107,9 @@ a restyled brand FAILS the happy-flow gate.
 
 For each open ticket in the current wave:
 - `spawn-agent <id> <role> <model> build`; `TicketStore.claim(ticket_id, <id>)` — the SAME id
+- **SOF-100:** if the ticket's `design_refs` is non-empty, open `context/mockups/<SCREEN_ID>.html`
+  for each referenced screen before writing any UI code — the mockup is the spec for that screen,
+  build to match it, not from imagination. Read the ticket's `goal`/`implementation_notes` too.
 - implement THIS ticket yourself; commit it to main as ONE commit with a message naming the ticket
 - capture provenance: `SHA=$(git rev-parse HEAD)` and `DIFF=$(git show --stat HEAD | tail -1)` (the
   changed-lines count)
