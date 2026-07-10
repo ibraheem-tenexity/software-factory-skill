@@ -50,7 +50,7 @@ _PERSISTED = {
     "summary",
     "created_by", "created_at",
     "creds_vault_ids",
-    "paused_at_node", "crashed_at_node",
+    "paused_at_node", "crashed_at_node", "auto_resume_count",
     "relaunched_from",
     "log_url",
     "owner_github_username",
@@ -122,6 +122,12 @@ class ProjectState:
     # Operator-driven recovery (Recovery bar) resumes from these; auto-resume is suppressed.
     paused_at_node: str = ""   # pipeline node where pause was requested
     crashed_at_node: str = ""  # pipeline node where an unexpected process exit was detected
+    # SOF-116: the money-burner guard. A PERSISTED counter — unlike the poller's old in-process
+    # `_auto_resumed` dict, this survives a console restart (redeploy/OOM/crash), so repeated
+    # restarts can't each hand out a fresh set of "free" auto-resumes and retry forever without
+    # ever reaching mark_stage_crashed (which is the only path that notifies the operator).
+    # Reset to 0 on any explicit operator recovery action (resume/retry-node) — a fresh cap.
+    auto_resume_count: int = 0
     held: bool = False  # gated hold: created but NOT launched until released (survives restarts)
     owner: str = ""  # email of the creating user; members see only their own runs (admins see all)
     # SOF-3: the owner's GitHub handle — self-declared, unverified (GitHub's own collaborator-invite

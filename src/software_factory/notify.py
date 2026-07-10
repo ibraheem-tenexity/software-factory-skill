@@ -15,7 +15,7 @@ import json
 import os
 import urllib.request
 
-_EMAIL_KEYS = ("done", "depswait")
+_EMAIL_KEYS = ("done", "depswait", "crashed-final")
 _EMAIL_PREFIXES = ("budget-", "resume-")
 
 

@@ -22,12 +22,14 @@ _stage2_launched: set = set()
 _stage3_launched: set = set()
 _narrated: set = set()
 _log_offsets: dict = {}  # pid -> bytes uploaded on last log flush
-# project_id -> crash auto-resume attempts, bounded per server life. Configurable: long opencode
-# sessions (multi-hour Kimi build/test loops) crash more often than claude's — run-b594a5f4
-# exhausted 2 resumes mid-test-phase and stalled 12h. The bound exists to stop crash loops,
-# not to ration recovery; budget enforcement is the real spend brake.
+# Crash auto-resume attempts. Configurable: long opencode sessions (multi-hour Kimi build/test
+# loops) crash more often than claude's — run-b594a5f4 exhausted 2 resumes mid-test-phase and
+# stalled 12h. The bound exists to stop crash loops, not to ration recovery; budget enforcement is
+# the real spend brake. SOF-116: the count itself is PERSISTED on ProjectState (auto_resume_count),
+# not an in-process dict — a console restart (redeploy/OOM) must not hand out a fresh set of "free"
+# resumes, or a run can retry forever across restarts without ever reaching mark_stage_crashed
+# (the only path that notifies the operator).
 _AUTO_RESUME_MAX = int(os.environ.get("SF_AUTO_RESUME_MAX", "2") or 2)
-_auto_resumed: dict = {}
 _health_bad_since = [None]  # [-]: None = healthy; float = first failure ts (alert once)
 
 
@@ -239,13 +241,16 @@ def _poll_transitions():
                                  "⏸ Budget cap reached — stage stopped (state preserved). "
                                  "Raise the cap to continue.")
                     # SPEC §3 zero-touch: resume a crashed stage automatically (bounded).
-                    if not st.get("done") and _auto_resumed.get(pid, 0) < _AUTO_RESUME_MAX:
+                    # SOF-116: read the PERSISTED count (state.auto_resume_count via status()),
+                    # not an in-process dict — survives console restarts.
+                    resumes_so_far = st.get("auto_resume_count", 0)
+                    if not st.get("done") and resumes_so_far < _AUTO_RESUME_MAX:
                         if console.auto_resume_dead_stage(pid):
-                            _auto_resumed[pid] = _auto_resumed.get(pid, 0) + 1
-                            _narrate(pid, "resume-%d" % _auto_resumed[pid],
+                            n = console.status(pid).get("auto_resume_count", resumes_so_far + 1)
+                            _narrate(pid, "resume-%d" % n,
                                      "⚠️ Stage process died mid-flight — auto-resumed "
-                                     f"(attempt {_auto_resumed[pid]}/{_AUTO_RESUME_MAX}).")
-                    elif not st.get("done") and _auto_resumed.get(pid, 0) >= _AUTO_RESUME_MAX:
+                                     f"(attempt {n}/{_AUTO_RESUME_MAX}).")
+                    elif not st.get("done") and resumes_so_far >= _AUTO_RESUME_MAX:
                         # Auto-resume cap exhausted — land in 'crashed' for Recovery-bar resume.
                         if console.mark_stage_crashed(pid):
                             _narrate(pid, "crashed-final",

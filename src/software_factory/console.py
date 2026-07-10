@@ -758,6 +758,13 @@ class Console:
         if state.phase in ("done", "stopped", "paused", "crashed") or not self.stage_finished(project_id):
             return False   # terminal or operator-controlled — never auto-resume
         stage = state.stage
+        # SOF-116: verify complete BEFORE relaunching — a dead process is not proof of incomplete
+        # work. Stage 3 in particular can finish (tickets approved, app deployed and tested) and
+        # still look "dead" to this function if the specific record-verification call never landed;
+        # re-check the real DB-backed completion gate first so a truly-finished run is never
+        # relaunched just because its process exited.
+        if stage == 3 and self.detect_stage3_done(project_id):
+            return False   # already done — detect_stage3_done just persisted deploy_url + phase
         db = ProjectStore(self._paths(project_id)["db"])
         if any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers()):
             return False   # budget stop is intentional — operator resumes via /budget + /retry
@@ -768,9 +775,18 @@ class Console:
         )
         if not incomplete:
             return False
+        # SOF-116: persisted hard cap — money/lifecycle machinery, not agent judgment. Unlike the
+        # old in-process retry counter, this survives a console restart, so repeated redeploys
+        # can't each hand out a fresh set of "free" auto-resumes and retry forever.
+        max_resumes = int(os.environ.get("SF_AUTO_RESUME_MAX", "2") or 2)
+        if state.auto_resume_count >= max_resumes:
+            return False   # cap exhausted — poller lands this in 'crashed' for operator recovery
         if stage == 3:
             self._reset_stuck_tickets(project_id)
-        logger.info("[auto-resume] %s relaunching dead stage %s", project_id, stage)
+        state.auto_resume_count += 1
+        state.save()
+        logger.info("[auto-resume] %s relaunching dead stage %s (attempt %d/%d)",
+                    project_id, stage, state.auto_resume_count, max_resumes)
         return self.retry_stage(project_id, stage) is not None
 
     def mark_stage_crashed(self, project_id: str) -> bool:
@@ -786,6 +802,11 @@ class Console:
         if not self.stage_finished(project_id):
             return False   # stage is still alive — don't mark crashed prematurely
         stage = state.stage
+        # SOF-116: never crash a run that actually finished (see auto_resume_dead_stage) — the
+        # narrow window between this tick's auto-resume check and this call is enough for the
+        # agent's own verification write to land.
+        if stage == 3 and self.detect_stage3_done(project_id):
+            return False
         db = ProjectStore(self._paths(project_id)["db"])
         incomplete = (
             (stage == 1 and not state.stage1_done)
@@ -794,7 +815,11 @@ class Console:
         )
         if not incomplete:
             return False
-        state.crashed_at_node = state.phase
+        # SOF-116: the honest signal, not the frozen one. state.phase is a scalar set once at
+        # pipeline kickoff and never advanced through the per-node pipeline (see current_phase's
+        # own docstring: "never the stale ProjectState value") — recording it here is exactly the
+        # lying crashed_at_node the ticket reported (stuck at 'provision' while the app was live).
+        state.crashed_at_node = self.current_phase(project_id)
         state.phase = "crashed"
         state.save()
         logger.warning("[crash] %s marked crashed at node %s (stage %s) — auto-resume exhausted",
@@ -809,7 +834,10 @@ class Console:
         if state.phase in ("done", "stopped"):
             return {"project_id": project_id, "phase": state.phase, "paused": False,
                     "detail": "run is already terminal"}
-        node = state.phase
+        # SOF-116: the honest signal — state.phase never advances past the pipeline-kickoff value
+        # it's set to once in promote_draft (see current_phase's docstring); recording it as the
+        # pause point would be stale from the very first pause.
+        node = self.current_phase(project_id)
         self._kill_stage_process(project_id)
         state = self._load_state(project_id)  # reload after kill (stop_project may have saved)
         if state.phase not in ("done", "stopped"):  # don't overwrite a concurrent terminal
@@ -831,6 +859,7 @@ class Console:
             self._reset_stuck_tickets(project_id)
         state.paused_at_node = ""
         state.crashed_at_node = ""
+        state.auto_resume_count = 0  # SOF-116: explicit operator recovery — a fresh cap
         state.phase = resume_node or "provision"
         state.save()
         return self.retry_stage(project_id, stage)
@@ -854,6 +883,7 @@ class Console:
             self._reset_stuck_tickets(project_id)
         state.paused_at_node = ""
         state.crashed_at_node = ""
+        state.auto_resume_count = 0  # SOF-116: explicit operator recovery — a fresh cap
         state.phase = node
         state.save()
         return self.retry_stage(project_id, stage)
@@ -1903,6 +1933,7 @@ class Console:
             "budget_ceiling": self._budget_ceiling(project_id),
             "paused_at_node": state.paused_at_node or "",
             "crashed_at_node": state.crashed_at_node or "",
+            "auto_resume_count": state.auto_resume_count,
             "held": state.held,
             "owner": state.owner,
             "maintenance_enabled": state.maintenance_enabled,
