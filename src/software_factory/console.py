@@ -479,7 +479,14 @@ class Console:
     def current_phase(self, project_id: str) -> str:
         """The derived current phase for the header/API — never the stale ProjectState value."""
         state = self._load_state(project_id)
-        if state.phase in ("done", "stopped"):
+        if state.phase in ("done", "stopped", "draft"):
+            # SOF-98: "draft" must be trusted directly, same as "done"/"stopped" — otherwise a
+            # promote_draft that failed and restored phase="draft" still reports the phases
+            # canvas table's leftover history (e.g. "provision") from the failed attempt, since
+            # that append-only table is never cleaned up. Before this fix, a failed promote never
+            # RETURNED to "draft" at all, so this scenario couldn't previously occur — discovered
+            # live while verifying #326/#327 (is_draft()/the router's retry gate were correctly
+            # restored, but the status API's displayed phase still showed "provision").
             return state.phase
         db = ProjectStore(self._paths(project_id)["db"])
         recorded = db.phase_status()
