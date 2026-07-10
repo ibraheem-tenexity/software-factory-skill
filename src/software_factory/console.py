@@ -1454,6 +1454,9 @@ class Console:
                 state.phase = "draft"
                 state.held = False
                 state.save()
+            # TEMP DIAGNOSTIC (SOF-98) — remove once the live-staging mystery is resolved.
+            logger.warning("[SOF-98-diag] %s: restore path executed, phase now %r (was %r)",
+                            project_id, self._load_state(project_id).phase, "provision")
             raise
 
     def relaunch_project(self, source_id: str, owner: str = "") -> str:
