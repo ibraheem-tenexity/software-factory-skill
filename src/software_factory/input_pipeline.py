@@ -46,6 +46,7 @@ def persist_and_compose(
     interview_md: str | None = None,
     tolerate_extract_failures: bool = False,
     product_brief_md: str | None = None,
+    genre_recipes_md: str | None = None,
 ) -> list[str]:
     """Write attached files into `input_dir`, converting PDFs (markitdown) and Word docs to
     Markdown, then write the composed Stage 1 input to `input_dir/context.md` (it's composed from
@@ -56,7 +57,9 @@ def persist_and_compose(
     and kept paired with their captions; falls back to the text-only converter if the image
     deps are unavailable. `product_brief_md` (the Concierge-finalized brief, SOF-63) SUPERSEDES
     the raw composition as context.md when present; `interview_md` is written verbatim as
-    `interview.md` for Stage 1 to consume.
+    `interview.md` for Stage 1 to consume. `genre_recipes_md` (SOF-96) is written verbatim as
+    `genre-recipes.md` — the selected scope genres' recipe bodies, for product-synthesis to draw
+    its per-genre PRD modules from.
 
     PDF/DOCX originals are kept on disk alongside their `.md` extractions so callers can push
     them to object storage. Returned list includes both the original filename AND the `.md` name
@@ -147,5 +150,11 @@ def persist_and_compose(
         with open(os.path.join(input_dir, "interview.md"), "w") as itf:
             itf.write(interview_md.strip() + "\n")
         written.append("interview.md")
+
+    if genre_recipes_md and genre_recipes_md.strip():
+        os.makedirs(input_dir, exist_ok=True)
+        with open(os.path.join(input_dir, "genre-recipes.md"), "w") as gf:
+            gf.write(genre_recipes_md.strip() + "\n")
+        written.append("genre-recipes.md")
 
     return written

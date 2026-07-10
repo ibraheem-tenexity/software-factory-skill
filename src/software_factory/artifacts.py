@@ -88,6 +88,107 @@ def design_spec_is_complete(text: str, screen_ids: list[str]) -> tuple[bool, lis
     return (True, [])
 
 
+def _find_section(text: str, heading_re: str) -> str | None:
+    """Body of the first h1-h3 heading whose text matches `heading_re`, up to the next heading of
+    the same or shallower level. None if no such heading exists. Numbered headings ('## 5. Foo')
+    match fine since `heading_re` is searched anywhere in the heading text, not anchored."""
+    lines = (text or "").splitlines()
+    start = level = None
+    for i, line in enumerate(lines):
+        m = re.match(r"^(#{1,3})\s+(.*)$", line.strip())
+        if m and re.search(heading_re, m.group(2), re.I):
+            start, level = i + 1, len(m.group(1))
+            break
+    if start is None:
+        return None
+    body = []
+    for line in lines[start:]:
+        m = re.match(r"^(#{1,3})\s+\S", line.strip())
+        if m and len(m.group(1)) <= level:
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+def _subsections(body: str) -> list[str]:
+    """Split a section's body into its nested-heading (h2-h4) subsection chunks. The whole body as
+    one chunk if it has no nested headings of its own."""
+    lines = body.splitlines()
+    starts = [i for i, l in enumerate(lines) if re.match(r"^#{2,4}\s+\S", l.strip())]
+    if not starts:
+        return [body] if body.strip() else []
+    ends = starts[1:] + [len(lines)]
+    return ["\n".join(lines[s:e]) for s, e in zip(starts, ends)]
+
+
+def prd_required_sections_complete(text: str, genres: list[str] | None = None) -> tuple[bool, list[str]]:
+    """SOF-96: the PRD must carry real product depth, not just the SOF-73 structural skeleton —
+    personas, per-feature user stories + acceptance criteria, explicit non-goals, a phased
+    roadmap, and one module per scope genre the user selected. Mechanical presence-check only
+    (headings + key phrases): depth/quality of what's written under each heading stays the
+    synthesizing agent's judgment (Minimum Machinery) — this only catches a PRD that skipped a
+    required section outright. Returns (ok, reasons-it-failed)."""
+    reasons = []
+
+    personas = _find_section(text, r"personas?")
+    if personas is None or not personas.strip():
+        reasons.append("no Personas section (or it's empty)")
+
+    features = _find_section(text, r"feature\s*specs?|\bfeatures\b")
+    if features is None or not features.strip():
+        reasons.append("no Feature Specs section")
+    else:
+        subs = _subsections(features)
+        if not subs:
+            reasons.append("Feature Specs section has no per-feature subsections")
+        bad = []
+        for sub in subs:
+            sub_low = sub.lower()
+            has_story = "user stor" in sub_low or re.search(r"\bas an?\b.+\bi want\b", sub_low, re.S)
+            has_ac = "acceptance criteria" in sub_low
+            if not (has_story and has_ac):
+                heading = next((ln.lstrip("#").strip() for ln in sub.splitlines() if ln.strip()), "(unnamed feature)")
+                bad.append(heading)
+        if bad:
+            reasons.append(f"feature(s) missing a user story and/or acceptance criteria: {', '.join(bad)}")
+
+    non_goals = _find_section(text, r"non[-\s]?goals?|out\s+of\s+scope")
+    if non_goals is None or not non_goals.strip():
+        reasons.append("no Non-Goals / Out of Scope section")
+
+    roadmap = _find_section(text, r"roadmap")
+    if roadmap is None or not roadmap.strip():
+        reasons.append("no phased Roadmap section")
+    else:
+        rlow = roadmap.lower()
+        missing_phases = [p for p, present in (
+            ("v1", "v1" in rlow), ("v1.1", "v1.1" in rlow),
+            ("later/v2/future", bool(re.search(r"\b(later|v2|future)\b", rlow))),
+        ) if not present]
+        if missing_phases:
+            reasons.append(f"Roadmap missing phase(s): {', '.join(missing_phases)}")
+
+    headings_norm = [
+        _normalize(m.group(1))
+        for m in re.finditer(r"^#{1,3}\s+(.*)$", text or "", re.M)
+    ]
+    for genre in (genres or []):
+        name = (genre or "").strip()
+        if not name:
+            continue
+        norm = _normalize(name)
+        if norm and not any(norm in h for h in headings_norm):
+            reasons.append(f"no module/section covering selected scope genre: {name}")
+
+    return (len(reasons) == 0, reasons)
+
+
+def _normalize(s: str) -> str:
+    """Case/whitespace/punctuation-insensitive form for genre-heading matching — 'AP/AR' and
+    'AP / AR' (or '## AP & AR') must compare equal."""
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
 def parse_required_tokens(text: str) -> list[dict]:
     """Extract required tokens/keys/URLs from architecture.md's dependency section.
 

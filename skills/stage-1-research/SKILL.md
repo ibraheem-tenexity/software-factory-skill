@@ -85,7 +85,10 @@ longer does its own ad-hoc web search from scratch; it starts from here.
 
 Run a **council**: 3 drafting seats each produce a candidate PRD draft from the SAME context
 (`input/brief.md` + `input/interview.md` + `context.md` + any `input/images/` + Phase 3's
-`market-scan.md`/`existing-solutions.md`/`requirements-fit.md`). For each seat
+`market-scan.md`/`existing-solutions.md`/`requirements-fit.md` + any `input/genre-recipes.md` —
+SOF-96: present only when the user selected one or more scope genres at intake; each is a recipe
+body the customer's genre-matching modules should cover, adapted to what they actually described,
+never pasted verbatim). For each seat
 `spawn-agent <id> <role> <model> product`, dispatch a native **Task** sub-agent, then
 `finish-agent <id> success`. **Launch the 3 seats in PARALLEL** (multiple Task calls in one turn)
 — they are independent:
@@ -117,11 +120,12 @@ Run a **council**: 3 drafting seats each produce a candidate PRD draft from the 
    `PRD-draft-horizon.md`.
 
 Then dispatch `Task(subagent_type="product")` — the operator-configured PRODUCT agent (its prompt
-lives in Tenexity OS, materialized into your workspace as `.claude/agents/product.md`; if unset it
-falls back to Claude Code's own default subagent behavior) reads all three drafts and composes the
-SINGLE `PRD.md`, then `finish-agent product-synth success`. The synthesized PRD MUST be an
+lives in Tenexity OS's `system_agents` table — DB-editable, the tuning surface for this synthesis
+step — materialized into your workspace as `.claude/agents/product.md`; a starting prompt ships
+seeded, an operator may have since edited it) reads all three drafts and composes the SINGLE
+`PRD.md`, then `finish-agent product-synth success`. The synthesized PRD MUST be an
 **Input-Contract PRD** (so the downstream build/harness can consume it deterministically) AND MUST
-pass `prd_is_complete()`. It must contain:
+pass `prd_is_complete()` AND `prd_required_sections_complete()`. It must contain:
 - **stable IDs** on every screen/step/note;
 - a **screen catalog** table with a scope column (`V1? = Yes/Future`), one row per screen, each tagged
   with its target **app** (`mobile-web | web | api`) — a project may ship **multiple deliverables**;
@@ -134,7 +138,16 @@ pass `prd_is_complete()`. It must contain:
 - an **## Acceptance Criteria** section (given/when/then/verification) and a **## Ticket Seeds** section;
 - captioned **wireframe image refs** when `input/images/` holds wireframes;
 - a closing **PRD lock-in** line: a `SHIP_AS_IS / SHIP_WITH_EDITS / SEND_BACK` tally summarizing where
-  the seats agreed/diverged (autonomous — NO human gate).
+  the seats agreed/diverged (autonomous — NO human gate);
+- **SOF-96 depth (exact headings, mechanically checked — see the PRODUCT agent's own prompt for
+  the full spec):** a **`## Personas`** section (2-4 named personas, each its own `### <Name>,
+  <role>` subsection); a **`## Feature Specs`** section with one `### <Feature Name>` subsection
+  per feature, each carrying its own **User Story:** and **Acceptance Criteria:** (in addition to
+  the whole-product ones above); an explicit **`## Non-Goals`** section; a **`## Roadmap`** section
+  with exactly `### v1` / `### v1.1` / `### Later` subsections, v1 scoped to the customer's budget;
+  and, for every scope genre selected at intake (`input/genre-recipes.md`, when present), a heading
+  named after that genre covering it as a real module — free-form projects with no genre selected
+  owe the same depth from interview content alone.
 
 **On a `SEND_BACK` verdict**, re-loop the synthesis with the divergent seat(s) re-drafted — up to 2
 more passes. If still `SEND_BACK` after that, force `SHIP_WITH_EDITS` with an explicit escalation
@@ -143,13 +156,17 @@ note in the PRD rather than looping forever; the run must never wedge on its own
 Commit + push, then `record-artifact PRD <repo>/PRD.md prd product-synth`.
 
 **Done-gate (mechanical):** `artifacts.prd_is_complete(PRD.md)` passes — ≥3 real product URLs, an
-acceptance-criteria section, and ticket seeds — AND `artifacts.prd_lock_in_verdict(PRD.md)` is
-`SHIP_AS_IS` or `SHIP_WITH_EDITS` (never `SEND_BACK`, never missing). A hollow/absent/unresolved
-PRD does NOT advance.
+acceptance-criteria section, and ticket seeds — AND `artifacts.prd_required_sections_complete
+(PRD.md, scope)` passes — Personas, Feature Specs (each with a user story + its own acceptance
+criteria), Non-Goals, a phased Roadmap, and one heading per selected scope genre — AND
+`artifacts.prd_lock_in_verdict(PRD.md)` is `SHIP_AS_IS` or `SHIP_WITH_EDITS` (never `SEND_BACK`,
+never missing). A hollow/absent/unresolved PRD does NOT advance. Both gate functions are pure
+presence checks (headings + key phrases, no LLM) — depth and quality under each heading are the
+PRODUCT agent's judgment call, never the gate's.
 
 ## When done
 
-Once the PRD passes both checks above, **STOP**. The console detects the complete PRD and launches
+Once the PRD passes every check above, **STOP**. The console detects the complete PRD and launches
 Stage 2. (No "done" event — the committed PRD in the datastore IS the signal.)
 
 ## Python layer (call it, don't reinvent)
@@ -159,7 +176,7 @@ Stage 2. (No "done" event — the committed PRD in the datastore IS the signal.)
 | Record canvas state | `python3 -m software_factory.db <verb> <projects_dir> <project_id> ...` (above) |
 | Verify creds | `creds.check_all(target, env)` |
 | Fusion research | `research.fusion_research(question)` |
-| PRD done-gate | `artifacts.prd_is_complete(text)` + `artifacts.prd_lock_in_verdict(text)` |
+| PRD done-gate | `artifacts.prd_is_complete(text)` + `artifacts.prd_required_sections_complete(text, scope)` + `artifacts.prd_lock_in_verdict(text)` |
 | Isolated workspace | `workspace.create(projects_dir, project_id)` |
 
 ## Guardrails
