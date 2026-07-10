@@ -1121,7 +1121,7 @@ class Console:
                 ] + argv
         else:
             # Model precedence: the operator's per-project pick (most specific — pinned in state at
-            # start_project, so retries keep it) > SF_MODEL env (deploy-wide knob) > stage defaults
+            # promote_draft, so retries keep it) > SF_MODEL env (deploy-wide knob) > stage defaults
             # (research & design on Opus 4.8; build on Sonnet, cheaper for code volume).
             pick = state.planning_model if stage in (1, 2) else state.impl_model
             model = pick or os.environ.get("SF_MODEL") \
@@ -1147,31 +1147,11 @@ class Console:
             logger.warning("[launch] %s stage %s — _launch returned no handle", project_id, stage)
         return result
 
-    def name_taken(self, name: str, exclude: str | None = None) -> bool:
-        """A project name is the user-facing identity, so it must be unique (case-insensitive).
-        Checked at creation. `exclude` skips one run id (not used at create, here for callers)."""
-        n = (name or "").strip().lower()
-        if not n:
-            return False
-        for r in self.list_projects():
-            if r["project_id"] == exclude:
-                continue
-            if (r.get("name") or "").strip().lower() == n:
-                return True
-        return False
-
-    def start_project(self, req: ProjectRequest) -> str:
-        """Start a new run (Stage 1). Returns project_id. Raises ValueError if the project name
-        is already taken (names are the unique, user-facing project identity)."""
-        if req.name and self.name_taken(req.name):
-            raise ValueError(f"A project named {req.name!r} already exists — names must be unique.")
-        project_id = self._new_id()
-        return self._provision_and_launch(project_id, req)
-
     def _provision_and_launch(self, project_id: str, req: ProjectRequest, *,
                               interview_md: str | None = None) -> str:
         """Provision a run dir (id already minted), persist state, and launch Stage 1.
-        Shared by start_project (fresh mint) and promote_draft (existing draft id)."""
+        Called by promote_draft (the only path into a run — Option C's create_draft mints the id
+        up front, so this always runs against an existing draft id)."""
         paths = self._paths(project_id)
         os.makedirs(paths["base"], exist_ok=True)
 
@@ -1232,8 +1212,9 @@ class Console:
         state.held = False   # drafts hold via create_draft; a provisioned run is never held
         state.owner = (req.owner or state.owner or "").lower()
         state.owner_github_username = (req.owner_github_username or state.owner_github_username or "").strip()
-        # Immutable creator stamp — set ONCE (covers a direct start_project with no prior draft; a draft
-        # already stamped it in create_draft, so this never overwrites). Falls back to owner.
+        # Immutable creator stamp — set ONCE (create_draft already stamped it for every real path
+        # into this method, so this is a defensive no-op guard, not the primary stamp site).
+        # Falls back to owner.
         if not state.created_by:
             state.created_by = state.owner
             state.created_at = time.time()
@@ -1562,8 +1543,9 @@ class Console:
         return min(ts) if ts else None
 
     def is_pipeline_project(self, project_id: str) -> bool:
-        """True only if this run was actually started by THIS pipeline (start_project records ≥1
-        artifact in project store). A resurfaced pre-redesign dir — PRD.md on disk but an empty project store
+        """True only if this run was actually started by THIS pipeline (promote_draft's
+        _provision_and_launch records ≥1 artifact in project store). A resurfaced pre-redesign
+        dir — PRD.md on disk but an empty project store
         (created fresh on load) — is False, so the poller never auto-advances/zombie-launches it.
         A DRAFT (pre-run interview) is always False, even though attached files record artifacts,
         so the poller ignores it until promotion."""
