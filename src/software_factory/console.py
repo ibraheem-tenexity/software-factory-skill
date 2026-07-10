@@ -1073,14 +1073,17 @@ class Console:
         # SOF-73: PRODUCT (stage 1) / DESIGN (stage 2, Phase 2) — claude runtime only.
         # SOF-100: stage 2 ALSO materializes TICKETS (Phase 3) — two distinct claude-native
         # subagent slots now live in one stage, so this is a list, not a single (callsign, row).
+        # SOF-119: stage 3 materializes REVIEW (Phase 3a) — the adversarial in-pipeline reviewer,
+        # dispatched once per ticket-wave between the shared deploy+happy-flow gate and the
+        # existing per-ticket QA loop.
         agent_rows: list = []
         try:
             from .system_agents import SystemAgentStore
             store = SystemAgentStore()
             row = store.get(f"STAGE-{stage}")
             override = row["prompt"] if row and (row.get("prompt") or "").strip() else None
-            if runtime == "claude" and stage in (1, 2):
-                callsigns = ["PRODUCT"] if stage == 1 else ["DESIGN", "TICKETS"]
+            if runtime == "claude" and stage in (1, 2, 3):
+                callsigns = {1: ["PRODUCT"], 2: ["DESIGN", "TICKETS"], 3: ["REVIEW"]}[stage]
                 for callsign in callsigns:
                     candidate = store.get(callsign)
                     if candidate and (candidate.get("prompt") or "").strip():
