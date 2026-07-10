@@ -1675,7 +1675,7 @@ class Console:
             return True
         if not self.stage_finished(project_id):
             return False   # SPEC §1: gate + finished process, never mid-flight
-        required = ["PRD.md", "architecture.md", "architecture.svg", "design-spec.md"]
+        required = ["PRD.md", "architecture.md", "architecture.svg", "design-spec.md", "flow-map.md"]
         base = self._paths(project_id)["base"]
         found_root = base
         ok, _missing = artifacts.verify(base, required)
@@ -1697,6 +1697,18 @@ class Console:
         design_ok, _reasons = artifacts.design_spec_is_complete(
             design_text, artifacts.parse_screen_ids(prd_text))
         if not design_ok:
+            return False
+        # SOF-99: no build start without a real per-screen mockup for every V1 screen, plus a
+        # flow map that references them all — file-existence facts, not the text-substring
+        # coverage design_spec_is_complete does for design-spec.md's prose.
+        v1_screen_ids = artifacts.parse_v1_screen_ids(prd_text)
+        mockups_ok, _reasons = artifacts.mockups_cover_v1_screens(found_root, v1_screen_ids)
+        if not mockups_ok:
+            return False
+        with open(os.path.join(found_root, "flow-map.md")) as f:
+            flow_map_text = f.read()
+        flow_map_ok, _reasons = artifacts.flow_map_is_complete(flow_map_text, v1_screen_ids)
+        if not flow_map_ok:
             return False
         # The store must hold real, buildable tickets (acceptance + DoD) — not just
         # ticket *events* on the canvas. An empty/hollow store is NOT a done Stage 2.

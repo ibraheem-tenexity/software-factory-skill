@@ -19,7 +19,7 @@ const INGEST_STATUS: Record<string, { tone: "success" | "warning" | "danger" | "
 const FILE_KIND: Record<string, [string, string, string]> = {
   pdf: ["PDF", "#fbe3e3", "#c0392f"], xlsx: ["XLS", "#e4f8ef", "#1f8a5b"], csv: ["CSV", "#e4f8ef", "#1f8a5b"],
   doc: ["DOC", "#e8f1ff", "#1A7BFF"], md: ["MD", "#e8f1ff", "#1A7BFF"], svg: ["SVG", "#f3e9fb", "#7a3ea8"],
-  video: ["MP4", "#f3e9fb", "#7a3ea8"], img: ["IMG", "#fbefdc", "#b06f12"],
+  video: ["MP4", "#f3e9fb", "#7a3ea8"], img: ["IMG", "#fbefdc", "#b06f12"], mockup: ["HTML", "#f3e9fb", "#7a3ea8"],
 };
 function fmtBytes(n?: number): string {
   if (!n) return "";

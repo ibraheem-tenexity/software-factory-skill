@@ -74,6 +74,88 @@ def parse_screen_ids(text: str) -> list[str]:
     return ids
 
 
+def parse_v1_screen_ids(text: str) -> list[str]:
+    """SOF-99: the PRD screen catalog's V1-only screen IDs (excludes Future). Column ORDER varies
+    between PRDs (the V1?/ID columns aren't always in the same position), so this reads the
+    header row to find both columns by name rather than assuming a fixed layout. Falls back to
+    column 0 for ID and the last column for V1? if a header can't be matched — best-effort,
+    same spirit as parse_screen_ids. A row counts as V1 when its V1? cell starts with "yes"
+    (case-insensitive) — "Future"/"No"/blank do not."""
+    in_section = False
+    header_seen = False
+    id_idx = 0
+    v1_idx = -1
+    ids: list[str] = []
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if re.match(r"^#{1,3}\s+(\d+\.\s+)?.*screen\s+catalog", stripped, re.I):
+            in_section, header_seen, id_idx, v1_idx = True, False, 0, -1
+            continue
+        if not in_section:
+            continue
+        if re.match(r"^#{1,2}\s+\S", stripped):
+            break
+        if not stripped.startswith("|"):
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if re.match(r"^-+$", cells[0]):
+            continue   # markdown table separator row
+        if not header_seen:
+            header_seen = True
+            lowered = [c.lower() for c in cells]
+            for i, c in enumerate(lowered):
+                if c in ("id", "screen id"):
+                    id_idx = i
+            for i, c in enumerate(lowered):
+                if "v1" in c:
+                    v1_idx = i
+            continue
+        if id_idx >= len(cells):
+            continue
+        screen_id = cells[id_idx]
+        if not screen_id:
+            continue
+        v1_cell = cells[v1_idx] if 0 <= v1_idx < len(cells) else cells[-1]
+        if v1_cell.strip().lower().startswith("yes"):
+            ids.append(screen_id)
+    return ids
+
+
+def mockups_cover_v1_screens(base_dir: str, screen_ids: list[str]) -> tuple[bool, list[str]]:
+    """SOF-99: every V1 screen must have a real, non-husk mockup file at
+    `mockups/<SCREEN_ID>.html` under base_dir — a FILE-existence check, not the text-substring
+    coverage `design_spec_is_complete` does for design-spec.md's prose. "Non-husk" is still a
+    mechanical fact, not a quality judgment: non-empty AND contains an `<html`/`<style` token, so
+    a 0-byte or placeholder file doesn't pass. No screen_ids (PRD catalog missing/unparseable) is
+    surfaced as a reason but does not fail this check on its own — nothing to enforce against."""
+    if not screen_ids:
+        return (True, ["no V1 screen IDs found in the PRD's screen catalog to check mockup coverage against"])
+    reasons = []
+    for sid in screen_ids:
+        path = os.path.join(base_dir, "mockups", f"{sid}.html")
+        if not os.path.isfile(path) or os.path.getsize(path) == 0:
+            reasons.append(f"missing or empty mockup for screen {sid} (expected mockups/{sid}.html)")
+            continue
+        with open(path, "r", errors="replace") as f:
+            content = f.read()
+        low = content.lower()
+        if "<html" not in low and "<style" not in low:
+            reasons.append(f"mockups/{sid}.html doesn't look like real HTML (no <html or <style tag)")
+    return (len(reasons) == 0, reasons)
+
+
+def flow_map_is_complete(text: str, screen_ids: list[str]) -> tuple[bool, list[str]]:
+    """SOF-99: flow-map.md must exist (verify() already checks that) AND actually reference every
+    V1 screen ID — same text-substring coverage style as design_spec_is_complete, applied to the
+    design stage's own screen-flow artifact instead of the PRD's prose nav map."""
+    if not screen_ids:
+        return (True, ["no V1 screen IDs found in the PRD's screen catalog to check flow-map coverage against"])
+    missing = [sid for sid in screen_ids if sid not in (text or "")]
+    if missing:
+        return (False, [f"flow-map.md never references screen ID(s): {', '.join(missing)}"])
+    return (True, [])
+
+
 def design_spec_is_complete(text: str, screen_ids: list[str]) -> tuple[bool, list[str]]:
     """SOF-73: design-spec.md must actually cover the PRD's screen catalog, not just exist.
     Returns (ok, reasons). No screen_ids parsed from the PRD (catalog missing/unparseable) is
