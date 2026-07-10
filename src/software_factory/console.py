@@ -477,7 +477,13 @@ class Console:
         return out
 
     def current_phase(self, project_id: str) -> str:
-        """The derived current phase for the header/API — never the stale ProjectState value."""
+        """The derived current phase for the header/API. `ProjectState.phase` is authoritative for
+        every NON-pipeline state (done/stopped/draft/paused/crashed — set directly by an operator
+        action or a terminal gate, never written into the phases canvas table); for everything else
+        (an in-progress pipeline run) the phases canvas table's recorded node history is the source
+        of truth instead, since that scalar is never advanced node-by-node (see #326/#329/#332/#333
+        — the recurring bug is trusting the scalar for a pipeline-progress state, or not trusting it
+        for a non-pipeline one)."""
         state = self._load_state(project_id)
         if state.phase in ("done", "stopped", "draft", "paused", "crashed"):
             # SOF-149: "crashed"/"paused" must ALSO be trusted directly — found live re-verifying
