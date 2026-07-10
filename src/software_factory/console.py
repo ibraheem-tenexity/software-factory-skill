@@ -1234,7 +1234,14 @@ class Console:
 
         prompt = make_prompt_stage1(req, project_id, self._projects_dir, runtime=state.runtime,
                                     brief_block=brief_block)
-        self._launch_stage(project_id, 1, prompt, env)
+        if self._launch_stage(project_id, 1, prompt, env) is None:
+            # SOF-98: _launch_stage can cleanly REFUSE (budget-at-launch, a hard-gated unhealthy
+            # MCP) rather than raise — returning `project_id` here would claim success while
+            # nothing actually launched, the same dishonest-success shape as an uncaught crash.
+            # A budget refusal in particular happens BEFORE _launch_stage's own launch_attempted
+            # stamp, so it isn't even reachable by SOF-116's auto_resume_dead_stage (which requires
+            # launch_attempted or an existing project.log) — a real recorded blocker explains why.
+            raise RuntimeError(f"stage 1 launch was refused for {project_id} — see its recorded blockers")
         return project_id
 
     # ---- Durable drafts: an interview before a run exists -------------------------------
