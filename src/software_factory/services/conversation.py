@@ -4,9 +4,15 @@
 unconditionally the conversation service, backed by `ConversationStore`. The in-memory mock
 (`Conversation`, scripted turns for a keyless demo) and its tests are removed with it.
 """
+import logging
 import uuid
 
 from software_factory import dbshim
+from software_factory.constants import CONCIERGE_SAFE_FALLBACK
+from software_factory.data_transfer_objects.chat_agent import ConciergeTurn
+from software_factory.tagged_reply import parse_tagged_reply
+
+logger = logging.getLogger(__name__)
 
 # SOF-137: the first-turn context is baked into the system prompt and re-sent EVERY turn (the
 # cached agent instance reuses it for the whole conversation) — unlike fetch_document_markdown's
@@ -233,13 +239,56 @@ class DbConversation:
                 if is_first_turn:
                     first_turn_context = _build_first_turn_context(self._console, project_id, self._users)
             self._agents[project_id] = ChatAgent(
-                context="intake", tools=tools, first_turn_context=first_turn_context)
+                context="intake", tools=tools, first_turn_context=first_turn_context,
+                use_tagged_output=True)
         return self._agents[project_id]
 
     def history(self, project_id: str) -> list[dict]:
         """The full transcript for a project (oldest first). Empty if none yet."""
         rows = self._store.history(_onboarding_session_id(project_id))
         return [{"role": r["role"], "content": r["input"] or "", "choices": []} for r in rows]
+
+    def _persist_turn(self, session_id: str, project_id: str, sent_len: int,
+                      final_messages: list, turn: ConciergeTurn, usage: dict) -> dict:
+        """Shared by `turn()` and `turn_stream()` (SOF-154): append everything the run produced —
+        tool calls, tool results, the final reply — to the conversation, then return the
+        ConciergeTurn dict `{response, suggested_responses, message_id, session_id}`. `final_messages`
+        is the full message list (input + produced); `sent_len` is how many of those were the input
+        we sent, so only the newly-produced tail gets persisted here."""
+        suggested = [sr.model_dump() for sr in turn.suggested_responses]
+        new_msgs = final_messages[sent_len:]
+        message_id = None
+        for m in new_msgs:
+            mtype = getattr(m, "type", "")
+            if mtype == "ai":
+                tool_calls = getattr(m, "tool_calls", None) or []
+                if not tool_calls:
+                    # The terminal, tag-formatted reply — its RAW content (still carrying <say>/
+                    # <option> tags) is never persisted as its own row; the parsed, clean `turn`
+                    # below is the one and only row recorded for it.
+                    continue
+                blocks = [{"type": "tool_use", "id": tc.get("id") or "", "name": tc.get("name") or "",
+                          "input": tc.get("args") or {}} for tc in tool_calls]
+                message_id = self._store.append(session_id, "agent", blocks, project_id=project_id)
+            elif mtype == "tool":
+                content_text = m.content if isinstance(m.content, str) else str(m.content)
+                message_id = self._store.append(
+                    session_id, "tool",
+                    [{"type": "tool_result", "tool_use_id": getattr(m, "tool_call_id", "") or "",
+                      "is_error": False, "content": [{"type": "text", "text": content_text}]}],
+                    project_id=project_id, tool_name=getattr(m, "name", None),
+                    tool_call_id=getattr(m, "tool_call_id", None))
+        # The user-facing reply — recorded once, with usage on this final row.
+        message_id = self._store.append(
+            session_id, "agent",
+            [{"type": "text", "text": turn.response, "suggested_responses": suggested}],
+            project_id=project_id,
+            model=usage.get("model"), provider=usage.get("provider"),
+            input_tokens=usage.get("input_tokens", 0), output_tokens=usage.get("output_tokens", 0),
+            cost_usd=usage.get("cost_usd") or 0.0,
+        )
+        return {"response": turn.response, "suggested_responses": suggested,
+                "message_id": message_id, "session_id": session_id}
 
     async def turn(self, project_id: str, message: str) -> dict:
         """One Concierge turn. Non-empty message = the user's turn (recorded, agent replies).
@@ -265,50 +314,51 @@ class DbConversation:
 
         agent = self._get_agent(project_id, is_first_turn=is_first_turn)
         result = await agent.run(messages)
-        turn = result["structured_response"]
+        # SOF-154: ToolStrategy(ConciergeTurn) is off for this agent (use_tagged_output=True) — there
+        # is no more `result["structured_response"]`. Reconstruct from the terminal AI message's
+        # plain, tag-formatted content instead (see tagged_reply.py) — the ReAct loop only stops once
+        # the model emits a no-tool-call message, so that's always the last message in the result.
+        final_messages = result.get("messages") or []
+        final_content = ""
+        if final_messages:
+            last = final_messages[-1]
+            final_content = last.content if isinstance(getattr(last, "content", None), str) else ""
+        turn = parse_tagged_reply(final_content)
         usage = getattr(agent, "last_usage", None) or {}
-        suggested = [sr.model_dump() for sr in turn.suggested_responses]
+        return self._persist_turn(session_id, project_id, len(messages), final_messages, turn, usage)
 
-        # Append EVERYTHING the run produced — tool calls, tool results, replies — to the array,
-        # verbatim. The run's result messages start with the input we sent; everything after is new.
-        new_msgs = (result.get("messages") or [])[len(messages):]
-        message_id = None
-        response_recorded = False
-        for m in new_msgs:
-            mtype = getattr(m, "type", "")
-            if mtype == "ai":
-                blocks = []
-                text = m.content if isinstance(m.content, str) else ""
-                if text.strip():
-                    blk: dict = {"type": "text", "text": text}
-                    if text.strip() == turn.response.strip():
-                        blk["suggested_responses"] = suggested
-                        response_recorded = True
-                    blocks.append(blk)
-                for tc in (getattr(m, "tool_calls", None) or []):
-                    blocks.append({"type": "tool_use", "id": tc.get("id") or "", "name": tc.get("name") or "",
-                                   "input": tc.get("args") or {}})
-                if blocks:
-                    message_id = self._store.append(session_id, "agent", blocks, project_id=project_id)
-            elif mtype == "tool":
-                content_text = m.content if isinstance(m.content, str) else str(m.content)
-                message_id = self._store.append(
-                    session_id, "tool",
-                    [{"type": "tool_result", "tool_use_id": getattr(m, "tool_call_id", "") or "",
-                      "is_error": False, "content": [{"type": "text", "text": content_text}]}],
-                    project_id=project_id, tool_name=getattr(m, "name", None),
-                    tool_call_id=getattr(m, "tool_call_id", None))
-        # The user-facing reply (ToolStrategy emits it as a tool call, so it usually isn't a plain
-        # ai-text message above). Record it once, with usage on this final row.
-        if not response_recorded:
-            message_id = self._store.append(
-                session_id, "agent",
-                [{"type": "text", "text": turn.response, "suggested_responses": suggested}],
-                project_id=project_id,
-                model=usage.get("model"), provider=usage.get("provider"),
-                input_tokens=usage.get("input_tokens", 0), output_tokens=usage.get("output_tokens", 0),
-                cost_usd=usage.get("cost_usd") or 0.0,
-            )
+    async def turn_stream(self, project_id: str, message: str):
+        """SOF-154: the streaming sibling of `turn()` — same recording/reply contract, but the
+        final reply streams token-by-token instead of landing all at once. Yields the SAME
+        `working`/`token`/`option` event dicts `ChatAgent.astream_turn()` produces, then a final
+        `{"type": "done", **turn()'s return dict}` once persistence completes (mirrors `turn()`'s
+        single commit-point — persistence happens AFTER the stream is exhausted, not per-token, so
+        the SOF-90 tool-trace ordering invariant is unchanged, just delayed to stream-end) or
+        `{"type": "error", "detail": ...}` on a genuine mid-stream failure."""
+        text = (message or "").strip()
+        session_id = _onboarding_session_id(project_id)
+        is_first_turn = not self._store.history(session_id)
 
-        return {"response": turn.response, "suggested_responses": suggested,
-                "message_id": message_id, "session_id": session_id}
+        if text:
+            self._store.append(session_id, "user", [{"type": "text", "text": text}],
+                              project_id=project_id)
+
+        from software_factory.conversation_provider import to_provider
+        rows = self._store.history(session_id)
+        messages = to_provider(rows, "openai")
+
+        agent = self._get_agent(project_id, is_first_turn=is_first_turn)
+        try:
+            async for ev in agent.astream_turn(messages):
+                yield ev
+        except Exception:
+            logger.exception("[conversation] turn_stream mid-stream failure, project=%s", project_id)
+            yield {"type": "error", "detail": CONCIERGE_SAFE_FALLBACK}
+            return
+
+        final_messages = getattr(agent, "last_messages", None) or list(messages)
+        turn = getattr(agent, "last_turn", None) or ConciergeTurn(
+            response=CONCIERGE_SAFE_FALLBACK, suggested_responses=[])
+        usage = getattr(agent, "last_usage", None) or {}
+        result = self._persist_turn(session_id, project_id, len(messages), final_messages, turn, usage)
+        yield {"type": "done", **result}

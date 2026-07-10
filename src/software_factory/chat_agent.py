@@ -22,6 +22,7 @@ from software_factory.constants import (
 )
 from software_factory.data_transfer_objects.chat_agent import ConciergeTurn
 from software_factory.default_prompt import build_system_prompt
+from software_factory.tagged_reply import TaggedReplyParser
 
 # Model type → chat model class. Kimi (Moonshot) speaks the OpenAI wire protocol, so it's the same
 # client class with a different base_url/key — the map is the single place that knowledge lives.
@@ -120,13 +121,23 @@ class ChatAgent:
     """
 
     def __init__(self, context: str = "intake", tools: list | None = None, model=None,
-                 first_turn_context: str | None = None):
-        self.last_usage: dict = {}   # set by run(): {model, provider, input/output_tokens, cost_usd}
+                 first_turn_context: str | None = None, use_tagged_output: bool = False):
+        """`use_tagged_output` (SOF-154): drop the forced `ToolStrategy(ConciergeTurn)` structured
+        output entirely and let the final turn stream as plain content instead, formatted per the
+        `<say>`/`<option>` tag contract (`tagged_reply.py`) the `context`'s prompt framing must
+        already instruct — today that's ONLY `default_prompt._CONTEXT_FRAMING["intake"]`. This is a
+        construction-time choice (`response_format` is bound once, at `create_agent`), so a caller
+        that wants the old one-shot structured-JSON behavior (the dock) simply never passes it."""
+        self.last_usage: dict = {}   # set by run()/astream_turn(): {model, provider, tokens, cost_usd}
+        self._use_tagged_output = use_tagged_output
+        kwargs: dict = {}
+        if not use_tagged_output:
+            kwargs["response_format"] = ToolStrategy(ConciergeTurn)
         self._agent = create_agent(
             model or choose_chat_model(),
             tools or [],
             system_prompt=build_system_prompt(context, first_turn_context),
-            response_format=ToolStrategy(ConciergeTurn),
+            **kwargs,
         )
 
     async def run(self, messages: list) -> dict:
@@ -145,3 +156,67 @@ class ChatAgent:
                 continue
         return {"messages": [],
                 "structured_response": ConciergeTurn(response=CONCIERGE_SAFE_FALLBACK, suggested_responses=[])}
+
+    async def astream_turn(self, messages: list):
+        """SOF-154: stream the final tagged reply. Requires `use_tagged_output=True` at
+        construction (there is no forced structured_response to stream field-by-field otherwise).
+
+        Yields event dicts as they occur:
+          - `{"type": "working"}` — the model is mid-tool-call this turn (real tool_call_chunks
+            seen); emitted once per model turn that calls a tool, never carries prose.
+          - `{"type": "token", "text": ...}` / `{"type": "option", "option_type", "text"}` — from
+            `TaggedReplyParser`, fed the final turn's plain-content deltas.
+
+        After the stream is exhausted, sets `self.last_turn` (the reconstructed `ConciergeTurn`),
+        `self.last_messages` (the full message list — same shape `run()`'s `result["messages"]`
+        carries, for the caller's existing persistence walk), and `self.last_usage`.
+
+        Retry semantics mirror `run()`: one silent retry, but ONLY while `started` is still False
+        (nothing has reached the caller yet) — once a real `working`/`token`/`option` event has been
+        yielded, a subsequent failure is NOT retried here. It propagates as a raised exception so the
+        caller (already mid-stream to its own client) surfaces its own error event instead of this
+        method silently redoing work the user has partially seen."""
+        if not self._use_tagged_output:
+            raise RuntimeError("astream_turn requires ChatAgent(use_tagged_output=True)")
+        for attempt in range(2):
+            parser = TaggedReplyParser()
+            started = False
+            in_tool_call_streak = False
+            result_messages = list(messages)
+            try:
+                async for ev in self._agent.astream_events({"messages": messages}, version="v2"):
+                    name = ev.get("event")
+                    if name == "on_chat_model_stream":
+                        chunk = ev["data"]["chunk"]
+                        if getattr(chunk, "tool_call_chunks", None):
+                            if not in_tool_call_streak:
+                                in_tool_call_streak = True
+                                started = True
+                                yield {"type": "working"}
+                            continue
+                        in_tool_call_streak = False
+                        text = chunk.content if isinstance(chunk.content, str) else ""
+                        if text:
+                            events = parser.feed(text)
+                            if events:
+                                started = True
+                            for out in events:
+                                yield out
+                    elif name == "on_chain_end" and ev.get("name") == "LangGraph":
+                        output = ev.get("data", {}).get("output") or {}
+                        if isinstance(output, dict) and output.get("messages"):
+                            result_messages = output["messages"]
+            except Exception:
+                if started:
+                    raise
+                logger.exception("[chat_agent] astream_turn attempt %s failed", attempt + 1)
+                continue
+            for out in parser.finish():
+                yield out
+            self.last_messages = result_messages
+            self.last_usage = _extract_usage(result_messages)
+            self.last_turn = parser.reconstruct()
+            return
+        self.last_messages = []
+        self.last_usage = {}
+        self.last_turn = ConciergeTurn(response=CONCIERGE_SAFE_FALLBACK, suggested_responses=[])
