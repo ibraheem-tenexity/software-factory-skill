@@ -1428,7 +1428,26 @@ class Console:
         state.phase = "provision"
         state.held = False
         state.save()
-        return self._provision_and_launch(project_id, req, interview_md=interview_md)
+        try:
+            return self._provision_and_launch(project_id, req, interview_md=interview_md)
+        except Exception:
+            # SOF-98: a launch that fails or crashes anywhere in this chain (workspace prep, MCP
+            # check, the subprocess spawn itself) must not strand the row at phase="provision"
+            # forever — nothing else ever un-sticks it (is_pipeline_project can be True here via
+            # the context.md artifact _provision_and_launch just recorded, yet auto_resume_dead_stage
+            # requires launch_attempted/a project.log to even consider it, neither of which may exist
+            # if the crash happened before _launch_stage got that far). Restore the honest state: the
+            # hand-off simply didn't happen, so the draft goes back to being a draft — the SAME
+            # onboarding screen the user is already on already re-enables its Hand off button and
+            # shows the real error (OnboardingScreen.tsx's catch), so this is a real, working retry
+            # with zero new UI needed. Re-raise so the caller (router + the concierge's
+            # hand_off_to_factory tool) still sees the actual failure, not a silent success.
+            state = self._load_state(project_id)
+            if state.phase not in ("done", "stopped"):  # don't clobber a concurrent terminal
+                state.phase = "draft"
+                state.held = False
+                state.save()
+            raise
 
     def relaunch_project(self, source_id: str, owner: str = "") -> str:
         """Mint a fresh run from the same spec as a stopped/done project.
