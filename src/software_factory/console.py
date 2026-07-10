@@ -1057,7 +1057,14 @@ class Console:
         # a missing SF_APP_URL — same tolerance as admin_service.py's access_resend, which
         # degrades rather than blocking a launch.
         from . import auth as _auth
-        base_url = (os.environ.get("SF_APP_URL") or "").rstrip("/")
+        # SOF-155: derive the console's public base URL for the per-run proxy callbacks. SF_APP_URL
+        # is an OPTIONAL override; fall back to Railway's always-auto-injected RAILWAY_PUBLIC_DOMAIN
+        # (e.g. console.tenexity.ai) so this can't silently no-op from a forgotten env var — which
+        # is exactly what left BOTH the memory MCP (SOF-41) and the research proxy unwired in every
+        # environment (SF_APP_URL was set nowhere; the guard below was always false).
+        _pub = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+        base_url = (os.environ.get("SF_APP_URL")
+                    or (f"https://{_pub}" if _pub else "")).rstrip("/")
         if base_url:
             env = {**env, "SF_MEMORY_TOKEN": _auth.sign_scope_token(project_id),
                   "SF_MEMORY_MCP_URL": f"{base_url}/mcp/memory",
@@ -1067,7 +1074,8 @@ class Console:
                   "SF_RESEARCH_TOKEN": _auth.sign_scope_token(project_id, purpose="research"),
                   "SF_RESEARCH_URL": f"{base_url}/api/research/fusion"}
         else:
-            logger.debug("[launch] %s SF_APP_URL unset — memory MCP + research proxy not wired", project_id)
+            logger.warning("[launch] %s no console base URL (SF_APP_URL and RAILWAY_PUBLIC_DOMAIN both "
+                           "unset) — memory MCP + research proxy NOT wired for this stage", project_id)
         # Operator override: if staff edited THIS stage's prompt for THIS runtime in the OS Agents
         # dashboard, that stored text drives the run (written as ws/SKILL.md); else the on-disk
         # default. Per-runtime + best-effort — a store hiccup must never block a launch.
