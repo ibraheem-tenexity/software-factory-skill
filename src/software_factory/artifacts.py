@@ -271,6 +271,47 @@ def _normalize(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
 
 
+_DECISION_LOG_SENTINEL_RE = re.compile(
+    r"\b(nothing to declare|none declared|no (assumptions|shortcuts|known gaps)[^.\n]{0,40}to declare)\b",
+    re.I)
+_DECISION_LOG_TYPE_RE = re.compile(r"^(assumption|shortcut|known[-\s]?gap)\b", re.I)
+
+
+def decision_log_is_complete(text: str) -> tuple[bool, list[str]]:
+    """SOF-118: decision-log.md must actually disclose real content, not just exist as a blank
+    file — `verify()` already checks existence/non-emptiness; this checks the CONTENT is a real
+    disclosure. Passes if EITHER (a) the file has ≥1 real `## <Type>: ...` entry (type is
+    assumption/shortcut/known-gap, case-insensitive), each carrying a `Reason` and an
+    `Affected surface`, OR (b) an explicit "nothing to declare" sentinel — a stage that genuinely
+    made no notable shortcuts is allowed to say so, but silence/a placeholder heading is not the
+    same as an honest, stated 'none'. Mechanical presence-check only: whether the disclosed reason
+    is a GOOD reason is the writing agent's judgment, never the gate's."""
+    if _DECISION_LOG_SENTINEL_RE.search(text or ""):
+        return (True, [])
+    lines = (text or "").splitlines()
+    starts = [i for i, ln in enumerate(lines) if re.match(r"^#{1,3}\s+\S", ln.strip())]
+    if not starts:
+        return (False, ["no '## <Type>: ...' entries found, and no explicit "
+                        "'nothing to declare' statement"])
+    ends = starts[1:] + [len(lines)]
+    reasons = []
+    found_entry = False
+    for s, e in zip(starts, ends):
+        heading = re.sub(r"^#{1,3}\s+", "", lines[s].strip())
+        if not _DECISION_LOG_TYPE_RE.match(heading):
+            continue   # not a decision-log entry heading (e.g. a doc title) — ignore, not a failure
+        found_entry = True
+        body_low = "\n".join(lines[s + 1:e]).lower()
+        missing = [label for label, needle in (("Reason", "reason"), ("Affected surface", "affected surface"))
+                  if needle not in body_low]
+        if missing:
+            reasons.append(f"entry {heading!r} missing: {', '.join(missing)}")
+    if not found_entry:
+        reasons.append("no entry heading starts with Assumption/Shortcut/Known Gap, and no "
+                       "explicit 'nothing to declare' statement")
+    return (len(reasons) == 0, reasons)
+
+
 def parse_required_tokens(text: str) -> list[dict]:
     """Extract required tokens/keys/URLs from architecture.md's dependency section.
 

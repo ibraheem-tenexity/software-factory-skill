@@ -5,7 +5,9 @@
                                               └── qa_reject ──▶ open  (carries a bug report)
 
 `mark_done` is the gate that makes "done" mean something: it refuses to close a ticket
-without a real merged PR (or commit sha) and a non-empty diff. An empty agent turn
+without a real merged PR (or commit sha), a non-empty diff, AND (SOF-118) an explicit
+`decision_log` — the build agent's own disclosure of what it assumed/shortcut/left as a
+known gap, or an honest `[]` when there's nothing to declare. An empty agent turn
 therefore cannot be laundered into "complete". The later transitions drive deploy + the
 QA loop: a deployed ticket is exercised on its live URL; on a bug it bounces back to
 `open` carrying a markdown bug report (with Supabase Storage screenshot links) in its
@@ -41,13 +43,37 @@ _BUILT_OR_BEYOND = ("done", "deployed", "qa_testing", "approved")
 
 
 def _decode_row(row) -> dict:
-    """JSON-decode `design_refs`/`dependencies` for the `Ticket` dataclass — SQL NULL stays
-    Python `None` (never addressed); a JSON array (including `'[]'`) decodes to a real list."""
+    """JSON-decode `design_refs`/`dependencies`/`decision_log` for the `Ticket` dataclass — SQL
+    NULL stays Python `None` (never addressed); a JSON array (including `'[]'`) decodes to a real
+    list."""
     d = dict(row)
-    for key in ("design_refs", "dependencies"):
+    for key in ("design_refs", "dependencies", "decision_log"):
         raw = d.get(key)
         d[key] = json.loads(raw) if raw is not None else None
     return d
+
+
+_DECISION_LOG_TYPES = ("assumption", "shortcut", "known-gap")
+
+
+def _decision_log_errors(entries: list) -> list[str]:
+    """SOF-118: structural validation for a decision_log array — mechanical shape checks only
+    (real `type` enum value, non-empty `statement`/`reason`/`affected_surface`), never a judgment
+    on whether the disclosure itself is good enough. Returns human-readable problems, empty if
+    the structure is sound (including an empty list, which is always sound)."""
+    problems = []
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            problems.append(f"entry {i}: not an object — expected "
+                            f"{{type, statement, reason, affected_surface}}")
+            continue
+        etype = entry.get("type")
+        if etype not in _DECISION_LOG_TYPES:
+            problems.append(f"entry {i}: type {etype!r} must be one of {_DECISION_LOG_TYPES}")
+        for field_name in ("statement", "reason", "affected_surface"):
+            if not (entry.get(field_name) or "").strip():
+                problems.append(f"entry {i}: missing or empty '{field_name}'")
+    return problems
 
 
 class HollowWorkError(Exception):
@@ -79,6 +105,10 @@ class Ticket:
     dependencies: Optional[list] = None   # other tickets this one depends on (title/in-batch ref)
     scope_genre: Optional[str] = None     # the PRD genre-module heading this ticket belongs to
     implementation_notes: str = ""        # concrete build guidance beyond acceptance/dod
+    # SOF-118: same None/[]/populated convention — the build agent's own disclosure of what it
+    # assumed/shortcut/left-undone while implementing THIS ticket. mark_done() refuses to close
+    # a ticket that never addressed this.
+    decision_log: Optional[list] = None
 
 
 class TicketStore:
@@ -130,13 +160,19 @@ class TicketStore:
         self._repo.update(ticket_id, status="in_progress", agent=agent)
 
     def mark_done(self, ticket_id: int, provenance, diff_lines: int,
-                  provenance_type: str | None = None) -> None:
+                  provenance_type: str | None = None,
+                  decision_log: Optional[list] = None) -> None:
         """Close a ticket against REAL, attributable work. `provenance` is the work's
         proof: a merged PR number or URL (claude orchestrator workflow) OR a commit sha
         string (monolithic opencode workflow — direct commits to main have no PRs;
         run-45b8c4d5 proved the gate was unsatisfiable for Kimi as previously specced).
         Either way the no-hollow-close property holds: non-empty provenance + a non-zero
-        diff. Allowed from open/in_progress (claim is the norm but not required)."""
+        diff. Allowed from open/in_progress (claim is the norm but not required).
+
+        SOF-118: `decision_log` is REQUIRED — pass `[]` for an honest "nothing to declare," never
+        omit it. `None` (the default, meaning "never addressed") and a structurally invalid list
+        both refuse the close, same as a hollow provenance/diff — the refusal message states
+        exactly what to fix so the closing agent can act on it directly."""
         self._require(ticket_id, ("open", "in_progress"), "done")
         if provenance is None:
             provenance = ""
@@ -151,8 +187,21 @@ class TicketStore:
             raise HollowWorkError(f"ticket {ticket_id}: refusing 'done' without a merged PR or commit sha")
         if diff_lines <= 0:
             raise HollowWorkError(f"ticket {ticket_id}: refusing 'done' with an empty diff")
+        if decision_log is None:
+            raise HollowWorkError(
+                f"ticket {ticket_id}: refusing 'done' — decision_log was never addressed. Call "
+                f"mark_done(..., decision_log=[]) if there is honestly nothing to declare, or "
+                f"decision_log=[{{'type': 'assumption'|'shortcut'|'known-gap', 'statement': ..., "
+                f"'reason': ..., 'affected_surface': ...}}, ...] to disclose what you assumed, "
+                f"shortcut, or left as a known gap while building this ticket.")
+        problems = _decision_log_errors(decision_log)
+        if problems:
+            raise HollowWorkError(
+                f"ticket {ticket_id}: refusing 'done' — decision_log is malformed: "
+                + "; ".join(problems))
         self._repo.update(ticket_id, status="done", provenance=provenance,
-                          provenance_type=provenance_type, diff_lines=diff_lines)
+                          provenance_type=provenance_type, diff_lines=diff_lines,
+                          decision_log=json.dumps(decision_log))
 
     def mark_deployed(self, ticket_id: int) -> None:
         self._require(ticket_id, ("done",), "deployed")

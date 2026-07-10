@@ -202,7 +202,10 @@ _USAGE = (
     "  finish-agent <projects_dir> <project_id> <agent_id> <outcome> [cost_usd] [provenance] [diff_lines]\n"
     "                         provenance = PR number or commit SHA; type inferred (digits='pr', else='commit')\n"
     "  claim <projects_dir> <project_id> <ticket_id> <agent>\n"
-    "  mark-done <projects_dir> <project_id> <ticket_id> <provenance> <diff_lines>\n"
+    "  mark-done <projects_dir> <project_id> <ticket_id> <provenance> <diff_lines> <decision_log_json>\n"
+    "                         decision_log_json = a JSON array of {type, statement, reason,\n"
+    "                         affected_surface} objects, or '[]' for an honest 'nothing to declare'\n"
+    "                         — REQUIRED, mark-done refuses a hollow close without it (SOF-118)\n"
     "  mark-deployed <projects_dir> <project_id> <ticket_id>\n"
     "  start-qa <projects_dir> <project_id> <ticket_id>\n"
     "  qa-approve <projects_dir> <project_id> <ticket_id>\n"
@@ -382,7 +385,8 @@ def main(argv: list[str]) -> int:
         if verb == "claim":
             ts.claim(tid, rest[1])
         elif verb == "mark-done":
-            ts.mark_done(tid, rest[1], int(rest[2]))
+            decision_log = json.loads(rest[3]) if len(rest) > 3 and rest[3] not in ("", "-") else None
+            ts.mark_done(tid, rest[1], int(rest[2]), decision_log=decision_log)
         elif verb == "mark-deployed":
             ts.mark_deployed(tid)
         elif verb == "start-qa":

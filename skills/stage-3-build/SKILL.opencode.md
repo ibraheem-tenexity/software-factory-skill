@@ -113,10 +113,17 @@ For each open ticket in the current wave:
 - implement THIS ticket yourself; commit it to main as ONE commit with a message naming the ticket
 - capture provenance: `SHA=$(git rev-parse HEAD)` and `DIFF=$(git show --stat HEAD | tail -1)` (the
   changed-lines count)
-- **`TicketStore.mark_done(ticket_id, "<SHA>", <diff_lines>)` — MANDATORY, IMMEDIATELY after the
-  commit.** The commit sha is your PR-equivalent; the done-gate reads this ledger and a run whose
-  tickets were never marked done can NEVER reach done, no matter how good the app is
-  (run-45b8c4d5 shipped a fully verified app and still scored not-done for exactly this).
+- **`TicketStore.mark_done(ticket_id, "<SHA>", <diff_lines>, decision_log=<list>)` — MANDATORY,
+  IMMEDIATELY after the commit.** The commit sha is your PR-equivalent; the done-gate reads this
+  ledger and a run whose tickets were never marked done can NEVER reach done, no matter how good
+  the app is (run-45b8c4d5 shipped a fully verified app and still scored not-done for exactly
+  this). **SOF-118 — state this up front, it is not optional:** `decision_log` is REQUIRED — pass
+  `[]` only if you genuinely have nothing to declare, or a list of `{type, statement, reason,
+  affected_surface}` objects (`type` is `assumption`|`shortcut`|`known-gap`) disclosing what you
+  assumed, shortcut, or left as a known gap while building THIS ticket (e.g. "seeded 16/24 rows
+  with the field the PRD didn't specify for the rest," "this check only runs client-side"). Never
+  omit it or silently carry forward an undeclared gap — `mark_done` refuses a hollow close without
+  it and states exactly what's missing.
 - `finish-agent <id> <outcome> 0 <SHA> <diff_lines>` (cost 0 is fine — the host attributes session
   cost; sha + diff_lines are the fields that matter)
 
@@ -259,7 +266,26 @@ bounces a ticket back to `open` with a bug report. Per ticket, after its app is 
      ticket returns to `open` carrying the report — rebuild it, redeploy, QA again.
 
 **The run is DONE only when `TicketStore.all_approved()`** (every ticket `approved`) AND a passing
-Playwright verification per deliverable is recorded. `detect_stage3_done` enforces both.
+Playwright verification per deliverable is recorded AND `build-decision-log.md` exists and passes its
+gate (Phase 3c below). `detect_stage3_done` enforces all three.
+
+## Phase 3c: decision log  (`set-phase decision-log`)
+
+**SOF-118:** write `build-decision-log.md` (a DIFFERENT filename than Stage 2's `decision-log.md` — you clone the same repo Stage 2 committed to, so a same-named file here would collide with its already-gated content) — YOUR OWN stage-wide disclosure of what you assumed,
+shortcut, or left as a known gap across the BUILD as a whole, distinct from each ticket's own
+`decision_log` (already captured per-ticket at `mark_done` time in Phase 1). This is for
+cross-cutting build decisions that don't belong to one ticket.
+
+One `## <Type>: <short title>` section per entry (`Assumption` / `Shortcut` / `Known Gap`), each
+with a `- **Reason:**` and a `- **Affected surface:**` line — or, if there's genuinely nothing
+stage-wide to add beyond what's already on individual tickets, an explicit line like "Nothing to
+declare beyond the per-ticket decision logs." A blank/placeholder file is NOT the same as that
+honest statement and fails the done-gate.
+
+`record-artifact "Build Decision Log" build-decision-log.md decision-log <agent>`.
+
+**Done-gate (mechanical):** `artifacts.verify(run_dir, ["build-decision-log.md"])` passes AND
+`artifacts.decision_log_is_complete(build-decision-log.md)`.
 
 ## Phase 4: teardown  (`set-phase teardown`)
 
@@ -276,12 +302,16 @@ Proof (project.db + project.log) at the base survives.
 | Repo / PR / merge | `repo.GitHub` — `open_pr`, `merge_if_green` |
 | Deploy + health | `deploy.deploy(target, dir)`, `deploy.healthy(url)` |
 | Done verdict | `gate.happy_flow_passed(result)`, `gate.bugs_from(result)` |
+| Decision-log done-gate | `artifacts.decision_log_is_complete(decision_log_text)` |
 | Workspace teardown | `workspace.destroy(path, projects_dir)` |
 
 ## Guardrails
 
 - **No hollow done:** empty diff = no-op = retry; `merge_if_green` + `mark_done` enforce real diffs/PRs;
-  done REQUIRES a recorded passing Playwright verification AND every ticket `approved` via the QA loop.
+  done REQUIRES a recorded passing Playwright verification, every ticket `approved` via the QA loop,
+  AND (SOF-118) a real (or explicitly "nothing to declare") stage decision log.
+- **No silent gaps:** `mark_done` refuses to close ANY ticket without its own `decision_log` — a
+  real shortcut/gap must be disclosed there, not carried forward unstated.
 - **One ticket at a time:** each bracketed by `spawn-agent`/`claim`/…/`finish-agent` with the same id.
 - **Deploy isolation:** always deploy to `sf-<project_id>`, never the console service.
 - **Fully autonomous** — no human approval gates.

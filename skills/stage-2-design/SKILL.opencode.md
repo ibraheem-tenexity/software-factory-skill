@@ -138,10 +138,30 @@ ok, reasons = s.depth_ok(v1_screen_ids, scope); \
 assert ok, 'ticket depth gate failed: ' + '; '.join(reasons)"
 ```
 
+## Phase 4: decision log  (`set-phase decision-log`)
+
+**SOF-118:** write `decision-log.md` — YOUR OWN stage-wide disclosure of what you assumed,
+shortcut, or left as a known gap while architecting/designing/writing tickets, distinct from
+each ticket's own `decision_log` (which the Stage-3 build agent fills in per-ticket at close
+time). This is for cross-cutting Stage-2 decisions that don't belong to one ticket.
+
+One `## <Type>: <short title>` section per entry, `Type` one of `Assumption` / `Shortcut` /
+`Known Gap`, each with a `- **Reason:**` and a `- **Affected surface:**` line. If you genuinely
+made no notable stage-wide assumptions/shortcuts/gaps, write a single explicit line — e.g.
+"Nothing to declare for this stage." — rather than a blank file; a blank/placeholder file is NOT
+the same as an honest "none" and fails the done-gate.
+
+Commit + push; `record-artifact "Decision Log" decision-log.md decision-log <agent>`.
+
+**Done-gate (mechanical):** `artifacts.verify(run_dir, ["decision-log.md"])` passes AND
+`artifacts.decision_log_is_complete(decision-log.md)` — real entries with Reason + Affected
+surface, or an explicit "nothing to declare" statement.
+
 ## When done
 
-Once PRD+architecture+svg+design-spec.md+flow-map.md all exist (design-spec.md covering every PRD
-screen ID, a real mockup for every V1 screen, flow-map.md covering every V1 screen ID) AND
+Once PRD+architecture+svg+design-spec.md+flow-map.md+decision-log.md all exist (design-spec.md
+covering every PRD screen ID, a real mockup for every V1 screen, flow-map.md covering every V1
+screen ID, decision-log.md a real disclosure or an explicit "nothing to declare") AND
 `TicketStore.buildable_count() >= 1` AND `TicketStore.depth_ok(...)` passes, **STOP**. The console
 detects this, collects required dependencies from the user, and launches Stage 3. (No "done"
 event — the datastore is the signal.)
@@ -161,6 +181,7 @@ event — the datastore is the signal.)
 | Tickets | `tickets.TicketStore` — `create_ticket` (persist!), `claim`, `mark_done` |
 | Ticket hollow-gate | `tickets.TicketStore(db).buildable_count()` — must be ≥1 |
 | Ticket depth-gate | `tickets.TicketStore(db).depth_ok(v1_screen_ids, scope)` |
+| Decision-log done-gate | `artifacts.decision_log_is_complete(decision_log_text)` |
 
 ## Guardrails
 

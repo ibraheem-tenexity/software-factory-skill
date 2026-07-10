@@ -1594,7 +1594,8 @@ class Console:
              "goal": getattr(t, "goal", ""), "design_refs": getattr(t, "design_refs", None),
              "dependencies": getattr(t, "dependencies", None),
              "scope_genre": getattr(t, "scope_genre", None),
-             "implementation_notes": getattr(t, "implementation_notes", "")}
+             "implementation_notes": getattr(t, "implementation_notes", ""),
+             "decision_log": getattr(t, "decision_log", None)}
             for t in store.all_tickets()
         ]
         waves = sorted({t["wave"] for t in items})
@@ -1683,7 +1684,8 @@ class Console:
             return True
         if not self.stage_finished(project_id):
             return False   # SPEC §1: gate + finished process, never mid-flight
-        required = ["PRD.md", "architecture.md", "architecture.svg", "design-spec.md", "flow-map.md"]
+        required = ["PRD.md", "architecture.md", "architecture.svg", "design-spec.md", "flow-map.md",
+                   "decision-log.md"]
         base = self._paths(project_id)["base"]
         found_root = base
         ok, _missing = artifacts.verify(base, required)
@@ -1717,6 +1719,13 @@ class Console:
             flow_map_text = f.read()
         flow_map_ok, _reasons = artifacts.flow_map_is_complete(flow_map_text, v1_screen_ids)
         if not flow_map_ok:
+            return False
+        # SOF-118: the design stage's own decision log — real disclosed content or an explicit
+        # "nothing to declare," never a blank/placeholder file.
+        with open(os.path.join(found_root, "decision-log.md")) as f:
+            decision_log_text = f.read()
+        decision_log_ok, _reasons = artifacts.decision_log_is_complete(decision_log_text)
+        if not decision_log_ok:
             return False
         # The store must hold real, buildable tickets (acceptance + DoD) — not just
         # ticket *events* on the canvas. An empty/hollow store is NOT a done Stage 2.
@@ -1773,6 +1782,25 @@ class Console:
         # Gate (c): QA approved every ticket. The QA agent drives each deployed ticket's happy flow
         # and qa_approve/qa_reject's it; the run is not done while any ticket is unapproved.
         if not tickets.all_approved():
+            return False
+        # SOF-118: Stage 3's own stage-wide decision log (cross-cutting build shortcuts not tied
+        # to one ticket — per-ticket decisions are already enforced individually by mark_done()).
+        # Named DISTINCTLY from Stage 2's decision-log.md ("build-decision-log.md", not
+        # "decision-log.md") — Stage 3 clones the SAME canonical repo Stage 2 committed to (SOF-22),
+        # so it would otherwise inherit Stage 2's already-gated file via git history and this check
+        # could never tell "Stage 2's leftover" from "Stage 3 actually wrote its own."
+        base = paths["base"]
+        decision_log_root = None
+        for root, _dirs, files in os.walk(base):
+            if "build-decision-log.md" in files:
+                decision_log_root = root
+                break
+        if decision_log_root is None:
+            return False
+        with open(os.path.join(decision_log_root, "build-decision-log.md")) as f:
+            decision_log_text = f.read()
+        decision_log_ok, _reasons = artifacts.decision_log_is_complete(decision_log_text)
+        if not decision_log_ok:
             return False
         passing = [v for v in db.verifications() if v["passed"]]
         # Gate (d): if auth is present (agent recorded a demo-creds artifact), the happy-flow must
