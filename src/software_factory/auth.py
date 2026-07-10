@@ -119,23 +119,27 @@ def verify_session(cookie: str) -> dict | None:
 MEMORY_TOKEN_TTL = 24 * 3600   # spans a full stage run, not just a browser tab
 
 
-def sign_scope_token(project_id: str, ttl_seconds: int = MEMORY_TOKEN_TTL) -> str:
-    """A token scoping its bearer to exactly one project's memory. Minted once per stage launch
-    (console.py::_launch_stage) and handed to the stage subprocess as SF_MEMORY_TOKEN."""
-    payload = {"purpose": "memory", "pid": str(project_id), "exp": int(time.time()) + ttl_seconds}
+def sign_scope_token(project_id: str, purpose: str = "memory",
+                     ttl_seconds: int = MEMORY_TOKEN_TTL) -> str:
+    """A token scoping its bearer to exactly one project AND one capability. Minted per stage
+    launch (console.py::_launch_stage) and handed to the stage subprocess. `purpose` isolates
+    capabilities: "memory" → SF_MEMORY_TOKEN for the /mcp/memory endpoint; "research" → the
+    SF_RESEARCH_TOKEN for the /api/research/fusion proxy (SOF-155). A research token can't reach
+    the memory endpoint and vice-versa — verify_scope_token rejects a mismatched purpose."""
+    payload = {"purpose": purpose, "pid": str(project_id), "exp": int(time.time()) + ttl_seconds}
     raw = _b64u_encode(json.dumps(payload, separators=(",", ":")).encode())
     sig = hmac.new(_secret(), raw.encode(), hashlib.sha256).digest()
     return f"{raw}.{_b64u_encode(sig)}"
 
 
-def verify_scope_token(token: str) -> str | None:
+def verify_scope_token(token: str, purpose: str = "memory") -> str | None:
     """The project_id this token is scoped to, if the signature is valid, unexpired, and its
-    `purpose` claim is 'memory' — else None.
+    `purpose` claim matches `purpose` (default "memory") — else None.
 
-    THIS is the enforcement point for the memory MCP's "an agent scoped to project A cannot read
-    project B's memory" requirement: the MCP's tool functions take no project_id argument at all —
-    every tool acts on whatever this returns for the request's bearer token, never a caller-
-    supplied value."""
+    THIS is the enforcement point for the "an agent scoped to project A / capability X cannot
+    reach project B or capability Y" requirement: endpoints take no project_id argument — each
+    acts on whatever this returns for the request's bearer token, and passes its OWN `purpose`
+    so a token minted for another capability is rejected outright."""
     if not token:
         return None
     try:
@@ -149,7 +153,7 @@ def verify_scope_token(token: str) -> str | None:
         payload = json.loads(_b64u_decode(raw))
     except Exception:
         return None
-    if payload.get("purpose") != "memory":
+    if payload.get("purpose") != purpose:
         return None
     if int(payload.get("exp", 0)) < int(time.time()):
         return None

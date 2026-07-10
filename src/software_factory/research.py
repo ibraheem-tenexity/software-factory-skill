@@ -316,6 +316,19 @@ def _fusion_research(
     )
 
 
+def _fusion_via_proxy(url: str, token: str | None, question: str, timeout: float) -> dict:
+    """SOF-155: POST the research question to the console's /api/research/fusion proxy with the
+    research-scoped bearer token. The console holds OPENROUTER_API_KEY and returns the same
+    {panels, consensus, contradictions, cost_usd} dict fusion_research produces directly."""
+    try:
+        resp = httpx.post(url, json={"question": question},
+                          headers={"Authorization": f"Bearer {token or ''}"}, timeout=timeout)
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPError as exc:
+        raise ResearchError(f"Fusion research proxy failed: {exc}") from exc
+
+
 def fusion_research(question: str, *, api_key: str | None = None,
                     timeout: float = _FUSION_TIMEOUT_S) -> dict:
     """General-purpose Fusion research (SOF-79/SOF-73): ask any question, get the per-model
@@ -328,6 +341,15 @@ def fusion_research(question: str, *, api_key: str | None = None,
     question has no reason to produce structured JSON per panel the way the company-profile
     prompt does. Raises ResearchError only on a transport failure, never on the response's shape
     (an empty consensus/contradictions string just means Fusion's markdown didn't include one)."""
+    # SOF-155: in-stage, the OpenRouter key is scrubbed from the build env (env.py isolation), so
+    # reach Fusion through the console proxy instead — the console holds the key and makes the real
+    # call. _launch_stage injects SF_RESEARCH_URL + SF_RESEARCH_TOKEN per run. Console-side callers
+    # (the concierge's research_company path) pass api_key explicitly / have no SF_RESEARCH_URL, so
+    # they take the direct path below, unchanged.
+    proxy_url = os.environ.get("SF_RESEARCH_URL")
+    if proxy_url and api_key is None:
+        return _fusion_via_proxy(proxy_url, os.environ.get("SF_RESEARCH_TOKEN"), question, timeout)
+
     api_key = api_key or os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         raise ResearchError("OPENROUTER_API_KEY is not set — required for Fusion research")
