@@ -1503,7 +1503,24 @@ class Console:
             owner=state.owner,
             owner_github_username=source_state.owner_github_username,
         )
-        return self._provision_and_launch(new_id, req)
+        try:
+            return self._provision_and_launch(new_id, req)
+        except Exception:
+            # SOF-149: a relaunch that fails (a refused launch — #327's honest RuntimeError — or
+            # any other crash) must not strand the freshly-minted row at phase="provision" forever,
+            # the same class of bug #326 fixed for promote_draft. Unlike a draft promotion, there's
+            # no earlier "draft" to fall back to here — by this point the row already carries real
+            # content (copied input/ materials, relaunched_from=source_id, the full copied spec),
+            # so land it in "crashed" rather than deleting it: the EXISTING RecoveryBar/`/resume`
+            # already handles a crashed stage-1 relaunch correctly (proven in SOF-98's investigation)
+            # — zero new UI needed, and the operator gets a real Resume affordance on THIS row
+            # instead of having to hit Restart again from the source (minting yet another id).
+            state = self._load_state(new_id)
+            if state.phase not in ("done", "stopped"):  # don't clobber a concurrent terminal
+                state.crashed_at_node = "provision"
+                state.phase = "crashed"
+                state.save()
+            raise
 
     def deployments(self, project_id: str) -> dict:
         """Per-deliverable deployments (a run ships 1..N apps; no single run-level deploy_url)."""
