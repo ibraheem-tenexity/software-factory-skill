@@ -47,6 +47,16 @@ export type Ticket = {
   dependencies?: string[] | null;
   scope_genre?: string | null;
   implementation_notes?: string;
+  // SOF-118: the build agent's own disclosure — null until the ticket is closed (mark_done sets
+  // it), [] for an honest "nothing to declare".
+  decision_log?: DecisionLogEntry[] | null;
+};
+
+export type DecisionLogEntry = {
+  type: "assumption" | "shortcut" | "known-gap";
+  statement: string;
+  reason: string;
+  affected_surface: string;
 };
 
 export type TicketsResponse = { tickets: Ticket[]; waves: number[] };

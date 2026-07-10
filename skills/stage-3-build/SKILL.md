@@ -118,8 +118,20 @@ For each open ticket in the current wave:
   prompt. If `design_refs` is non-empty, the sub-agent MUST open `context/mockups/<SCREEN_ID>.html` for
   each referenced screen and build the UI to match it — the mockup is the spec for that screen, not a
   suggestion; don't build from imagination when a real mockup exists.
+  **SOF-118 — state this up front, it is not optional:** the sub-agent must also report its own
+  `decision_log` when it finishes — what it assumed, shortcut, or left as a known gap while
+  implementing THIS ticket (e.g. "seeded 16/24 rows with the field the PRD didn't specify for the
+  rest," "this check only runs client-side, no server-side enforcement yet," "mocked the
+  third-party call instead of wiring it live"), or an honest "nothing to declare" if there's truly
+  nothing notable. This is disclosed by the AGENT that did the work, not invented by you.
 - merge ONLY via `GitHub.merge_if_green(pr, diff_lines)` — refuses red checks and empty diffs
-- `TicketStore.mark_done(pr, diff_lines)` (refuses hollow closes); `finish-agent <id> <outcome> <cost> <pr> <diff_lines>`
+- `TicketStore.mark_done(pr, diff_lines, decision_log=<list>)` — `decision_log` is **REQUIRED**
+  (SOF-118): pass `[]` only if the sub-agent genuinely reported nothing to declare, or a list of
+  `{type, statement, reason, affected_surface}` objects (`type` is `assumption`|`shortcut`|
+  `known-gap`) carrying exactly what it disclosed. `mark_done` refuses a hollow close without it —
+  same mechanism that already refuses one without a real PR/diff, and the refusal message states
+  exactly what's missing.
+- `finish-agent <id> <outcome> <cost> <pr> <diff_lines>`
 
 A no-op sub-agent turn (empty diff) is a retry/escalate signal, never a completion. Serialize per wave so
 `main` accumulates and later tickets build on merged work.
@@ -270,8 +282,30 @@ For each ticket that built + deployed:
      report + screenshots, fixes, `mark_done` → redeploy → QA again.
 
 **The run is DONE only when EVERY ticket is `approved`** (`TicketStore.all_approved()`) AND a passing
-Playwright verification per deliverable is recorded. The host's `detect_stage3_done` enforces both — a run
-with any unapproved (or QA-bounced) ticket is NOT done.
+Playwright verification per deliverable is recorded AND `build-decision-log.md` exists and passes its gate
+(Phase 3c below). The host's `detect_stage3_done` enforces all three — a run with any unapproved
+(or QA-bounced) ticket, or a missing/hollow stage decision log, is NOT done.
+
+## Phase 3c: decision log  (`set-phase decision-log`)
+
+**SOF-118:** write `build-decision-log.md` (a DIFFERENT filename than Stage 2's `decision-log.md` — you clone the same repo Stage 2 committed to, so a same-named file here would collide with its already-gated content) — YOUR OWN stage-wide disclosure of what you assumed,
+shortcut, or left as a known gap across the BUILD as a whole, distinct from each ticket's own
+`decision_log` (already captured per-ticket at `mark_done` time in Phase 1). This is for
+cross-cutting build decisions that don't belong to one ticket — e.g. "used a shared demo-login
+session for every role instead of per-role test accounts because the PRD didn't specify distinct
+credentials," or "the deploy target only provisions one region; multi-region wasn't in scope."
+
+One `## <Type>: <short title>` section per entry (`Assumption` / `Shortcut` / `Known Gap`), each
+with a `- **Reason:**` and a `- **Affected surface:**` line — or, if there's genuinely nothing
+stage-wide to add beyond what's already on individual tickets, an explicit line like "Nothing to
+declare beyond the per-ticket decision logs." A blank/placeholder file is NOT the same as that
+honest statement and fails the done-gate.
+
+Commit + push; `record-artifact "Build Decision Log" build-decision-log.md decision-log <agent>`.
+
+**Done-gate (mechanical):** `artifacts.verify(run_dir, ["build-decision-log.md"])` passes AND
+`artifacts.decision_log_is_complete(build-decision-log.md)` — real entries with Reason + Affected
+surface, or an explicit "nothing to declare" statement.
 
 ## Phase 4: teardown  (`set-phase teardown`)
 
@@ -288,12 +322,16 @@ Proof (project.db + project.log) at the base survives.
 | Repo / PR / merge | `repo.GitHub` — `open_pr`, `merge_if_green` |
 | Deploy + health | `deploy.deploy(target, dir)`, `deploy.healthy(url)` |
 | Done verdict | `gate.happy_flow_passed(result)`, `gate.bugs_from(result)` |
+| Decision-log done-gate | `artifacts.decision_log_is_complete(decision_log_text)` |
 | Workspace teardown | `workspace.destroy(path, projects_dir)` |
 
 ## Guardrails
 
 - **No hollow done:** empty turn = retry/escalate; `merge_if_green` + `mark_done` enforce real diffs/PRs;
-  done REQUIRES a recorded passing Playwright verification AND every ticket `approved` via the QA loop.
+  done REQUIRES a recorded passing Playwright verification, every ticket `approved` via the QA loop,
+  AND (SOF-118) a real (or explicitly "nothing to declare") stage decision log.
+- **No silent gaps:** `mark_done` refuses to close ANY ticket without its own `decision_log` — a
+  build agent that hits a real shortcut/gap must disclose it there, not carry it forward unstated.
 - **Orchestrator-only:** never edit app code in the main session — one native Task sub-agent per ticket.
 - **Deploy isolation:** always deploy to `sf-<project_id>`, never the console service.
 - **Fully autonomous** — no human approval gates.

@@ -48,6 +48,20 @@ function ticketDetailMarkdown(t: Ticket, projectId: string): string {
     lines.push("");
   }
   if (t.implementation_notes) lines.push("## Implementation Notes", "", t.implementation_notes, "");
+  // SOF-118: null = not yet closed (mark_done sets it); [] = an honest "nothing to declare".
+  if (t.decision_log === null || t.decision_log === undefined) {
+    lines.push("## Decision Log", "", "_(not yet closed — recorded when this ticket is marked done)_", "");
+  } else if (t.decision_log.length === 0) {
+    lines.push("## Decision Log", "", "_Nothing declared — no assumptions, shortcuts, or known gaps._", "");
+  } else {
+    lines.push("## Decision Log", "");
+    for (const entry of t.decision_log) {
+      const label = entry.type === "known-gap" ? "Known Gap" : entry.type === "shortcut" ? "Shortcut" : "Assumption";
+      lines.push(`**${label}: ${entry.statement}**`);
+      lines.push(`- Reason: ${entry.reason}`);
+      lines.push(`- Affected surface: ${entry.affected_surface}`, "");
+    }
+  }
   if (t.description) lines.push("## Description", "", t.description, "");
   return lines.join("\n") || "(no ticket detail recorded)";
 }

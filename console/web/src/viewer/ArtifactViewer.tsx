@@ -26,7 +26,8 @@ function kindLabel(kind: string, path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() || "";
   const MAP: Record<string, string> = { deploy: "Deploy", repo: "Repo", "demo-creds": "Creds",
     context: "Context", md: "Markdown", sow: "SOW", svg: "SVG", code: "Code",
-    json: "JSON", csv: "CSV", image: "Image", fig: "Design", mockup: "Mockup", "flow-map": "Flow Map" };
+    json: "JSON", csv: "CSV", image: "Image", fig: "Design", mockup: "Mockup", "flow-map": "Flow Map",
+    "decision-log": "Decision Log" };
   return MAP[kind] || MAP[ext] || kind || "File";
 }
 

@@ -123,6 +123,11 @@ tickets = Table(
     Column("dependencies", Text),
     Column("scope_genre", Text),
     Column("implementation_notes", Text, nullable=False, server_default=""),
+    # SOF-118: JSON-encoded array of {type, statement, reason, affected_surface} decision-log
+    # entries (assumptions made / shortcuts taken / known gaps left while building THIS ticket).
+    # Same NULL-vs-'[]' convention as design_refs/dependencies: NULL = never addressed (mark_done
+    # refuses to close it), '[]' = explicitly "nothing to declare" (an honest, gate-passing close).
+    Column("decision_log", Text),
 )
 
 runtime_agents = Table(
