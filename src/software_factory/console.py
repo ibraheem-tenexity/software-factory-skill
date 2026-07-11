@@ -1067,7 +1067,9 @@ class Console:
                     or (f"https://{_pub}" if _pub else "")).rstrip("/")
         if base_url:
             env = {**env, "SF_MEMORY_TOKEN": _auth.sign_scope_token(project_id),
-                  "SF_MEMORY_MCP_URL": f"{base_url}/mcp/memory",
+                  # SOF-157: FastMCP serves the streamable-HTTP handler at the sub-app's /mcp path,
+                  # so the endpoint is /mcp/memory/mcp (the bare /mcp/memory 307-redirects then 404s).
+                  "SF_MEMORY_MCP_URL": f"{base_url}/mcp/memory/mcp",
                   # SOF-155: in-stage Fusion research reaches the console proxy with a research-scoped,
                   # per-run token — OPENROUTER_API_KEY stays in the console, never the scrubbed build
                   # env. Distinct purpose from the memory token (can't cross to /mcp/memory).
