@@ -24,6 +24,7 @@ solved by the console's own `auth.sign_scope_token`/`verify_scope_token`.
 """
 from __future__ import annotations
 
+import contextlib
 import contextvars
 
 from mcp.server.fastmcp import FastMCP
@@ -257,7 +258,37 @@ def build_mcp() -> FastMCP:
     return mcp
 
 
+# ONE FastMCP instance + ONE streamable-HTTP app, shared between the mount (memory_asgi_app) and
+# the lifespan (memory_mcp_lifespan). The session manager is created lazily by streamable_http_app()
+# and must be the SAME object the lifespan runs — so build both exactly once (SOF-157).
+_MCP = None
+_MCP_APP = None
+
+
+def _memory_mcp():
+    global _MCP, _MCP_APP
+    if _MCP is None:
+        _MCP = build_mcp()
+        _MCP_APP = _MCP.streamable_http_app()   # creates the session manager (accessible only after this)
+    return _MCP, _MCP_APP
+
+
 def memory_asgi_app():
     """The mountable ASGI app — `console/app.py` mounts this unconditionally at `/mcp/memory`
-    behind `_BearerScopeMiddleware`, which enforces the per-project scope token boundary."""
-    return _BearerScopeMiddleware(build_mcp().streamable_http_app())
+    behind `_BearerScopeMiddleware`, which enforces the per-project scope token boundary. FastMCP
+    serves its handler at the sub-app's `/mcp` path, so the effective endpoint is `/mcp/memory/mcp`
+    (that's what SF_MEMORY_MCP_URL points at — SOF-157)."""
+    _, app = _memory_mcp()
+    return _BearerScopeMiddleware(app)
+
+
+@contextlib.asynccontextmanager
+async def memory_mcp_lifespan():
+    """Run the FastMCP streamable-HTTP session manager (SOF-157). A Starlette sub-app mounted via
+    `app.mount()` does NOT get its lifespan run by the parent, so `StreamableHTTPSessionManager.run()`
+    (which initializes the task group) never fires — and every `/mcp/memory` request 500s with
+    'Task group is not initialized'. The console app enters THIS in its own lifespan so the memory
+    MCP actually works."""
+    mcp, _ = _memory_mcp()
+    async with mcp.session_manager.run():
+        yield
