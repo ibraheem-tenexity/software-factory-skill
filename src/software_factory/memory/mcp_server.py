@@ -28,6 +28,7 @@ import contextlib
 import contextvars
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.responses import PlainTextResponse
 
 from .. import auth, dbshim
@@ -207,7 +208,14 @@ class _BearerScopeMiddleware:
 
 
 def build_mcp() -> FastMCP:
-    mcp = FastMCP("project-memory")
+    # FastMCP's default host is 127.0.0.1, which auto-enables DNS-rebinding protection allowlisting
+    # ONLY localhost — so behind a real domain (Railway/prod console.tenexity.ai) every request 421s
+    # "Invalid Host header" (SOF-157: surfaced only once the endpoint served over a real host). That
+    # protection guards a browser from DNS-rebinding onto a local server; it's redundant here — this
+    # transport sits behind _BearerScopeMiddleware, which requires a signed HMAC scope token on every
+    # request that no rebinding browser can forge — and it must serve varying hosts (staging + prod).
+    mcp = FastMCP("project-memory",
+                 transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
 
     @mcp.tool(name="get_project_overview",
              description="Project brief + rollup summary + assumptions digest. Call this first "
