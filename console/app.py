@@ -18,6 +18,7 @@ mounts + router includes. The pieces live in sibling modules:
 
 Run:  uvicorn console.app:app --host 0.0.0.0 --port 8765   (or python3 console/app.py)
 """
+import contextlib
 import json
 import os
 import sys
@@ -52,8 +53,19 @@ import console.state as state  # noqa: E402  (also: app_mod.state is the patch h
 # importantly re-seeding the bootstrap admin AFTER conftest's per-test TRUNCATE.
 state.reset()
 
-from console.poller import lifespan  # noqa: E402
+from console.poller import lifespan as _poller_lifespan  # noqa: E402
 from console.routers import open_routes, auth, org, admin_os, projects, chat, research  # noqa: E402
+from software_factory.memory.mcp_server import memory_asgi_app, memory_mcp_lifespan  # noqa: E402
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: "FastAPI"):
+    # SOF-157: a Starlette sub-app mounted via app.mount() does NOT get its lifespan run by the
+    # parent, so the memory MCP's StreamableHTTPSessionManager.run() never fired and every
+    # /mcp/memory request 500'd. Run it here (alongside the poller lifespan) for the app's lifetime.
+    async with memory_mcp_lifespan():
+        async with _poller_lifespan(app):
+            yield
 
 # Re-exported so the public `console.app` surface (and the tests that read/patch object attributes
 # on them) is preserved across the split. Bound AFTER reset() → the current instances; the same
@@ -119,8 +131,7 @@ app.include_router(research.router)
 # speaking the MCP streamable-HTTP transport, mounted the same way the static SPA assets are
 # above). Bearer-token scope enforcement lives in the sub-app itself (memory/mcp_server.py's
 # _BearerScopeMiddleware). Always mounted (SOF-71) — memory is core product, not opt-in.
-from software_factory.memory.mcp_server import memory_asgi_app
-app.mount("/mcp/memory", memory_asgi_app())
+app.mount("/mcp/memory", memory_asgi_app())  # memory_asgi_app imported above (SOF-157 lifespan wiring)
 
 
 if __name__ == "__main__":
