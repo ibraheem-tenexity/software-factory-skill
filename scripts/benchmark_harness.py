@@ -8,9 +8,19 @@ Drives the whole loop against a live console over HTTP — no browser:
      answering from a reference brief — until a product brief is finalized.
   4. Hand off (POST /promote) and poll to a terminal state (deployed / budget-stopped / crashed /
      blocked / timeout).
-  5. Write a structured friction report as JSON, one file per run — the exact report{} shape
-     `software_factory.run_autopsy.classify_run` already consumes (SOF-93/PR #330), reusing that
-     module's own `build_report_from_console` adapter rather than re-deriving the schema.
+  5. Classify + file: build the report via `run_autopsy.build_report_from_console` and hand it to
+     `run_autopsy.autopsy_and_file` DIRECTLY, in-process — this both writes a durable Postgres
+     ledger row for EVERY terminal run (including DEPLOYED, the positive "the cron actually fired"
+     signal) and files/comments on Linear for anything that isn't DEPLOYED. Also writes the same
+     report as JSON to SF_BENCHMARK_REPORTS_DIR/<project_id>.json — the file-path contract
+     run_autopsy_scan.py's docstring already anticipates.
+  6. Self-cleanup: archive the benchmark project and, if it provisioned a deploy-DB, tear it down
+     directly via `deploy_db.teardown()` (the same vetted function the console's own reaper uses)
+     — an unattended, disposable-project loop must not silt up the environment.
+
+An internal wall-clock alarm (SIGALRM) guards the whole run: a hang self-terminates from INSIDE
+the process (raising HarnessTimeout) well before any external kill could apply, so cleanup +
+reporting still run even when something further downstream never returns.
 
 Usage: python3 scripts/benchmark_harness.py [--base-url URL] [--brief PATH]
 
@@ -23,26 +33,35 @@ Env:
   SF_BENCHMARK_BUDGET       per-run budget_ceiling (default: 30, per operator directive 2026-07-10)
   SF_BENCHMARK_MAX_TURNS    interview turn cap before giving up (default: 20)
   SF_BENCHMARK_POLL_SECS    poll interval while waiting for a terminal state (default: 30)
-  SF_BENCHMARK_TIMEOUT_HOURS  wall-clock cap on the poll loop (default: 6, matches run_autopsy's
-                              own TIMEOUT_HOURS so a stalled run gets classified the same way)
+  SF_BENCHMARK_TIMEOUT_HOURS  wall-clock cap on the poll loop AND the internal SIGALRM safety net
+                              (default: 6, matches run_autopsy's own TIMEOUT_HOURS so a stalled
+                              run gets classified the same way)
   SF_BENCHMARK_REPORTS_DIR  where per-run JSON reports are written (default: benchmark_reports/)
+  DATABASE_URL / SF_STATE_DB_URL   required for the autopsy dedup ledger (RunAutopsyStore)
+  LINEAR_API_KEY / SF_LINEAR_TEAM_ID   optional — filing degrades honestly without them
+  RAILWAY_TOKEN             required to tear down a provisioned deploy-DB (scoped to the
+                            software-factory-projects STAGING environment)
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import signal
 import sys
 import time
+import traceback
 from datetime import datetime, timezone
 
 import httpx
 
 sys.path.insert(0, "src")
 
+from software_factory import deploy_db  # noqa: E402
+from software_factory import linear_filer  # noqa: E402
 from software_factory.constants import OPENROUTER_BASE_URL, CONCIERGE_KIMI_MODEL  # noqa: E402
 from software_factory.run_autopsy import (  # noqa: E402
-    BENCHMARK_OWNER, build_report_from_console, classify_run,
+    BENCHMARK_OWNER, RunAutopsyStore, autopsy_and_file, build_report_from_console, classify_run,
 )
 
 DEFAULT_BASE_URL = os.environ.get(
@@ -54,10 +73,24 @@ POLL_INTERVAL_SECS = int(os.environ.get("SF_BENCHMARK_POLL_SECS", "30"))
 WALL_CLOCK_TIMEOUT_HOURS = float(os.environ.get("SF_BENCHMARK_TIMEOUT_HOURS", "6"))
 REPORTS_DIR = os.environ.get("SF_BENCHMARK_REPORTS_DIR", "benchmark_reports")
 BUDGET_CEILING = float(os.environ.get("SF_BENCHMARK_BUDGET", "30"))
+# A hang must self-terminate from inside the process before any external kill could matter (an
+# external kill runs no Python cleanup) — arm the alarm past the poll loop's own deadline, not at
+# the same instant, so poll_to_terminal's own honest timeout classification gets first say.
+ALARM_BUFFER_SECS = 600
 
 
 class HarnessError(RuntimeError):
     """A harness-specific failure with an honest, actionable reason — never a guess."""
+
+
+class HarnessTimeout(RuntimeError):
+    """Raised by the internal SIGALRM handler — a hang self-terminating from inside the process."""
+
+
+def _alarm_handler(signum, frame) -> None:
+    raise HarnessTimeout(
+        f"harness exceeded its internal wall-clock cap ({WALL_CLOCK_TIMEOUT_HOURS}h + "
+        f"{ALARM_BUFFER_SECS}s buffer) — self-terminating so cleanup/reporting still run")
 
 
 def get_benchmark_session(client: httpx.Client, base_url: str) -> None:
@@ -219,30 +252,91 @@ def poll_to_terminal(client: httpx.Client, base_url: str, project_id: str) -> tu
         time.sleep(POLL_INTERVAL_SECS)
 
 
-def write_report(list_entry: dict, status: dict, events: list, out_dir: str,
-                 extra_friction_findings: list | None = None):
-    """Build the report via run_autopsy's own adapter (same shape classify_run already consumes,
-    zero re-derivation), write it to <out_dir>/<project_id>.json, and return the classification
-    for a human-readable console line."""
-    report = build_report_from_console(list_entry, status, events, env="staging")
-    if extra_friction_findings:
-        report["friction_findings"].extend(extra_friction_findings)
-    os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, f"{report['run']['project_id']}.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
-    record = classify_run(report)
-    print(f"[benchmark] {record.project_id}: {record.classification} — {record.reason} "
-          f"(${record.cost_usd:.2f}/${record.ceiling_usd:.2f} ceiling) -> {path}")
-    return record
-
-
 def _fetch_current_state(client: httpx.Client, base_url: str, project_id: str) -> tuple[dict, dict, list]:
     projects = _get_json(client, f"{base_url}/api/projects")["projects"]
     list_entry = next((p for p in projects if p["project_id"] == project_id), {})
     status = _get_json(client, f"{base_url}/api/projects/{project_id}")
     events = _get_json(client, f"{base_url}/api/projects/{project_id}/events")["events"]
     return list_entry, status, events
+
+
+def report_and_file(list_entry: dict, status: dict, events: list, project_id: str,
+                    extra_friction_findings: list | None = None):
+    """Build the report via run_autopsy's own adapter (same shape classify_run already consumes,
+    zero re-derivation), write it to REPORTS_DIR/<project_id>.json, and hand it directly to
+    `autopsy_and_file` — a durable Postgres ledger row for EVERY terminal run (the positive "the
+    cron actually fired" signal, present even for DEPLOYED) plus a filed/commented Linear ticket
+    for anything that isn't DEPLOYED. Returns the AutopsyRecord."""
+    report = build_report_from_console(list_entry, status, events, env="staging")
+    if extra_friction_findings:
+        report["friction_findings"].extend(extra_friction_findings)
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    path = os.path.join(REPORTS_DIR, f"{project_id}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
+    store = RunAutopsyStore()
+    record = autopsy_and_file(report, store)
+    print(f"[benchmark] {record.project_id}: {record.classification} — {record.reason} "
+          f"(${record.cost_usd:.2f}/${record.ceiling_usd:.2f} ceiling) -> {path}")
+    return record
+
+
+def _best_effort_report(client: httpx.Client, base_url: str, project_id: str | None, *, note: str) -> None:
+    """Called from the harness's own crash/timeout handlers: assemble whatever state exists and
+    file it, so a harness-level failure (not just a pipeline-level one) still leaves a durable
+    signal. If classify_run's own inference would land on UNKNOWN (a genuine code crash early in
+    the run, before any pipeline-level terminal signal exists), that's not loud enough on its own —
+    file a distinct harness-error ticket directly so it's never silently swallowed."""
+    if not project_id:
+        print(f"[benchmark] no project was created yet — nothing to report ({note})")
+        return
+    try:
+        list_entry, status, events = _fetch_current_state(client, base_url, project_id)
+    except Exception as exc:
+        print(f"[benchmark] {project_id}: could not fetch state for the crash/timeout report: {exc}")
+        linear_filer.create_issue(
+            f"[benchmark] harness error on {project_id} — could not even fetch state",
+            f"**Note:** {note}\n\n**Follow-up fetch also failed:** {exc}", priority=2)
+        return
+    record = report_and_file(list_entry, status, events, project_id, extra_friction_findings=[{
+        "severity": "high", "type": "harness_error", "finding": note, "action": "review harness logs",
+    }])
+    if record.classification == "UNKNOWN":
+        # classify_run had no pipeline-level terminal signal to go on — that's expected for an
+        # early harness crash, but UNKNOWN alone files no ticket. File one directly so a genuine
+        # code bug is never silent just because the pipeline itself never got far enough to fail.
+        linear_filer.create_issue(
+            f"[benchmark] harness error on {project_id}",
+            f"**Note:** {note}\n\n(classify_run returned UNKNOWN — no pipeline-level terminal "
+            "signal yet, so this is a harness-side failure, not a pipeline one.)", priority=2)
+
+
+def cleanup_benchmark_project(client: httpx.Client, base_url: str, project_id: str) -> None:
+    """Self-cleanup for a disposable benchmark run: tear down its deploy-DB (if it provisioned
+    one — most runs budget-stop before reaching stage-3 deploy and never do) via the SAME vetted
+    `deploy_db.teardown()` the console's own reaper uses, then archive the project. Deletes only
+    the resource_id THIS run's own context/deploy-db.json artifact names — never a scan or a
+    shared/default DB, so it can't hit the shared-DB exclusivity bug found in the prod sweep.
+    Best-effort: a cleanup hiccup must never raise past the harness's own finally-path."""
+    try:
+        resp = client.get(f"{base_url}/api/projects/{project_id}/artifact",
+                         params={"path": "context/deploy-db.json"})
+        if resp.status_code == 200:
+            info = json.loads(resp.json()["content"])
+            service_id = (info.get("service_id") or "").strip()
+            if service_id:
+                result = deploy_db.teardown(service_id, volume_id=info.get("volume_id", ""))
+                print(f"[benchmark] {project_id}: deploy-DB teardown {result}")
+        elif resp.status_code != 404:
+            print(f"[benchmark] {project_id}: deploy-db.json fetch returned {resp.status_code}, skipping DB teardown")
+    except Exception as exc:
+        print(f"[benchmark] {project_id}: deploy-DB teardown failed (non-fatal): {exc}")
+
+    try:
+        resp = client.delete(f"{base_url}/api/projects/{project_id}")
+        print(f"[benchmark] {project_id}: archived ({resp.status_code})")
+    except Exception as exc:
+        print(f"[benchmark] {project_id}: archive failed (non-fatal): {exc}")
 
 
 def main() -> None:
@@ -254,7 +348,12 @@ def main() -> None:
     brief = load_reference_brief(args.brief)
     brief_title = os.path.splitext(os.path.basename(args.brief))[0].replace("_", " ")
 
-    with httpx.Client(timeout=30) as client:
+    client = httpx.Client(timeout=30)
+    project_id: str | None = None
+    try:
+        signal.signal(signal.SIGALRM, _alarm_handler)
+        signal.alarm(int(WALL_CLOCK_TIMEOUT_HOURS * 3600) + ALARM_BUFFER_SECS)
+
         get_benchmark_session(client, args.base_url)
 
         active = find_active_benchmark_run(client, args.base_url)
@@ -271,7 +370,7 @@ def main() -> None:
             print(f"[benchmark] {project_id}: interview did not finalize a product brief within "
                   f"{MAX_INTERVIEW_TURNS} turns — not handing off; run stays a draft")
             list_entry, status, events = _fetch_current_state(client, args.base_url, project_id)
-            write_report(list_entry, status, events, REPORTS_DIR, extra_friction_findings=[{
+            report_and_file(list_entry, status, events, project_id, extra_friction_findings=[{
                 "severity": "high", "type": "interview_non_convergence",
                 "finding": f"customer-simulator did not reach a finalized brief in {MAX_INTERVIEW_TURNS} turns",
                 "action": "review transcript (no dedicated GET route exists; see recent_events)",
@@ -283,7 +382,22 @@ def main() -> None:
         promote(client, args.base_url, project_id)
 
         list_entry, status, events = poll_to_terminal(client, args.base_url, project_id)
-        write_report(list_entry, status, events, REPORTS_DIR)
+        report_and_file(list_entry, status, events, project_id)
+    except HarnessTimeout as exc:
+        print(f"[benchmark] {project_id or '(no project yet)'}: TIMEOUT — {exc}")
+        _best_effort_report(client, args.base_url, project_id, note=str(exc))
+    except Exception as exc:
+        print(f"[benchmark] {project_id or '(no project yet)'}: harness crashed — {exc}")
+        _best_effort_report(client, args.base_url, project_id,
+                            note=f"{exc}\n\n{traceback.format_exc()}")
+    finally:
+        signal.alarm(0)
+        if project_id:
+            try:
+                cleanup_benchmark_project(client, args.base_url, project_id)
+            except Exception as exc:
+                print(f"[benchmark] {project_id}: cleanup failed: {exc}")
+        client.close()
 
 
 if __name__ == "__main__":
