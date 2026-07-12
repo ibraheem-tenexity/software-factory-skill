@@ -290,9 +290,32 @@ class Console:
     # ---- SPEC §1: stage process lifecycle ------------------------------------------------
     def _stage_process_alive(self, project_id: str) -> bool:
         p = self._procs.get(project_id)
-        if p is None or not hasattr(p, "poll") or p.poll() is not None:
+        if p is not None and hasattr(p, "poll") and p.poll() is None and not self._reap_if_os_zombie(p):
+            return True   # authoritative live handle in THIS process (fast path, no DB read)
+        # SOF-161: no live in-process handle — either the tracked process exited, or this is a fresh
+        # console after a restart (self._procs is wiped). Fall back to the DURABLE, self-healing
+        # persisted claim so a genuinely-live orphaned orchestrator (surviving a restart, or launched
+        # by the un-guarded _provision_and_launch caller) is still refused a second launch.
+        return self._launch_token_alive(self._load_state(project_id))
+
+    def _launch_token_alive(self, state: ProjectState) -> bool:
+        """SOF-161: True iff this run's persisted launch claim is held by a genuinely-live
+        orchestrator. Self-healing: a pid that is gone or a zombie, or a REUSED pid now belonging to
+        an unrelated process, reads as NOT alive — so a fresh console clears a stale lock instead of
+        blocking forever (today's post-restart bug) or trusting it forever (the naive fix). The
+        pid-reuse guard anchors via /proc/<pid>/cwd: every stage launches with cwd = the run's
+        workspace (<projects_dir>/<project_id>/workspace), so a live claimant's cwd still contains
+        the project_id — even after the workspace dir is deleted (the readlink keeps the id)."""
+        pid = getattr(state, "launch_run_pid", 0) or 0
+        if not getattr(state, "launch_run_token", "") or pid <= 0:
             return False
-        return not self._reap_if_os_zombie(p)
+        if _proc_state(pid) in (None, "Z"):
+            return False   # dead / zombie → stale claim, self-heal
+        try:
+            cwd = os.readlink(f"/proc/{pid}/cwd")
+        except OSError:
+            return False   # can't read cwd (pid gone / no perm) → not a live claim we can trust
+        return state.project_id in cwd   # a reused pid on an unrelated process fails this anchor
 
     @staticmethod
     def _reap_if_os_zombie(p) -> bool:
@@ -1227,10 +1250,26 @@ class Console:
             ]
         # cwd = the workspace so the stage's SKILL.md / phases/ / context/ (its contract) load.
         logger.info("[launch] %s stage %s — runtime=%s model=%s", project_id, stage, runtime, model)
+        # SOF-161: stake the DURABLE launch claim right before Popen (token now, real pid the moment
+        # we have it). Same lifecycle as self._procs below, but PERSISTED — so a console restart
+        # mid-stage self-heals from this claim (via _launch_token_alive) instead of forgetting the
+        # orphan. The token is the CAS key: a failed launch releases only its OWN claim.
+        _claim = uuid.uuid4().hex
+        _st = self._load_state(project_id)
+        _st.launch_run_token, _st.launch_run_pid = _claim, 0
+        _st.save()
         result = self._launch(argv, env, os.path.join(paths["base"], "project.log"), cwd=ws)
         if result is not None:
             self._procs[project_id] = result   # SPEC §1: tracked for the stage-handoff guard
+            _st.launch_run_pid = result.pid     # anchor the durable claim to the live orchestrator
+            _st.save()
         else:
+            # Failed launch releases its own claim (CAS: clear only if the token is still ours, so a
+            # concurrent successful launch's claim is never clobbered).
+            _cur = self._load_state(project_id)
+            if _cur.launch_run_token == _claim:
+                _cur.launch_run_token, _cur.launch_run_pid = "", 0
+                _cur.save()
             logger.warning("[launch] %s stage %s — _launch returned no handle", project_id, stage)
         return result
 
