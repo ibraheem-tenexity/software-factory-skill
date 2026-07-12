@@ -13,7 +13,8 @@ _TCOLS = (tickets.c.id, tickets.c.title, tickets.c.acceptance, tickets.c.dod, ti
           tickets.c.status, tickets.c.agent, tickets.c.provenance, tickets.c.provenance_type,
           tickets.c.diff_lines, tickets.c.app, tickets.c.description, tickets.c.goal,
           tickets.c.design_refs, tickets.c.dependencies, tickets.c.scope_genre,
-          tickets.c.implementation_notes, tickets.c.decision_log, tickets.c.review_bounce_count)
+          tickets.c.implementation_notes, tickets.c.decision_log, tickets.c.review_bounce_count,
+          tickets.c.stall_count)
 
 
 class TicketRepository:
