@@ -44,6 +44,24 @@ from .log import get_logger
 
 logger = get_logger(__name__)
 
+
+def _log_teardown_failures(result: dict | None, project_id: str = "") -> None:
+    """SOF-160: surface deploy-DB teardown failures LOUDLY. `deploy_db.reap()` records failures in
+    result["failed"] and logs them, but every caller passes log=logger.info, so a failed teardown
+    (notably a serviceDelete 403 from the token-scope gap — SOF-160 — which comes back ok=False, NOT
+    as an exception) is logged at INFO and effectively invisible: the DB leaks silently. Re-log each
+    failure at ERROR with the service_id + detail so a leaked DB is visible. Non-fatal by design —
+    the caller still completes its lifecycle/archive write regardless."""
+    if not result:
+        return
+    for f in result.get("failed", []):
+        logger.error("[deploy-db] TEARDOWN FAILED — DB NOT reclaimed (leaked; likely SOF-160 "
+                     "RAILWAY_TOKEN 403 on serviceDelete): project=%s service=%s detail=%s",
+                     f.get("project_id") or project_id, f.get("service_id"), f.get("detail"))
+    for vf in (result.get("detached_volumes") or {}).get("failed", []):
+        logger.error("[deploy-db] DETACHED-VOLUME SWEEP FAILED — volume NOT reclaimed: %s", vf)
+
+
 SKILL_VERSION = "0.0.1"
 
 PIPELINE_LABELS = {"wait-for-deps": "wait for deps"}
@@ -2312,7 +2330,9 @@ class Console:
                 has_verified_deploy=bool(getattr(st, "deploy_url", None)),
                 volume_id=getattr(st, "deploy_db_volume_id", "") or "",
             )
-            return deploy_db.reap([rec], log=logger.info)
+            result = deploy_db.reap([rec], log=logger.info)
+            _log_teardown_failures(result, project_id)   # SOF-160: don't let a 403 leak silently
+            return result
         except Exception:
             logger.exception("[deploy-db] teardown hook error for %s", project_id)
             return None
@@ -2340,7 +2360,9 @@ class Console:
                 has_verified_deploy=bool(getattr(st, "deploy_url", None)),
                 volume_id=getattr(st, "deploy_db_volume_id", "") or "",
             ))
-        return deploy_db.reap(records, log=logger.info, dry_run=dry_run)
+        result = deploy_db.reap(records, log=logger.info, dry_run=dry_run)
+        _log_teardown_failures(result)   # SOF-160: surface batch-sweep teardown failures loudly
+        return result
 
     def _bulk_repo_signals(self, project_ids: list[str]) -> tuple[dict[str, str], set[str]]:
         """Batch equivalent of calling `project_links(pid)["repo"]` + `repo_shared_with_owner(pid)`
