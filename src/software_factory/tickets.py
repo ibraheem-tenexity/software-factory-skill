@@ -175,8 +175,20 @@ class TicketStore:
         # claim), or done (re-attribution/rework — a monolithically-completed ticket is re-claimed
         # by a real native-Task agent to attach provenance). Claiming a shipped ticket
         # (deployed/qa_testing/approved) raises.
-        self._require(ticket_id, ("open", "in_progress", "done"), "in_progress")
-        self._repo.update(ticket_id, status="in_progress", agent=agent)
+        #
+        # SOF-162: compare-and-swap, not read-check-then-write — the UPDATE's own WHERE clause
+        # re-checks status at write time, so a concurrent claim loses the race with an honest
+        # IllegalTransition instead of silently overwriting whoever claimed it first (SOF-92's
+        # concurrency bug was this exact shape: an invariant held only by convention, not
+        # enforced by the data layer, eventually didn't hold).
+        allowed = ("open", "in_progress", "done")
+        if self._repo.update_if(ticket_id, allowed, status="in_progress", agent=agent) == 0:
+            # 0 rows: either the ticket doesn't exist (get() raises KeyError below) or its
+            # status was no longer in `allowed` by the time this write ran — get() reports
+            # whatever it actually is now, same message shape as the pre-CAS `_require` path.
+            t = self.get(ticket_id)
+            raise IllegalTransition(
+                f"ticket {ticket_id}: {t.status} → in_progress is not a legal transition")
 
     def mark_done(self, ticket_id: int, provenance, diff_lines: int,
                   provenance_type: str | None = None,
