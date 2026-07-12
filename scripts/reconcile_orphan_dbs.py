@@ -47,9 +47,18 @@ def _run(args: list[str]) -> str:
 
 
 def _services(project: str) -> dict[str, str]:
-    """{service_id: name} for every service in the project (via status --json)."""
-    out = _run(["railway", "status", "--json"])
-    d = json.loads(out)
+    """{service_id: name} for every service in the project (via status --json).
+
+    `railway status` reports the LINKED project and silently ignores a project arg — so on a tool
+    that emits DELETE candidates we do NOT trust the ambient link: assert the linked project id
+    equals the caller's --project and hard-fail on any mismatch (the silent-wrong-target class that
+    burned a session today). `_var`/`_volumes` operate on this same linked project, so this one
+    assertion guards the whole enumeration."""
+    d = json.loads(_run(["railway", "status", "--json"]))
+    linked = d.get("id")
+    if linked != project:
+        raise SystemExit(f"REFUSING: railway is linked to project {linked!r}, not --project {project!r}. "
+                         f"`railway link` to the intended project (or fix --project) and re-run.")
     return {e["node"]["id"]: e["node"]["name"] for e in d.get("services", {}).get("edges", [])}
 
 
