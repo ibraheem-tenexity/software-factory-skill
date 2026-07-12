@@ -45,7 +45,7 @@ _PERSISTED = {
     "stage", "stage1_done", "stage2_done", "runtime",
     "planning_model", "impl_model", "opencode_model",
     "deps_required", "deps_provided", "deps_satisfied", "deps_disposition",
-    "budget_ceiling", "deploy_db_attempts", "deploy_db_service_id", "deploy_db_volume_id", "held", "owner",
+    "budget_ceiling", "deploy_db_attempts", "deploy_db_service_id", "deploy_db_volume_id", "deploy_db_pending", "held", "owner",
     "goal", "scope", "is_demo", "archived", "maintenance_enabled",
     "summary",
     "created_by", "created_at",
@@ -118,6 +118,7 @@ class ProjectState:
     deploy_db_attempts: int = 0  # provision-attempt counter — hard cap so a failure can't spawn unbounded DBs
     deploy_db_service_id: str = ""  # captured Railway Postgres serviceId — the durable teardown handle
     deploy_db_volume_id: str = ""   # captured Railway volume ID — must be deleted explicitly (service delete does NOT cascade)
+    deploy_db_pending: dict = field(default_factory=dict)  # SOF-159: in-flight-provision breadcrumb {started_at, attempt} — set BEFORE `railway add`, cleared once serviceId is captured. A marker still set with an empty deploy_db_service_id means a provision was killed mid-add (Railway created the Postgres, the CLI never returned an id) → a probably-orphaned DB the reconciliation reporter can attribute to this project by timing.
     # Crash/pause recovery — set by the console when it halts a stage.
     # Operator-driven recovery (Recovery bar) resumes from these; auto-resume is suppressed.
     paused_at_node: str = ""   # pipeline node where pause was requested

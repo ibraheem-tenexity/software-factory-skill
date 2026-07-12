@@ -233,6 +233,20 @@ def _provision_db(projects_dir: str, project_id: str) -> int:
     info_path = os.path.join(ctx, deploy_db.DEPLOY_DB_FILE)
     db = ProjectStore(base)
     state = ProjectState.load(project_id, db)
+    # SOF-159: a marker still set from a prior attempt with no captured handle means that attempt was
+    # killed mid-`railway add` (Railway created the Postgres, the CLI never returned an id) — surface
+    # it so the reconciliation reporter/operator can reclaim that orphan. This attempt still proceeds.
+    if state.deploy_db_pending and not state.deploy_db_service_id:
+        sys.stderr.write(
+            f"provision-db: WARNING prior provision (attempt {state.deploy_db_pending.get('attempt')}, "
+            f"started {state.deploy_db_pending.get('started_at')}) left a pending marker with no serviceId "
+            f"— it may have orphaned a Postgres; flag for reconciliation.\n")
+    # Durable breadcrumb written BEFORE the create call: if this process is SIGKILLed during
+    # `railway add` (SOF-116 console-deploy kill / OOM / timeout — none catchable by the except
+    # below), this marker is the ONLY durable record that a DB may have been created for this
+    # project. deploy-db.json is workspace-local and, in the kill-mid-add case, never gets written.
+    state.deploy_db_pending = {"started_at": time.time(), "attempt": state.deploy_db_attempts + 1}
+    state.save()
     try:
         info = deploy_db.provision(project_id, ctx)
         # Persist the captured serviceId as the DURABLE teardown handle: the reaper needs it even
@@ -241,6 +255,7 @@ def _provision_db(projects_dir: str, project_id: str) -> int:
             state.deploy_db_service_id = info["service_id"]
         if info.get("volume_id"):
             state.deploy_db_volume_id = info["volume_id"]
+        state.deploy_db_pending = {}  # SOF-159: handle captured → clear the in-flight breadcrumb
         state.save()
         db.record_artifact("Deploy DB", "context/" + deploy_db.DEPLOY_DB_FILE, kind="deploy-db")
         return 0
@@ -252,7 +267,9 @@ def _provision_db(projects_dir: str, project_id: str) -> int:
                 _partial = json.load(_pf)
             if _partial.get("service_id") and not state.deploy_db_service_id:
                 state.deploy_db_service_id = _partial["service_id"]
-                state.save()
+            if state.deploy_db_service_id:
+                state.deploy_db_pending = {}  # SOF-159: salvaged a handle → clear the breadcrumb
+            state.save()  # else the pending marker STAYS set — the breadcrumb for reconciliation
         except Exception:
             pass
         sys.stderr.write(f"provision-db failed: {e}\n")
