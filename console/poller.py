@@ -213,6 +213,20 @@ def _github_reaper_tick(tick: int, interval: int, console) -> dict | None:
     return report
 
 
+def _ticket_reclaim_tick(tick: int, interval: int, pid: str, console) -> list:
+    """SOF-163: interval-gated per-project check for orphaned in_progress tickets. Unlike the
+    deploy-DB/GitHub reapers, this is ON by default (no separate arm env var) — reclaiming a
+    ticket's own state back to `open` is a low-risk, purely-corrective action (unlike deleting a
+    real Railway/GitHub resource), so it doesn't need the same disarmed-by-default caution.
+    Returns the list of reclaimed ticket ids (empty if none, or if the interval hasn't come up)."""
+    if interval <= 0 or tick <= 0 or tick % interval != 0:
+        return []
+    try:
+        return console.reclaim_orphaned_tickets(pid)
+    except Exception:
+        return []
+
+
 def _log_flush_tick(pid: str, log_path: str) -> None:
     """Upload project.log to Supabase Storage when new bytes have arrived since the last flush.
     Re-uploads the whole file (upsert, same key) — idempotent. No-op when storage is disabled."""
@@ -236,6 +250,9 @@ def _poll_transitions():
     _reaper_interval = int(os.environ.get("SF_REAPER_INTERVAL_TICKS", "0") or "0")
     _gh_reaper_interval = int(os.environ.get("SF_GITHUB_REAPER_INTERVAL_TICKS", "0") or "0")
     _log_flush_interval = max(1, int(os.environ.get("SF_LOG_FLUSH_TICKS", "10") or "10"))
+    # SOF-163: ~5 minutes at the default 3s base tick — the staleness bound this checks against is
+    # hours, so there's no need to poll more often; on by default (see _ticket_reclaim_tick).
+    _ticket_reclaim_interval = max(1, int(os.environ.get("SF_TICKET_RECLAIM_TICKS", "100") or "100"))
     while True:
         time.sleep(3)
         tick += 1
@@ -305,6 +322,15 @@ def _poll_transitions():
                             _narrate(pid, "crashed-final",
                                      f"⛔ Stage crashed after {_AUTO_RESUME_MAX} auto-resume "
                                      "attempts — paused for operator (use Resume to continue).")
+                    # SOF-163: catches a single ticket orphaned WHILE the stage is still alive —
+                    # distinct from the whole-stage recovery above, which only fires once the
+                    # entire stage looks dead.
+                    if not st.get("done"):
+                        reclaimed = _ticket_reclaim_tick(tick, _ticket_reclaim_interval, pid, console)
+                        if reclaimed:
+                            _narrate(pid, "reclaim-%s" % ",".join(str(t) for t in reclaimed),
+                                     f"♻️ Reclaimed stalled ticket(s) {reclaimed} back to open "
+                                     "for re-dispatch.")
                     _narrate_project(pid, st)
                 except Exception:
                     pass

@@ -57,6 +57,11 @@ _BUILT_OR_BEYOND = ("done", "deployed", "qa_testing", "approved")
 # SF_AUTO_RESUME_MAX (SOF-116) — a real, bounded cap, never an unbounded retry loop.
 _DEFAULT_REVIEW_BOUNCE_MAX = 2
 
+# SOF-163: how many times the host will reclaim a single orphaned in_progress ticket back to
+# `open` before giving up and escalating via add-blocker instead of retrying forever. Same
+# bounded-cap idiom as _DEFAULT_REVIEW_BOUNCE_MAX/SF_AUTO_RESUME_MAX.
+_DEFAULT_STALL_MAX = 2
+
 
 def _decode_row(row) -> dict:
     """JSON-decode `design_refs`/`dependencies`/`decision_log` for the `Ticket` dataclass — SQL
@@ -128,6 +133,10 @@ class Ticket:
     # SOF-119: how many times the REVIEW stage has bounced this ticket deployed->open. Always a
     # real int (0 for "never bounced") — no None/[] "never addressed" ambiguity, see migration 0021.
     review_bounce_count: int = 0
+    # SOF-163: how many times the host has reclaimed this ticket back to open from a dead-end
+    # in_progress state (terminal agent row never reverted, or a stale-running agent past the
+    # staleness bound). Same convention as review_bounce_count — see migration 0024.
+    stall_count: int = 0
 
 
 class TicketStore:
@@ -288,6 +297,38 @@ class TicketStore:
         self._repo.update(ticket_id, status="open", agent=None, description=report,
                           review_bounce_count=new_count)
         return True
+
+    def reclaim_stalled(self, ticket_id: int, reason: str, max_stalls: Optional[int] = None) -> bool:
+        """SOF-163: reclaim an `in_progress` ticket that has no live path forward — either its
+        claimed agent's own runtime_agents row is already terminal (done/failed, so nothing will
+        ever call finish() for it again — a deterministic bug) or that agent has been `running`
+        well past a generous staleness bound (a heuristic reclaim; the caller decides which and
+        supplies `reason`). Host-detected via AgentRegistry's real spawn/finish bookkeeping, which
+        both runtimes (claude-native and opencode swarm) write identically.
+
+        CAS: only reverts if the ticket is STILL `in_progress` at write time — never clobbers a
+        ticket that legitimately transitioned in the same moment (e.g. finish-agent landing
+        concurrently with this check). Returns True iff the CAS actually reverted the ticket.
+
+        While under the cap: reverts to `open` (agent cleared) so the normal claim/dispatch flow
+        re-attempts it, carrying a note explaining why. At/over the cap: the ticket is left as-is
+        — NOT reset again, a ticket that stalls repeatedly needs an operator, not another silent
+        retry — the count is still persisted, and the caller should escalate via `add-blocker`.
+
+        `max_stalls` defaults from `SF_TICKET_STALL_MAX` (mirrors SOF-116's SF_AUTO_RESUME_MAX /
+        SOF-119's SF_REVIEW_BOUNCE_MAX precedent), falling back to `_DEFAULT_STALL_MAX`."""
+        if max_stalls is None:
+            max_stalls = int(os.environ.get("SF_TICKET_STALL_MAX", _DEFAULT_STALL_MAX))
+        t = self.get(ticket_id)
+        new_count = t.stall_count + 1
+        if new_count > max_stalls:
+            self._repo.update(ticket_id, stall_count=new_count)
+            return False
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+        report = (t.description or "").rstrip()
+        report = (report + "\n\n" if report else "") + f"## Reclaimed (stalled {stamp})\n\n{reason.strip()}\n"
+        return self._repo.update_if(ticket_id, ("in_progress",), status="open", agent=None,
+                                    description=report, stall_count=new_count) == 1
 
     # ---- queries ---------------------------------------------------------------------
     def open_waves(self) -> list[int]:

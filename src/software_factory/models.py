@@ -134,6 +134,11 @@ tickets = Table(
     # loop spans separate agent processes (review -> rebuild -> redeploy -> review again), so this
     # must be persisted, not counted in-process.
     Column("review_bounce_count", Integer, nullable=False, server_default="0"),
+    # SOF-163: how many times the host has reclaimed this ticket back to `open` because it was
+    # `in_progress` with no live path forward (its claimed agent's runtime_agents row already
+    # terminal, or running well past a generous staleness bound). Same shape as
+    # review_bounce_count — persisted, not derivable, since the stall spans separate processes.
+    Column("stall_count", Integer, nullable=False, server_default="0"),
 )
 
 runtime_agents = Table(

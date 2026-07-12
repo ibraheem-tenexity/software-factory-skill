@@ -1022,6 +1022,58 @@ class Console:
         ts = TicketStore(self._paths(project_id)["db"])
         ts.reset_in_progress_tickets()
 
+    def reclaim_orphaned_tickets(self, project_id: str) -> list[int]:
+        """SOF-163: `_reset_stuck_tickets` above is a BLANKET reset, only invoked when the whole
+        STAGE is judged dead (auto-resume/resume_project). This is the SELECTIVE counterpart —
+        it catches a single ticket orphaned while the stage is still alive and everything else is
+        progressing fine (confirmed in real prod history: a ticket left `in_progress` for 32+
+        hours after its own agent had already failed, with the rest of the project completing
+        normally around it). Two independent, host-detectable signals, checked per ticket against
+        its claimed agent's real AgentRegistry row (runtime-agnostic — both claude-native and
+        opencode swarm write the same spawn-agent/finish-agent bookkeeping):
+
+          (a) DETERMINISTIC — the agent row is already terminal (done/failed) but the ticket is
+              still in_progress. The agent proved it will never call finish() again; no threshold
+              needed, this is unconditionally a bug to fix.
+          (b) HEURISTIC — the agent row is still `running` but started more than
+              SF_TICKET_STALL_HOURS ago (default 6, matching run_autopsy's own TIMEOUT_HOURS).
+              Deliberately generous: real build-phase turns have legitimately run up to ~12h in
+              prod history, so this must sit comfortably above that to avoid false-positiving a
+              merely-slow ticket.
+
+        Neither case can literally interrupt a live sub-agent call (Task calls run inside the
+        one tracked stage process; individual sub-agent execution is opaque to the host in both
+        runtimes) — this reclaims the TICKET's state, not the process. Returns the list of ticket
+        ids actually reclaimed this call; a ticket at its stall cap is left untouched here (see
+        `TicketStore.reclaim_stalled`) for the caller to escalate via `add-blocker`."""
+        ts = TicketStore(self._paths(project_id)["db"])
+        registry = AgentRegistry(self._paths(project_id)["db"])
+        stall_hours = float(os.environ.get("SF_TICKET_STALL_HOURS", "6") or 6)
+        reclaimed = []
+        for t in ts.all_tickets():
+            if t.status != "in_progress" or not t.agent:
+                continue
+            try:
+                agent = registry.get(t.agent)
+            except KeyError:
+                continue   # no matching agent row to correlate against — leave it alone
+            if agent.status in ("done", "failed"):
+                reason = f"agent `{t.agent}` already finished ({agent.status}) but this ticket was never reverted"
+            elif agent.status == "running" and (time.time() - agent.started_at) > stall_hours * 3600:
+                age_h = (time.time() - agent.started_at) / 3600
+                reason = f"agent `{t.agent}` has been running {age_h:.1f}h (past the {stall_hours:g}h bound)"
+            else:
+                continue
+            if ts.reclaim_stalled(t.id, reason):
+                reclaimed.append(t.id)
+                logger.info("[reclaim] %s ticket %s reclaimed to open: %s", project_id, t.id, reason)
+            else:
+                db = ProjectStore(self._paths(project_id)["db"])
+                db.add_blocker(f"Ticket {t.id} stalled repeatedly ({reason}) — stall cap exceeded, "
+                               "needs an operator", blocks="stall")
+                logger.warning("[reclaim] %s ticket %s at stall cap, escalated via blocker", project_id, t.id)
+        return reclaimed
+
     def raise_budget(self, project_id: str, ceiling: float) -> dict:
         """Persist a new per-project spend ceiling (raise or lower) and clear any budget blocker.
         Lowering is allowed — caller is responsible for policy checks if desired."""
