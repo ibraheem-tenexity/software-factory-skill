@@ -12,6 +12,7 @@ export type ProjectSummary = {
   summary?: string;       // customer-facing summary; preferred over description in the dashboard snippet
   deploy_url?: string;    // present ⇒ deployed/live
   budget_stopped?: boolean;
+  credential_stopped?: boolean;  // SOF-148: uncleared credential blocker — needs operator provisioning
   held?: boolean;
   agents?: string[];      // distinct agent roles on the run (avatar stack)
   updated?: number;       // last-activity epoch (seconds)

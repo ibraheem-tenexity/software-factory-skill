@@ -839,6 +839,15 @@ class Console:
         # firing, not because the cap logic broke.
         if any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers()):
             return False   # budget stop is intentional — operator resumes via /budget + /retry
+        # SOF-148: a rejected/missing credential (GH_TOKEN invalid, etc.) is unrecoverable by
+        # retrying — the stage-1 SKILL.md tags this exact failure `blocks="credential"` and halts
+        # its own turn immediately, but that alone can't stop THIS function from blindly relaunching
+        # the same doomed attempt up to SF_AUTO_RESUME_MAX more times (the actual retry-burn SOF-148
+        # measured: ~$6.25 across repeat stage-1 launches, each failing the same gh-auth check).
+        # Same shape as the budget check above: a credential stop is a parked state an operator
+        # resolves by provisioning the real credential and retrying, not a crash to auto-heal from.
+        if any(b.get("blocks") == "credential" and not b["cleared"] for b in db.blockers()):
+            return False   # credential/config stop is unrecoverable by retry — needs an operator fix
         incomplete = (
             (stage == 1 and not state.stage1_done)
             or (stage == 2 and not state.stage2_done)
@@ -2251,6 +2260,15 @@ class Console:
                 b.get("blocks") == "budget" and not b["cleared"]
                 for b in blocker_rows[name]
             )
+            # SOF-148: same reasoning as budget_stopped — a credential-blocked run's auto-resume
+            # returns False forever (never reaches 'crashed'), so without a surfaced flag it sits
+            # invisible, looking like whatever phase it was last in. An uncleared credential
+            # blocker means the run needs an operator to provision the real credential, not a
+            # crash to auto-heal from.
+            credential_stopped = any(
+                b.get("blocks") == "credential" and not b["cleared"]
+                for b in blocker_rows[name]
+            )
             # Last activity (epoch) for the dashboard's "updated" column; falls back to the
             # registry create time for a registry-only run with no local dir yet.
             try:
@@ -2267,6 +2285,7 @@ class Console:
                 "spent_usd": st.spent_usd or 0,
                 "stage": st.stage,
                 "budget_stopped": budget_stopped,
+                "credential_stopped": credential_stopped,
                 "held": st.held,
                 "owner": st.owner,
                 # Immutable creator (falls back to current owner for not-yet-backfilled rows).
