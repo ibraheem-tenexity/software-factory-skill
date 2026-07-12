@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from software_factory.data_transfer_objects.chat_agent import ChatMessage
 from software_factory import notify
 from software_factory import env as _env
+from software_factory import recovery
 
 import console.state as state
 from console import chat_persistence
@@ -21,6 +22,7 @@ from console import chat_persistence
 _stage2_launched: set = set()
 _stage3_launched: set = set()
 _narrated: set = set()
+_recovery_done_resolved: set = set()  # SOF-165: pids whose recovery actions were resolved on done (once per server life)
 _log_offsets: dict = {}  # pid -> bytes uploaded on last log flush
 # Crash auto-resume attempts. Configurable: long opencode sessions (multi-hour Kimi build/test
 # loops) crash more often than claude's — run-b594a5f4 exhausted 2 resumes mid-test-phase and
@@ -151,13 +153,20 @@ def _run_is_silence_classifiable(st: dict) -> bool:
     return phase not in ("draft", "pending", "provision", "stopped", "crashed", "paused", "done")
 
 
-def _recovery_action_seam(pid: str) -> None:
-    """SOF-165 SEAM — intentionally a NO-OP in SOF-164. This is the exact call site where a
-    'critical' silence will open a Recovery Action (Proposal 5): consult process liveness, then
-    resume / mark-crashed / notify (opening one only if not already open). Kept as a no-op stub so
-    NOTICING stays fully separated from ACTING until SOF-165 lands — the classification + narration
-    at the call site is the entire SOF-164 effect."""
-    return  # SOF-165: open/refresh the Recovery Action for `pid` here.
+def _recovery_action_seam(pid: str, console, idle: float) -> None:
+    """SOF-165: a 'critical' silence opens the tier-2 Recovery Action — but ONLY when the process is
+    genuinely ALIVE-but-silent. The liveness gate (SOF-161's durable _stage_process_alive) is the
+    key separation: a DEAD silent stage is owned by the auto_resume → mark_stage_crashed 'dead_stage'
+    path, which opens its OWN action; opening a 'silent_run' here too would double-count the same
+    incident. So: alive+silent → open('silent_run') (idempotent — a persistent silence refreshes the
+    one open action, never spams); dead → do nothing, the dead_stage path has it."""
+    try:
+        if console._stage_process_alive(pid):
+            cause = "no output written yet while alive" if idle < 0 else f"silent {int(idle)}s while alive"
+            recovery.open_recovery_action(pid, kind="silent_run", cause=cause,
+                                          evidence={"idle_seconds": int(idle)})
+    except Exception:
+        pass  # best-effort — a recovery-bookkeeping hiccup must never wedge the poll loop
 
 
 def _health() -> dict:
@@ -323,9 +332,15 @@ def _poll_transitions():
                             detail = "hasn't written any output yet" if sil == "no-log" else f"silent for ~{int(idle)}s"
                             _narrate(pid, "silence-critical",
                                      f"🔴 Stage {detail} — flagged for review.")
-                            _recovery_action_seam(pid)   # SOF-165 seam (no-op stub)
+                            _recovery_action_seam(pid, console, idle)   # SOF-165: acts iff alive
                 except Exception:
                     pass
+                # SOF-165: a run that reaches done RESOLVES its open recovery action(s) — a
+                # self-recovered silent_run (transient silence that then completed) must not leave a
+                # zombie-open row. Once per pid per server life; idempotent no-op if none open.
+                if st.get("done") and pid not in _recovery_done_resolved:
+                    _recovery_done_resolved.add(pid)
+                    recovery.resolve_recovery_actions(pid, resolution="restored")
                 if st.get("done") or st.get("phase") == "pending":
                     continue
                 prev = state._project_stages.get(pid, 0)

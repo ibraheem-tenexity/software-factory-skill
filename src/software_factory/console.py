@@ -26,7 +26,7 @@ from .constants import (
     PLANNING_MODELS, IMPL_MODELS,
     RUNNER_KEYS as _RUNNER_KEYS,
 )
-from . import artifacts, checkpoint as ckpt, deploy_db, env as _env, streamlog, vault as _vault
+from . import artifacts, checkpoint as ckpt, deploy_db, env as _env, recovery, streamlog, vault as _vault
 from .runtime_agents import AgentRegistry
 from .input_pipeline import persist_and_compose
 from .pdf_extract import extract_to_markdown
@@ -904,6 +904,11 @@ class Console:
         state.save()
         logger.warning("[crash] %s marked crashed at node %s (stage %s) — auto-resume exhausted",
                        project_id, state.crashed_at_node, stage)
+        # SOF-165: ADDITIVELY record the unified tier-2 recovery action. phase='crashed' above stays
+        # the Recovery-bar's driver (UX byte-identical); this only unifies the underlying record so
+        # the benchmark autopsy path lands the same primitive. Best-effort — never breaks the crash mark.
+        recovery.open_recovery_action(project_id, kind="dead_stage", cause=state.crashed_at_node,
+                                     evidence={"stage": stage, "auto_resume_count": getattr(state, "auto_resume_count", 0)})
         return True
 
     def pause_project(self, project_id: str) -> dict:
@@ -965,6 +970,10 @@ class Console:
             raise
         if result is None:
             _restore_recovery_markers()
+        else:
+            # SOF-165: a successful operator resume RESTORES the run — resolve its open recovery
+            # action(s). Idempotent no-op if none were open (e.g. a paused run that never crashed).
+            recovery.resolve_recovery_actions(project_id, resolution="restored")
         return result
 
     def resume_failure_reason(self, project_id: str) -> str | None:
@@ -2322,6 +2331,10 @@ class Console:
                 except Exception:
                     pass  # best-effort: archive write must never fail due to Vault hiccup
             self._maybe_teardown_deploy_db(project_id, state)
+            # SOF-165: archiving/discarding a run resolves its open recovery action(s) as
+            # 'cancelled' — a dead project must never leave a zombie-open action accumulating in the
+            # ledger (the exact silent-accumulation class the 2026-07-11 sweep hand-cleaned).
+            recovery.resolve_recovery_actions(project_id, resolution="cancelled")
         return state.archived
 
     def set_maintenance(self, project_id: str, enabled: bool) -> bool:
@@ -2348,6 +2361,7 @@ class Console:
             except Exception:
                 pass
         self._maybe_teardown_deploy_db(project_id, state)
+        recovery.resolve_recovery_actions(project_id, resolution="cancelled")  # SOF-165: no zombie-open rows
         # Drop the persisted state (projectstate row → out of the registry) BEFORE the dir, so a
         # registry-only run with no local dir is still fully removed.
         try:
