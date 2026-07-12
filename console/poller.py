@@ -31,6 +31,13 @@ _log_offsets: dict = {}  # pid -> bytes uploaded on last log flush
 # (the only path that notifies the operator).
 _AUTO_RESUME_MAX = int(os.environ.get("SF_AUTO_RESUME_MAX", "2") or 2)
 _health_bad_since = [None]  # [-]: None = healthy; float = first failure ts (alert once)
+# SOF-164: output-silence classification bands (seconds), env-tunable. Coherent with the existing
+# scales — 300s = stage_finished's opencode idle grace (past normal streaming-quiet); 900s sits
+# above that yet below run_autopsy's STALL_HOURS (3600s), so the PROD poller notices a frozen run
+# BEFORE the benchmark cron would. Read at import like _AUTO_RESUME_MAX (a Railway env change
+# restarts the process and picks them up). NOT a new scale — anchored to the two that already exist.
+_SILENCE_SUSPICIOUS_S = int(os.environ.get("SF_SILENCE_SUSPICIOUS_S", "300") or 300)
+_SILENCE_CRITICAL_S = int(os.environ.get("SF_SILENCE_CRITICAL_S", "900") or 900)
 
 
 def _auto_advance(pid: str):
@@ -109,6 +116,48 @@ def _narrate_project(pid: str, st: dict):
             # The seeded throwaway demo login (SPEC §6) — without it an auth'd app can't be demoed.
             msg += "\n🔑 Demo login:\n" + creds
         _narrate(pid, "done", msg)
+
+
+def _silence_tick(log_path: str) -> tuple[str, float]:
+    """SOF-164 (Proposal 4): classify a run's output-silence — 'ok' | 'suspicious' | 'critical' |
+    'no-log'. PURE noticing: reads only the log's mtime — never the process, never a kill/resume/
+    advance. This is a PARALLEL observation channel to stage_finished's binary finish/kill/resume
+    path, which stays completely untouched (zero regression to the twice-patched acting logic).
+
+    Bands from _SILENCE_SUSPICIOUS_S / _SILENCE_CRITICAL_S. A missing/never-written log on an
+    ACTIVE run is NOT 'ok' — it's its own 'no-log' signal (a stage that died before writing a
+    single line), which the caller treats as critical. Returns (state, idle_seconds); idle is -1
+    for the no-log case."""
+    try:
+        idle = time.time() - os.path.getmtime(log_path)
+    except OSError:
+        return ("no-log", -1.0)
+    if idle < _SILENCE_SUSPICIOUS_S:
+        return ("ok", idle)
+    if idle < _SILENCE_CRITICAL_S:
+        return ("suspicious", idle)
+    return ("critical", idle)
+
+
+def _run_is_silence_classifiable(st: dict) -> bool:
+    """True only for a run whose stage orchestrator SHOULD be streaming output right now — the only
+    runs where silence is meaningful. Excludes everything that is intentionally quiet: done, held,
+    budget_stopped, and credential_stopped (SOF-148 — a run parked on either must never flag), plus
+    the pre-launch and terminal phases (no orchestrator is running to go silent). Exclusion-based so
+    a NEW mid-execution phase defaults to classifiable — the safe direction for a noticing layer."""
+    if st.get("done") or st.get("held") or st.get("budget_stopped") or st.get("credential_stopped"):
+        return False
+    phase = (st.get("phase") or "").lower()
+    return phase not in ("draft", "pending", "provision", "stopped", "crashed", "paused", "done")
+
+
+def _recovery_action_seam(pid: str) -> None:
+    """SOF-165 SEAM — intentionally a NO-OP in SOF-164. This is the exact call site where a
+    'critical' silence will open a Recovery Action (Proposal 5): consult process liveness, then
+    resume / mark-crashed / notify (opening one only if not already open). Kept as a no-op stub so
+    NOTICING stays fully separated from ACTING until SOF-165 lands — the classification + narration
+    at the call site is the entire SOF-164 effect."""
+    return  # SOF-165: open/refresh the Recovery Action for `pid` here.
 
 
 def _health() -> dict:
@@ -257,6 +306,24 @@ def _poll_transitions():
                                      f"⛔ Stage crashed after {_AUTO_RESUME_MAX} auto-resume "
                                      "attempts — paused for operator (use Resume to continue).")
                     _narrate_project(pid, st)
+                except Exception:
+                    pass
+                # SOF-164: graded silent-run classification — a PARALLEL noticing channel run AFTER
+                # (and independent of) all the acting logic above. It never advances/kills/resumes;
+                # it only narrates suspicious/critical and taps the SOF-165 recovery seam (a no-op
+                # today). Gated to runs whose orchestrator should be streaming — a done/held/budget-
+                # or credential-stopped run is intentionally quiet and must not flag.
+                try:
+                    if _run_is_silence_classifiable(st):
+                        sil, idle = _silence_tick(os.path.join(state.PROJECTS_DIR, pid, "project.log"))
+                        if sil == "suspicious":
+                            _narrate(pid, "silence-suspicious",
+                                     f"👀 Stage has been quiet ~{int(idle)}s — watching (no action taken).")
+                        elif sil in ("critical", "no-log"):
+                            detail = "hasn't written any output yet" if sil == "no-log" else f"silent for ~{int(idle)}s"
+                            _narrate(pid, "silence-critical",
+                                     f"🔴 Stage {detail} — flagged for review.")
+                            _recovery_action_seam(pid)   # SOF-165 seam (no-op stub)
                 except Exception:
                     pass
                 if st.get("done") or st.get("phase") == "pending":
