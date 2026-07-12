@@ -17,7 +17,7 @@ type Tone = "success" | "warning" | "neutral" | "brand" | "info" | "danger";
 function statusOf(r: ProjectSummary): { key: StatusKey; label: string; tone: Tone } {
   if (r.deploy_url || r.done || r.phase === "done") return { key: "deployed", label: "Deployed", tone: "success" };
   if (r.phase === "draft") return { key: "draft", label: "Draft", tone: "neutral" };
-  if (r.budget_stopped || r.held) return { key: "needs-input", label: "Needs input", tone: "warning" };
+  if (r.budget_stopped || r.credential_stopped || r.held) return { key: "needs-input", label: "Needs input", tone: "warning" };
   // Shared with FactoryConsole's phaseTone() (factory/pipeline.ts) so a halted run reads the
   // same here as in the detail view — see #128, where a duplicated if-chain drifted out of sync.
   if (r.phase === "stopped") return { key: "stopped", label: "Stopped", tone: toneForHaltedPhase("stopped")! };
