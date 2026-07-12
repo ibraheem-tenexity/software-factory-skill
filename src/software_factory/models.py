@@ -441,11 +441,27 @@ autopsy_signatures = Table(
     Column("last_seen_at", Float, nullable=False),
 )
 
+# SOF-102 (B5) — eval-judge scores. One row per benchmark run (project_id PK); trends come from
+# querying rows across runs (group by brief_title, order by scored_at). Global, like the autopsy
+# ledgers. `by_stage`/`detail` are JSONB: by_stage = {stage bucket: miss count}, detail = the full
+# scored criteria + screen diffs (the evidence behind the aggregate score).
+eval_scores = Table(
+    "eval_scores", metadata,
+    Column("project_id", Text, primary_key=True),
+    Column("brief_title", Text, nullable=False, server_default=""),
+    Column("total", Integer, nullable=False, server_default="0"),
+    Column("passed", Integer, nullable=False, server_default="0"),
+    Column("score", Float, nullable=False, server_default="0"),
+    Column("by_stage", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("detail", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("scored_at", Float, nullable=False),
+)
+
 # Groupings: the flat per-project tables, the global directory tables, and everything (Alembic + tests).
 PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
 FLAT_TABLES = PROJECTDB + (tickets, runtime_agents, checkpoint)
 GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
                  system_agents, tools, sow,
                  doc_summary, chunk, conversation, org_secrets,
-                 autopsy_processed_runs, autopsy_signatures)
+                 autopsy_processed_runs, autopsy_signatures, eval_scores)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES
