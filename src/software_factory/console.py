@@ -1045,14 +1045,29 @@ class Console:
         one tracked stage process; individual sub-agent execution is opaque to the host in both
         runtimes) — this reclaims the TICKET's state, not the process. Returns the list of ticket
         ids actually reclaimed this call; a ticket at its stall cap is left untouched here (see
-        `TicketStore.reclaim_stalled`) for the caller to escalate via `add-blocker`."""
+        `TicketStore.reclaim_stalled`) for the caller to escalate via `add-blocker`.
+
+        Once escalated, a ticket is SKIPPED on every later call while its blocker is uncleared —
+        `add_blocker` has no dedup of its own, and this tick re-runs every ~5 minutes, so without
+        this check an over-cap ticket (still in_progress, agent still terminal) would re-match
+        forever and add a fresh blocker each time (~288/day). The uncleared blocker IS the
+        "already escalated, waiting on an operator" signal; an operator clearing it (or the
+        ticket transitioning away from in_progress some other way) is what re-arms this ticket."""
         ts = TicketStore(self._paths(project_id)["db"])
         registry = AgentRegistry(self._paths(project_id)["db"])
+        db = ProjectStore(self._paths(project_id)["db"])
         stall_hours = float(os.environ.get("SF_TICKET_STALL_HOURS", "6") or 6)
+        already_escalated = {
+            b["what"].split(" ", 2)[1]  # "Ticket <id> stalled ..." -> "<id>"
+            for b in db.blockers()
+            if b.get("blocks") == "stall" and not b["cleared"] and b["what"].startswith("Ticket ")
+        }
         reclaimed = []
         for t in ts.all_tickets():
             if t.status != "in_progress" or not t.agent:
                 continue
+            if str(t.id) in already_escalated:
+                continue   # already escalated, waiting on an operator — don't re-process or re-block
             try:
                 agent = registry.get(t.agent)
             except KeyError:
@@ -1068,7 +1083,6 @@ class Console:
                 reclaimed.append(t.id)
                 logger.info("[reclaim] %s ticket %s reclaimed to open: %s", project_id, t.id, reason)
             else:
-                db = ProjectStore(self._paths(project_id)["db"])
                 db.add_blocker(f"Ticket {t.id} stalled repeatedly ({reason}) — stall cap exceeded, "
                                "needs an operator", blocks="stall")
                 logger.warning("[reclaim] %s ticket %s at stall cap, escalated via blocker", project_id, t.id)
