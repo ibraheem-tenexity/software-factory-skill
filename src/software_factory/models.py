@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import (Boolean, CheckConstraint, Column, Computed, DateTime, Float,
-                        ForeignKey, Integer, MetaData, Table, Text, UniqueConstraint, func, text)
+                        ForeignKey, Index, Integer, MetaData, Table, Text, UniqueConstraint, func, text)
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 
 metadata = MetaData()
@@ -446,6 +446,32 @@ autopsy_signatures = Table(
     Column("last_seen_at", Float, nullable=False),
 )
 
+# SOF-165 (Proposal 5) — first-class Recovery Action: the tier-2 recovery entity between the
+# bounded auto-resume (tier 1) and the terminal Recovery-bar/Linear escalation (tier 3). One
+# unified record that BOTH the production path (mark_stage_crashed) and the benchmark path
+# (autopsy_and_file) + the SOF-164 silence seam write to. Global, like the autopsy ledgers.
+# Idempotency: the partial unique index below allows at most ONE *open* (resolved_at IS NULL)
+# action per (project_id, kind) — a repeated same-cause signal refreshes it instead of duplicating;
+# a re-open after resolution is a fresh row. `evidence` JSONB carries the cause specifics
+# (stage/idle/signature/linear_issue); `resolution` is the terminal outcome.
+recovery_actions = Table(
+    "recovery_actions", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("project_id", Text, nullable=False),
+    Column("kind", Text, nullable=False),               # dead_stage | silent_run | budget_exhausted | ...
+    Column("owner", Text, nullable=False, server_default="auto"),   # "auto" | operator email
+    Column("cause", Text, nullable=False, server_default=""),
+    Column("evidence", JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    Column("opened_at", Float, nullable=False),
+    Column("resolved_at", Float),                        # NULL while open
+    Column("resolution", Text),                          # restored|delegated|false_positive|blocked|escalated|cancelled
+)
+# At most one OPEN action per (project_id, kind) — the DB-enforced idempotency the open() upsert's
+# ON CONFLICT arbiter must match EXACTLY (index_elements + this same predicate), or the upsert
+# throws "no unique or exclusion constraint matching" on the first real conflict.
+Index("uq_recovery_open_project_kind", recovery_actions.c.project_id, recovery_actions.c.kind,
+      unique=True, postgresql_where=recovery_actions.c.resolved_at.is_(None))
+
 # SOF-102 (B5) — eval-judge scores. One row per benchmark run (project_id PK); trends come from
 # querying rows across runs (group by brief_title, order by scored_at). Global, like the autopsy
 # ledgers. `by_stage`/`detail` are JSONB: by_stage = {stage bucket: miss count}, detail = the full
@@ -468,5 +494,5 @@ FLAT_TABLES = PROJECTDB + (tickets, runtime_agents, checkpoint)
 GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
                  system_agents, tools, sow,
                  doc_summary, chunk, conversation, org_secrets,
-                 autopsy_processed_runs, autopsy_signatures, eval_scores)
+                 autopsy_processed_runs, autopsy_signatures, eval_scores, recovery_actions)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES
