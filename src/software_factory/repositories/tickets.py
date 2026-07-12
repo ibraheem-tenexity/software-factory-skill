@@ -37,6 +37,17 @@ class TicketRepository:
         stmt = update(tickets).where(tickets.c.id == ticket_id, self._scoped()).values(**vals)
         return self._x.execute(stmt).rowcount
 
+    def update_if(self, ticket_id: int, allowed_statuses: tuple, **vals) -> int:
+        """CAS write: applies `vals` only if the row's status is STILL one of
+        `allowed_statuses` at write time (re-checked in the same UPDATE, not read earlier and
+        trusted). Returns the affected row count (0 or 1) so the caller can detect a lost race
+        instead of silently overwriting a concurrent claim."""
+        stmt = (update(tickets)
+                .where(tickets.c.id == ticket_id, self._scoped(),
+                      tickets.c.status.in_(allowed_statuses))
+                .values(**vals))
+        return self._x.execute(stmt).rowcount
+
     def bulk_reset_in_progress(self) -> int:
         stmt = (update(tickets)
                 .where(self._scoped(), tickets.c.status == "in_progress")
