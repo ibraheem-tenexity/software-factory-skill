@@ -10,6 +10,8 @@ import { api } from "../../api";
 // SOF-17: the full block-level renderer (headings/tables/code/blockquotes/lists), shared with
 // the standalone ArtifactViewer so the two never drift.
 import { MarkdownBody } from "../../markdown";
+// SOF-168: bare URLs in chat message bodies render as clickable links (React-node split, no HTML).
+import { linkify } from "../../linkify";
 export { T };
 
 type CSS = React.CSSProperties;
@@ -478,7 +480,7 @@ export function Message({ who, persona, text, anim, badge }:
           {isAgent && <span style={{ font: `500 10px/1 ${T.sans}`, letterSpacing: "0.08em", textTransform: "uppercase",
             background: T.brandSoft, color: T.brandDeep, padding: "3px 6px", borderRadius: 4 }}>{badge || "Concierge"}</span>}
         </header>
-        <p style={{ margin: 0, font: `400 13.5px/1.5 ${T.sans}`, color: isAgent ? T.secondary : T.fg }}>{text}</p>
+        <p style={{ margin: 0, font: `400 13.5px/1.5 ${T.sans}`, color: isAgent ? T.secondary : T.fg }}>{linkify(text)}</p>
       </div>
     </article>
   );
