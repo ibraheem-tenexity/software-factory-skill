@@ -52,3 +52,24 @@ def open_recovery_actions_for(project_id: str, *, repo: RecoveryActionRepository
     except Exception:
         logger.exception("[recovery] open_for(%s) failed (non-fatal)", project_id)
         return []
+
+
+def recovery_actions_for(project_id: str, limit: int = 50,
+                         *, repo: RecoveryActionRepository | None = None) -> list[dict]:
+    """SOF-165 PR2: full recovery-action history for a run (open + resolved), newest first — the
+    read surface behind GET /api/projects/{pid}/recovery-actions. Best-effort → [] on any error."""
+    try:
+        return _repo(repo).by_project(project_id, limit)
+    except Exception:
+        logger.exception("[recovery] by_project(%s) failed (non-fatal)", project_id)
+        return []
+
+
+def open_recovery_action_count(project_id: str, *, repo: RecoveryActionRepository | None = None) -> int:
+    """SOF-165 PR2: cheap open-action count for status(). Best-effort → 0 on any error (never breaks
+    a status read)."""
+    try:
+        return _repo(repo).open_count(project_id)
+    except Exception:
+        logger.exception("[recovery] open_count(%s) failed (non-fatal)", project_id)
+        return 0
