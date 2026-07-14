@@ -13,6 +13,8 @@
 import { useEffect, useRef, useState } from "react";
 import { T, Icon, Sparkle, Composer, Message, CategoryLabel, StatusPill, WorkingPill, QuickReplies } from "../onboarding/design";
 import { api, ProjectEvent } from "../../api";
+// SOF-168: bare URLs in activity-feed lines render as clickable links (React-node split, no HTML).
+import { linkify } from "../../linkify";
 import { ArtifactList, ArtifactRef } from "./Artifacts";
 
 type ChatMsg = { role: string; content: string; ts: number; msg_type?: string };
@@ -200,7 +202,7 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
               {events.map((e, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: T.rMd, background: T.sunken }}>
                   <Icon name={EVENT_ICON[e.type] || "dots"} size={12} color={e.type === "blocker" ? T.danger : e.type === "done" ? T.success : T.tertiary} />
-                  <span style={{ font: `400 11.5px/1.35 ${T.sans}`, color: T.secondary }}>{eventText(e)}</span>
+                  <span style={{ font: `400 11.5px/1.35 ${T.sans}`, color: T.secondary }}>{linkify(eventText(e))}</span>
                 </div>
               ))}
             </div>
@@ -237,7 +239,7 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
             : events.map((e, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 9px", borderRadius: T.rMd, background: T.sunken }}>
                 <Icon name={EVENT_ICON[e.type] || "dots"} size={12} color={e.type === "blocker" ? T.danger : e.type === "done" ? T.success : T.tertiary} />
-                <span style={{ font: `400 12px/1.35 ${T.sans}`, color: T.secondary }}>{eventText(e)}</span>
+                <span style={{ font: `400 12px/1.35 ${T.sans}`, color: T.secondary }}>{linkify(eventText(e))}</span>
               </div>
             ))}
         </div>
