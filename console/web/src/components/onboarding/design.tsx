@@ -627,6 +627,15 @@ export function SuggestedResponseList({ options, onSubmit, disabled }:
   const isMulti = options[0]?.type === "multi select";
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
 
+  // SOF-169: a NEW turn's options must start unpicked. The parent renders this list only under the
+  // last message, so it normally remounts per turn — but don't depend on that keying: reset `picked`
+  // whenever the option SET changes, so a reused instance can't carry a prior turn's selection into
+  // the next (which would leave every new chip disabled/dimmed — a dead interview). Harmless during
+  // a single turn's chip-streaming: `picked` is empty until the user acts, and they act only once
+  // the chips have finished streaming (so the set is stable by then).
+  const optionsKey = options.map((o) => o.response).join("");
+  React.useEffect(() => { setPicked(new Set()); }, [optionsKey]);
+
   if (!options.length) return null;
 
   if (!isMulti) {
