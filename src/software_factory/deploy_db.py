@@ -43,12 +43,23 @@ _RAILWAY_GRAPHQL_URL = "https://backboard.railway.app/graphql/v2"
 
 
 def _graphql(query: str, variables: dict, token: str) -> dict:
-    """POST a Railway GraphQL request. Returns the parsed JSON body. Raises on HTTP error."""
+    """POST a Railway GraphQL request. Returns the parsed JSON body. Raises on HTTP error.
+
+    SOF-160: two things Railway's GraphQL requires that this call was missing —
+    1. AUTH HEADER: RAILWAY_TOKEN here is always a Railway PROJECT token (env-scoped), authenticated
+       via the `Project-Access-Token` header — NOT `Authorization: Bearer` (that's account/team
+       tokens; a project token sent as Bearer → "Project Token not found").
+    2. USER-AGENT: backboard is behind Cloudflare, which BANS urllib's default `Python-urllib/x.y`
+       UA with HTTP 403 "error code: 1010" — BEFORE the request ever reaches Railway's auth. With no
+       UA set, every serviceDelete/variables call 403'd regardless of the auth header (this is the
+       actual "1010" the ticket saw). Any non-default UA passes; we send an honest descriptive one.
+    Both are required: the header alone still 1010s at Cloudflare; the UA alone still fails auth."""
     payload = json.dumps({"query": query, "variables": variables}).encode()
     req = urllib.request.Request(
         _RAILWAY_GRAPHQL_URL,
         data=payload,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        headers={"Content-Type": "application/json", "Project-Access-Token": token,
+                 "User-Agent": "software-factory-deploy-db/1.0"},
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())
