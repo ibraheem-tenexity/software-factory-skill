@@ -24,3 +24,7 @@ console/web/node_modules
 
 # claude-flow — not used; never commit any of it
 .claude-flow/
+
+# AGENTS.md is a local symlink to CLAUDE.md so Codex reads the same instructions as Claude Code.
+# It is intentionally NOT tracked — recreate it after cloning if you use Codex (see README).
+AGENTS.md
