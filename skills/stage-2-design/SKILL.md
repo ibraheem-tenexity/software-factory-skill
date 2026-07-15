@@ -36,6 +36,18 @@ per Task sub-agent; `record-artifact <projects_dir> <project_id> <title> <path> 
 
 ## Phase 1: architect  (`set-phase architect`)
 
+**Reuse the repo (SOF-151 — do NOT create a second one):** Stage 1 already created this project's
+ONE canonical GitHub repo. `python3 -m software_factory.db provision-repo <projects_dir>
+<project_id> <slug>` — since `ProjectState.repo_url` is already set, this clones Stage 1's existing
+repo into your cwd (as `<repo>/`) and prints its url; it does **not** create a new repo and does
+**not** re-record the "GitHub Repo" artifact. Pass the same `<slug>` you'd have picked for a repo
+name (only used on the rare path where Stage 1 never got to provisioning). Never call
+`GitHub.create_repo` or `record-artifact "GitHub Repo"` directly. **If this fails** (non-zero exit —
+e.g. the repo was deleted), `add-blocker "GitHub Repo: provision-repo failed for <project_id>"
+credential` and **STOP THIS STAGE IMMEDIATELY** — every artifact you produce below needs somewhere
+durable to land; do not proceed and silently produce work that can only ever live in this
+workspace.
+
 `spawn-agent architect software-architect <model> architect` → a native **Task** sub-agent that, from the
 PRD + design spec, designs the **demo-simplest** architecture: YAGNI hard, the **fewest services possible**.
 Fixed constraints: **Railway** compute; **a factory-provided Postgres** for data (the build agent
@@ -46,9 +58,11 @@ Stage 3 has **no Supabase access** — the database is provisioned by the factor
 is self-generated, so design those as agent-/factory-handled — do NOT require the operator to supply them.
 
 Produce: service list; data model; dependency list; **`## Required Tokens`** section (UPPER_SNAKE_CASE names
-ending `_TOKEN`/`_KEY`/`_URL`/`_SECRET`/`_ID`/`_PASSWORD` so the console can parse them). Write `architecture.md`;
-build the Mermaid diagram, then `diagram.render(mermaid, ".../architecture.svg")`. Commit; `record-artifact`
-each (`architecture` and `architecture-svg`).
+ending `_TOKEN`/`_KEY`/`_URL`/`_SECRET`/`_ID`/`_PASSWORD` so the console can parse them). Write
+`<repo>/architecture.md`; build the Mermaid diagram, then `diagram.render(mermaid,
+"<repo>/architecture.svg")`. **Commit + push** (SOF-151 — this is what makes it survive workspace
+teardown, exactly like Stage 1's PRD.md); `record-artifact` each (`architecture` and
+`architecture-svg`, at their real `<repo>/...` paths).
 
 **Done-gate:** `artifacts.verify(run_dir, ["PRD.md", "architecture.md", "architecture.svg"])` passes.
 
@@ -60,25 +74,26 @@ table — DB-editable, the tuning surface for this step — materialized into yo
 `.claude/agents/design.md`; a starting prompt ships seeded, an operator may have since edited it).
 It reads `PRD.md`'s screen catalog (every screen ID + its scope/app tag) and CHROMA's embedded
 design guidance, and produces THREE things:
-1. `design-spec.md`: a per-screen breakdown (layout, key components, states, a11y notes) that
+1. `<repo>/design-spec.md`: a per-screen breakdown (layout, key components, states, a11y notes) that
    explicitly **references every screen ID from the PRD's catalog** — this is what the done-gate
    cross-checks, so don't invent screens the PRD doesn't list and don't skip one it does. Visual
    guidance follows the same `frontend-design`/`ui-ux-pro-max` skills + `skills/tenexity-design/`
    brand canon CHROMA already used.
-2. **SOF-99 — one real mockup per V1 screen**, at exactly `mockups/<SCREEN_ID>.html` for every
+2. **SOF-99 — one real mockup per V1 screen**, at exactly `<repo>/mockups/<SCREEN_ID>.html` for every
    screen the PRD's catalog marks `V1? = Yes` (skip `Future`). Each is a single self-contained
    HTML file (CSS inlined in a `<style>` block, tenexity-design token values pulled in directly —
    no external stylesheet link, since the artifact viewer renders each mockup in isolation) and
    **static — no JavaScript** (the console renders mockups in a sandboxed iframe with scripts
    disabled). This is no longer a "bonus, not gated" artifact — see the DESIGN agent's own prompt
    for the full contract; the done-gate below is mechanical and blocks Stage 3 without it.
-3. **SOF-99 — `flow-map.md`**: one file, a `## <SCREEN_ID> — <Screen Name>` section per V1 screen
+3. **SOF-99 — `<repo>/flow-map.md`**: one file, a `## <SCREEN_ID> — <Screen Name>` section per V1 screen
    listing its mockup path and what it's entered-from/navigates-to — the design stage's own
    screen-to-screen UX ownership, distinct from the PRD's prose Navigation Map.
 
-Commit; `record-artifact "Design Spec" design-spec.md design-spec design`, one
-`record-artifact "Mockup <SCREEN_ID>" mockups/<SCREEN_ID>.html mockup design` per V1 screen, and
-`record-artifact "Flow Map" flow-map.md flow-map design`. `finish-agent design success`.
+**Commit + push** (SOF-151 — same reason as Phase 1: this is what makes these survive workspace
+teardown); `record-artifact "Design Spec" <repo>/design-spec.md design-spec design`, one
+`record-artifact "Mockup <SCREEN_ID>" <repo>/mockups/<SCREEN_ID>.html mockup design` per V1 screen, and
+`record-artifact "Flow Map" <repo>/flow-map.md flow-map design`. `finish-agent design success`.
 
 **Done-gate (mechanical):** `artifacts.verify(run_dir, ["design-spec.md", "flow-map.md"])` passes
 AND `artifacts.design_spec_is_complete(design-spec.md, screen_ids)` (every screen ID from `PRD.md`'s
@@ -139,7 +154,7 @@ assert ok, 'ticket depth gate failed: ' + '; '.join(reasons)"
 
 ## Phase 4: decision log  (`set-phase decision-log`)
 
-**SOF-118:** write `decision-log.md` — YOUR OWN stage-wide disclosure of what you assumed,
+**SOF-118:** write `<repo>/decision-log.md` — YOUR OWN stage-wide disclosure of what you assumed,
 shortcut, or left as a known gap while architecting/designing/writing tickets, distinct from
 each ticket's own `decision_log` (which the Stage-3 build agent fills in per-ticket at close
 time). This is for cross-cutting Stage-2 decisions that don't belong to one ticket — e.g. "picked
@@ -159,7 +174,7 @@ per-ticket or wasn't a real judgment call), write a single explicit line — e.g
 declare for this stage." — rather than leaving the file blank or skipping it. A blank/placeholder
 file is NOT the same as an honest "none," and fails the done-gate.
 
-Commit + push; `record-artifact "Decision Log" decision-log.md decision-log <agent>`.
+Commit + push; `record-artifact "Decision Log" <repo>/decision-log.md decision-log <agent>`.
 
 **Done-gate (mechanical):** `artifacts.verify(run_dir, ["decision-log.md"])` passes AND
 `artifacts.decision_log_is_complete(decision-log.md)` — real `## <Type>: ...` entries with a
