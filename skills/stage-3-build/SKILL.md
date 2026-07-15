@@ -16,9 +16,15 @@ Read prior-stage artifacts from `context/` (PRD.md, architecture.md, architectur
 flow-map.md, and the `mockups/` directory — SOF-99/100) and the tickets from the store.
 The sub agents must use sonnet 4.6 as their model not opus 4.8.
 
-**The one definition of done:** the app's primary user journey passes end-to-end in a real browser
-(Playwright) on the LIVE deployed URL. Code merging is not done. Deploy succeeding is not done. Only a
-recorded, GREEN Playwright happy-flow on the live URL is done.
+**Definition of done — the happy-flow gate AND full PRD coverage, not either alone (SOF-101, "build
+more, not a 3-screen demo"):** the app's primary user journey must pass end-to-end in a real browser
+(Playwright) on the LIVE deployed URL — code merging is not done, deploy succeeding is not done, only
+a recorded GREEN Playwright happy-flow is that gate. But a single passing happy-flow through a
+sliver of the app is NOT the whole bar: the build must also actually implement the PRD's full
+`## Feature Specs` list, not just whatever subset the ticket wave you were handed happened to cover.
+Every PRD feature must be accounted for in `build-decision-log.md` (Phase 3c) — built, or an honest
+Known Gap entry naming it and why. "The happy-flow passed" and "the PRD's features are unbuilt" can
+both be true at once; only the combination is done.
 
 ## Record state in the datastore (there are NO events)
 
@@ -98,6 +104,14 @@ exists — the DB was already provisioned; read `DATABASE_URL` from it directly.
 
 BEFORE building, write `build-plan.md` (approach; the wave/ticket order; mock/MCP decisions per dependency
 disposition; the exact happy-flow you will verify). Then `record-artifact "Build Plan" build-plan.md plan`.
+
+**SOF-101 (B4) — cross-check ticket coverage against the PRD FIRST, here, before executing:** read
+`context/PRD.md`'s `## Feature Specs` section. For every named feature with no ticket that actually
+builds it, `TicketStore.create_ticket(...)` a new one yourself (same wave-numbering scheme as the
+existing tickets) before you start Phase 1 — you were handed Stage 2's ticket set, but YOU are the
+one held to full PRD coverage, so don't silently build only what you were given if it's thinner than
+the PRD. Note this cross-check (what you added, or that nothing was missing) in `build-plan.md`.
+
 THEN execute the plan — autonomously, no human approval.
 
 > The **exa** web-search MCP is wired into your workspace — use its `web_search`-type tools whenever
@@ -344,11 +358,18 @@ stage-wide to add beyond what's already on individual tickets, an explicit line 
 declare beyond the per-ticket decision logs." A blank/placeholder file is NOT the same as that
 honest statement and fails the done-gate.
 
+**SOF-101 (B4) — every PRD feature must be named here, one way or another:** for each feature in
+`context/PRD.md`'s `## Feature Specs` that shipped, a one-line mention is enough (which ticket(s)
+built it); for each one that didn't, a real `## Known Gap: <Feature Name>` entry with why. The gate
+below checks every feature name is MENTIONED somewhere in this file — it does not (cannot) judge
+whether "built" was done well; that honesty is yours to disclose, same as the rest of this log.
+
 Commit + push; `record-artifact "Build Decision Log" build-decision-log.md decision-log <agent>`.
 
 **Done-gate (mechanical):** `artifacts.verify(run_dir, ["build-decision-log.md"])` passes AND
 `artifacts.decision_log_is_complete(build-decision-log.md)` — real entries with Reason + Affected
-surface, or an explicit "nothing to declare" statement.
+surface, or an explicit "nothing to declare" statement — AND (SOF-101) `artifacts.decision_log_covers_features`
+finds every `context/PRD.md` Feature Spec name mentioned somewhere in this file.
 
 ## Phase 4: teardown  (`set-phase teardown`)
 
@@ -360,12 +381,12 @@ Proof (project.db + project.log) at the base survives.
 | Need | Call |
 |------|------|
 | Record canvas state | `python3 -m software_factory.db <verb> <projects_dir> <project_id> ...` |
-| Tickets | `tickets.TicketStore` — `claim`, `mark_done`, `mark_deployed`, `start_qa`, `qa_approve`, `qa_reject`, `review_reject` (SOF-119), `all_approved` |
+| Tickets | `tickets.TicketStore` — `claim`, `create_ticket` (SOF-101 — open one yourself for an uncovered PRD feature), `mark_done`, `mark_deployed`, `start_qa`, `qa_approve`, `qa_reject`, `review_reject` (SOF-119), `all_approved` |
 | Blob storage | `storage.put/get/url`, `blobs.BlobStore.record` — durable QA screenshots (Supabase Storage; local fallback) |
 | Repo / PR / merge | `repo.GitHub` — `open_pr`, `merge_if_green` |
 | Deploy + health | `deploy.deploy(target, dir)`, `deploy.healthy(url)` |
 | Done verdict | `gate.happy_flow_passed(result)`, `gate.bugs_from(result)` |
-| Decision-log done-gate | `artifacts.decision_log_is_complete(decision_log_text)` |
+| Decision-log done-gate | `artifacts.decision_log_is_complete(decision_log_text)`, `artifacts.decision_log_covers_features(decision_log_text, artifacts.parse_feature_names(prd_text))` (SOF-101) |
 | Workspace teardown | `workspace.destroy(path, projects_dir)` |
 
 ## Guardrails
@@ -373,6 +394,9 @@ Proof (project.db + project.log) at the base survives.
 - **No hollow done:** empty turn = retry/escalate; `merge_if_green` + `mark_done` enforce real diffs/PRs;
   done REQUIRES a recorded passing Playwright verification, every ticket `approved` via the QA loop,
   AND (SOF-118) a real (or explicitly "nothing to declare") stage decision log.
+- **No thin coverage (SOF-101):** done ALSO requires every PRD `## Feature Specs` entry to be named
+  in `build-decision-log.md` — built, or an honest Known Gap. A thin ticket wave is your problem to
+  fix at Phase 0 (open the missing tickets yourself), not a gap to carry silently into "done."
 - **No silent gaps:** `mark_done` refuses to close ANY ticket without its own `decision_log` — a
   build agent that hits a real shortcut/gap must disclose it there, not carry it forward unstated.
 - **No infinite review bounce:** `review_reject` enforces `SF_REVIEW_BOUNCE_MAX` (default 2) itself —

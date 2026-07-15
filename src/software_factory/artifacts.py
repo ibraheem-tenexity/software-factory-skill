@@ -312,6 +312,41 @@ def decision_log_is_complete(text: str) -> tuple[bool, list[str]]:
     return (len(reasons) == 0, reasons)
 
 
+def parse_feature_names(text: str) -> list[str]:
+    """SOF-101: the PRD's '## Feature Specs' subsection names (SOF-96 requires one '### <Feature
+    Name>' subsection per feature). Same parsing the section-presence check in
+    `prd_required_sections_complete` already uses (`_find_section` + `_subsections`); this just
+    returns the heading names instead of validating their content. Best-effort: an unparseable/
+    absent Feature Specs section yields an empty list rather than raising."""
+    features = _find_section(text, r"feature\s*specs?|\bfeatures\b")
+    if not features:
+        return []
+    names = []
+    for sub in _subsections(features):
+        heading = next((ln.lstrip("#").strip() for ln in sub.splitlines() if ln.strip()), None)
+        if heading:
+            names.append(heading)
+    return names
+
+
+def decision_log_covers_features(text: str, feature_names: list[str]) -> tuple[bool, list[str]]:
+    """SOF-101 (B4): Stage 3's build-decision-log.md must explicitly account for every PRD feature
+    — built, or honestly deferred as a Known Gap — not silently drop features the PRD named. This
+    is the same text-substring coverage style `flow_map_is_complete`/`design_spec_is_complete` use
+    for screen IDs, applied to feature names: it only checks the name is MENTIONED somewhere (built
+    how, or why deferred, is the build agent's judgment and disclosure, never the gate's). No
+    feature_names (PRD Feature Specs section missing/unparseable) is not a failure — nothing to
+    enforce against."""
+    if not feature_names:
+        return (True, ["no Feature Specs found in the PRD to check build coverage against"])
+    body = _normalize(text or "")
+    missing = [name for name in feature_names if _normalize(name) not in body]
+    if missing:
+        return (False, [f"build-decision-log.md never accounts for PRD feature(s) (not built, "
+                        f"and no Known Gap entry naming them): {', '.join(missing)}"])
+    return (True, [])
+
+
 def parse_required_tokens(text: str) -> list[dict]:
     """Extract required tokens/keys/URLs from architecture.md's dependency section.
 

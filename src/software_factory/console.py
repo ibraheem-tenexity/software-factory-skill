@@ -1820,6 +1820,21 @@ class Console:
         decision_log_ok, _reasons = artifacts.decision_log_is_complete(decision_log_text)
         if not decision_log_ok:
             return False
+        # Gate (e) SOF-101 (B4): the build must account for every PRD feature, not just pass a
+        # single happy-flow — build-decision-log.md must mention each PRD Feature Spec (built, or
+        # honestly deferred as a Known Gap). No PRD.md found is not a failure (nothing to check).
+        prd_root = None
+        for root, _dirs, files in os.walk(base):
+            if "PRD.md" in files:
+                prd_root = root
+                break
+        if prd_root is not None:
+            with open(os.path.join(prd_root, "PRD.md")) as f:
+                prd_text = f.read()
+            feature_names = artifacts.parse_feature_names(prd_text)
+            features_ok, _reasons = artifacts.decision_log_covers_features(decision_log_text, feature_names)
+            if not features_ok:
+                return False
         passing = [v for v in db.verifications() if v["passed"]]
         # Gate (d): if auth is present (agent recorded a demo-creds artifact), the happy-flow must
         # include a real sign-in step — a post-login flow with no sign-in step is not done.
