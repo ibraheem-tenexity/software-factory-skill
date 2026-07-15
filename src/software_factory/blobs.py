@@ -52,6 +52,25 @@ class BlobStore:
         row = self._repo.by_id(blob_id)
         return dict(row) if row else None
 
+    def descendants(self, blob_id: int) -> list[dict]:
+        """Return a source blob and extraction descendants, with children before parents."""
+        root = self.get_blob(blob_id)
+        if not root:
+            return []
+
+        def collect(blob: dict) -> list[dict]:
+            children = [dict(row) for row in self._repo.children_of(blob["id"])]
+            return [item for child in children for item in collect(child)] + [blob]
+
+        return collect(root)
+
+    def delete_tree(self, blob_id: int) -> list[dict]:
+        """Delete a source blob and extraction descendants, returning children before parents."""
+        rows = self.descendants(blob_id)
+        for row in rows:
+            self._repo.delete(row["id"])
+        return rows
+
     def record_use(self, blob_id: int, project_id: str) -> int:
         """Note that a project (`project_id`) imported this org doc; return the new distinct-project
         count. Re-recording the same project is a no-op for the count."""

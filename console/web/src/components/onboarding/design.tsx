@@ -274,20 +274,24 @@ export const INGEST_STAGE_LABEL: Record<string, string> = {
   parsing: "Parsing", chunking: "Chunking", embedding: "Embedding", summarizing: "Summarizing",
 };
 
-export function Dropzone({ kind, filled, onToggle, compact, files = [] }:
+export function Dropzone({ kind, filled, onToggle, onDropFiles, onRemove, compact, files = [] }:
   { kind: "video" | "docs"; filled?: boolean; onToggle?: () => void; compact?: boolean;
-    files?: { name: string; size?: string; uploading?: boolean; ingestStage?: string;
+    onDropFiles?: (files: FileList) => void; onRemove?: (file: { name: string; blobId?: number }) => void;
+    files?: { name: string; size?: string; uploading?: boolean; blobId?: number; ingestStage?: string;
       ingestPct?: number; ingestStatus?: "running" | "ready" | "failed" }[] }) {
   const isVideo = kind === "video";
   // The list reflects what the user ACTUALLY uploaded (passed in by the caller) — no dummy data.
   const has = files.length > 0 || !!filled;
   const reduceMotion = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const [dragging, setDragging] = React.useState(false);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <button onClick={onToggle} style={{ width: "100%", boxSizing: "border-box", cursor: "pointer",
+      <button onClick={onToggle} onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)} onDrop={(e) => { e.preventDefault(); setDragging(false); onDropFiles?.(e.dataTransfer.files); }}
+        style={{ width: "100%", boxSizing: "border-box", cursor: "pointer",
         display: "flex", alignItems: "center", justifyContent: "center", gap: 12, textAlign: "center",
-        border: `2px dashed ${has ? T.brand : T.borderDefault}`, borderRadius: T.rLg,
-        background: has ? T.brandSoft : T.sunken, padding: compact ? "10px 14px" : "22px 16px", transition: "all .14s" }}>
+        border: `2px dashed ${dragging || has ? T.brand : T.borderDefault}`, borderRadius: T.rLg,
+        background: dragging || has ? T.brandSoft : T.sunken, padding: compact ? "10px 14px" : "22px 16px", transition: "all .14s" }}>
         <Icon name={isVideo ? "video" : "upload"} size={20} color={has ? T.brand : T.tertiary} />
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
           <span style={{ font: `500 14px/1.3 ${T.sans}`, color: T.fg }}>
@@ -328,6 +332,12 @@ export function Dropzone({ kind, filled, onToggle, compact, files = [] }:
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4, font: `400 12px/1 ${T.sans}`, color: T.success }}>
                   <Icon name="check" size={13} color={T.success} /> Uploaded
                 </span>
+              )}
+              {onRemove && !f.uploading && f.blobId != null && (
+                <button onClick={() => onRemove(f)} title={`Remove ${f.name}`} style={{ width: 26, height: 26,
+                  display: "grid", placeItems: "center", border: "none", borderRadius: T.rMd, background: "transparent", cursor: "pointer", color: T.tertiary }}>
+                  <Icon name="x" size={14} />
+                </button>
               )}
             </div>
           ))}

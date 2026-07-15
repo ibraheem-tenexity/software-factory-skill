@@ -24,6 +24,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import urllib.error
 import urllib.request
 
 
@@ -124,6 +125,27 @@ def get(scope_id: str, key: str) -> bytes:
     """Fetch an object's bytes addressed by scope_id + key (see `get_by_path` for the full-path
     variant, which is what a stored `storage_key` needs)."""
     return get_by_path(_object_path(scope_id, key))
+
+
+def delete_by_path(obj: str) -> None:
+    """Delete one object at its full bucket-relative path. Missing objects are already gone."""
+    if enabled():
+        base = os.environ["SUPABASE_URL"].rstrip("/")
+        bucket = os.environ["SF_STORAGE_BUCKET"]
+        endpoint = f"{base}/storage/v1/object/{bucket}/{obj}"
+        req = urllib.request.Request(endpoint, method="DELETE",
+                                     headers={"apikey": os.environ["SUPABASE_SERVICE_KEY"]})
+        try:
+            with urllib.request.urlopen(req, timeout=30):
+                pass
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+        return
+    try:
+        os.remove(os.path.join(_local_root(), obj))
+    except FileNotFoundError:
+        pass
 
 
 def get_by_url(url: str) -> bytes:

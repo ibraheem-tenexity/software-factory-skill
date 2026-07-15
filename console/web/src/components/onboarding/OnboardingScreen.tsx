@@ -357,8 +357,8 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       }).catch(() => {});
       api.documents(resumeProjectId).then((docs) => {
         const ups = docs.uploaded || [];
-        const vids = ups.filter((m) => m.kind === "video").map((m) => ({ name: m.name, size: fmtBytes(m.size_bytes || 0) }));
-        const others = ups.filter((m) => m.kind !== "video").map((m) => ({ name: m.name, size: fmtBytes(m.size_bytes || 0) }));
+        const vids = ups.filter((m) => m.kind === "video").map((m) => ({ name: m.name, size: fmtBytes(m.size_bytes || 0), blobId: Number(m.id) }));
+        const others = ups.filter((m) => m.kind !== "video").map((m) => ({ name: m.name, size: fmtBytes(m.size_bytes || 0), blobId: Number(m.id) }));
         setMats({ video: vids, docs: others });
         setP((x) => ({ ...x, video: vids.length > 0, docs: others.length > 0 }));
       }).catch(() => {});
@@ -551,6 +551,18 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     }
   };
 
+  const removeFile = async (kind: "video" | "docs", file: MatFile) => {
+    if (!draftId || file.blobId == null) return;
+    setError("");
+    try {
+      await api.deleteMaterial(draftId, file.blobId);
+      setMats((m) => ({ ...m, [kind]: m[kind].filter((f) => f.blobId !== file.blobId) }));
+      setProj(kind, mats[kind].some((f) => f.blobId !== file.blobId));
+    } catch (e: any) {
+      setError(`Couldn’t remove ${file.name}: ${String(e?.message || e)}`);
+    }
+  };
+
   const handoff = async () => {
     if (!ready || submitting || !draftId) return;
     setSubmitting(true);
@@ -736,8 +748,8 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                   <Card cat="Your first project" title="Project materials" desc="A walkthrough recording is the highest-signal input you can give.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                       <OrgImportPicker />
-                      <Field label="Walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} /></Field>
-                      <Field label="Supporting documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
+                      <Field label="Walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} onDropFiles={(files) => attachFiles(files, "video")} onRemove={(file) => removeFile("video", file)} /></Field>
+                      <Field label="Supporting documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} onDropFiles={(files) => attachFiles(files, "docs")} onRemove={(file) => removeFile("docs", file)} /></Field>
                       <ProcessingBanner files={mats.video.concat(mats.docs)} />
                     </div>
                   </Card>
@@ -836,8 +848,8 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                   <Card cat="This project" title="Project materials" desc="We already have your line card & pricing on file — only add what's specific to this project.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                       <OrgImportPicker />
-                      <Field label="Project walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} /></Field>
-                      <Field label="Extra documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
+                      <Field label="Project walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} onDropFiles={(files) => attachFiles(files, "video")} onRemove={(file) => removeFile("video", file)} /></Field>
+                      <Field label="Extra documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} onDropFiles={(files) => attachFiles(files, "docs")} onRemove={(file) => removeFile("docs", file)} /></Field>
                       <ProcessingBanner files={mats.video.concat(mats.docs)} />
                     </div>
                   </Card>

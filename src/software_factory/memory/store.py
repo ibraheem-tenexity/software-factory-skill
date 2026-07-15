@@ -205,3 +205,13 @@ class MemoryStore:
         finally:
             conn.close()
         return row["content"] if row else None
+
+    def delete_document(self, blob_id: int) -> None:
+        """Remove every derived, agent-readable representation of one uploaded blob."""
+        conn = self._connect()
+        try:
+            conn.execute("DELETE FROM artifacts WHERE source_blob_id = ?", (blob_id,))
+            conn.execute("DELETE FROM chunk WHERE blob_id = ?", (blob_id,))
+            conn.execute("DELETE FROM doc_summary WHERE blob_id = ?", (blob_id,))
+        finally:
+            conn.close()

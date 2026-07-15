@@ -316,3 +316,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/components/factory/{FactoryConsole,Concierge,Artifacts,NodeMap,StageRail,WaitForDeps,BuildBoard}.tsx, factory/pipeline.ts, onboarding/design.tsx, App.tsx, api.ts (Ticket.confidence optional). Branch sof-68-console-design.
 3. All data stays real (graph/tickets/events/status props; synthesized concierge bubbles derive from them); no backend changes; tokens from T except design-specified constants kept verbatim (KIND_BADGE repo/fig pairs, nodemap orchestrator ink + artifact purple).
 4. Summary: tsc -b and vite build clean; FE-only; PR to main opened from sof-68-console-design.
+
+# Codex Update at Time: 15:07:2026:01:20:40.540
+1. Started SOF-179 and SOF-181: added independent Kanban column scrolling plus intake drag-and-drop and material removal with downstream cleanup.
+2. console/web/src/components/{factory/BuildBoard,onboarding/{OnboardingScreen,design},project/DocumentsTab}.tsx; console/routers/projects.py; src/software_factory/{storage,blobs,db,memory/store,repositories/{blobs,canvas}}.py.
+3. Removal must erase durable bytes, blob metadata, document chunks/summaries, and the agent-readable markdown artifact; drag/drop reuses the existing attach pipeline.
+4. Summary: both Linear tickets set In Progress; Python compile and Vite production build pass; staging browser verification is pending deployment after the benchmark hold.
