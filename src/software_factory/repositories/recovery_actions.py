@@ -2,7 +2,7 @@
 entity (SOF-165). Mirrors the run_autopsy/eval_scores Store→Repository→GlobalExec pattern."""
 from __future__ import annotations
 
-from sqlalchemy import desc, select, update
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..models import recovery_actions
@@ -55,3 +55,13 @@ class RecoveryActionRepository:
         return self._x.fetchall(
             select(recovery_actions).where(recovery_actions.c.project_id == project_id)
             .order_by(desc(recovery_actions.c.opened_at)).limit(limit))
+
+    def open_count(self, project_id: str) -> int:
+        """COUNT of this run's OPEN actions — cheap (partial-index-covered), for status()'s per-tick
+        open-count signal. Fetches an int, not rows. GlobalExec returns a dict row; take its single
+        value key-agnostically (count(*) column name varies)."""
+        row = self._x.fetchone(
+            select(func.count().label("n")).select_from(recovery_actions).where(
+                recovery_actions.c.project_id == project_id,
+                recovery_actions.c.resolved_at.is_(None)))
+        return int(next(iter((row or {}).values()), 0) or 0)

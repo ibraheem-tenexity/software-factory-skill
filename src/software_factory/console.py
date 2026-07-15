@@ -2245,7 +2245,16 @@ class Console:
             "held": state.held,
             "owner": state.owner,
             "maintenance_enabled": state.maintenance_enabled,
+            # SOF-165 PR2: count of open tier-2 recovery actions for this run — a lightweight signal
+            # the Recovery bar / dashboard can read without a second call. Cheap COUNT over the small,
+            # partial-index-covered recovery_actions table; best-effort (0 on any error).
+            "open_recovery_actions": recovery.open_recovery_action_count(project_id),
         }
+
+    def recovery_actions(self, project_id: str) -> list[dict]:
+        """SOF-165 PR2: this run's recovery-action history (open + resolved, newest first) — read
+        surface behind GET /api/projects/{pid}/recovery-actions. Read-only."""
+        return recovery.recovery_actions_for(project_id)
 
     def project_exists(self, project_id: str) -> bool:
         """True if the project exists on disk OR in the pg registry. Pure read — never materializes a dir."""
