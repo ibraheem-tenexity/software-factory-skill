@@ -627,20 +627,43 @@ export function SuggestedResponseList({ options, onSubmit, disabled }:
   const isMulti = options[0]?.type === "multi select";
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
 
+  // SOF-169: a NEW turn's options must start unpicked. The parent renders this list only under the
+  // last message, so it normally remounts per turn — but don't depend on that keying: reset `picked`
+  // whenever the option SET changes, so a reused instance can't carry a prior turn's selection into
+  // the next (which would leave every new chip disabled/dimmed — a dead interview). Harmless during
+  // a single turn's chip-streaming: `picked` is empty until the user acts, and they act only once
+  // the chips have finished streaming (so the set is stable by then).
+  const optionsKey = options.map((o) => o.response).join("");
+  React.useEffect(() => { setPicked(new Set()); }, [optionsKey]);
+
   if (!options.length) return null;
 
   if (!isMulti) {
+    // Single-select: reflect the click on the option itself (filled radio + brand highlight), not
+    // just downstream (e.g. the "Handing off…" button). Reuse `picked` (0 or 1 item); once chosen,
+    // lock the list — the turn is answered, and a second click would double-submit.
+    const chosen = [...picked][0];
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {options.map((o) => (
-          <button key={o.response} onClick={() => { if (!disabled) onSubmit([o.response]); }} disabled={disabled}
-            style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", boxSizing: "border-box", textAlign: "left",
-              cursor: disabled ? "default" : "pointer", padding: "9px 11px", borderRadius: T.rMd, font: `500 13px/1.3 ${T.sans}`,
-              border: `1px solid ${T.borderDefault}`, background: T.raised, color: T.fg, opacity: disabled ? 0.55 : 1, transition: "all .12s" }}>
-            <span style={{ width: 16, height: 16, flexShrink: 0, borderRadius: "50%", border: `1.5px solid ${T.borderDefault}` }} />
-            <span style={{ flex: 1 }}>{o.response}</span>
-          </button>
-        ))}
+        {options.map((o) => {
+          const sel = chosen === o.response;
+          const off = disabled || (chosen !== undefined && !sel);
+          return (
+            <button key={o.response}
+              onClick={() => { if (!disabled && chosen === undefined) { setPicked(new Set([o.response])); onSubmit([o.response]); } }}
+              disabled={disabled || chosen !== undefined}
+              style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", boxSizing: "border-box", textAlign: "left",
+                cursor: (disabled || chosen !== undefined) ? "default" : "pointer", padding: "9px 11px", borderRadius: T.rMd, font: `500 13px/1.3 ${T.sans}`,
+                border: `1px solid ${sel ? T.brand : T.borderDefault}`, background: sel ? T.brandSoft : T.raised,
+                color: sel ? T.brandDeep : T.fg, opacity: off ? 0.55 : 1, transition: "all .12s" }}>
+              <span style={{ width: 16, height: 16, flexShrink: 0, borderRadius: "50%", display: "grid", placeItems: "center",
+                border: `1.5px solid ${sel ? T.brand : T.borderDefault}` }}>
+                {sel && <span style={{ width: 8, height: 8, borderRadius: "50%", background: T.brand }} />}
+              </span>
+              <span style={{ flex: 1 }}>{o.response}</span>
+            </button>
+          );
+        })}
       </div>
     );
   }
