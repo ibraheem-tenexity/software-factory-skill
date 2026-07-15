@@ -9,7 +9,11 @@ from dataclasses import dataclass, asdict
 
 # SOF-79: real measured end-to-end latency for a Fusion call is ~165-181s (two live runs);
 # the original 60s timeout killed every successful call before it could complete.
-_FUSION_TIMEOUT_S = 240
+# SOF-185: the ONLY limit on a fusion call is TIME — output is unbounded (no max_tokens, ever), so
+# a genuinely deep research pass is never truncated mid-response. 30 minutes purely bounds a
+# never-ending call. This single constant feeds every hop of the chain (in-stage _fusion_via_proxy
+# client → console route → outbound httpx to OpenRouter), so 30 min holds end-to-end.
+_FUSION_TIMEOUT_S = 1800
 
 
 def _fusion_analysis_models() -> list[str]:
@@ -22,6 +26,28 @@ def _fusion_analysis_models() -> list[str]:
     if not models:
         raise ResearchError("'fusion' tool has no analysis_models configured — set it in the OS Tools tab")
     return list(models)
+
+
+def _fusion_judge_model() -> str | None:
+    """The Fusion judge/aggregator model — the OpenRouter fusion plugin's `model` field (SOF-185),
+    from the same DB-editable `fusion` row (OS Tools tab). OPTIONAL, unlike analysis_models: unset
+    ⇒ the plugin uses its own default judge, so this never raises — a judge is a refinement, not a
+    hard prerequisite like the panel."""
+    from .tools import ToolStore
+    try:
+        return (ToolStore().config_for("fusion") or {}).get("judge_model") or None
+    except Exception:
+        return None
+
+
+def _fusion_plugin() -> dict:
+    """The `fusion` plugin object for the OpenRouter request: panel (`analysis_models`) plus the
+    optional judge (`model`), both from the DB-editable `fusion` tool row (SOF-81/SOF-185)."""
+    plugin = {"id": "fusion", "analysis_models": _fusion_analysis_models()}
+    judge = _fusion_judge_model()
+    if judge:
+        plugin["model"] = judge
+    return plugin
 
 
 @dataclass
@@ -250,21 +276,39 @@ def _synthesized_profile(analysis_text: str) -> dict | None:
 
 def _fusion_post(payload: dict, api_key: str, timeout: float) -> tuple[str, float | None]:
     """POST to Fusion and return (raw_markdown_content, cost_usd). Shared transport for both
-    the company-profile path and the general question path."""
-    try:
-        resp = httpx.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-    except Exception as exc:
-        raise ResearchError(f"Fusion research failed: {exc}") from exc
-    body = resp.json()
-    raw = body["choices"][0]["message"]["content"]
-    cost_usd = (body.get("usage") or {}).get("cost")
-    return raw, cost_usd
+    the company-profile path and the general question path.
+
+    SOF-185: NEVER set max_tokens on the payload — fusion output must stay unbounded so a deep
+    research pass isn't clipped; the only limit is `timeout` (30 min, _FUSION_TIMEOUT_S).
+    SOF-183: the observed prod failure was resp.json() raising on a 200-OK whose HTTP body was cut
+    off mid-object (an INCOMPLETE body, not a max_tokens length cap — a real length cap returns
+    valid JSON with finish_reason="length"; live probe confirmed fusion returns a single COMPLETE
+    JSON body when it returns at all). Body truncation on these long (~8-11 min) calls is
+    intermittent, so we retry ONCE on an unparseable body, then degrade: a broken tool must
+    degrade the answer (ResearchError → the console route's clean 502 → the in-stage proxy
+    re-wraps it), never crash the stage with an unhandled JSONDecodeError/KeyError (CLAUDE.md).
+    A transport error / timeout is NOT retried — a 30-min timeout must not silently become 60."""
+    last_err: ResearchError | None = None
+    for _attempt in range(2):  # 1 try + 1 retry, parse-failure only
+        try:
+            resp = httpx.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+        except Exception as exc:
+            raise ResearchError(f"Fusion research failed: {exc}") from exc
+        try:
+            body = resp.json()
+            raw = body["choices"][0]["message"]["content"]
+            return raw, (body.get("usage") or {}).get("cost")
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            last_err = ResearchError(
+                f"Fusion returned an incomplete/unparseable response "
+                f"({type(exc).__name__}: {exc}); last 200 chars: {(resp.text or '')[-200:]!r}")
+    raise last_err
 
 
 def _fusion_research(
@@ -281,7 +325,7 @@ def _fusion_research(
         {
             "model": "openrouter/fusion",
             "messages": [{"role": "user", "content": prompt}],
-            "plugins": [{"id": "fusion", "analysis_models": _fusion_analysis_models()}],
+            "plugins": [_fusion_plugin()],
             "response_format": {"type": "json_object"},
         },
         api_key, _FUSION_TIMEOUT_S,
@@ -358,7 +402,7 @@ def fusion_research(question: str, *, api_key: str | None = None,
         {
             "model": "openrouter/fusion",
             "messages": [{"role": "user", "content": question}],
-            "plugins": [{"id": "fusion", "analysis_models": _fusion_analysis_models()}],
+            "plugins": [_fusion_plugin()],
         },
         api_key, timeout,
     )
