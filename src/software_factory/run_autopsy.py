@@ -244,5 +244,16 @@ def autopsy_and_file(report: dict, store: RunAutopsyStore, *, linear=None) -> Au
             # moment a key is provisioned — nothing is lost to the config gap.
             store.record_occurrence(record.signature, record.classification, record.project_id)
 
+    # SOF-165: a benchmark autopsy FAILURE opens the SAME unified tier-2 recovery action the prod
+    # crash path uses — stops maintaining two parallel recovery pipelines. The Linear filing above
+    # is untouched (it stays one resolution CHANNEL); this only lands the unified record.
+    # DEPLOYED/UNKNOWN returned early above (no recovery needed).
+    from . import recovery
+    _kind = {"CRASHED": "dead_stage", "BUDGET_STOPPED": "budget_exhausted",
+             "TIMEOUT": "silent_run", "BLOCKED": "blocked"}.get(record.classification, "unknown")
+    recovery.open_recovery_action(record.project_id, kind=_kind, cause=record.reason[:200],
+                                  owner="auto", evidence={"signature": record.signature,
+                                                          "classification": record.classification,
+                                                          "cost_usd": record.cost_usd})
     store.mark_processed(record.project_id, record.signature, record.classification)
     return record

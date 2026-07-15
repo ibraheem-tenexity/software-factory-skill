@@ -99,6 +99,26 @@ async def converse(pid: str, body: ConverseIn, v: tuple = Depends(authorize_proj
     return await state.conversation_svc.turn(pid, body.message)
 
 
+@router.post("/api/projects/{pid}/converse/stream")
+async def converse_stream(pid: str, body: ConverseIn, v: tuple = Depends(authorize_project)):
+    """SOF-154: the streaming sibling of `/converse` — prose renders token-by-token, then
+    suggested-response chips arrive one at a time. `/converse` itself is untouched (unchanged
+    contract for OnboardingScreen.tsx's separate composer). NDJSON over StreamingResponse, same
+    transport shape as `/api/chat`: event types `working` | `token` | `option` | `done` | `error`."""
+    async def generate():
+        try:
+            async with asyncio.timeout(_CHAT_TIMEOUT):
+                async for ev in state.conversation_svc.turn_stream(pid, body.message):
+                    yield json.dumps(ev) + "\n"
+        except asyncio.TimeoutError:
+            yield json.dumps({"type": "error", "detail": "chat turn timed out — try again"}) + "\n"
+        except Exception as e:
+            yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache"})
+
+
 @router.get("/api/chat/{pid}/history")
 def chat_history(pid: str, v: tuple = Depends(authorize_project)):
     return {"messages": _chat_history(pid)}

@@ -13,7 +13,8 @@ _TCOLS = (tickets.c.id, tickets.c.title, tickets.c.acceptance, tickets.c.dod, ti
           tickets.c.status, tickets.c.agent, tickets.c.provenance, tickets.c.provenance_type,
           tickets.c.diff_lines, tickets.c.app, tickets.c.description, tickets.c.goal,
           tickets.c.design_refs, tickets.c.dependencies, tickets.c.scope_genre,
-          tickets.c.implementation_notes, tickets.c.decision_log, tickets.c.review_bounce_count)
+          tickets.c.implementation_notes, tickets.c.decision_log, tickets.c.review_bounce_count,
+          tickets.c.stall_count)
 
 
 class TicketRepository:
@@ -35,6 +36,17 @@ class TicketRepository:
 
     def update(self, ticket_id: int, **vals) -> int:
         stmt = update(tickets).where(tickets.c.id == ticket_id, self._scoped()).values(**vals)
+        return self._x.execute(stmt).rowcount
+
+    def update_if(self, ticket_id: int, allowed_statuses: tuple, **vals) -> int:
+        """CAS write: applies `vals` only if the row's status is STILL one of
+        `allowed_statuses` at write time (re-checked in the same UPDATE, not read earlier and
+        trusted). Returns the affected row count (0 or 1) so the caller can detect a lost race
+        instead of silently overwriting a concurrent claim."""
+        stmt = (update(tickets)
+                .where(tickets.c.id == ticket_id, self._scoped(),
+                      tickets.c.status.in_(allowed_statuses))
+                .values(**vals))
         return self._x.execute(stmt).rowcount
 
     def bulk_reset_in_progress(self) -> int:

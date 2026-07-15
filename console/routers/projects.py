@@ -64,6 +64,13 @@ def project_status(pid: str, v: tuple = Depends(authorize_project)):
     return state.console.status(pid)
 
 
+@router.get("/api/projects/{pid}/recovery-actions")
+def project_recovery_actions(pid: str, v: tuple = Depends(authorize_project)):
+    """SOF-165 PR2: this run's tier-2 recovery-action history (open + resolved, newest first).
+    Read-only; authed like the rest of the project reads."""
+    return {"recovery_actions": state.console.recovery_actions(pid)}
+
+
 @router.get("/api/projects/{pid}/graph")
 def project_graph(pid: str, v: tuple = Depends(authorize_project)):
     return state.console.graph(pid)

@@ -12,6 +12,7 @@ export type ProjectSummary = {
   summary?: string;       // customer-facing summary; preferred over description in the dashboard snippet
   deploy_url?: string;    // present ⇒ deployed/live
   budget_stopped?: boolean;
+  credential_stopped?: boolean;  // SOF-148: uncleared credential blocker — needs operator provisioning
   held?: boolean;
   agents?: string[];      // distinct agent roles on the run (avatar stack)
   updated?: number;       // last-activity epoch (seconds)
@@ -402,6 +403,21 @@ export const api = {
   converse: (projectId: string, message: string) =>
     send<{ response: string; suggested_responses: { response: string; type: "single select" | "multi select" }[];
           message_id?: string; session_id?: string }>(`/api/projects/${projectId}/converse`, "POST", { message }),
+  // SOF-154: streaming sibling of `converse` — NDJSON over the raw Response body, same shape as
+  // `chatStream` below. Caller reads `.body.getReader()` and parses `working`/`token`/`option`/
+  // `done`/`error` events itself.
+  converseStream: async (projectId: string, message: string, signal?: AbortSignal): Promise<Response> => {
+    const path = `/api/projects/${projectId}/converse/stream`;
+    const r = await fetch(path, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message }),
+      signal,
+    });
+    if (!r.ok) { checkAuth(r); throw new Error(`${path} → ${r.status}`); }
+    return r;
+  },
   chatStream: async (body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> => {
     const r = await fetch("/api/chat", {
       method: "POST",

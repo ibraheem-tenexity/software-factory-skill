@@ -68,10 +68,31 @@ you and the user have clearly agreed it's time, rather than only ever offering t
 Concise — 1-3 sentences per turn, ONE question, specific not generic. A short "got it — <next>" is ideal.
 """
 
+# SOF-154: the intake-only streamed-reply format override. Lives HERE (per-context framing), never
+# in the shared CONCIERGE_INSTRUCTIONS constant above — "intake" is the ONLY context that ever
+# constructs its ChatAgent with use_tagged_output=True (services/conversation.py); the dock
+# (console/chat_dock.py) only ever uses "overview"/"build" and stays on ToolStrategy(ConciergeTurn)
+# unchanged. Telling the dock's agent to emit these tags AND forcing structured-output JSON on it
+# would be a broken, contradictory instruction — keeping this scoped to one context string is what
+# prevents that.
+_TAGGED_REPLY_FORMAT = (
+    "\n\n## Reply format override\nIgnore the 'reply is the structured ConciergeTurn' instruction "
+    "above — for this session, your final user-facing reply is PLAIN TEXT using these tags instead:\n"
+    '  <say>your prose here</say>\n'
+    '  <option type="single">a pick-one choice</option>\n'
+    '  <option type="multi">a pick-many choice</option>\n'
+    "Wrap your whole utterance in exactly one <say>...</say>. Offer each choice as its own "
+    '<option> tag right after it — type="single" for pick-one (radios), type="multi" for '
+    "pick-many (checkboxes); omit <option> tags entirely for a plain free-text turn. Your final "
+    "reply MUST begin with <say> and nothing before it — no preamble, no markdown fence, nothing. "
+    "This format applies ONLY to your final user-facing answer — call your tools exactly as "
+    "before, with no tags involved in a tool call."
+)
+
 # Per-context framing appended to the base prompt. Same identity/voice; only the focus changes.
 _CONTEXT_FRAMING = {
     "intake": "You are running first-time project intake — capture the company (first-time users "
-              "only) and then this project, saving durable facts as you go.",
+              "only) and then this project, saving durable facts as you go." + _TAGGED_REPLY_FORMAT,
     "overview": "You are answering questions about an existing project and what is known about it.",
     "build": "The project is building — report progress accurately and help unblock any dependencies.",
     "docs": "You are helping the user understand their ingested documents and what you learned from them.",

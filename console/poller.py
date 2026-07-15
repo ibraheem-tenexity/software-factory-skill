@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from software_factory.data_transfer_objects.chat_agent import ChatMessage
 from software_factory import notify
 from software_factory import env as _env
+from software_factory import recovery
 
 import console.state as state
 from console import chat_persistence
@@ -21,6 +22,7 @@ from console import chat_persistence
 _stage2_launched: set = set()
 _stage3_launched: set = set()
 _narrated: set = set()
+_recovery_done_resolved: set = set()  # SOF-165: pids whose recovery actions were resolved on done (once per server life)
 _log_offsets: dict = {}  # pid -> bytes uploaded on last log flush
 # Crash auto-resume attempts. Configurable: long opencode sessions (multi-hour Kimi build/test
 # loops) crash more often than claude's — run-b594a5f4 exhausted 2 resumes mid-test-phase and
@@ -31,6 +33,13 @@ _log_offsets: dict = {}  # pid -> bytes uploaded on last log flush
 # (the only path that notifies the operator).
 _AUTO_RESUME_MAX = int(os.environ.get("SF_AUTO_RESUME_MAX", "2") or 2)
 _health_bad_since = [None]  # [-]: None = healthy; float = first failure ts (alert once)
+# SOF-164: output-silence classification bands (seconds), env-tunable. Coherent with the existing
+# scales — 300s = stage_finished's opencode idle grace (past normal streaming-quiet); 900s sits
+# above that yet below run_autopsy's STALL_HOURS (3600s), so the PROD poller notices a frozen run
+# BEFORE the benchmark cron would. Read at import like _AUTO_RESUME_MAX (a Railway env change
+# restarts the process and picks them up). NOT a new scale — anchored to the two that already exist.
+_SILENCE_SUSPICIOUS_S = int(os.environ.get("SF_SILENCE_SUSPICIOUS_S", "300") or 300)
+_SILENCE_CRITICAL_S = int(os.environ.get("SF_SILENCE_CRITICAL_S", "900") or 900)
 
 
 def _auto_advance(pid: str):
@@ -111,6 +120,55 @@ def _narrate_project(pid: str, st: dict):
         _narrate(pid, "done", msg)
 
 
+def _silence_tick(log_path: str) -> tuple[str, float]:
+    """SOF-164 (Proposal 4): classify a run's output-silence — 'ok' | 'suspicious' | 'critical' |
+    'no-log'. PURE noticing: reads only the log's mtime — never the process, never a kill/resume/
+    advance. This is a PARALLEL observation channel to stage_finished's binary finish/kill/resume
+    path, which stays completely untouched (zero regression to the twice-patched acting logic).
+
+    Bands from _SILENCE_SUSPICIOUS_S / _SILENCE_CRITICAL_S. A missing/never-written log on an
+    ACTIVE run is NOT 'ok' — it's its own 'no-log' signal (a stage that died before writing a
+    single line), which the caller treats as critical. Returns (state, idle_seconds); idle is -1
+    for the no-log case."""
+    try:
+        idle = time.time() - os.path.getmtime(log_path)
+    except OSError:
+        return ("no-log", -1.0)
+    if idle < _SILENCE_SUSPICIOUS_S:
+        return ("ok", idle)
+    if idle < _SILENCE_CRITICAL_S:
+        return ("suspicious", idle)
+    return ("critical", idle)
+
+
+def _run_is_silence_classifiable(st: dict) -> bool:
+    """True only for a run whose stage orchestrator SHOULD be streaming output right now — the only
+    runs where silence is meaningful. Excludes everything that is intentionally quiet: done, held,
+    budget_stopped, and credential_stopped (SOF-148 — a run parked on either must never flag), plus
+    the pre-launch and terminal phases (no orchestrator is running to go silent). Exclusion-based so
+    a NEW mid-execution phase defaults to classifiable — the safe direction for a noticing layer."""
+    if st.get("done") or st.get("held") or st.get("budget_stopped") or st.get("credential_stopped"):
+        return False
+    phase = (st.get("phase") or "").lower()
+    return phase not in ("draft", "pending", "provision", "stopped", "crashed", "paused", "done")
+
+
+def _recovery_action_seam(pid: str, console, idle: float) -> None:
+    """SOF-165: a 'critical' silence opens the tier-2 Recovery Action — but ONLY when the process is
+    genuinely ALIVE-but-silent. The liveness gate (SOF-161's durable _stage_process_alive) is the
+    key separation: a DEAD silent stage is owned by the auto_resume → mark_stage_crashed 'dead_stage'
+    path, which opens its OWN action; opening a 'silent_run' here too would double-count the same
+    incident. So: alive+silent → open('silent_run') (idempotent — a persistent silence refreshes the
+    one open action, never spams); dead → do nothing, the dead_stage path has it."""
+    try:
+        if console._stage_process_alive(pid):
+            cause = "no output written yet while alive" if idle < 0 else f"silent {int(idle)}s while alive"
+            recovery.open_recovery_action(pid, kind="silent_run", cause=cause,
+                                          evidence={"idle_seconds": int(idle)})
+    except Exception:
+        pass  # best-effort — a recovery-bookkeeping hiccup must never wedge the poll loop
+
+
 def _health() -> dict:
     """Liveness for probes + the console dot."""
     import shutil as _sh
@@ -164,6 +222,20 @@ def _github_reaper_tick(tick: int, interval: int, console) -> dict | None:
     return report
 
 
+def _ticket_reclaim_tick(tick: int, interval: int, pid: str, console) -> list:
+    """SOF-163: interval-gated per-project check for orphaned in_progress tickets. Unlike the
+    deploy-DB/GitHub reapers, this is ON by default (no separate arm env var) — reclaiming a
+    ticket's own state back to `open` is a low-risk, purely-corrective action (unlike deleting a
+    real Railway/GitHub resource), so it doesn't need the same disarmed-by-default caution.
+    Returns the list of reclaimed ticket ids (empty if none, or if the interval hasn't come up)."""
+    if interval <= 0 or tick <= 0 or tick % interval != 0:
+        return []
+    try:
+        return console.reclaim_orphaned_tickets(pid)
+    except Exception:
+        return []
+
+
 def _log_flush_tick(pid: str, log_path: str) -> None:
     """Upload project.log to Supabase Storage when new bytes have arrived since the last flush.
     Re-uploads the whole file (upsert, same key) — idempotent. No-op when storage is disabled."""
@@ -187,6 +259,9 @@ def _poll_transitions():
     _reaper_interval = int(os.environ.get("SF_REAPER_INTERVAL_TICKS", "0") or "0")
     _gh_reaper_interval = int(os.environ.get("SF_GITHUB_REAPER_INTERVAL_TICKS", "0") or "0")
     _log_flush_interval = max(1, int(os.environ.get("SF_LOG_FLUSH_TICKS", "10") or "10"))
+    # SOF-163: ~5 minutes at the default 3s base tick — the staleness bound this checks against is
+    # hours, so there's no need to poll more often; on by default (see _ticket_reclaim_tick).
+    _ticket_reclaim_interval = max(1, int(os.environ.get("SF_TICKET_RECLAIM_TICKS", "100") or "100"))
     while True:
         time.sleep(3)
         tick += 1
@@ -256,9 +331,42 @@ def _poll_transitions():
                             _narrate(pid, "crashed-final",
                                      f"⛔ Stage crashed after {_AUTO_RESUME_MAX} auto-resume "
                                      "attempts — paused for operator (use Resume to continue).")
+                    # SOF-163: catches a single ticket orphaned WHILE the stage is still alive —
+                    # distinct from the whole-stage recovery above, which only fires once the
+                    # entire stage looks dead.
+                    if not st.get("done"):
+                        reclaimed = _ticket_reclaim_tick(tick, _ticket_reclaim_interval, pid, console)
+                        if reclaimed:
+                            _narrate(pid, "reclaim-%s" % ",".join(str(t) for t in reclaimed),
+                                     f"♻️ Reclaimed stalled ticket(s) {reclaimed} back to open "
+                                     "for re-dispatch.")
                     _narrate_project(pid, st)
                 except Exception:
                     pass
+                # SOF-164: graded silent-run classification — a PARALLEL noticing channel run AFTER
+                # (and independent of) all the acting logic above. It never advances/kills/resumes;
+                # it only narrates suspicious/critical and taps the SOF-165 recovery seam (a no-op
+                # today). Gated to runs whose orchestrator should be streaming — a done/held/budget-
+                # or credential-stopped run is intentionally quiet and must not flag.
+                try:
+                    if _run_is_silence_classifiable(st):
+                        sil, idle = _silence_tick(os.path.join(state.PROJECTS_DIR, pid, "project.log"))
+                        if sil == "suspicious":
+                            _narrate(pid, "silence-suspicious",
+                                     f"👀 Stage has been quiet ~{int(idle)}s — watching (no action taken).")
+                        elif sil in ("critical", "no-log"):
+                            detail = "hasn't written any output yet" if sil == "no-log" else f"silent for ~{int(idle)}s"
+                            _narrate(pid, "silence-critical",
+                                     f"🔴 Stage {detail} — flagged for review.")
+                            _recovery_action_seam(pid, console, idle)   # SOF-165: acts iff alive
+                except Exception:
+                    pass
+                # SOF-165: a run that reaches done RESOLVES its open recovery action(s) — a
+                # self-recovered silent_run (transient silence that then completed) must not leave a
+                # zombie-open row. Once per pid per server life; idempotent no-op if none open.
+                if st.get("done") and pid not in _recovery_done_resolved:
+                    _recovery_done_resolved.add(pid)
+                    recovery.resolve_recovery_actions(pid, resolution="restored")
                 if st.get("done") or st.get("phase") == "pending":
                     continue
                 prev = state._project_stages.get(pid, 0)

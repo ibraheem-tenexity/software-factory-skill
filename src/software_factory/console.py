@@ -26,7 +26,7 @@ from .constants import (
     PLANNING_MODELS, IMPL_MODELS,
     RUNNER_KEYS as _RUNNER_KEYS,
 )
-from . import artifacts, checkpoint as ckpt, deploy_db, env as _env, streamlog, vault as _vault
+from . import artifacts, checkpoint as ckpt, deploy_db, env as _env, recovery, streamlog, vault as _vault
 from .runtime_agents import AgentRegistry
 from .input_pipeline import persist_and_compose
 from .pdf_extract import extract_to_markdown
@@ -43,6 +43,24 @@ from .workspace_setup import prepare_workspace, tool_env_overrides, write_agent_
 from .log import get_logger
 
 logger = get_logger(__name__)
+
+
+def _log_teardown_failures(result: dict | None, project_id: str = "") -> None:
+    """SOF-160: surface deploy-DB teardown failures LOUDLY. `deploy_db.reap()` records failures in
+    result["failed"] and logs them, but every caller passes log=logger.info, so a failed teardown
+    (notably a serviceDelete 403 from the token-scope gap — SOF-160 — which comes back ok=False, NOT
+    as an exception) is logged at INFO and effectively invisible: the DB leaks silently. Re-log each
+    failure at ERROR with the service_id + detail so a leaked DB is visible. Non-fatal by design —
+    the caller still completes its lifecycle/archive write regardless."""
+    if not result:
+        return
+    for f in result.get("failed", []):
+        logger.error("[deploy-db] TEARDOWN FAILED — DB NOT reclaimed (leaked; likely SOF-160 "
+                     "RAILWAY_TOKEN 403 on serviceDelete): project=%s service=%s detail=%s",
+                     f.get("project_id") or project_id, f.get("service_id"), f.get("detail"))
+    for vf in (result.get("detached_volumes") or {}).get("failed", []):
+        logger.error("[deploy-db] DETACHED-VOLUME SWEEP FAILED — volume NOT reclaimed: %s", vf)
+
 
 SKILL_VERSION = "0.0.1"
 
@@ -272,9 +290,32 @@ class Console:
     # ---- SPEC §1: stage process lifecycle ------------------------------------------------
     def _stage_process_alive(self, project_id: str) -> bool:
         p = self._procs.get(project_id)
-        if p is None or not hasattr(p, "poll") or p.poll() is not None:
+        if p is not None and hasattr(p, "poll") and p.poll() is None and not self._reap_if_os_zombie(p):
+            return True   # authoritative live handle in THIS process (fast path, no DB read)
+        # SOF-161: no live in-process handle — either the tracked process exited, or this is a fresh
+        # console after a restart (self._procs is wiped). Fall back to the DURABLE, self-healing
+        # persisted claim so a genuinely-live orphaned orchestrator (surviving a restart, or launched
+        # by the un-guarded _provision_and_launch caller) is still refused a second launch.
+        return self._launch_token_alive(self._load_state(project_id))
+
+    def _launch_token_alive(self, state: ProjectState) -> bool:
+        """SOF-161: True iff this run's persisted launch claim is held by a genuinely-live
+        orchestrator. Self-healing: a pid that is gone or a zombie, or a REUSED pid now belonging to
+        an unrelated process, reads as NOT alive — so a fresh console clears a stale lock instead of
+        blocking forever (today's post-restart bug) or trusting it forever (the naive fix). The
+        pid-reuse guard anchors via /proc/<pid>/cwd: every stage launches with cwd = the run's
+        workspace (<projects_dir>/<project_id>/workspace), so a live claimant's cwd still contains
+        the project_id — even after the workspace dir is deleted (the readlink keeps the id)."""
+        pid = getattr(state, "launch_run_pid", 0) or 0
+        if not getattr(state, "launch_run_token", "") or pid <= 0:
             return False
-        return not self._reap_if_os_zombie(p)
+        if _proc_state(pid) in (None, "Z"):
+            return False   # dead / zombie → stale claim, self-heal
+        try:
+            cwd = os.readlink(f"/proc/{pid}/cwd")
+        except OSError:
+            return False   # can't read cwd (pid gone / no perm) → not a live claim we can trust
+        return state.project_id in cwd   # a reused pid on an unrelated process fails this anchor
 
     @staticmethod
     def _reap_if_os_zombie(p) -> bool:
@@ -798,6 +839,15 @@ class Console:
         # firing, not because the cap logic broke.
         if any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers()):
             return False   # budget stop is intentional — operator resumes via /budget + /retry
+        # SOF-148: a rejected/missing credential (GH_TOKEN invalid, etc.) is unrecoverable by
+        # retrying — the stage-1 SKILL.md tags this exact failure `blocks="credential"` and halts
+        # its own turn immediately, but that alone can't stop THIS function from blindly relaunching
+        # the same doomed attempt up to SF_AUTO_RESUME_MAX more times (the actual retry-burn SOF-148
+        # measured: ~$6.25 across repeat stage-1 launches, each failing the same gh-auth check).
+        # Same shape as the budget check above: a credential stop is a parked state an operator
+        # resolves by provisioning the real credential and retrying, not a crash to auto-heal from.
+        if any(b.get("blocks") == "credential" and not b["cleared"] for b in db.blockers()):
+            return False   # credential/config stop is unrecoverable by retry — needs an operator fix
         incomplete = (
             (stage == 1 and not state.stage1_done)
             or (stage == 2 and not state.stage2_done)
@@ -854,6 +904,11 @@ class Console:
         state.save()
         logger.warning("[crash] %s marked crashed at node %s (stage %s) — auto-resume exhausted",
                        project_id, state.crashed_at_node, stage)
+        # SOF-165: ADDITIVELY record the unified tier-2 recovery action. phase='crashed' above stays
+        # the Recovery-bar's driver (UX byte-identical); this only unifies the underlying record so
+        # the benchmark autopsy path lands the same primitive. Best-effort — never breaks the crash mark.
+        recovery.open_recovery_action(project_id, kind="dead_stage", cause=state.crashed_at_node,
+                                     evidence={"stage": stage, "auto_resume_count": getattr(state, "auto_resume_count", 0)})
         return True
 
     def pause_project(self, project_id: str) -> dict:
@@ -915,6 +970,10 @@ class Console:
             raise
         if result is None:
             _restore_recovery_markers()
+        else:
+            # SOF-165: a successful operator resume RESTORES the run — resolve its open recovery
+            # action(s). Idempotent no-op if none were open (e.g. a paused run that never crashed).
+            recovery.resolve_recovery_actions(project_id, resolution="restored")
         return result
 
     def resume_failure_reason(self, project_id: str) -> str | None:
@@ -971,6 +1030,72 @@ class Console:
         """Reset 'in_progress' tickets to 'open' so a resumed swarm re-dispatches them."""
         ts = TicketStore(self._paths(project_id)["db"])
         ts.reset_in_progress_tickets()
+
+    def reclaim_orphaned_tickets(self, project_id: str) -> list[int]:
+        """SOF-163: `_reset_stuck_tickets` above is a BLANKET reset, only invoked when the whole
+        STAGE is judged dead (auto-resume/resume_project). This is the SELECTIVE counterpart —
+        it catches a single ticket orphaned while the stage is still alive and everything else is
+        progressing fine (confirmed in real prod history: a ticket left `in_progress` for 32+
+        hours after its own agent had already failed, with the rest of the project completing
+        normally around it). Two independent, host-detectable signals, checked per ticket against
+        its claimed agent's real AgentRegistry row (runtime-agnostic — both claude-native and
+        opencode swarm write the same spawn-agent/finish-agent bookkeeping):
+
+          (a) DETERMINISTIC — the agent row is already terminal (done/failed) but the ticket is
+              still in_progress. The agent proved it will never call finish() again; no threshold
+              needed, this is unconditionally a bug to fix.
+          (b) HEURISTIC — the agent row is still `running` but started more than
+              SF_TICKET_STALL_HOURS ago (default 6, matching run_autopsy's own TIMEOUT_HOURS).
+              Deliberately generous: real build-phase turns have legitimately run up to ~12h in
+              prod history, so this must sit comfortably above that to avoid false-positiving a
+              merely-slow ticket.
+
+        Neither case can literally interrupt a live sub-agent call (Task calls run inside the
+        one tracked stage process; individual sub-agent execution is opaque to the host in both
+        runtimes) — this reclaims the TICKET's state, not the process. Returns the list of ticket
+        ids actually reclaimed this call; a ticket at its stall cap is left untouched here (see
+        `TicketStore.reclaim_stalled`) for the caller to escalate via `add-blocker`.
+
+        Once escalated, a ticket is SKIPPED on every later call while its blocker is uncleared —
+        `add_blocker` has no dedup of its own, and this tick re-runs every ~5 minutes, so without
+        this check an over-cap ticket (still in_progress, agent still terminal) would re-match
+        forever and add a fresh blocker each time (~288/day). The uncleared blocker IS the
+        "already escalated, waiting on an operator" signal; an operator clearing it (or the
+        ticket transitioning away from in_progress some other way) is what re-arms this ticket."""
+        ts = TicketStore(self._paths(project_id)["db"])
+        registry = AgentRegistry(self._paths(project_id)["db"])
+        db = ProjectStore(self._paths(project_id)["db"])
+        stall_hours = float(os.environ.get("SF_TICKET_STALL_HOURS", "6") or 6)
+        already_escalated = {
+            b["what"].split(" ", 2)[1]  # "Ticket <id> stalled ..." -> "<id>"
+            for b in db.blockers()
+            if b.get("blocks") == "stall" and not b["cleared"] and b["what"].startswith("Ticket ")
+        }
+        reclaimed = []
+        for t in ts.all_tickets():
+            if t.status != "in_progress" or not t.agent:
+                continue
+            if str(t.id) in already_escalated:
+                continue   # already escalated, waiting on an operator — don't re-process or re-block
+            try:
+                agent = registry.get(t.agent)
+            except KeyError:
+                continue   # no matching agent row to correlate against — leave it alone
+            if agent.status in ("done", "failed"):
+                reason = f"agent `{t.agent}` already finished ({agent.status}) but this ticket was never reverted"
+            elif agent.status == "running" and (time.time() - agent.started_at) > stall_hours * 3600:
+                age_h = (time.time() - agent.started_at) / 3600
+                reason = f"agent `{t.agent}` has been running {age_h:.1f}h (past the {stall_hours:g}h bound)"
+            else:
+                continue
+            if ts.reclaim_stalled(t.id, reason):
+                reclaimed.append(t.id)
+                logger.info("[reclaim] %s ticket %s reclaimed to open: %s", project_id, t.id, reason)
+            else:
+                db.add_blocker(f"Ticket {t.id} stalled repeatedly ({reason}) — stall cap exceeded, "
+                               "needs an operator", blocks="stall")
+                logger.warning("[reclaim] %s ticket %s at stall cap, escalated via blocker", project_id, t.id)
+        return reclaimed
 
     def raise_budget(self, project_id: str, ceiling: float) -> dict:
         """Persist a new per-project spend ceiling (raise or lower) and clear any budget blocker.
@@ -1209,10 +1334,26 @@ class Console:
             ]
         # cwd = the workspace so the stage's SKILL.md / phases/ / context/ (its contract) load.
         logger.info("[launch] %s stage %s — runtime=%s model=%s", project_id, stage, runtime, model)
+        # SOF-161: stake the DURABLE launch claim right before Popen (token now, real pid the moment
+        # we have it). Same lifecycle as self._procs below, but PERSISTED — so a console restart
+        # mid-stage self-heals from this claim (via _launch_token_alive) instead of forgetting the
+        # orphan. The token is the CAS key: a failed launch releases only its OWN claim.
+        _claim = uuid.uuid4().hex
+        _st = self._load_state(project_id)
+        _st.launch_run_token, _st.launch_run_pid = _claim, 0
+        _st.save()
         result = self._launch(argv, env, os.path.join(paths["base"], "project.log"), cwd=ws)
         if result is not None:
             self._procs[project_id] = result   # SPEC §1: tracked for the stage-handoff guard
+            _st.launch_run_pid = result.pid     # anchor the durable claim to the live orchestrator
+            _st.save()
         else:
+            # Failed launch releases its own claim (CAS: clear only if the token is still ours, so a
+            # concurrent successful launch's claim is never clobbered).
+            _cur = self._load_state(project_id)
+            if _cur.launch_run_token == _claim:
+                _cur.launch_run_token, _cur.launch_run_pid = "", 0
+                _cur.save()
             logger.warning("[launch] %s stage %s — _launch returned no handle", project_id, stage)
         return result
 
@@ -2104,7 +2245,16 @@ class Console:
             "held": state.held,
             "owner": state.owner,
             "maintenance_enabled": state.maintenance_enabled,
+            # SOF-165 PR2: count of open tier-2 recovery actions for this run — a lightweight signal
+            # the Recovery bar / dashboard can read without a second call. Cheap COUNT over the small,
+            # partial-index-covered recovery_actions table; best-effort (0 on any error).
+            "open_recovery_actions": recovery.open_recovery_action_count(project_id),
         }
+
+    def recovery_actions(self, project_id: str) -> list[dict]:
+        """SOF-165 PR2: this run's recovery-action history (open + resolved, newest first) — read
+        surface behind GET /api/projects/{pid}/recovery-actions. Read-only."""
+        return recovery.recovery_actions_for(project_id)
 
     def project_exists(self, project_id: str) -> bool:
         """True if the project exists on disk OR in the pg registry. Pure read — never materializes a dir."""
@@ -2194,6 +2344,15 @@ class Console:
                 b.get("blocks") == "budget" and not b["cleared"]
                 for b in blocker_rows[name]
             )
+            # SOF-148: same reasoning as budget_stopped — a credential-blocked run's auto-resume
+            # returns False forever (never reaches 'crashed'), so without a surfaced flag it sits
+            # invisible, looking like whatever phase it was last in. An uncleared credential
+            # blocker means the run needs an operator to provision the real credential, not a
+            # crash to auto-heal from.
+            credential_stopped = any(
+                b.get("blocks") == "credential" and not b["cleared"]
+                for b in blocker_rows[name]
+            )
             # Last activity (epoch) for the dashboard's "updated" column; falls back to the
             # registry create time for a registry-only run with no local dir yet.
             try:
@@ -2210,6 +2369,7 @@ class Console:
                 "spent_usd": st.spent_usd or 0,
                 "stage": st.stage,
                 "budget_stopped": budget_stopped,
+                "credential_stopped": credential_stopped,
                 "held": st.held,
                 "owner": st.owner,
                 # Immutable creator (falls back to current owner for not-yet-backfilled rows).
@@ -2246,6 +2406,10 @@ class Console:
                 except Exception:
                     pass  # best-effort: archive write must never fail due to Vault hiccup
             self._maybe_teardown_deploy_db(project_id, state)
+            # SOF-165: archiving/discarding a run resolves its open recovery action(s) as
+            # 'cancelled' — a dead project must never leave a zombie-open action accumulating in the
+            # ledger (the exact silent-accumulation class the 2026-07-11 sweep hand-cleaned).
+            recovery.resolve_recovery_actions(project_id, resolution="cancelled")
         return state.archived
 
     def set_maintenance(self, project_id: str, enabled: bool) -> bool:
@@ -2272,6 +2436,7 @@ class Console:
             except Exception:
                 pass
         self._maybe_teardown_deploy_db(project_id, state)
+        recovery.resolve_recovery_actions(project_id, resolution="cancelled")  # SOF-165: no zombie-open rows
         # Drop the persisted state (projectstate row → out of the registry) BEFORE the dir, so a
         # registry-only run with no local dir is still fully removed.
         try:
@@ -2312,7 +2477,9 @@ class Console:
                 has_verified_deploy=bool(getattr(st, "deploy_url", None)),
                 volume_id=getattr(st, "deploy_db_volume_id", "") or "",
             )
-            return deploy_db.reap([rec], log=logger.info)
+            result = deploy_db.reap([rec], log=logger.info)
+            _log_teardown_failures(result, project_id)   # SOF-160: don't let a 403 leak silently
+            return result
         except Exception:
             logger.exception("[deploy-db] teardown hook error for %s", project_id)
             return None
@@ -2340,7 +2507,9 @@ class Console:
                 has_verified_deploy=bool(getattr(st, "deploy_url", None)),
                 volume_id=getattr(st, "deploy_db_volume_id", "") or "",
             ))
-        return deploy_db.reap(records, log=logger.info, dry_run=dry_run)
+        result = deploy_db.reap(records, log=logger.info, dry_run=dry_run)
+        _log_teardown_failures(result)   # SOF-160: surface batch-sweep teardown failures loudly
+        return result
 
     def _bulk_repo_signals(self, project_ids: list[str]) -> tuple[dict[str, str], set[str]]:
         """Batch equivalent of calling `project_links(pid)["repo"]` + `repo_shared_with_owner(pid)`

@@ -17,7 +17,7 @@ type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 
 function statusOf(s: ProjectSummary & Record<string, any>): { label: string; tone: Tone } {
   if (s.deploy_url || s.done || s.phase === "done") return { label: "Deployed", tone: "success" };
-  if (s.budget_stopped || s.held) return { label: "Needs input", tone: "warning" };
+  if (s.budget_stopped || s.credential_stopped || s.held) return { label: "Needs input", tone: "warning" };
   if (s.phase === "draft") return { label: "Draft", tone: "neutral" };
   if ((s.phase || "").toLowerCase().includes("research")) return { label: "Researching", tone: "brand" };
   return { label: "Building", tone: "info" };

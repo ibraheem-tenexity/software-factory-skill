@@ -27,12 +27,70 @@ export function InterviewView({ draftId, projectName, onBack, onHandoff, submitt
     if (t) setTurns((x) => [...x, { who: "user", text: t }]);
     setDraft("");
     setThinking(true);
+
+    // SOF-154: prose streams in token-by-token, then chips arrive one at a time. The live bubble
+    // is only pushed once the FIRST real content arrives (a token or a chip) — while the agent is
+    // still tool-calling ("working"), the existing "Thinking…" indicator below covers it, exactly
+    // as before; no empty bubble sits on screen during that phase.
+    let bubbleStarted = false;
+    const ensureBubble = () => {
+      if (!bubbleStarted) {
+        bubbleStarted = true;
+        setTurns((x) => [...x, { who: "agent", text: "", suggested: [] }]);
+      }
+    };
+    const updateBubble = (fn: (t: ChatTurn) => ChatTurn) => {
+      setTurns((x) => {
+        const next = [...x];
+        next[next.length - 1] = fn(next[next.length - 1]);
+        return next;
+      });
+    };
+    const fail = () => {
+      ensureBubble();
+      updateBubble(() => ({ who: "agent", text: "Something went wrong on that turn — say that again?", suggested: [] }));
+    };
+
     try {
       // Empty message = "the agent opens" (the kickoff). Everything else is a normal turn.
-      const r = await api.converse(draftId, t);
-      setTurns((x) => [...x, { who: "agent", text: r.response, suggested: r.suggested_responses || [] }]);
+      const resp = await api.converseStream(draftId, t);
+      const reader = resp.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop()!;
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const evt = JSON.parse(line);
+          if (evt.type === "token") {
+            ensureBubble();
+            updateBubble((last) => ({ ...last, text: last.text + evt.text }));
+          } else if (evt.type === "option") {
+            ensureBubble();
+            updateBubble((last) => ({
+              ...last,
+              suggested: [...(last.suggested || []), {
+                response: evt.text,
+                type: evt.option_type === "multi" ? "multi select" : "single select",
+              }],
+            }));
+          } else if (evt.type === "done") {
+            // Authoritative reconciliation — silent (identical to what already streamed) in the
+            // normal case; only visibly changes anything if the stream genuinely drifted.
+            ensureBubble();
+            updateBubble(() => ({ who: "agent", text: evt.response, suggested: evt.suggested_responses || [] }));
+          } else if (evt.type === "error") {
+            fail();
+          }
+          // "working" needs no UI action of its own — the pre-bubble "Thinking…" indicator covers it.
+        }
+      }
     } catch {
-      setTurns((x) => [...x, { who: "agent", text: "Something went wrong on that turn — say that again?" }]);
+      fail();
     } finally {
       setThinking(false);
     }
@@ -67,7 +125,11 @@ export function InterviewView({ draftId, projectName, onBack, onHandoff, submitt
           {turns.map((m, i) => (
             <div key={i} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <Message who={m.who} text={m.text} anim={i === turns.length - 1} />
-              {m.who === "agent" && m === last && !thinking && (m.suggested?.length ?? 0) > 0 && (
+              {/* SOF-154: chips render as they stream in, one at a time — no longer gated on
+                  !thinking, since the reply's prose is already fully streamed by the time its
+                  first <option> tag closes; m === last already stops this from showing on a
+                  stale turn once a new one begins. */}
+              {m.who === "agent" && m === last && (m.suggested?.length ?? 0) > 0 && (
                 <div style={{ marginLeft: 35 }}>
                   <SuggestedResponseList options={m.suggested!} onSubmit={(values) => {
                     const joined = values.join(", ");
@@ -77,7 +139,10 @@ export function InterviewView({ draftId, projectName, onBack, onHandoff, submitt
               )}
             </div>
           ))}
-          {thinking && (
+          {/* SOF-154: once the streaming bubble appears (last turn is the live agent reply),
+              its own streaming prose IS the working indicator — this separate spinner is only for
+              the pre-content phase (tool-calling/connecting), matching "working" events. */}
+          {thinking && last?.who !== "agent" && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, font: `400 12.5px/1 ${T.sans}`, color: T.tertiary }}>
               <span className="sf-spin" style={{ display: "inline-flex" }}><Icon name="refresh" size={13} color={T.tertiary} /></span>
               {started ? "Thinking…" : "Reading your project and materials…"}
