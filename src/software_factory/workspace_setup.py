@@ -47,7 +47,11 @@ _EXA = {"type": "http", "url": "https://mcp.exa.ai/mcp", "headers": {"x-api-key"
 # THE STAGE-3 AGENT (the `provision-db` verb wrapping deploy_db.py) and written to
 # context/deploy-db.json. Railway stays — the agent needs it to deploy the app
 # (create_service/deploy/generate_domain), not to make a DB.
-_OPEN_ROUTER = { "type":"http", "url": "https://mcp.openrouter.ai/mcp" }
+# NO OpenRouter MCP (SOF-158, removed): no code ever called mcp__openrouter__* — the concierge's
+# fusion_search/exa_search (concierge_tools.py) hit research.py's OpenRouter Fusion REST API
+# directly via httpx (openrouter.ai/api/v1/chat/completions), a different endpoint entirely from
+# this MCP server's (mcp.openrouter.ai/mcp). It was a real, always-present, never-called entry in
+# every stage's .mcp.json.
 # Project Memory — console-hosted (SOF-41/T4.2), not a third-party MCP. The URL/token are per-run,
 # not console-static, so both are env-var'd (resolved from SF_MEMORY_MCP_URL/SF_MEMORY_TOKEN,
 # injected by console.py::_launch_stage — see env._STAGE_ESSENTIAL's docstring for why a per-run
@@ -60,7 +64,7 @@ _MEMORY = {"type": "http", "url": "${SF_MEMORY_MCP_URL}",
 
 
 def _hardcoded_mcp_config(stage: int) -> dict:
-    servers = {"playwright": _PLAYWRIGHT, "exa": _EXA, "openrouter": _OPEN_ROUTER, "memory": _MEMORY}
+    servers = {"playwright": _PLAYWRIGHT, "exa": _EXA, "memory": _MEMORY}
     if stage >= 3:
         servers["railway"] = _RAILWAY
     return {"mcpServers": servers}

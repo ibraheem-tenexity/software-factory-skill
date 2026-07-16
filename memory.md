@@ -317,6 +317,12 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 3. All data stays real (graph/tickets/events/status props; synthesized concierge bubbles derive from them); no backend changes; tokens from T except design-specified constants kept verbatim (KIND_BADGE repo/fig pairs, nodemap orchestrator ink + artifact purple).
 4. Summary: tsc -b and vite build clean; FE-only; PR to main opened from sof-68-console-design.
 
+# Codex Update at Time: 14:07:2026:23:48:49.927
+1. Implemented SOF-180 graph artifact previews: selecting a graph artifact now opens a compact rendered preview with an explicit route to the existing full artifact viewer.
+2. console/web/src/components/factory/{NodeMap,FactoryConsole,Artifacts}.tsx on branch agent/sof-180-artifact-preview.
+3. This preserves the established full-viewer behavior while allowing operators to inspect an artifact without leaving the map.
+4. Summary: artifact-node taps resolve the same artifact reference as before; local artifacts load their content in the preview; external artifacts retain an open-source control.
+
 # Codex Update at Time: 15:07:2026:01:20:40.540
 1. Started SOF-179 and SOF-181: added independent Kanban column scrolling plus intake drag-and-drop and material removal with downstream cleanup.
 2. console/web/src/components/{factory/BuildBoard,onboarding/{OnboardingScreen,design},project/DocumentsTab}.tsx; console/routers/projects.py; src/software_factory/{storage,blobs,db,memory/store,repositories/{blobs,canvas}}.py.

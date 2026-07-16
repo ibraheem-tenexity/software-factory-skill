@@ -198,8 +198,12 @@ def _project_documents(pid: str) -> dict:
     so this degrades gracefully."""
     from software_factory.memory.store import MemoryStore
     doc_summaries = MemoryStore().list_doc_summaries("project", pid)
+    # Org knowledge base for the "From your organization" group (design #32 / PRD §2.5b) — degrades
+    # to [] when the owner has no org on file, so the tab still renders its other two groups.
+    org = state.users.org_for_user(state.console.project_owner(pid))
+    org_docs = state.blobs.list_org_docs(org["id"]) if org else []
     return project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid),
-                                  doc_summaries)
+                                  doc_summaries, org_docs)
 
 
 @router.get("/api/projects/{pid}/documents")
@@ -373,7 +377,9 @@ def project_material_scope(pid: str, material_id: int, body: MaterialScopeIn,
         state.blobs.set_scope(material_id, "project", pid)
     else:
         raise HTTPException(status_code=400, detail="scope must be 'project' or 'org'")
-    return project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid))
+    # Full 3-group payload (incl. the org knowledge base) so the toggled doc reappears in the
+    # "From your organization" group — never vanishes — and can be toggled straight back.
+    return _project_documents(pid)
 
 
 # ── Run-scoped actions ──────────────────────────────────────────────────────────────────────

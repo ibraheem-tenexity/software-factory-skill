@@ -104,7 +104,7 @@ export type Artifact = { path: string; content?: string; error?: string };
 
 // Project view (§2.5) — Overview rollup + Documents, per tjyb5gmy's LOCKED shapes (PR #13).
 // Callers degrade to empty until live.
-export type ProjectMaterial = { id?: string; name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number; scope?: "project" | "org"; summary?: string; summary_status?: "pending" | "ready" | "failed" };
+export type ProjectMaterial = { id?: string; name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number; scope?: "project" | "org"; tag?: string; used_count?: number; summary?: string; summary_status?: "pending" | "ready" | "failed" };
 export type ProjectArtifact = { id?: number; title: string; path?: string; kind?: string; agent?: string; ts?: number };
 export type ProjectOverview = {
   brief?: { name?: string; description?: string; goal?: string; scope?: string[]; owner?: string; phase?: string; stage?: number; created?: number | string; runtime?: string; created_by?: string };
@@ -119,7 +119,7 @@ export type ProjectOverview = {
   materials_count?: number;
   produced_count?: number;
 };
-export type ProjectDocuments = { uploaded: ProjectMaterial[]; produced: ProjectArtifact[] };
+export type ProjectDocuments = { uploaded: ProjectMaterial[]; produced: ProjectArtifact[]; org?: ProjectMaterial[] };
 
 // Org-admin (§2.3) — org-scoped, per the locked contract in docs/plans/org-admin-api.md.
 export type Member = { email: string; role: string; designation?: string; you?: boolean };

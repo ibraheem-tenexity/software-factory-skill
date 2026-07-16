@@ -105,17 +105,17 @@ export function ArtifactList({ artifacts, onOpen }:
 
 // DocViewer — modal that fetches + renders one artifact (or arbitrary content, e.g. a ticket body).
 // Header (design: artifacts.jsx:118-123): KIND badge · mono filename · "· produced by {agent}".
-export function DocViewer({ projectId, doc, onClose }:
+export function DocViewer({ projectId, doc, onClose, preview = false }:
   { projectId: string;
-    doc: { label: string; path?: string; content?: string; id?: number; agent?: string; kind?: string } | null;
-    onClose: () => void }) {
+    doc: { label: string; path?: string; content?: string; id?: number; url?: string | null; agent?: string; kind?: string } | null;
+    onClose: () => void; preview?: boolean }) {
   const [content, setContent] = useState<string | null>(doc?.content ?? null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!doc) return;
-    if (doc.content != null) { setContent(doc.content); return; }
-    if (!doc.path) return;
+    setContent(doc.content ?? null);
+    if (doc.content != null || !doc.path) return;
     setLoading(true);
     api.artifact(projectId, doc.path)
       .then((r) => setContent(r.content ?? (r.error ? `Could not load: ${r.error}` : "")))
@@ -128,11 +128,16 @@ export function DocViewer({ projectId, doc, onClose }:
   const isSvg = lowerPath.endsWith(".svg");
   const isMd = lowerPath.endsWith(".md") || lowerPath.endsWith(".mdx");
   const k = kindBadgeFor(doc.kind || (doc.path ? artifactKind(doc.path) : "doc"));
+  const openFull = () => {
+    if (doc.id != null) openArtifact(doc.id);
+    else if (doc.url) window.open(doc.url, "_blank");
+  };
+  const canOpenFull = doc.id != null || !!doc.url;
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(6,7,9,0.45)", zIndex: 50,
       display: "grid", placeItems: "center", padding: 24 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(820px, 100%)", maxHeight: "86vh",
+      <div onClick={(e) => e.stopPropagation()} style={{ width: preview ? "min(560px, 100%)" : "min(820px, 100%)", maxHeight: preview ? "58vh" : "86vh",
         background: T.raised, borderRadius: T.rXl, boxShadow: T.shadowMd, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <header style={{ display: "flex", alignItems: "center", gap: 9, padding: "13px 16px", borderBottom: `1px solid ${T.borderSubtle}` }}>
           <span style={{ font: `700 9px/1 ${T.mono}`, letterSpacing: "0.04em", color: k[2], background: k[1],
@@ -141,8 +146,8 @@ export function DocViewer({ projectId, doc, onClose }:
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.label}</span>
           {doc.agent && <span style={{ font: `400 12px/1 ${T.sans}`, color: T.tertiary, whiteSpace: "nowrap" }}>· produced by {doc.agent}</span>}
           <span style={{ flex: 1 }} />
-          {doc.id != null && (
-            <button onClick={() => openArtifact(doc.id!)} title="Open full viewer"
+          {canOpenFull && (
+            <button onClick={openFull} title="Open full viewer"
               style={{ width: 28, height: 28, display: "grid", placeItems: "center", borderRadius: T.rMd,
                 border: "none", background: "transparent", cursor: "pointer", color: T.secondary }}>
               <Icon name="external" size={14} />
@@ -155,7 +160,8 @@ export function DocViewer({ projectId, doc, onClose }:
           {loading ? <span style={{ font: `400 13px/1 ${T.sans}`, color: T.tertiary }}>Loading…</span>
             : isSvg && content ? <div style={{ display: "grid", placeItems: "center" }} dangerouslySetInnerHTML={{ __html: content }} />
             : isMd && content ? <MarkdownBody content={content} />
-            : <pre style={{ margin: 0, font: `400 12.5px/1.6 ${T.mono}`, color: T.fg, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{content}</pre>}
+            : content ? <pre style={{ margin: 0, font: `400 12.5px/1.6 ${T.mono}`, color: T.fg, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{content}</pre>
+            : <span style={{ font: `400 13px/1.5 ${T.sans}`, color: T.tertiary }}>No inline preview is available for this artifact.</span>}
         </div>
       </div>
     </div>

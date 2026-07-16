@@ -69,12 +69,17 @@ def agents_projection(agents: list, tickets: list) -> list:
             for a in (agents or [])]
 
 
-def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None) -> dict:
+def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None,
+              org_docs: list | None = None) -> dict:
     """Documents tab: user uploads (run blobs; display name = storage-key basename) + factory
-    artifacts. `doc_summaries` (SOF-36) is MemoryStore.list_doc_summaries's blob_id -> row map —
-    optional so this stays callable/testable with no memory data at all (no doc_summary rows yet,
-    e.g. ingestion still running or not yet started); a blob with no entry just gets
-    summary=None/summary_status=None."""
+    artifacts + the org knowledge base. `doc_summaries` (SOF-36) is MemoryStore.list_doc_summaries's
+    blob_id -> row map — optional so this stays callable/testable with no memory data at all (no
+    doc_summary rows yet, e.g. ingestion still running or not yet started); a blob with no entry
+    just gets summary=None/summary_status=None. `org_docs` (design change #32 / PRD §2.5b) is
+    BlobStore.list_org_docs's rows for the project owner's org — surfaced here so a document toggled
+    project→org still appears ON this page (in the "From your organization" group) with a path back
+    to project scope, instead of vanishing; optional so callers that only need the counts (Overview)
+    can omit it."""
     doc_summaries = doc_summaries or {}
     uploaded = []
     for b in blobs or []:
@@ -83,7 +88,7 @@ def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None) -
         ds = doc_summaries.get(b.get("id")) or {}
         uploaded.append({"id": b.get("id"), "name": name, "kind": _kind_for(name),
                          "size_bytes": b.get("size_bytes"), "content_type": b.get("content_type"),
-                         "storage_key": key, "created_at": b.get("created_at"),
+                         "storage_key": key, "created_at": b.get("created_at"), "scope": "project",
                          "summary": ds.get("summary_md"), "summary_status": ds.get("status")})
     # SOF-60: origin='user' artifact rows are user-deposited document markdown (agent reading
     # material), not factory output — they'd double-list next to their own upload here.
@@ -95,7 +100,16 @@ def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None) -
                  "kind": a.get("kind", ""), "agent": a.get("agent", ""), "ts": a.get("ts")}
                 for a in (artifacts or [])
                 if a.get("origin") != "user" and a.get("kind") != "context"]
-    return {"uploaded": uploaded, "produced": produced}
+    # Org knowledge base surfaced on the project Documents tab (design #32 / PRD §2.5b). Each row
+    # keeps scope="org" so the tile renders the toggle with "Org-wide" active — flipping it to
+    # "Project" moves the doc back into this project (the reverse of the vanish-on-toggle bug).
+    org = []
+    for b in org_docs or []:
+        name = b.get("name") or os.path.basename(b.get("storage_key") or "") or ""
+        org.append({"id": b.get("id"), "name": name, "kind": _kind_for(name),
+                    "size_bytes": b.get("size_bytes"), "content_type": b.get("content_type"),
+                    "tag": b.get("tag"), "scope": "org", "used_count": b.get("used_count") or 0})
+    return {"uploaded": uploaded, "produced": produced, "org": org}
 
 
 def brief_block(project: dict, status: dict, created) -> dict:
