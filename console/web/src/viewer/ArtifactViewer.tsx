@@ -3,7 +3,7 @@
 // Fetches GET /api/artifacts/{id} for the main artifact, then
 // GET /api/projects/{project_id}/overview to populate the left rail.
 import { useEffect, useState } from "react";
-import { api, ProjectArtifact } from "../api";
+import { api, ApiError, ProjectArtifact } from "../api";
 import { T, Icon } from "../components/onboarding/design";
 import { MarkdownBody } from "../markdown";
 
@@ -178,7 +178,13 @@ export function ArtifactViewer() {
           .then((d) => setRailItems(d.produced || []))
           .catch(() => {});
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => {
+        // SOF-191: a bare "path → 500" is not an honest reason a viewer should show a person —
+        // surface the server's parsed `detail` when the API sent one, otherwise say plainly that
+        // the artifact couldn't be loaded rather than leak the raw fetch error shape.
+        const detail = (e as ApiError)?.detail;
+        setError(typeof detail === "string" && detail ? detail : "This artifact couldn't be loaded.");
+      });
   }, [docId, sowId]);
 
   const displayArtifact = artifact
@@ -210,9 +216,15 @@ export function ArtifactViewer() {
   };
 
   if (error) {
+    // Same honest-unavailable framing ContentBody uses for a stored-but-gone artifact (SOF-139) —
+    // a fetch failure isn't a different kind of "not available" from the user's point of view.
     return (
-      <div style={{ height: "100vh", display: "grid", placeItems: "center", background: T.bg, fontFamily: T.sans }}>
-        <span style={{ font: `400 13.5px/1.5 ${T.sans}`, color: T.danger }}>{error}</span>
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column", alignItems: "center",
+        justifyContent: "center", gap: 14, background: T.bg, fontFamily: T.sans, color: T.tertiary }}>
+        <Icon name="file" size={36} color={T.tertiary} />
+        <span style={{ font: `400 13.5px/1.5 ${T.sans}`, textAlign: "center", maxWidth: 380 }}>
+          Unavailable: {error}
+        </span>
       </div>
     );
   }
