@@ -1948,16 +1948,13 @@ class Console:
         # "decision-log.md") — Stage 3 clones the SAME canonical repo Stage 2 committed to (SOF-22),
         # so it would otherwise inherit Stage 2's already-gated file via git history and this check
         # could never tell "Stage 2's leftover" from "Stage 3 actually wrote its own."
-        base = paths["base"]
-        decision_log_root = None
-        for root, _dirs, files in os.walk(base):
-            if "build-decision-log.md" in files:
-                decision_log_root = root
-                break
-        if decision_log_root is None:
+        # SOF-187: read via the shared DB-first helper, not a raw disk walk — the agent's own
+        # teardown step deletes the workspace AFTER recording this artifact, so a disk-only read
+        # here made this gate permanently unsatisfiable post-teardown (the exact incident: a real
+        # done run got relaunched because this gate could never find the file again).
+        decision_log_text = self._artifact_content(project_id, "build-decision-log.md")
+        if decision_log_text is None:
             return False
-        with open(os.path.join(decision_log_root, "build-decision-log.md")) as f:
-            decision_log_text = f.read()
         decision_log_ok, _reasons = artifacts.decision_log_is_complete(decision_log_text)
         if not decision_log_ok:
             return False
@@ -2656,13 +2653,22 @@ class Console:
         items.sort(key=lambda e: e["ts"])
         return items
 
-    def artifact(self, project_id: str, path: str) -> dict:
-        # SOF-138: prefer the inline `content` recorded in the DB at record time — it survives
-        # workspace teardown, unlike the file on disk. Fall back to the filesystem for older rows
-        # recorded before content was persisted (and while their workspace still exists).
-        row = ProjectStore(self._paths(project_id)["db"]).artifact_by_path(path)
+    def _artifact_content(self, project_id: str, path: str) -> str | None:
+        """Read an artifact's full text content: the DB-inlined `content` column first (SOF-138 —
+        survives workspace teardown), falling back to the live filesystem for pre-SOF-138 rows or
+        a still-live workspace. Returns None if the artifact isn't found anywhere.
+
+        SOF-187: this is the ONE shared read path any stage-completion gate (or artifact fetch)
+        should use. A gate that reads straight from disk becomes PERMANENTLY unsatisfiable once
+        the stage-3 agent's own teardown step (workspace.destroy) deletes the workspace — which
+        defeats auto_resume_dead_stage's "already done, don't relaunch" check for stage 3, since
+        that check depends entirely on detect_stage3_done() seeing every gate pass. Any future
+        stage-completion gate that needs to read a recorded document (e.g. PR #364's PRD.md gate)
+        should call this instead of its own os.walk — that's the whole fix, reused."""
+        db = ProjectStore(self._paths(project_id)["db"])
+        row = db.artifact_by_path(path)
         if row and row.get("content") is not None:
-            return {"path": path, "content": row["content"][:200000]}
+            return row["content"]
 
         # Artifact paths arrive relative to wherever the recording agent worked: the run base
         # (host: "input/..."), the workspace (orchestrator: "architecture.md"), or the cloned
@@ -2680,7 +2686,13 @@ class Console:
             full = os.path.realpath(os.path.join(root, path))
             if os.path.commonpath([full, base]) == base and os.path.isfile(full):
                 with open(full, "r", errors="replace") as f:
-                    return {"path": path, "content": f.read()[:200000]}
+                    return f.read()
+        return None
+
+    def artifact(self, project_id: str, path: str) -> dict:
+        content = self._artifact_content(project_id, path)
+        if content is not None:
+            return {"path": path, "content": content[:200000]}
         return {"error": "not found", "path": path}
 
     def graph(self, project_id: str) -> dict:
