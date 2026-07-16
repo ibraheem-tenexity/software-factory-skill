@@ -159,6 +159,9 @@ class ProjectStore:
         row = self._artifact_repo.by_path(path)
         return dict(row) if row else None
 
+    def delete_artifacts_by_paths(self, paths: list[str]) -> None:
+        self._artifact_repo.delete_paths(paths)
+
     def blockers(self) -> list[dict]:
         return [dict(r) for r in self._blocker_repo.all_for_project()]
 

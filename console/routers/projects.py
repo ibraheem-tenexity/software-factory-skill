@@ -4,14 +4,16 @@ import asyncio
 import base64
 import mimetypes
 import os
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 
 from software_factory import storage, project_view
 from software_factory.console import project_paths
-from software_factory.db import artifact_by_id
+from software_factory.db import ProjectStore, artifact_by_id
 from software_factory.deps import extract_env_creds
+from software_factory.input_pipeline import make_prompt
 from software_factory.memory.ingest import maybe_ingest_async
 
 import console.state as state
@@ -219,12 +221,64 @@ def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authori
         raw = base64.b64decode(body.data_b64 or "", validate=True)
     except Exception:
         raise HTTPException(status_code=400, detail="data_b64 must be valid base64")
-    key = f"materials/{body.name}"
+    key = f"materials/{uuid.uuid4().hex}-{os.path.basename(body.name)}"
     storage.put(pid, key, raw)
     blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=body.name, tag=body.tag,
                  kind=state._doc_kind(body.name), content_type=body.content_type,
                  size_bytes=len(raw), sha256=storage.sha256(raw))
     maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
+    return _project_documents(pid)
+
+
+@router.delete("/api/projects/{pid}/materials/{material_id}")
+def project_material_delete(pid: str, material_id: int, v: tuple = Depends(authorize_project)):
+    """Delete an uploaded material plus storage, memory chunks/summary, and source artifact."""
+    root = state.blobs.get_blob(material_id)
+    if not root or root["scope"] != "project" or root["scope_id"] != pid:
+        raise HTTPException(status_code=404, detail="material not found")
+
+    from software_factory.memory.store import MemoryStore
+    rows = state.blobs.descendants(material_id)
+
+    memory = MemoryStore()
+    for row in rows:
+        storage.delete_by_path(row["storage_key"])
+        memory.delete_document(row["id"])
+    state.blobs.delete_tree(material_id)
+
+    # Draft uploads also live in input/ until promotion. Rebuild context.md from the remaining
+    # extracted documents so the removed text cannot remain in the next agent's source context.
+    input_dir = project_paths(state.PROJECTS_DIR, pid)["input_dir"]
+    name = os.path.basename(root.get("name") or "")
+    paths = [name, f"{name}.md"]
+    for relative in paths:
+        try:
+            os.remove(os.path.join(input_dir, relative))
+        except FileNotFoundError:
+            pass
+    remaining_docs = []
+    for blob in state.blobs.list_for("project", pid):
+        if blob.get("source_blob_id") is not None:
+            continue
+        doc_name = os.path.basename(blob.get("name") or "")
+        markdown_path = os.path.join(input_dir, f"{doc_name}.md")
+        if os.path.isfile(markdown_path):
+            with open(markdown_path) as source:
+                remaining_docs.append((doc_name, source.read()))
+    context_path = os.path.join(input_dir, "context.md")
+    context = make_prompt("", remaining_docs)
+    if context:
+        with open(context_path, "w") as target:
+            target.write(context)
+    else:
+        try:
+            os.remove(context_path)
+        except FileNotFoundError:
+            pass
+    project_store = ProjectStore(project_paths(state.PROJECTS_DIR, pid)["db"])
+    project_store.delete_artifacts_by_paths([f"input/{relative}" for relative in paths] + ["input/context.md"])
+    if context:
+        project_store.record_artifact("input", "input/context.md", kind="context")
     return _project_documents(pid)
 
 
@@ -456,26 +510,22 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
     written = state.console.attach_to_draft(pid, body.files or [])
-    # push PDF/DOCX originals to blob storage and record in the manifest
+    # Push every original to blob storage and record it in the manifest. The documents endpoint
+    # and delete flow operate on these durable rows, regardless of whether extraction produced MD.
     input_dir = project_paths(state.PROJECTS_DIR, pid)["input_dir"]
-    for name in written:
-        nl = name.lower()
-        if nl.endswith(".pdf") or nl.endswith(".docx"):
-            file_path = os.path.join(input_dir, name)
-            if not os.path.exists(file_path):
-                continue
-            raw = open(file_path, "rb").read()
-            key = f"materials/{name}"
-            storage.put(pid, key, raw)
-            blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=name,
-                               kind=state._doc_kind(name),
-                               content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
-                               size_bytes=len(raw), sha256=storage.sha256(raw))
-            # SOF-32: this is the actual live onboarding upload path (draft-only, pre-promotion)
-            # — the /materials route below is a separate, any-phase path. Missing this hook here
-            # means real user uploads during the interview never get ingested at all, which is
-            # exactly when the Concierge's first-turn context needs the real document text.
-            maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
+    for file in body.files or []:
+        name = os.path.basename(file.get("name") or "")
+        file_path = os.path.join(input_dir, name)
+        if not name or not os.path.exists(file_path):
+            continue
+        raw = open(file_path, "rb").read()
+        key = f"materials/{uuid.uuid4().hex}-{name}"
+        storage.put(pid, key, raw)
+        blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=name,
+                           kind=state._doc_kind(name),
+                           content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
+                           size_bytes=len(raw), sha256=storage.sha256(raw))
+        maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
     return {"attached": written}
 
 

@@ -10,7 +10,7 @@ the original raw SQL, which used the passed argument, not the store's own scopin
 """
 from __future__ import annotations
 
-from sqlalchemy import select, insert, update, func
+from sqlalchemy import select, insert, update, delete, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..models import projectstate, phases, artifacts, blockers, gates, verifications, deployments
@@ -96,6 +96,11 @@ class ArtifactRepository:
             select(artifacts).where((artifacts.c.project_id == self._pid())
                                     & (artifacts.c.path == path))
             .order_by(artifacts.c.id.desc()))
+
+    def delete_paths(self, paths: list[str]) -> None:
+        if paths:
+            self._x.execute(delete(artifacts).where(artifacts.c.project_id == self._pid(),
+                                                    artifacts.c.path.in_(paths)))
 
     @staticmethod
     def batch_for_projects(exec_, project_ids: list) -> list:

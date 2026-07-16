@@ -554,6 +554,8 @@ export const api = {
   rewindTo: (id: string, node: string) => send<Record<string, any>>(`/api/projects/${id}/rewind`, "POST", { node }),
   uploadMaterial: (id: string, file: { name: string; tag?: string; content_type?: string; data_b64: string }) =>
     send<{ ok?: boolean }>(`/api/projects/${id}/materials`, "POST", file),
+  deleteMaterial: (id: string, materialId: string | number) =>
+    send<ProjectDocuments>(`/api/projects/${id}/materials/${materialId}`, "DELETE"),
   // Auto-summarize / Regenerate (SOF-36/T3.3) — synchronous, blocks until the fresh summary is
   // persisted; 404s if project memory (SF_MEMORY) isn't enabled.
   summarizeDocument: (id: string, blobId: string) =>
@@ -582,4 +584,3 @@ export function phaseIsStale(phase: string | undefined, stage: number | undefine
   if (!_ALL_STAGE_PHASES.has(phase)) return false; // non-pipeline (draft/paused/crashed): never stale
   return !(_STAGE_PHASES[stage] || []).includes(phase);
 }
-

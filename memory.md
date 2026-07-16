@@ -322,3 +322,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/components/factory/{NodeMap,FactoryConsole,Artifacts}.tsx on branch agent/sof-180-artifact-preview.
 3. This preserves the established full-viewer behavior while allowing operators to inspect an artifact without leaving the map.
 4. Summary: artifact-node taps resolve the same artifact reference as before; local artifacts load their content in the preview; external artifacts retain an open-source control.
+
+# Codex Update at Time: 15:07:2026:01:20:40.540
+1. Started SOF-179 and SOF-181: added independent Kanban column scrolling plus intake drag-and-drop and material removal with downstream cleanup.
+2. console/web/src/components/{factory/BuildBoard,onboarding/{OnboardingScreen,design},project/DocumentsTab}.tsx; console/routers/projects.py; src/software_factory/{storage,blobs,db,memory/store,repositories/{blobs,canvas}}.py.
+3. Removal must erase durable bytes, blob metadata, document chunks/summaries, and the agent-readable markdown artifact; drag/drop reuses the existing attach pipeline.
+4. Summary: both Linear tickets set In Progress; Python compile and Vite production build pass; staging browser verification is pending deployment after the benchmark hold.

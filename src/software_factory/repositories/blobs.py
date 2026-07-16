@@ -53,6 +53,10 @@ class BlobRepository:
     def by_id(self, blob_id):
         return self._x.fetchone(select(*_BLOB_COLS).where(blobs.c.id == blob_id))
 
+    def children_of(self, blob_id) -> list:
+        return self._x.fetchall(select(*_BLOB_COLS).where(blobs.c.source_blob_id == blob_id)
+                                .order_by(blobs.c.id))
+
     def record_use(self, blob_id, project_id) -> None:
         self._x.execute(insert(blob_uses).values(blob_id=blob_id, project_id=project_id))
 

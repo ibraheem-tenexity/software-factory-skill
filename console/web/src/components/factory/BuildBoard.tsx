@@ -108,13 +108,14 @@ export function BuildBoard({ tickets, onOpenTicket }: { tickets: Ticket[]; onOpe
     );
   }
   return (
-    <div style={{ display: "grid", gridTemplateColumns: `repeat(${COLS.length}, 1fr)`, gap: 12, alignItems: "start", overflowX: "auto" }}>
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${COLS.length}, minmax(220px, 1fr))`, gap: 12,
+      height: "min(560px, 56vh)", minHeight: 240, alignItems: "stretch", overflowX: "auto" }}>
       {COLS.map((c) => {
         const list = tickets.filter((t) => columnOf(t) === c.id);
         const over = c.wipMax != null && list.length > c.wipMax;
         return (
-          <div key={c.id} style={{ display: "flex", flexDirection: "column", border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised, minHeight: 180 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 11px", borderBottom: `1px solid ${T.borderSubtle}` }}>
+          <div key={c.id} style={{ display: "flex", flexDirection: "column", minHeight: 0, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised }}>
+            <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 11px", borderBottom: `1px solid ${T.borderSubtle}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: TONE_DOT[c.tone] }} />
                 <span style={{ font: `600 13px/1 ${T.display}`, letterSpacing: "-0.01em", color: T.fg }}>{c.label}</span>
@@ -129,7 +130,8 @@ export function BuildBoard({ tickets, onOpenTicket }: { tickets: Ticket[]; onOpe
                 </span>
               )}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 9, flex: 1 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 9, flex: 1, minHeight: 0,
+              overflowY: "auto", overscrollBehavior: "contain" }}>
               {list.map((t) => <TicketCard key={t.id} t={t} onOpen={onOpenTicket} />)}
             </div>
           </div>
