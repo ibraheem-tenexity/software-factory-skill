@@ -1,10 +1,10 @@
 # Console Schema — reference
 
-Flat single `public` schema. `src/software_factory/models.py` is the single source of truth: Alembic
-owns it in prod (baseline `0001_project_baseline` = `models.metadata.create_all`) and
-`metadata.create_all` builds it in the test suite — both from the same `metadata`, so they cannot
-drift. All DML goes through `dbshim` (a minimal DB-API wrapper over psycopg3 against the
-Supabase 6543 transaction pooler). Every per-project table is keyed by a `project_id` Text column; the
+Flat single `public` schema. `src/software_factory/models.py` is the application schema source;
+production Alembic revisions use frozen DDL, while `metadata.create_all` is reserved for test databases.
+Model and migration parity therefore requires review when either changes. All DML goes through `dbshim`
+(a minimal DB-API wrapper over psycopg3 against the configured Supabase endpoint). Every per-project
+table is keyed by a `project_id` Text column; the
 global directory tables are single row-sets. See `schema-erd.svg` (regenerated from `schema-erd.dot`).
 
 ## Per-project tables (keyed by project_id)
@@ -44,6 +44,9 @@ Files/outputs produced during a project, attributed to the producing agent.
 | kind | Text | |
 | agent | Text | |
 | ts | Float | not null |
+| content | Text | Converted/produced Markdown persisted inline |
+| source_blob_id | Integer | FK → blobs.id; source upload for a user document |
+| origin | Text | `agent` or `user` |
 
 ### blockers
 Open/cleared blockers raised during a project.
@@ -117,7 +120,7 @@ agent re-claims it.
 | app | Text | |
 | description | Text | not null, server_default `''`; carries QA bug reports |
 
-### agents
+### runtime_agents
 Per-agent execution record with token/cost accounting. Composite PK `(agent_id, project_id)` — an
 agent id is unique only within a project.
 
@@ -248,8 +251,8 @@ One row per (blob, project) — a project drawing on an org-scoped knowledge-bas
 ### doc_summary
 Project Memory (SOF-26): the per-document "2,000-ft view", keyed 1:1 on the document's `blobs` row.
 `scope`/`scope_id` mirror `blobs` so project- and org-scoped memory share one app-layer filter shape
-(isolation is app-layer + credential-scoped MCP, not RLS — see ARCHITECTURE §7). `key_facts` entries
-each carry their own source reference (document + section/page) — no bare confidence scores.
+(isolation is app-layer + credential-scoped MCP, not RLS — see ARCHITECTURE §7). `assumptions` entries
+carry their own source reference (document + section/page) — no bare confidence scores.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -257,7 +260,7 @@ each carry their own source reference (document + section/page) — no bare conf
 | scope | Text | not null; `'project'` or `'org'` |
 | scope_id | Text | not null |
 | summary_md | Text | map-reduce summary of the whole document |
-| key_facts | jsonb | not null default `'{}'`; extracted facts, each with a source reference |
+| assumptions | jsonb | not null default `'{}'`; source-referenced document assumptions |
 | outline | jsonb | not null default `'[]'`; section titles + one-line gist each |
 | embedding | halfvec(3072) | pgvector; the document-level embedding (google/gemini-embedding-2, SOF-84) |
 | token_count | Integer | |
@@ -316,21 +319,32 @@ truth for provider replay; `input`/`tool_result` are denormalized display/query 
 
 Unique constraint `(session_id, seq)`; indexes on `project_id`, `org_id`, `user_id`.
 
+### system_agents, tools, and sow
+`system_agents` stores the editable orchestrator identity, prompt, model, version, and editor per
+callsign. `tools` stores the actual MCP/API config, stage attachment list, Vault key pointer/last-four,
+and editor metadata. `sow` stores statement-of-work drafts and lifecycle metadata.
+
+### checkpoint and org_secrets
+`checkpoint` has one row per `(project_id, node)` with its JSON output and stamp time for host recovery.
+`org_secrets` holds one Vault pointer per `(org_id, name)`, plus non-secret metadata and timestamps.
+
+### Autopsy, recovery, and evaluation ledgers
+`autopsy_processed_runs` records one autopsy result per project; `autopsy_signatures` deduplicates
+cross-project failure signatures. `recovery_actions` holds the open/resolved recovery lifecycle per
+project and cause. `eval_scores` holds one benchmark score payload per project.
+
 ## Files on the volume
 
-Not in the DB. Per-project files live on the volume at `SF_PROJECTS_DIR` (default `/data/projects`):
-`projects/<id>/{input, project.log, chat.jsonl, workspace}`. The `workspace` is the ephemeral build
-dir (created → built in → published → destroyed); the rest are durable proof.
-
-The direction for durable blob bytes is the Supabase Storage adapter (env-gated; without it,
-`storage.py` falls back to a local directory). It stores the bytes; the `blobs` table holds the
-metadata manifest addressing them by `storage_key`.
+Per-project files live at `SF_PROJECTS_DIR` (default `/data/projects`): `input/`, the active
+`project.log`, and the disposable `workspace/` build directory. Conversation turns are not files;
+they live in `conversation`. Storage-backed bytes use the env-gated `storage.py` adapter, with
+`blobs.storage_key` as the metadata pointer and a local blob directory as its fallback.
 
 ## Migrations
 
-Alembic, single `public` schema. Baseline `0001_project_baseline` rebuilds every table directly from
-`models.metadata.create_all` (the flat project_id-keyed tables plus the global directory tables);
-irreversible by design. `python3 -m software_factory.migrate` runs `alembic upgrade head` at deploy
+Alembic, single `public` schema. Baseline `0001_project_baseline` is frozen inline DDL, as are
+historical revisions where needed; `models.metadata.create_all` is used for test databases. Production
+parity therefore requires review whenever schema models or migrations change. `python3 -m software_factory.migrate` runs `alembic upgrade head` at deploy
 (wired into `entrypoint.sh` before uvicorn) and defensively from the boot lifespan. It is a no-op
 without `DATABASE_URL`, idempotent, and safe to re-run.
 

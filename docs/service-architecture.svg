@@ -27,7 +27,7 @@
 
   <rect class="bg" x="0" y="0" width="1380" height="880"/>
   <text class="title" x="38" y="42">Software Factory Service Architecture</text>
-  <text class="tiny" x="38" y="64">FastAPI target: replace HTTP shell, keep pipeline/orchestration contracts, move blobs to Supabase Storage later.</text>
+  <text class="tiny" x="38" y="64">Current console topology: FastAPI, durable Postgres state/conversation, storage-backed blobs, and stage-driven deployment.</text>
 
   <rect class="zone" x="30" y="92" width="230" height="720"/>
   <text class="zone-title" x="52" y="120">Operators</text>
@@ -44,7 +44,7 @@
   <rect class="external" x="58" y="160" width="170" height="90"/>
   <text class="label" x="80" y="190">Browser UI</text>
   <text class="text" x="80" y="212">Console app</text>
-  <text class="text" x="80" y="232">Chat + canvas + SSE</text>
+  <text class="text" x="80" y="232">Chat + canvas + project views</text>
 
   <rect class="external" x="58" y="300" width="170" height="76"/>
   <text class="label" x="80" y="330">Service callers</text>
@@ -52,20 +52,20 @@
 
   <rect class="railway" x="330" y="150" width="250" height="126"/>
   <text class="label" x="352" y="180">FastAPI console</text>
-  <text class="text" x="352" y="204">Auth + routes + SSE</text>
+  <text class="text" x="352" y="204">Auth + routes + ingest SSE</text>
   <text class="text" x="352" y="224">Chat endpoint</text>
   <text class="text" x="352" y="244">Project ownership boundary</text>
 
   <rect class="railway" x="330" y="318" width="250" height="122"/>
   <text class="label" x="352" y="348">Console orchestrator</text>
-  <text class="text" x="352" y="372">Console.start_run()</text>
+  <text class="text" x="352" y="372">Draft promotion + stage launch</text>
   <text class="text" x="352" y="392">Stage gates + budget</text>
   <text class="text" x="352" y="412">Background poller</text>
 
   <rect class="volume" x="330" y="482" width="250" height="122"/>
   <text class="label" x="352" y="512">Railway /data volume</text>
   <text class="text" x="352" y="536">projects/&lt;id&gt;/input</text>
-  <text class="text" x="352" y="556">project.log, chat.jsonl</text>
+  <text class="text" x="352" y="556">active project.log</text>
   <text class="text" x="352" y="576">workspace scratch/cache</text>
 
   <rect class="agent" x="330" y="646" width="250" height="112"/>
@@ -77,16 +77,16 @@
   <rect class="supabase" x="805" y="150" width="210" height="126"/>
   <text class="label" x="827" y="180">Postgres state DB</text>
   <text class="text" x="827" y="204">public.users, organizations</text>
-  <text class="text" x="827" y="224">public.projectstate (registry)</text>
-  <text class="text" x="827" y="244">phases/tickets/agents/…</text>
+  <text class="text" x="827" y="224">projectstate + conversation</text>
+  <text class="text" x="827" y="244">phases/tickets/runtime_agents/…</text>
   <text class="tiny" x="827" y="262">one flat schema, project_id-keyed</text>
 
   <rect class="supabase" x="805" y="330" width="210" height="126"/>
   <text class="label" x="827" y="360">Supabase Storage</text>
-  <text class="text" x="827" y="384">bucket: factory-run-blobs</text>
-  <text class="text" x="827" y="404">inputs, artifacts</text>
-  <text class="text" x="827" y="424">logs, chat, snapshots</text>
-  <text class="tiny" x="827" y="442">Target source of truth</text>
+  <text class="text" x="827" y="384">configured Storage bucket</text>
+  <text class="text" x="827" y="404">uploaded material + artifacts</text>
+  <text class="text" x="827" y="424">project.log snapshots</text>
+  <text class="tiny" x="827" y="442">write-through when configured</text>
 
   <rect class="supabase" x="805" y="510" width="210" height="112"/>
   <text class="label" x="827" y="540">public.blobs</text>
@@ -100,8 +100,8 @@
   <text class="text" x="827" y="744">Live demo + app DB</text>
 
   <rect class="external" x="1112" y="140" width="190" height="80"/>
-  <text class="label" x="1134" y="170">Google OAuth</text>
-  <text class="text" x="1134" y="194">Console sign-in</text>
+  <text class="label" x="1134" y="170">Identity sign-in</text>
+  <text class="text" x="1134" y="194">Google OAuth + password</text>
 
   <rect class="external" x="1112" y="252" width="190" height="92"/>
   <text class="label" x="1134" y="282">OpenAI/OpenRouter</text>
@@ -144,5 +144,5 @@
   <path class="edge-orange" d="M580 724 C790 700, 995 674, 1112 670"/>
   <path class="edge-orange" d="M580 394 C800 525, 985 738, 1112 784"/>
 
-  <text class="tiny" x="38" y="846">Blob answer: durable bytes go to Supabase Storage bucket factory-run-blobs; public.blobs stores pointers; Railway /data remains cache/scratch until Storage adapter lands.</text>
+  <text class="tiny" x="38" y="846">Blob answer: public.blobs stores durable pointers; configured Storage carries uploaded bytes and log snapshots; Railway /data retains active logs and the disposable workspace.</text>
 </svg>

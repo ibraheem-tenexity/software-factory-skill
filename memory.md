@@ -328,3 +328,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/components/{factory/BuildBoard,onboarding/{OnboardingScreen,design},project/DocumentsTab}.tsx; console/routers/projects.py; src/software_factory/{storage,blobs,db,memory/store,repositories/{blobs,canvas}}.py.
 3. Removal must erase durable bytes, blob metadata, document chunks/summaries, and the agent-readable markdown artifact; drag/drop reuses the existing attach pipeline.
 4. Summary: both Linear tickets set In Progress; Python compile and Vite production build pass; staging browser verification is pending deployment after the benchmark hold.
+
+# Codex Update at Time: 16:07:2026:00:00:00.000
+1. Synced the canonical architecture narrative and schema/service diagrams with current staging code.
+2. docs/ARCHITECTURE.md, docs/schema-erd.{dot,md,svg}, docs/service-architecture.svg.
+3. Corrected stale runtime, stage-gate, persistence, auth, schema, and deployment claims from a source-backed audit.
+4. Summary: DOT render and model-table coverage pass; documentation diff is clean.
