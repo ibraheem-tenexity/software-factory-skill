@@ -104,7 +104,7 @@ granularity instead.
 
 ---
 
-## 3. Components (`src/software_factory/`)
+## 3. Components (`src/software_factory/`; the `console/` and `skills/` rows are repo-root, not in the package)
 
 | Module | Responsibility |
 |---|---|
