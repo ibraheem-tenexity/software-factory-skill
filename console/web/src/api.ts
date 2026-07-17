@@ -491,7 +491,7 @@ export const api = {
     method?: "google" | "microsoft" | "password" | "sso";
     password?: string;
     role?: "admin" | "member";
-  }) => send<{ users: AdminAccessUser[] }>("/api/admin/access", "POST", body),
+  }) => send<{ users: AdminAccessUser[]; invite_email_sent?: boolean }>("/api/admin/access", "POST", body),
   adminUpdateAccess: (email: string, body: { role?: string; status?: "active" | "invited" | "disabled"; is_internal?: boolean }) =>
     send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "PATCH", body),
   adminDeleteAccess: (email: string) => send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "DELETE"),
