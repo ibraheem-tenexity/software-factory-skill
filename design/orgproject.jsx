@@ -62,10 +62,15 @@ function FileTile({ name, kind, size, tag, used, updated, onClick }) {
 /* ============================ ORG ADMIN ============================ */
 function OrgAdmin({ onBack, loading = false }) {
   const [sec, setSec] = React.useState('profile');
+  const [enrichOpen, setEnrichOpen] = React.useState(false);
+  const [enrichedNote, setEnrichedNote] = React.useState(false);
   const SECTIONS = [
     { id: 'profile', label: 'Company profile' },
+    { id: 'brand', label: 'Brand & theme' },
     { id: 'knowledge', label: 'Knowledge base' },
     { id: 'systems', label: 'Connected systems' },
+    { id: 'discovery', label: 'Codebase discovery' },
+    { id: 'conventions', label: 'Dev conventions' },
     { id: 'secrets', label: 'Secrets' },
     { id: 'team', label: 'Team & access' },
     { id: 'billing', label: 'Usage & billing' },
@@ -123,7 +128,23 @@ function OrgAdmin({ onBack, loading = false }) {
 
             {sec === 'profile' && (
               <React.Fragment>
-                <SecHead title="Company profile" desc="The canonical context every project inherits — set once, reused everywhere." action={<Btn variant="secondary" size="sm">Edit profile</Btn>} />
+                <SecHead title="Company profile" desc="The canonical context every project inherits — set once, reused everywhere." action={
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Btn variant={enrichOpen ? 'primary' : 'secondary'} size="sm" onClick={() => setEnrichOpen((v) => !v)}><Icon name="globe" size={14} color={enrichOpen ? '#fff' : T.secondary} /> Enrich from web</Btn>
+                    <Btn variant="secondary" size="sm">Edit profile</Btn>
+                  </div>
+                } />
+                {enrichOpen && (
+                  <div style={{ border: `1px solid ${T.brand}55`, borderRadius: T.rLg, background: T.raised, boxShadow: T.shadowXs, padding: '16px 18px', marginBottom: 14 }}>
+                    <EnrichFromWeb onAccept={() => { setEnrichOpen(false); setEnrichedNote(true); }} onSkip={() => setEnrichOpen(false)} />
+                  </div>
+                )}
+                {enrichedNote && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '10px 13px', borderRadius: T.rLg, border: `1px solid ${T.success}55`, background: T.successSoft + '88', marginBottom: 14 }}>
+                    <Icon name="check" size={14} color={T.success} />
+                    <span style={{ font: `400 12.5px/1.5 ${T.sans}`, color: T.secondary }}><b style={{ color: T.success }}>Profile enriched from the web</b> — fields below are updated; anything still marked is waiting on your confirmation.</span>
+                  </div>
+                )}
                 {loading ? <KVGridSkel rows={9} cols={2} /> : (
                 <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: 'hidden', background: T.raised, boxShadow: T.shadowXs }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px', background: T.borderSubtle }}>
@@ -139,6 +160,15 @@ function OrgAdmin({ onBack, loading = false }) {
                 <div style={{ marginTop: 14, display: 'flex', alignItems: 'flex-start', gap: 10, padding: '13px 15px', borderRadius: T.rLg, border: `1px solid ${T.brand}33`, background: T.brandSoft + '55' }}>
                   <Sparkle size={13} color={T.brand} style={{ marginTop: 2 }} />
                   <p style={{ margin: 0, font: `400 12.5px/1.55 ${T.sans}`, color: T.secondary }}>The Concierge reuses this profile to skip questions on every new project. Keep it current and onboarding stays one-click.</p>
+                </div>
+              </React.Fragment>
+            )}
+
+            {sec === 'brand' && (
+              <React.Fragment>
+                <SecHead title="Brand & theme" desc="Your look, pulled from your website — applied to every mockup and app the factory generates for you." />
+                <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised, boxShadow: T.shadowXs, padding: '18px 20px' }}>
+                  <ThemeSection />
                 </div>
               </React.Fragment>
             )}
@@ -174,6 +204,24 @@ function OrgAdmin({ onBack, loading = false }) {
                       <Btn variant={s.connected ? 'ghost' : 'secondary'} size="sm">{s.connected ? 'Manage' : 'Link'}</Btn>
                     </div>
                   ))}
+                </div>
+              </React.Fragment>
+            )}
+
+            {sec === 'discovery' && (
+              <React.Fragment>
+                <SecHead title="Codebase discovery" desc="Already shipping your own software? Discovery agents read your repo and write the agent files (AGENTS.md, CLAUDE.md, integrations.md) that teach the factory to extend it." />
+                <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised, boxShadow: T.shadowXs, padding: '18px 20px' }}>
+                  <DiscoverySection />
+                </div>
+              </React.Fragment>
+            )}
+
+            {sec === 'conventions' && (
+              <React.Fragment>
+                <SecHead title="Development conventions" desc="For technical teams: your methodology and environment — repo, framework, commands, standards. The factory builds to your conventions, not ours." />
+                <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised, boxShadow: T.shadowXs, padding: '18px 20px' }}>
+                  <ConventionsSection />
                 </div>
               </React.Fragment>
             )}

@@ -74,25 +74,24 @@ function ScopeOfWork({ options, value, onChange, onAddOption }) {
   );
 }
 
-// Build engine selection. Both paths look identical downstream — same factory,
-// same console — only the underlying coding agent differs.
+// Build engine selection. Three coding agents — Claude Code, Codex, Kimi —
+// all drive the same factory: the console, pipeline, and output look identical
+// downstream; only the underlying coding agent differs. Model-flexible by
+// design: providers plug in, nothing downstream keys on a specific one.
 const ENGINES = [
-  { id: 'claude', name: 'Claude', tag: 'Default', desc: 'Anthropic Claude — the factory’s native build agent.' },
-  { id: 'opencode', name: 'OpenCode', desc: 'Open-source agent runtime — pick the model below.' },
-];
-const OC_MODELS = [
-  { id: 'kimi', name: 'Kimi K2.7', vendor: 'Moonshot AI' },
-  { id: 'glm', name: 'GLM 5.2', vendor: 'Zhipu AI' },
+  { id: 'claude', name: 'Claude Code', vendor: 'Anthropic', tag: 'Default', desc: 'The factory’s native build agent.' },
+  { id: 'codex', name: 'Codex 5.6', vendor: 'OpenAI', desc: 'OpenAI’s coding agent, driving the same pipeline.' },
+  { id: 'kimi', name: 'Kimi K3', vendor: 'Moonshot AI', desc: 'Moonshot’s coding agent — also generates screen designs.' },
 ];
 function engineLabel(e) {
-  if (!e || e.provider === 'claude') return 'Claude';
-  const m = OC_MODELS.find((x) => x.id === e.model);
-  return `OpenCode · ${m ? m.name : 'OpenCode'}`;
+  if (!e || !e.provider) return 'Claude Code';
+  const m = ENGINES.find((x) => x.id === e.provider);
+  return m ? m.name : 'Claude Code';
 }
 
-function EngineCardBtn({ active, name, desc, tag, onClick }) {
+function EngineCardBtn({ active, name, vendor, desc, tag, onClick }) {
   return (
-    <button onClick={onClick} style={{ textAlign: 'left', flex: 1, padding: '14px 15px', borderRadius: T.rLg, cursor: 'pointer',
+    <button onClick={onClick} style={{ textAlign: 'left', flex: 1, minWidth: 170, padding: '14px 15px', borderRadius: T.rLg, cursor: 'pointer',
       border: `1.5px solid ${active ? T.brand : T.borderSubtle}`, background: active ? T.brandSoft : T.raised, transition: 'all .12s', display: 'flex', flexDirection: 'column', gap: 5 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ width: 16, height: 16, borderRadius: '50%', flexShrink: 0, border: `1.5px solid ${active ? T.brand : T.borderDefault}`, background: active ? T.brand : 'transparent', display: 'grid', placeItems: 'center' }}>
@@ -102,34 +101,19 @@ function EngineCardBtn({ active, name, desc, tag, onClick }) {
         {tag && <span style={{ font: `600 9px/1 ${T.mono}`, letterSpacing: '0.06em', color: T.brandDeep, background: T.brandSoft, border: `1px solid ${T.brand}44`, padding: '2px 5px', borderRadius: 3 }}>{tag.toUpperCase()}</span>}
       </div>
       <span style={{ font: `400 12px/1.45 ${T.sans}`, color: T.secondary, paddingLeft: 24 }}>{desc}</span>
+      <span style={{ font: `400 10.5px/1 ${T.mono}`, color: T.tertiary, paddingLeft: 24 }}>{vendor}</span>
     </button>
   );
 }
 
 function EnginePicker({ value, onChange }) {
   const set = (patch) => onChange({ ...value, ...patch });
-  const provLabel = value.provider === 'claude' ? 'Claude' : (OC_MODELS.find((m) => m.id === value.model) || {}).name || 'OpenCode';
+  const provLabel = (ENGINES.find((m) => m.id === value.provider) || ENGINES[0]).name;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'flex', gap: 10 }}>
-        {ENGINES.map((e) => <EngineCardBtn key={e.id} active={value.provider === e.id} name={e.name} desc={e.desc} tag={e.tag} onClick={() => set({ provider: e.id })} />)}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {ENGINES.map((e) => <EngineCardBtn key={e.id} active={value.provider === e.id} name={e.name} vendor={e.vendor} desc={e.desc} tag={e.tag} onClick={() => set({ provider: e.id })} />)}
       </div>
-      {value.provider === 'opencode' && (
-        <Field label="OpenCode model">
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {OC_MODELS.map((m) => {
-              const on = value.model === m.id;
-              return (
-                <button key={m.id} onClick={() => set({ model: m.id })} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, padding: '9px 14px', borderRadius: T.rMd, cursor: 'pointer',
-                  border: `1.5px solid ${on ? T.brand : T.borderSubtle}`, background: on ? T.brandSoft : T.raised }}>
-                  <span style={{ font: `600 13px/1 ${T.sans}`, color: T.fg }}>{m.name}</span>
-                  <span style={{ font: `400 10.5px/1 ${T.mono}`, color: T.tertiary }}>{m.vendor}</span>
-                </button>
-              );
-            })}
-          </div>
-        </Field>
-      )}
       <Field label="API key">
         <Segmented value={value.keySource} onChange={(v) => set({ keySource: v })} options={[{ id: 'tenexity', label: 'Use Tenexity’s key' }, { id: 'byok', label: 'Bring your own key' }]} />
         <div style={{ marginTop: 10 }}>
@@ -141,9 +125,23 @@ function EnginePicker({ value, onChange }) {
     </div>
   );
 }
+// Goal → recipe matcher for the concierge's inline suggestion (CBT-11). When
+// someone starts a project without picking a recipe, the concierge offers the
+// best-fitting Published one. Live version = concierge tool over recipe
+// taglines; the prototype matches on keyword overlap.
+function suggestRecipe(goal) {
+  const g = (goal || '').toLowerCase();
+  if (g.trim().length < 12) return null;
+  const pub = (typeof RECIPES !== 'undefined' ? RECIPES : []).filter((r) => r.status === 'published');
+  const hay = (r) => (r.name + ' ' + r.tagline + ' ' + r.category + ' ' + r.systems.join(' ') + ' ' + r.includes.join(' ')).toLowerCase();
+  return pub.find((r) => {
+    const h = hay(r);
+    return g.split(/[^a-z]+/).some((w) => w.length > 4 && h.includes(w));
+  }) || null;
+}
+
 // Pull existing org knowledge-base documents into this project.
-function OrgImportPicker() {
-  const [open, setOpen] = React.useState(false);
+function OrgImportPicker() {  const [open, setOpen] = React.useState(false);
   const [picked, setPicked] = React.useState([]);
   const docs = (window.ORG_DOCS || []);
   const toggle = (n) => setPicked((p) => p.includes(n) ? p.filter((x) => x !== n) : [...p, n]);
@@ -201,7 +199,7 @@ function BudgetPicker({ value, onChange }) {
   );
 }
 
-function OptionC({ onExit, onBackground }) {
+function OptionC({ onExit, onBackground, initialRecipe }) {
   const [mode, setMode] = React.useState('returning'); // 'fresh' | 'returning'
   const [view, setView] = React.useState('intake'); // intake | processing | interview | build
   const [interviewDone, setInterviewDone] = React.useState(false);
@@ -224,14 +222,18 @@ function OptionC({ onExit, onBackground }) {
   // fresh-user company setup (empty — nothing on file yet)
   const [f, setF] = React.useState({ industry: '', sub: [], name: '', size: '', revenue: '', role: '', site: '', ints: [] });
   const setFresh = (k, v) => setF((x) => ({ ...x, [k]: v }));
-  // project answers (shared; prefilled so returning is one-click)
+  // web prefill: set once the user accepts the found-company card (EnrichFromWeb)
+  const [enriched, setEnriched] = React.useState(false);
+  const applyEnrich = (vals) => { setF((x) => ({ ...x, name: vals.name, industry: vals.industry, sub: vals.sub, size: vals.size, revenue: vals.revenue, site: vals.site, ints: vals.ints })); setEnriched(true); };
+  // project answers (shared; prefilled so returning is one-click). `recipe` is
+  // set when the user arrived from the Explore gallery ("Start from this →").
   const [p, setP] = React.useState({
     name: 'Quote-to-Epicor automation',
     goal: 'Replace the manual quoting spreadsheet — build quotes against our Epicor SKUs and price book, route >15% discounts to a manager for approval, and write the won quote straight back to Epicor.',
-    scope: ['Quoting / RFQ', 'Pricing & approvals'], video: false, docs: false, budget: 30,
+    scope: ['Quoting / RFQ', 'Pricing & approvals'], video: false, docs: false, budget: 30, recipe: initialRecipe || undefined,
   });
   const setProj = (k, v) => setP((x) => ({ ...x, [k]: v }));
-  const [engine, setEngine] = React.useState({ provider: 'claude', model: 'kimi', keySource: 'tenexity', key: '' });
+  const [engine, setEngine] = React.useState({ provider: 'claude', keySource: 'tenexity', key: '' });
   const projectName = `Acme Industrial · ${p.name || 'New project'}`;
   if (view === 'build') return <BuildProgress onBack={() => setView('interview')} backLabel="Interview" projectName={projectName} engine={engine} budget={p.budget} />;
   if (view === 'processing') return <ProcessingScreen projectName={projectName} onDone={() => setView('interview')} onBackground={onBackground ? () => onBackground({ name: p.name, goal: p.goal }) : undefined} />;
@@ -250,6 +252,11 @@ function OptionC({ onExit, onBackground }) {
   ];
   const projReady = projChecks.every((c) => c.done);
   const ready = fresh ? (f.industry && f.name && f.size && projReady) : projReady;
+  // concierge recipe suggestion: offered only while no recipe is picked and
+  // not dismissed; accepting sets the RecipePicker value in the main column.
+  const [suggestOff, setSuggestOff] = React.useState(false);
+  const suggestedRecipe = (!p.recipe && !suggestOff) ? suggestRecipe(p.goal) : null;
+  const appliedRecipe = p.recipe ? (typeof RECIPES !== 'undefined' ? RECIPES : []).find((x) => x.id === p.recipe) : null;
   // Step 0: the project must be created before the rest of intake is usable.
   // Naming it + Save fires a POST that writes the project to the DB in `draft`
   // state; everything after enriches it and advances its state (draft →
@@ -322,6 +329,18 @@ function OptionC({ onExit, onBackground }) {
                   </div>
 
                   <SectionDivider label="Your organization" sub="set up once · reused on every project" icon="building" />
+
+                  <Card cat="Your company" title="Start with your website — we’ll take it from there" desc="One lookup and most of the setup below fills itself in. You confirm everything before it saves." accent>
+                    {enriched ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: T.rLg, border: `1px solid ${T.success}55`, background: T.successSoft + '88' }}>
+                        <Icon name="check" size={15} color={T.success} />
+                        <span style={{ flex: 1, font: `400 12.5px/1.5 ${T.sans}`, color: T.secondary }}><b style={{ color: T.success }}>Pulled from the web</b> — your profile, industry, and Epicor connection are filled in below. Review and adjust anything.</span>
+                        <button onClick={() => setEnriched(false)} title="Run the lookup again" style={{ font: `500 12px/1 ${T.sans}`, color: T.tertiary, background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="refresh" size={12} color={T.tertiary} /> Again</button>
+                      </div>
+                    ) : (
+                      <EnrichFromWeb onAccept={applyEnrich} />
+                    )}
+                  </Card>
 
                   <Card cat="Your company" title="What kind of operation is this?" desc="Tuned for industrial & IT distribution.">
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 9 }}>
@@ -506,6 +525,31 @@ function OptionC({ onExit, onBackground }) {
                 </React.Fragment>
               )}
             </div>
+
+            {suggestedRecipe && (
+              <div className="ai-tint" style={{ padding: 12, borderRadius: T.rLg, border: `1px solid ${T.brand}44`, display: 'flex', flexDirection: 'column', gap: 9 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Icon name="book" size={13} color={T.brandDeep} /><CategoryLabel tone="brand">Recipe match</CategoryLabel>
+                  <span style={{ flex: 1 }} />
+                  <button onClick={() => setSuggestOff(true)} title="Dismiss suggestion" style={{ border: 'none', background: 'none', cursor: 'pointer', padding: 2 }}><Icon name="x" size={13} color={T.tertiary} /></button>
+                </div>
+                <div>
+                  <div style={{ font: `700 14px/1.25 ${T.display}`, letterSpacing: '-0.01em', color: T.fg }}>{suggestedRecipe.name}</div>
+                  <p style={{ margin: '3px 0 6px', font: `400 12px/1.5 ${T.sans}`, color: T.secondary }}>{suggestedRecipe.tagline}</p>
+                  <span style={{ font: `400 10.5px/1 ${T.mono}`, color: T.tertiary }}>{suggestedRecipe.builds} builds · start from proven code, not a blank page</span>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Btn variant="primary" size="sm" onClick={() => { setProj('recipe', suggestedRecipe.id); setSuggestOff(true); }}><Icon name="check" size={13} color="#fff" /> Use this recipe</Btn>
+                  <Btn variant="ghost" size="sm" onClick={() => setSuggestOff(true)}>No thanks</Btn>
+                </div>
+              </div>
+            )}
+            {appliedRecipe && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: T.rLg, border: `1px solid ${T.success}55`, background: T.successSoft + '66' }}>
+                <Icon name="check" size={13} color={T.success} />
+                <span style={{ flex: 1, font: `400 11.5px/1.4 ${T.sans}`, color: T.secondary }}>Building from the <b style={{ color: T.fg }}>{appliedRecipe.name}</b> recipe — change it in the Recipe card on the left.</span>
+              </div>
+            )}
 
             <Message who="agent" anim text={ready
               ? "That’s the setup done. Next I’ll process your uploads, then ask a few quick questions to sharpen the build — hit Continue when you’re ready."

@@ -70,7 +70,8 @@ allow-list managed in Tenexity OS (§3.6).
 **Purpose:** the home screen after login; list the org's projects.
 **Top bar:** wordmark · org switcher (→ Org admin) · search · user avatar.
 **Body:**
-- Header "Your projects" + **New project** CTA.
+- Header "Your projects" + **New project** CTA + **Explore** (compass icon) — the recipe
+  inspiration gallery (§2.8), a destination separate from starting a project.
 - **Pulse strip** (4 metric cards): Active projects / In build / Deployed / Spend this month.
 - **Org admin preview** (admins only): a compact, clickable preview of the organization (industry, scale, knowledge-base count, connected systems, team) with **Manage organization →** to the org admin page. Gated on `isAdmin` — **non-admin users see nothing in its place** (the list simply moves up). Replaces the former Concierge brief.
 - **Project list**, in **collapsible groups** ordered **Deployed** (top), then **In progress**, then **Archived** (only when non-empty). Each group header is a click-to-toggle button with a rotating chevron; the group's count stays in the header while collapsed. Each row: owner avatar, name, status pill, phase + progress bar, agents (avatar stack), last activity, spend, and an overflow (⋯) menu. A **team-member filter** ("All team members") in the header filters all groups by project owner.
@@ -81,21 +82,36 @@ allow-list managed in Tenexity OS (§3.6).
 ### 2.3 Organization admin  (`orgproject.jsx` → `OrgAdmin`)
 **Purpose:** the org's context + org-scoped documents, reused by every project.
 **Layout:** left sub-nav + content. Sections:
-- **Company profile** — canonical org context (name, industry, sub-focus, HQ, founded, headcount, revenue, website, footprint). Editable. Note: Concierge reuses this to skip questions on new projects.
+- **Company profile** — canonical org context (name, industry, sub-focus, HQ, founded, headcount, revenue, website, footprint). Editable. Note: Concierge reuses this to skip questions on new projects. Header action **Enrich from web** opens the same web-prefill flow as first-time intake (§2.4, `EnrichFromWeb`): look the company up → confirm the ai-tint found-card → profile fields update. Nothing writes until the user accepts.
+- **Brand & theme** (`ThemeSection`, `discovery.jsx`) — the org's look as a token pack. **Process theme from my website**: domain → `MiniLog` of the crawl (palette/type/logo) → found pack: color rows (swatch + role + hex + ConfidencePill + source), type stack, logo tile, and a **live preview** strip rendering a generated app shell in the found theme. Copy states the pack is applied to every Kimi K3 mockup (§2.6 design review) and every app the factory builds for the org; an existing `brand-guidelines.pdf` in the knowledge base is named as the fallback source.
 - **Knowledge base** — org-scoped documents (price book, line card, policies, brand, SOPs) as file tiles; each shows reuse count. Upload action.
 - **Connected systems** — org-level integrations (Epicor connected as primary; others linkable). Reused across projects.
+- **Codebase discovery** (`DiscoverySection`, `discovery.jsx`) — the on-ramp for companies already doing custom dev. Input a GitHub repo (access tokens live in Secrets; agents are **read-only**) → **Run discovery** → `MiniLog` crawl (clone → file map → manifests/CI → integrations detected → drafts written) → generated **AGENTS.md**, **CLAUDE.md**, **integrations.md** rows (ai-tint + ConfidencePill) saved into the knowledge base and reused on every project. Re-run / add-another actions.
+- **Dev conventions** (`ConventionsSection`, `discovery.jsx`) — for technical users: primary repo, framework & runtime, install/test commands, coding standards (or a standards doc in the knowledge base). A live **"What every build agent receives"** preview (ai-tint, mono) shows the compiled org AGENTS.md; Save flashes confirmation. Injected into every build agent's context so the factory builds to the org's conventions.
 - **Secrets** — the organization **secret vault** (`ORG_SECRETS`): API keys, tokens, endpoints stored once at the org level. Each row shows the secret **name** (mono, e.g. `EPICOR_API_KEY`), a masked value (`••••••<last4>`), **used-by** project count, last-updated, and a **Rotate** action; **Add secret** in the header. Values are **encrypted and write-only** — once saved the raw value can't be read back (by anyone), projects reference secrets **by name**, and rotating/revoking here propagates to every project that imported the secret. Projects pull from this vault during the build's wait-for-deps step (§2.6).
 - **Team & access** — members with roles; invite.
 - **Usage & billing** — plan, spend, per-project spend breakdown.
 
 ### 2.4 Project onboarding  (`optionC.jsx` → `OptionC`)
 **Purpose:** collect project context with a docked **Concierge**. This is the single, finalized intake design — the earlier alternate option studies (A · Guided Stepper, B · Context Workspace) have been **removed** to eliminate duplication; only this Concierge-led flow remains. Two modes via header toggle:
-- **First-time** (fresh org, nothing on file): set up company (industry, profile, systems) **then** first project. Copy promises "we'll remember this."
+- **First-time** (fresh org, nothing on file): **Start with your website** — the first card is
+  the **web prefill** (`EnrichFromWeb`, `discovery.jsx`): a domain input (pre-fill from the
+  signup email domain when it isn't a public provider) and **Find my company**. The lookup
+  runs as a visible `MiniLog` ("Reading acme-industrial.com… checking the careers page for
+  systems…"), then reveals the **found-company card**: ai-tint rows (company, industry, HQ,
+  headcount, systems-in-use, brand palette) each with a **ConfidencePill and a source label**,
+  and **Use these details** / "Not right — look again". Accepting fills the industry tiles,
+  sub-focus chips, profile fields, and connected systems below; the card collapses to a green
+  confirmation ("Pulled from the web — review and adjust anything"). **Nothing writes until
+  the user accepts** — unconfirmed AI values keep the ai-tint treatment (the confidence-cascade
+  contract from §1). Then company setup (industry, profile, systems) **then** first project.
+  Copy promises "we'll remember this."
 - **Returning** (org on file): company context shown as **"on file · reused"** (collapsible, Manage to edit); only project questions are asked.
 **Section separation:** a labeled `SectionDivider` splits **per-tenant (org)**
 data from **this-project** data.
 **Project inputs:** project name, "what are you building" (goal), **project budget cap**, **recipe** (optional blueprint), scope-of-work chips, build engine, materials.
-- **Recipe** (`RecipePicker`, from `recipes.jsx`) is an **optional** starting blueprint the customer picks from the Published entries of the OS recipe library (§3.4b). The picker shows only the light customer-facing fields (category, name, tagline, a few capabilities); the recipe's GitHub repos, image artifacts, and internal notes are **not** shown. A **No template** card is always present — the customer can build purely from their brief. Lives in the "This project" section (inside `LockedGroup`, so it unlocks after the project is created); the value is a recipe id or `null`.
+- **Recipe** (`RecipePicker`, from `recipes.jsx`) is an **optional** starting blueprint the customer picks from the Published entries of the OS recipe library (§3.4b). The picker shows only the light customer-facing fields (category, name, tagline, a few capabilities); the recipe's GitHub repos, image artifacts, and internal notes are **not** shown. A **No template** card is always present — the customer can build purely from their brief. Lives in the "This project" section (inside `LockedGroup`, so it unlocks after the project is created); the value is a recipe id or `null`. Arriving from the **Explore** gallery (§2.8) preselects the recipe (`initialRecipe` prop).
+  - **Concierge recipe suggestion:** when the goal text matches a Published recipe and none is picked, the intake Concierge rail shows an inline **"Recipe match"** card (ai-tint; name, tagline, builds count, **Use this recipe** / **No thanks**, dismissible ×). Accepting sets the picker's value and the card flips to a green "Building from the `<name>` recipe" confirmation; dismissing suppresses it for the session (no nagging). The prototype matcher is `suggestRecipe(goal)` (keyword overlap); the live version is a concierge tool over recipe taglines (see `TICKETS.md` CBT-11).
 - **Create the project first (gate).** The **very first action** in intake is naming the
   **project** and clicking **Create project** (`SaveBasics`, in `optionC.jsx`). This is a real
   creation event: it fires a **`POST` that writes the project to the database in `draft`
@@ -110,7 +126,7 @@ data from **this-project** data.
   later** (footer), which persists the whole in-progress intake and leaves.
 - **Project budget cap** (`BudgetPicker`) is the **absolute total spend ceiling for the whole project** (not a monthly figure) — presets ($30 / $60 / $120 / $250) plus a custom amount. The build pauses for approval when cumulative spend reaches the cap. The chosen value flows into the project Overview and the factory-console header (`spent <x> / $<cap> cap`).
 - **Scope of work** chips are multi-select with a **"+ Add"** affordance — the operator/customer can type a **custom scope or type of software** not in the preset list; it's added as a selected chip.
-- **Build engine** (`EnginePicker`): choose the coding agent that builds the project — **Claude** or **OpenCode**. The downstream factory + console look identical either way. Selecting **OpenCode** reveals a model choice (**Kimi K2.7** / **GLM 5.2**). For either engine, an **API key** segment: **Use Tenexity's key** (billed through the plan) or **Bring your own key** (key input). The chosen engine surfaces in the factory console header badge (`engine · <name> · TENEXITY KEY / BYO KEY`) and the process-tree orchestrator label.
+- **Build engine** (`EnginePicker`): choose the coding agent that builds the project — **Claude Code** (Anthropic, default), **Codex 5.6** (OpenAI), or **Kimi K3** (Moonshot AI; also the design-generation model, §2.6). Three provider cards (name, vendor, description); the downstream factory + console look identical either way — providers plug in, nothing downstream keys on a specific one. An **API key** segment: **Use Tenexity's key** (billed through the plan) or **Bring your own key** (key input). The chosen engine surfaces in the factory console header badge (`engine · <name> · TENEXITY KEY / BYO KEY`) and the process-tree orchestrator label. Value shape: `{ provider: 'claude'|'codex'|'kimi', keySource, key }` (the earlier `claude|opencode` + model-subpick shape was replaced).
 **Materials (`Dropzone` with `describe`):** walkthrough video + documents. Each uploaded file has:
   - a **description input** (free text) with **AI auto-summarize** button;
   - a **scope toggle**: **Project** or **Org-wide** (org-wide → saved to knowledge base, reused everywhere).
@@ -352,6 +368,7 @@ in the same spot — right side — on the overview, console, and documents scre
 - **Pipeline stage-rail** — the full pipeline as chips with Stage gates (diamonds): `extract → provision → research → [Stage 1] → architect → design(NEW) → tickets → [Stage 2] → wait-for-deps → build → test → deploy`. Done = checked, active = pulsing, deps = amber.
 - **Crash / pause recovery** — each completed node writes **immutable checkpoint artifacts** (the files in the Artifact Viewer); the run's durable state is the set of completed checkpoints, not in-memory progress. When a run **crashes** (node failure) or is **paused**, the stage-rail marks the halt node (red / amber) and downstream nodes fade to `queued`, and a **Recovery bar** appears: **Resume from `<node>`** (re-runs the halt node onward, reusing every upstream checkpoint — no re-research/re-architecting), **Retry `<node>`** (re-run just the halt node, e.g. after a transient failure or a now-provided key), or **Rewind to…** an earlier checkpoint (click any completed node, or pick from the dropdown — that node + downstream are invalidated and recomputed, upstream reused). The build Kanban is idempotent per-ticket, so a resumed build picks up only the not-done tickets. Header shows `run crashed` / `run paused`; the **Pause** control drives the paused state in the demo (a crash sets the same recovery flow at runtime).
 - **Wait-for-deps bar** — **stage-triggered**: appears *only after* the build reaches the wait-for-deps stage (not shown the rest of the run), marked with a `STAGE-TRIGGERED` badge and copy explaining why it surfaced now. The dependency set is **derived from the project's architecture**, so the **count varies per project** (factory + app design); the layout is an auto-wrapping grid that **scales to any number** of dependencies. Header tracks `resolved / total` and flips to "Dependencies resolved — build unblocked" when complete. Each dependency offers **3 resolution options**: **Get from MCP**, **Mock it**, or **Input key**. Build is gated until all are resolved. **Input key** additionally offers **Import from org secrets** (§2.3): a picker of the organization vault (`ORG_SECRETS`) with the best name/kind match badged `MATCH`; choosing one wires the dependency to that secret **by reference** (`org:<NAME>`) — the raw value is never shown — or the operator can still paste a key manually.
+- **Design review bar** (`DesignReviewBar`, `buildprogress.jsx`) — **stage-triggered** like the deps bar: surfaces only once the **design** node has completed. The design node (Kimi K3) generates high-fidelity screens from the PRD + the org's brand theme (§2.3 Brand & theme), then waits for the customer. The bar shows the generated screens as clickable mockup tiles (each opens the `screens` fig artifact in the Artifact Viewer), header `design · Kimi K3 · on your brand theme`, and copy explaining the two paths: **Approve & continue** locks the look (bar flips to a green "Design locked — tickets and the build proceed from these N screens", with **Re-open review**) — or **iterate via the Concierge** ("denser quote table", "approvals first"), which re-generates only the affected screens. Rendered between the stage-rail/Recovery bar and the wait-for-deps bar (design precedes deps in the pipeline).
 - **View toggle: Kanban · Tree · Map**
   - **Kanban**: columns Backlog → Claimed → Building (WIP cap) → Testing → Done; ticket cards show id, title, assigned agent (avatar), tags (bug / needs-key / e2e), confidence. "Run agents" advances the live sim; bugs in Testing loop back to Building.
   - **Tree**: process tree — orchestrator root → each pipeline node → its spawned sub-agent → the artifacts it produced (clickable).
@@ -367,6 +384,23 @@ The Concierge surfaces them as an "Artifacts produced" list with open-links.
 **Layout:** left **file rail** (all artifacts, grouped by project, searchable) + topbar (breadcrumb project ▸ node, file name, type badge, confidence, updated, Copy / Download) + typed body.
 **Supported types** (`ART` registry): **md** → real markdown renderer (`Markdown`) in a reading column with an **"On this page" TOC** (recipe descriptions register as `md`); **svg** → architecture diagram; **code** → line-numbered source (sql/bash/etc.); **json**; **csv** → table; **repo** → file tree; **fig** → frame grid; **image**. Selecting a file in the rail updates the URL so it's linkable.
 **Markdown renderer** (`Markdown`, exported): headings, lists (ordered/unordered), tables, fenced code, blockquotes, rules, inline bold/italic/code/links. Reused by the recipe editor's live preview.
+
+---
+
+## 2.8 Explore — recipe inspiration gallery  (`recipes.jsx` → `ExploreRecipes`)
+
+**Purpose:** let customers browse what the factory can build **without starting a
+project** — inspiration first, commitment second. Reached from the Projects dashboard
+(**Explore** button, §2.2) and renders its own destination with a slim top bar
+(**← Projects** back · wordmark · `/ Explore`).
+**Body:** headline "See what the factory can build — then make it yours" + a card grid of
+every **Published** recipe (§3.4b): preview area (the recipe's first **public** image
+artifact — images stay internal-only unless flagged **Public** in the OS editor's image
+tile, which gained a Public/Internal toggle), category + builds count, name, tagline,
+capability chips, systems, and a **Start from this →** primary action that enters intake
+(§2.4) with that recipe preselected (`initialRecipe`). A dashed **No template — start
+blank** card closes the grid (enters intake with no recipe).
+**Connected flow:** `FactoryApp` route `explore` (dashboard.jsx).
 
 ---
 
@@ -595,23 +629,83 @@ your organization"** group (the org knowledge-base docs, `ORG_DOCS`, reused acro
 "Uploaded by you" and "Produced by the factory"; the header count includes it. File:
 `orgproject.jsx` (`ProjectDashboard` docs tab).
 
+**33 · Web prefill — "we already know you"** (§2.4, §2.3) — **the wow feature.** First-time intake now
+leads with **Start with your website**: type a domain → **Find my company** → a `MiniLog` of the
+lookup runs visibly → the **found-company card** appears: ai-tint rows for company / industry / HQ /
+headcount / systems-in-use / brand palette, each with a **ConfidencePill + source label**. **Use these
+details** fills the whole setup form (industry tiles, sub-focus, profile, Epicor connection); the card
+collapses to a green confirmation. Nothing writes until the user accepts — the confidence-cascade
+contract. Same flow lives in Org admin → Company profile as **Enrich from web**. Files: `discovery.jsx`
+(`EnrichFromWeb`, `FoundCompanyCard`, `MiniLog`), `optionC.jsx` (fresh-mode card + `applyEnrich`),
+`orgproject.jsx` (profile enrich panel).
+
+**34 · Codebase discovery + Development conventions** (§2.3) — the on-ramp for companies that already
+ship software (CBT's case). Org admin gains two sections. **Codebase discovery**: point discovery
+agents at a GitHub repo → crawl log → generated **AGENTS.md / CLAUDE.md / integrations.md** (ai-tint
+rows + ConfidencePills) saved into the knowledge base; read-only agents, tokens live in Secrets.
+**Dev conventions**: primary repo, framework, install/test commands, and coding standards with a live
+**"What every build agent receives"** compiled-AGENTS.md preview — injected into every build agent's
+context. Files: `discovery.jsx` (`DiscoverySection`, `ConventionsSection`), `orgproject.jsx` (sub-nav
++ sections).
+
+**35 · Brand & theme** (§2.3, §2.6) — Org admin → **Brand & theme**: **Process theme from my website**
+→ crawl log → token pack (palette rows with hex + ConfidencePill + source, type stack, logo tile) and
+a **live preview** of a generated app shell rendered in the found theme. The pack is what the design
+node's Kimi K3 mockups (§2.6 design review) and every generated app are themed by; the knowledge-base
+`brand-guidelines.pdf` is the named fallback. Files: `discovery.jsx` (`ThemeSection`), `orgproject.jsx`.
+
+**36 · Engine trio** (§2.4, §2.6) — the build-engine picker is now **Claude Code** (default) /
+**Codex 5.6** / **Kimi K3** — three provider cards with vendor labels; BYOK segment unchanged. The
+`opencode` provider + model sub-pick is gone; value shape is `{ provider, keySource, key }`. Console
+header badge + process-tree label follow the choice. Files: `optionC.jsx` (`ENGINES`, `engineLabel`,
+`EnginePicker`), `buildprogress.jsx` (`engShort`).
+
+**37 · Concierge recipe suggestion + Explore gallery** (§2.4, §2.8, §2.2) — when the goal matches a
+Published recipe and none is picked, the intake concierge rail offers an inline **Recipe match** card
+(ai-tint; Use this recipe / No thanks; dismiss = no nag); accepting sets the picker and flips the card
+to a green confirmation. **Explore** is a new top-level destination (dashboard button, §2.2): the
+inspiration gallery of Published recipes with public preview images, **Start from this →** preselecting
+the recipe in intake, and a dashed **start blank** card. Recipe image artifacts gained a **Public /
+Internal** toggle (only public images show in Explore). Four recipes added toward the five-tool goal:
+**Vendor Scorecard, Rebate Tracker, Order Entry Automation, Quote Follow-Up** (all Published, repos
+under `tenexity-factory/`). Files: `optionC.jsx` (`suggestRecipe`, rail card), `recipes.jsx`
+(`ExploreRecipes`, image public toggle), `recipedata.jsx` (new recipes, `public` flags),
+`dashboard.jsx` (Explore button + route), `Software Factory Onboarding.html` (Explore artboard).
+
+**38 · Design review stage-gate** (§2.6) — the pipeline's design node now **waits for the customer**:
+once design completes, a `STAGE-TRIGGERED` **Design review** bar appears in the factory console —
+mockup tiles of the Kimi K3–generated screens (click → the `screens` fig artifact), **Approve &
+continue** (locks the look, green "Design locked" state, re-openable) or **iterate via the Concierge**
+(re-generates only affected screens). Copy ties the screens to the org's brand theme (entry 35).
+File: `buildprogress.jsx` (`DesignReviewBar`).
+
 ---
 
 ## 7. File map for this iteration (quick reference)
 
-- **`concierge.jsx`** *(new)* — `useConciergeChat` hook, `ConciergeHeader`, `QuickReplies`,
-  `ProcessingScreen`, `InterviewRail`, `ProjectConcierge`. Constants to edit: `INGEST_STEPS`
-  (processing log), `INTERVIEW_Q` (questions). Loaded in `Software Factory Onboarding.html`
-  right after `artifacts.jsx`.
-- **`optionC.jsx`** — `OptionC` state machine (`view`: intake/processing/interview/build +
-  `interviewDone` gate), `InterviewView` (+ `LEARNED` constant), `OnboardingStandalone`
-  (artboard wrapper that wires backgrounding to the project home).
-- **`orgproject.jsx`** — `ProjectDashboard` now takes `ingesting` + `onResumeInterview` props,
-  renders the background banner and the right-hand `ProjectConcierge`; `ProjectViewStandalone`
-  forwards those props.
-- **`buildprogress.jsx`** — `BuildProgress` renders `ProjectConcierge context="build"` on the
-  right (replaced the left `ConciergeRail`).
-- **`shared.jsx`** — `GoalMarkdown` + `looksLikeMarkdown` (exported on `window`).
+- **`TICKETS.md`** *(new)* — the CBT design-partner sprint: 30 tickets (CBT-1…30) across four lanes
+  (DSN design / WEB console frontend / PIPE pipeline-backend / OPS infra), grounded in a recon of the
+  real codebase; wave-ordered for the 27th. File into Linear (team SOF).
+- **`discovery.jsx`** *(new — loaded in `Software Factory Onboarding.html` right after `concierge.jsx`)*
+  — `MiniLog` (compact streaming agent log), `EnrichFromWeb` + `FoundCompanyCard` (web prefill),
+  `DiscoverySection` (repo crawl → agent files), `ConventionsSection` (org AGENTS.md compiler),
+  `ThemeSection` (brand token pack + preview). One interaction contract everywhere: visible agent
+  work → ai-tint findings with ConfidencePills + sources → user confirms.
+- **`optionC.jsx`** — fresh-mode **Start with your website** card (`applyEnrich`), `suggestRecipe` +
+  the concierge-rail **Recipe match** card, engine **trio** (`ENGINES`/`engineLabel`/`EnginePicker`
+  restructured to `{ provider, keySource, key }`), `initialRecipe` prop (Explore preselect).
+- **`orgproject.jsx`** — OrgAdmin sub-nav + sections: **Brand & theme**, **Codebase discovery**,
+  **Dev conventions**; Company profile **Enrich from web** panel.
+- **`recipes.jsx`** — `ExploreRecipes` gallery (§2.8); ImageEditor **Public/Internal** toggle.
+- **`recipedata.jsx`** — four new Published recipes (Vendor Scorecard, Rebate Tracker, Order Entry
+  Automation, Quote Follow-Up); `public` flags on preview images.
+- **`dashboard.jsx`** — **Explore** header button; `FactoryApp` gains the `explore` route and passes
+  `initialRecipe` into `OptionC`.
+- **`buildprogress.jsx`** — `DesignReviewBar` (stage-triggered design gate, §2.6); `engShort` maps the
+  engine trio.
+- **`shared.jsx`** — three new icons: `globe`, `palette`, `compass`.
+- **`Software Factory Onboarding.html`** — loads `discovery.jsx`; new **Explore** artboard in the
+  product-flow section.
 
 **Tokens used by the new screens** (all from the `T` object in `shared.jsx`): `T.brand`
 `#1A7BFF`, `T.brandSoft` `#E8F1FF`, `T.brandDeep` `#0958C9`, `T.success` `#059669`,

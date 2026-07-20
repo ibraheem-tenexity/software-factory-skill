@@ -88,6 +88,11 @@ function ImageEditor({ images, onChange }) {
               style={{ border: 'none', outline: 'none', background: 'transparent', font: `600 11px/1.2 ${T.mono}`, color: T.fg }} />
             <input value={im.note} onChange={(e) => patch(i, { note: e.target.value })} placeholder="caption…"
               style={{ border: 'none', outline: 'none', background: 'transparent', font: `400 11px/1.3 ${T.sans}`, color: T.tertiary }} />
+            <button onClick={() => patch(i, { public: !im.public })} title="Public images appear in the customer-facing Explore gallery"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, alignSelf: 'flex-start', marginTop: 3, border: `1px solid ${im.public ? T.brand + '66' : T.borderSubtle}`, background: im.public ? T.brandSoft : T.sunken, borderRadius: 9999, padding: '3px 8px', cursor: 'pointer' }}>
+              <Icon name="globe" size={11} color={im.public ? T.brandDeep : T.tertiary} />
+              <span style={{ font: `600 9px/1 ${T.mono}`, letterSpacing: '0.05em', textTransform: 'uppercase', color: im.public ? T.brandDeep : T.tertiary }}>{im.public ? 'Public' : 'Internal'}</span>
+            </button>
           </div>
         </div>
       ))}
@@ -304,4 +309,77 @@ function RecipePicker({ value, onChange }) {
   );
 }
 
-Object.assign(window, { RecipeLibrary, RecipeStatusPill, RecipePicker });
+// ---------- customer-facing Explore gallery ----------
+// The "Explore / Inspiration" destination — separate from starting a project.
+// Published recipes as rich cards with a preview (first PUBLIC image artifact;
+// images are internal-only unless flagged public in the OS editor). "Start
+// from this →" drops into intake with the recipe preselected.
+function ExploreRecipes({ onStart, onBack }) {
+  const all = (typeof RECIPES !== 'undefined' ? RECIPES : []).filter((r) => r.status === 'published');
+  const preview = (r) => r.images.find((im) => im.public);
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: T.bg, fontFamily: T.sans }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 26px', background: T.raised, borderBottom: `1px solid ${T.borderSubtle}`, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {onBack && <Btn variant="ghost" size="sm" onClick={onBack}><Icon name="arrowLeft" size={14} /> Projects</Btn>}
+          <Wordmark />
+          <span style={{ font: `400 13px/1 ${T.mono}`, color: T.tertiary }}>/</span>
+          <span style={{ font: `600 13px/1 ${T.sans}`, color: T.fg }}>Explore</span>
+        </div>
+        <Avatar name="Ibraheem K" size={30} tone="brand" />
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: '30px 28px 44px' }}>
+        <div style={{ maxWidth: 1080, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 22 }}>
+          <div>
+            <CategoryLabel tone="brand" style={{ marginBottom: 9 }}>Explore · inspiration</CategoryLabel>
+            <h1 style={{ font: `700 30px/1.15 ${T.display}`, letterSpacing: '-0.02em', color: T.fg, margin: 0 }}>See what the factory can build — then make it yours</h1>
+            <p style={{ font: `400 14px/1.55 ${T.sans}`, color: T.secondary, margin: '8px 0 0', maxWidth: 600 }}>
+              Proven tools from the Tenexity recipe library. Pick one as a starting point and the factory bends it to your process, your systems, and your brand — or start blank.
+            </p>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+            {all.map((r) => {
+              const pv = preview(r);
+              return (
+                <div key={r.id} style={{ display: 'flex', flexDirection: 'column', border: `1px solid ${T.borderSubtle}`, borderRadius: T.rXl, background: T.raised, overflow: 'hidden', boxShadow: T.shadowXs }}>
+                  <div style={{ height: 128, background: `repeating-linear-gradient(135deg, ${T.sunken}, ${T.sunken} 9px, ${T.bg} 9px, ${T.bg} 18px)`, display: 'grid', placeItems: 'center', borderBottom: `1px solid ${T.borderSubtle}` }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, font: `400 10.5px/1 ${T.mono}`, color: T.tertiary }}>
+                      <Icon name="image" size={14} color={T.tertiary} />{pv ? pv.name : 'preview coming'}
+                    </span>
+                  </div>
+                  <div style={{ flex: 1, padding: '15px 17px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <CategoryLabel>{r.category}</CategoryLabel>
+                      <span style={{ font: `400 10.5px/1 ${T.mono}`, color: T.tertiary }}>{r.builds} builds</span>
+                    </div>
+                    <span style={{ font: `700 17px/1.25 ${T.display}`, letterSpacing: '-0.01em', color: T.fg }}>{r.name}</span>
+                    <span style={{ font: `400 12.5px/1.5 ${T.sans}`, color: T.secondary }}>{r.tagline}</span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 2 }}>
+                      {r.includes.slice(0, 3).map((c) => (
+                        <span key={c} style={{ font: `500 10.5px/1 ${T.sans}`, color: T.secondary, background: T.sunken, border: `1px solid ${T.borderSubtle}`, padding: '4px 7px', borderRadius: 9999 }}>{c}</span>
+                      ))}
+                      {r.includes.length > 3 && <span style={{ font: `500 10.5px/1 ${T.mono}`, color: T.tertiary, padding: '4px 3px' }}>+{r.includes.length - 3}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 16px', borderTop: `1px solid ${T.borderSubtle}`, background: T.bg }}>
+                    <span style={{ font: `400 10.5px/1 ${T.mono}`, color: T.tertiary }}>{r.systems.slice(0, 2).join(' · ')}</span>
+                    <Btn variant="primary" size="sm" onClick={() => onStart && onStart(r.id)}>Start from this <Icon name="arrowRight" size={13} color="#fff" /></Btn>
+                  </div>
+                </div>
+              );
+            })}
+            {/* blank build */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: 10, border: `1.5px dashed ${T.borderDefault}`, borderRadius: T.rXl, background: T.raised, padding: '20px 22px', minHeight: 260 }}>
+              <span style={{ width: 34, height: 34, borderRadius: 9, display: 'grid', placeItems: 'center', background: T.sunken }}><Icon name="plus" size={16} color={T.tertiary} /></span>
+              <span style={{ font: `700 16px/1.25 ${T.display}`, letterSpacing: '-0.01em', color: T.fg }}>No template — start blank</span>
+              <span style={{ font: `400 12.5px/1.5 ${T.sans}`, color: T.secondary }}>Build purely from your brief and materials. The factory still researches, designs, and ships — just without a head start.</span>
+              <Btn variant="secondary" size="sm" onClick={() => onStart && onStart(null)} style={{ marginTop: 4 }}>Start blank <Icon name="arrowRight" size={13} /></Btn>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { RecipeLibrary, RecipeStatusPill, RecipePicker, ExploreRecipes });

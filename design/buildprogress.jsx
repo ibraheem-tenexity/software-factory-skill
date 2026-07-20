@@ -122,8 +122,71 @@ function DepsBar({ deps = DEPENDENCIES }) {
   );
 }
 
-function ConciergeRail({ done, total, allDone, onOpen }) {
-  const seed = allDone
+// ---- Design review (stage-triggered) ----------------------------------------
+// The pipeline's design node (Kimi K3) generates high-fidelity screens from
+// the PRD + the org's brand theme, then WAITS here: the customer approves the
+// look or iterates via the Concierge (only affected screens re-generate).
+// Surfaces only once the design node has completed — like DepsBar, it is not
+// shown for the rest of the run.
+function designStage() {
+  const d = (typeof PIPELINE !== 'undefined') && PIPELINE.find((n) => n.id === 'design');
+  return { reached: !!(d && d.done) };
+}
+const DESIGN_SCREENS = [
+  { name: 'Quote builder', note: 'line items · live Epicor pricing' },
+  { name: 'Approval queue', note: '>15% discount gate' },
+  { name: 'Manager dashboard', note: 'pipeline · margins' },
+  { name: 'Epicor write-back', note: 'won quote → order' },
+];
+function DesignReviewBar() {
+  if (!designStage().reached) return null;
+  const [approved, setApproved] = React.useState(false);
+  if (approved) {
+    return (
+      <div style={{ border: `1px solid ${T.success}`, background: T.successSoft + '66', borderRadius: T.rLg, padding: '11px 15px', display: 'flex', alignItems: 'center', gap: 10, animation: 'sfRise .3s var(--ease-out, ease) both' }}>
+        <Icon name="check" size={15} color={T.success} />
+        <span style={{ flex: 1, font: `500 12.5px/1.4 ${T.sans}`, color: T.fg }}>Design locked — tickets and the build proceed from these {DESIGN_SCREENS.length} screens.</span>
+        <button onClick={() => setApproved(false)} style={{ font: `500 11.5px/1 ${T.sans}`, color: T.tertiary, background: 'none', border: 'none', cursor: 'pointer' }}>Re-open review</button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ border: `1px solid ${T.brand}`, background: T.brandSoft + '55', borderRadius: T.rLg, padding: '13px 15px', animation: 'sfRise .3s var(--ease-out, ease) both' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <span style={{ width: 12, height: 12, background: T.brand, transform: 'rotate(45deg)', borderRadius: 2, flexShrink: 0 }} />
+          <span style={{ font: `600 13px/1.3 ${T.sans}`, color: T.fg }}>Design review — {DESIGN_SCREENS.length} screens generated</span>
+          <span style={{ font: `500 9.5px/1 ${T.mono}`, letterSpacing: '0.06em', color: T.brandDeep, background: T.brandSoft, border: `1px solid ${T.brand}44`, padding: '4px 6px', borderRadius: 4 }}>STAGE-TRIGGERED</span>
+        </div>
+        <span style={{ font: `500 11px/1 ${T.mono}`, color: T.brandDeep }}>design · Kimi K3 · on your brand theme</span>
+      </div>
+      <p style={{ margin: '0 0 12px', font: `400 11.5px/1.5 ${T.sans}`, color: T.secondary }}>
+        Surfaced now because the build reached the <b style={{ color: T.fg }}>design</b> stage. These screens were generated from your PRD and your org’s brand theme. <b style={{ color: T.fg }}>Approve</b> to lock the look — or tell the Concierge what to change and only the affected screens re-generate.
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 12 }}>
+        {DESIGN_SCREENS.map((s) => (
+          <button key={s.name} onClick={() => openArtifact('screens')} title="Open in the artifact viewer" className="sf-artchip" style={{ textAlign: 'left', cursor: 'pointer', border: `1px solid ${T.borderSubtle}`, borderRadius: T.rMd, overflow: 'hidden', background: T.raised, padding: 0 }}>
+            <div style={{ height: 74, background: `repeating-linear-gradient(135deg, ${T.sunken}, ${T.sunken} 8px, ${T.bg} 8px, ${T.bg} 16px)`, display: 'grid', placeItems: 'center' }}>
+              <span style={{ font: `400 10px/1 ${T.mono}`, color: T.tertiary }}>frame · v1</span>
+            </div>
+            <div style={{ padding: '8px 10px' }}>
+              <div style={{ font: `600 12px/1.2 ${T.sans}`, color: T.fg }}>{s.name}</div>
+              <div style={{ font: `400 10.5px/1.3 ${T.sans}`, color: T.tertiary, marginTop: 2 }}>{s.note}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <span style={{ font: `400 11.5px/1.4 ${T.sans}`, color: T.tertiary, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Sparkle size={11} color={T.brandDeep} /> Iterate in the Concierge on the right — e.g. “denser quote table” or “approvals first”.
+        </span>
+        <Btn variant="primary" size="sm" onClick={() => setApproved(true)} style={{ background: T.success }}><Icon name="check" size={13} color="#fff" /> Approve &amp; continue</Btn>
+      </div>
+    </div>
+  );
+}
+
+function ConciergeRail({ done, total, allDone, onOpen }) {  const seed = allDone
     ? [{ who: 'agent', text: 'All ' + total + ' tickets are green and the app is deployed. Want me to walk you through the live build?', confidence: 'exact' }]
     : [{ who: 'agent', text: 'Build is underway — ' + done + '/' + total + ' tickets done. The Architect, Research, and Product agents have all filed their work below.' },
        { who: 'agent', text: 'Heads up: Playwright caught a tax-rounding bug on SF-11. Sonnet already pulled it back into Building to fix.' }];
@@ -184,8 +247,8 @@ function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Indus
   const sim = useBuildSim();
   const [view, setView] = React.useState('kanban');
   const [doc, setDoc] = React.useState(null);
-  const engLabel = (typeof engineLabel === 'function') ? engineLabel(engine) : 'Claude';
-  const engShort = engine && engine.provider === 'opencode' ? 'OpenCode' : 'Claude';
+  const engLabel = (typeof engineLabel === 'function') ? engineLabel(engine) : 'Claude Code';
+  const engShort = ({ claude: 'Claude Code', codex: 'Codex 5.6', kimi: 'Kimi K3' })[engine && engine.provider] || 'Claude Code';
   const pct = Math.round((sim.done / sim.total) * 100);
   const allDone = sim.done === sim.total;
   const [run, setRun] = React.useState({ status: 'running', haltId: 'build', checkpointId: 'tickets', activeId: null, reason: '' });
@@ -234,6 +297,7 @@ function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Indus
         <div style={{ flex: 1, minWidth: 0, padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 15 }}>
           <StageRail runState={run} onRewind={(id) => resumeRun(id)} />
           <RecoveryBar runState={run} onResume={() => resumeRun()} onRetry={() => resumeRun()} onRewind={(id) => resumeRun(id)} />
+          <DesignReviewBar />
           <DepsBar />
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
@@ -289,4 +353,4 @@ function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Indus
   );
 }
 
-Object.assign(window, { BuildProgress, DepsBar, ConciergeRail, Segmented });
+Object.assign(window, { BuildProgress, DepsBar, DesignReviewBar, ConciergeRail, Segmented });

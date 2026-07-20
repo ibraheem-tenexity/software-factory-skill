@@ -147,7 +147,7 @@ function ConfirmModal({ modal, onCancel, onConfirm }) {
   );
 }
 
-function Dashboard({ onOpen, onNew, onOrg, isAdmin = true, loading = false }) {
+function Dashboard({ onOpen, onNew, onOrg, onExplore, isAdmin = true, loading = false }) {
   const [owner, setOwner] = React.useState('');
   const [archivedIds, setArchivedIds] = React.useState([]);
   const [deletedIds, setDeletedIds] = React.useState([]);
@@ -215,6 +215,7 @@ function Dashboard({ onOpen, onNew, onOrg, isAdmin = true, loading = false }) {
                   {owners.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </span>
+              <Btn variant="secondary" size="lg" onClick={onExplore} title="Browse the recipe library for inspiration"><Icon name="compass" size={15} /> Explore</Btn>
               <Btn variant="primary" size="lg" onClick={onNew}><Icon name="plus" size={15} color="#fff" /> New project</Btn>
             </div>
           </div>
@@ -311,14 +312,15 @@ function FactoryApp() {
   const [budget, setBudget] = React.useState(30);
   const go = (r) => setRoute((prev) => ({ ...prev, ...r }));
   if (route.view === 'org') return <OrgAdmin onBack={() => go({ view: 'dashboard' })} />;
-  if (route.view === 'new') return <OptionC onExit={() => go({ view: 'dashboard' })} />;
+  if (route.view === 'explore') return <ExploreRecipes onBack={() => go({ view: 'dashboard' })} onStart={(id) => go({ view: 'new', recipe: id == null ? undefined : id })} />;
+  if (route.view === 'new') return <OptionC onExit={() => go({ view: 'dashboard' })} initialRecipe={route.recipe} />;
   if (route.view === 'build') return <BuildProgress projectName={`Acme Industrial · ${route.project ? route.project.name : 'Project'}`} budget={budget}
     peerTabs={{ onSwitch: (id) => id === 'exit' ? go({ view: 'dashboard' }) : id === 'build' ? null : go({ view: 'project', tab: id }) }} />;
   if (route.view === 'project') {
     const p = route.project;
     return <ProjectDashboard project={p} tab={route.tab} onTab={(t) => go({ tab: t })} onBack={() => go({ view: 'dashboard' })} onOpenBuild={() => go({ view: 'build' })} onResume={() => go({ view: 'new' })} budget={budget} onBudgetChange={setBudget} />;
   }
-  return <Dashboard onNew={() => go({ view: 'new' })} onOpen={(p) => { setBudget(p.budget || 30); go({ view: 'project', project: p, tab: 'overview' }); }} onOrg={() => go({ view: 'org' })} />;
+  return <Dashboard onNew={() => go({ view: 'new' })} onOpen={(p) => { setBudget(p.budget || 30); go({ view: 'project', project: p, tab: 'overview' }); }} onOrg={() => go({ view: 'org' })} onExplore={() => go({ view: 'explore' })} />;
 }
 
 Object.assign(window, { PROJECTS, Dashboard, FactoryApp, MetricCard, ProjectRow, ProjectRowMenu, ConfirmModal });

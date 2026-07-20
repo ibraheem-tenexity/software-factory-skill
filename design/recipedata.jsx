@@ -26,8 +26,8 @@ const RECIPES = [
       { name: 'tenexity/erp-connectors', url: 'github.com/tenexity/erp-connectors', desc: 'Epicor / SAP / NetSuite order write-back adapters' },
     ],
     images: [
-      { name: 'quote-builder.png', note: 'Reference quote-builder screen' },
-      { name: 'approval-queue.png', note: 'Manager discount-approval queue' },
+      { name: 'quote-builder.png', note: 'Reference quote-builder screen', public: true },
+      { name: 'approval-queue.png', note: 'Manager discount-approval queue', public: true },
       { name: 'architecture.png', note: 'System architecture diagram' },
     ],
     content: `# Recipe — Quote-to-ERP Automation
@@ -158,6 +158,124 @@ screen designs are still being finalized.
 
 ## Intended output
 - OCR invoice capture, 3-way match against POs/receipts, approval routing, and ERP posting.
+`,
+  },
+  {
+    id: 'recipe-vendor-scorecard',
+    name: 'Vendor Scorecard',
+    tagline: 'Score every vendor on fill rate, on-time delivery, and price variance — automatically.',
+    category: 'Operations',
+    status: 'published',
+    builds: 3, updated: '4h ago', owner: 'GARRISON',
+    includes: ['OTD & fill-rate scoring', 'Price-variance flags', 'Vendor comparison board', 'Review-pack export'],
+    systems: ['Epicor', 'SAP B1'],
+    repos: [
+      { name: 'tenexity-factory/vendor-scorecard', url: 'github.com/tenexity-factory/vendor-scorecard', desc: 'Scoring engine + comparison board (AGENTS.md included)' },
+    ],
+    images: [
+      { name: 'scorecard-board.png', note: 'Vendor comparison board', public: true },
+      { name: 'vendor-detail.png', note: 'Single-vendor drill-down' },
+    ],
+    content: `# Recipe — Vendor Scorecard
+
+A reusable blueprint for vendor-performance tools in distribution.
+
+## What it produces
+- **OTD & fill-rate scoring** per vendor, computed from PO/receipt history.
+- **Price-variance flags** when invoiced price drifts from contract.
+- A **vendor comparison board** and an exportable quarterly review pack.
+
+## Build assets
+- Seeds from \`vendor-scorecard\` — scoring engine, comparison board, and an
+  \`AGENTS.md\` describing the scoring model and extension points.
+
+## Good fit when
+Vendor reviews run on anecdotes and spreadsheets instead of receipt data.
+`,
+  },
+  {
+    id: 'recipe-rebate-tracker',
+    name: 'Rebate Tracker',
+    tagline: 'Accrue, track, and claim every vendor rebate — no more money left in spreadsheets.',
+    category: 'Finance',
+    status: 'published',
+    builds: 2, updated: '1d ago', owner: 'PROFIT',
+    includes: ['Rebate accrual ledger', 'Threshold progress bars', 'Claim packet generation', 'ERP posting'],
+    systems: ['Epicor', 'NetSuite'],
+    repos: [
+      { name: 'tenexity-factory/rebate-tracker', url: 'github.com/tenexity-factory/rebate-tracker', desc: 'Accrual ledger + claim generator (AGENTS.md included)' },
+    ],
+    images: [
+      { name: 'rebate-ledger.png', note: 'Accrual ledger with program progress', public: true },
+    ],
+    content: `# Recipe — Rebate Tracker
+
+A blueprint for vendor-rebate accrual and claim automation.
+
+## What it produces
+- A **rebate accrual ledger** per program, fed by purchase history.
+- **Threshold progress** toward the next rebate tier.
+- **Claim packet generation** and posting back to the ERP.
+
+## Good fit when
+Rebate programs live in email and spreadsheets, and claims get missed.
+`,
+  },
+  {
+    id: 'recipe-order-entry',
+    name: 'Order Entry Automation',
+    tagline: 'Turn emails, PDFs, and EDI into clean sales orders — human review only where it counts.',
+    category: 'Operations',
+    status: 'published',
+    builds: 6, updated: '6h ago', owner: 'CARGO',
+    includes: ['Email / PDF order capture', 'Line-item extraction', 'Exception review queue', 'ERP order posting'],
+    systems: ['Epicor', 'SPS Commerce'],
+    repos: [
+      { name: 'tenexity-factory/order-entry', url: 'github.com/tenexity-factory/order-entry', desc: 'Capture pipeline + exception queue (AGENTS.md included)' },
+    ],
+    images: [
+      { name: 'order-review.png', note: 'Exception review queue', public: true },
+      { name: 'order-extract.png', note: 'Line-item extraction view' },
+    ],
+    content: `# Recipe — Order Entry Automation
+
+A blueprint for turning inbound orders (email, PDF, EDI) into posted sales orders.
+
+## What it produces
+- **Capture** from email/PDF/EDI with line-item extraction against live SKUs.
+- An **exception queue** — only unmatched or low-confidence lines hit a human.
+- Clean **order posting** into the ERP with an audit trail.
+
+## Good fit when
+CSRs re-key orders from inboxes all day.
+`,
+  },
+  {
+    id: 'recipe-quote-followup',
+    name: 'Quote Follow-Up',
+    tagline: 'Never let a sent quote go stale — automated nudges, win/loss capture, and a follow-up board.',
+    category: 'Sales & Quoting',
+    status: 'published',
+    builds: 4, updated: '2d ago', owner: 'TENDER',
+    includes: ['Stale-quote detection', 'Automated follow-up emails', 'Win/loss reasons', 'Rep follow-up board'],
+    systems: ['Epicor', 'SendGrid', 'Salesforce'],
+    repos: [
+      { name: 'tenexity-factory/quote-followup', url: 'github.com/tenexity-factory/quote-followup', desc: 'Staleness engine + follow-up board (AGENTS.md included)' },
+    ],
+    images: [
+      { name: 'followup-board.png', note: 'Rep follow-up board', public: true },
+    ],
+    content: `# Recipe — Quote Follow-Up
+
+A blueprint for post-quote engagement in distribution sales.
+
+## What it produces
+- **Stale-quote detection** with per-rep aging views.
+- **Automated follow-up emails** the rep approves with one click.
+- **Win/loss capture** feeding a follow-up board and reporting.
+
+## Good fit when
+Quotes go out and nobody systematically follows up.
 `,
   },
 ];

@@ -102,6 +102,7 @@
 <script type="text/babel" src="buildboard.jsx"></script>
 <script type="text/babel" src="artifacts.jsx"></script>
 <script type="text/babel" src="concierge.jsx"></script>
+<script type="text/babel" src="discovery.jsx"></script>
 <script type="text/babel" src="nodemap.jsx"></script>
 <script type="text/babel" src="buildprogress.jsx"></script>
 <script type="text/babel" src="optionC.jsx"></script>
@@ -124,6 +125,7 @@
           <DCArtboard id="console" label="Factory console · build board (the core screen)" width={1440} height={H}><ProjectViewStandalone initialTab="build" /></DCArtboard>
           <DCArtboard id="projdash" label="Project dashboard ⇄ factory console" width={W} height={H}><ProjectViewStandalone /></DCArtboard>
           <DCArtboard id="orgadmin" label="Organization admin · context & documents" width={W} height={H}><OrgAdmin /></DCArtboard>
+          <DCArtboard id="explore" label="Explore · recipe inspiration gallery" width={W} height={H}><ExploreRecipes /></DCArtboard>
         </DCSection>
         <DCSection id="operator" title="Tenexity OS · internal operator portal"
           subtitle="Platform-side admin: every tenant, every project, every agent prompt, and the tool / MCP registry.">
