@@ -13,7 +13,7 @@ import base64
 
 from software_factory import notify, storage
 from ..memory.ingest import maybe_ingest_async
-from .errors import Invalid, NotFound
+from .errors import Invalid, NotFound, Conflict
 from .files import doc_kind
 
 def summarize(org: dict | None, runs: list[dict]) -> dict:
@@ -57,6 +57,12 @@ class OrgService:
     def create_org(self, body, by: str) -> dict:
         if not (body.name or "").strip():
             raise Invalid("name required")
+        # SOF-196: reject a name that already belongs to an active org. Unlike the admin invite path,
+        # this is UNTRUSTED self-serve onboarding — silently attaching the caller to a stranger's
+        # same-named org (find-or-create) would leak that org's data to them. So we do NOT attach;
+        # we surface an honest 409 the onboarding UI shows as "name already exists".
+        if self.users.get_org_by_name(body.name):
+            raise Conflict(f"An organization named “{body.name.strip()}” already exists")
         oid = self.users.create_org(
             body.name, industry=body.industry, sub_focus=body.sub_focus,
             headcount=body.headcount, revenue=body.revenue, location=body.location,

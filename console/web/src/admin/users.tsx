@@ -228,8 +228,9 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
       } else {
         onCreated();
       }
-    } catch {
-      alert("Failed to invite user.");
+    } catch (e: any) {
+      // Surface the server's honest reason (e.g. a guarded-invariant 409) instead of a generic line.
+      alert(typeof e?.detail === "string" ? e.detail : "Failed to invite user.");
     } finally {
       setLoading(false);
     }

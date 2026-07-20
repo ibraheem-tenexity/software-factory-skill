@@ -219,6 +219,11 @@ class AdminService:
     def create_client(self, body, by: str) -> dict:
         if not (body.name or "").strip():
             raise Invalid("name required")
+        # SOF-196: "create a new client" is an explicit-create intent — an existing same-named org
+        # means the admin should edit that one, not silently spawn a duplicate. Honest 409, not a
+        # second org. (To ADD a user to an existing org, the invite path find-or-creates instead.)
+        if self.users.get_org_by_name(body.name):
+            raise Conflict(f"An organization named “{body.name.strip()}” already exists")
         oid = self.users.create_org(body.name, industry=body.industry, website=body.website, by=by or "")
         return {"client": self.users.get_org(oid)}
 
@@ -268,7 +273,11 @@ class AdminService:
         else:
             if not (body.org_name or "").strip():
                 raise Invalid("org_name required for a new org")
-            oid = self.users.create_org(body.org_name, by=by)
+            # SOF-196: find-or-create by name. The intent here is "add this user to org X" — if X
+            # already exists, attach to it; only create when it's genuinely new. This is what stops
+            # a retried invite (SOF-195 no-email → retry) from minting a second identical-named org.
+            existing = self.users.get_org_by_name(body.org_name)
+            oid = existing["id"] if existing else self.users.create_org(body.org_name, by=by)
             self.users.invite_member(email, oid, role=role or "admin", by=by)  # org default admin
             self.users.set_profile(email, name=body.name, designation=body.designation,
                                    sign_in_method=method)
