@@ -485,7 +485,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     setEditOrg(true);
   };
   const doneManage = async () => {
-    setEditOrg(false);
     const list = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
     // map connected-system LABELS back to their ids where known (custom values pass through)
     const sysIds = list(orgEdit.systems).map((x) => INTEGRATIONS.find((i) => i.label === x)?.id || x);
@@ -495,7 +494,13 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
         connected_systems: sysIds, sub_focus: list(orgEdit.subFocus), website: orgEdit.website || undefined,
       });
       setOnFile(updated);
-    } catch (e: any) { setError(String(e?.message || e)); }
+      setEditOrg(false);
+      setError("");
+    } catch (e: any) {
+      // SOF-198: surface the honest 409 (e.g. renaming to a name another org already holds) and keep
+      // the editor open so the user can fix it, rather than showing the raw "/api/org → 409" string.
+      setError(typeof e?.detail === "string" ? e.detail : String(e?.message || e));
+    }
   };
   const addScopeOption = (o: string) => setScopeOptions((s) => (s.includes(o) ? s : [...s, o]));
 
