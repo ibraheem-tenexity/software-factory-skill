@@ -41,14 +41,19 @@ Turn it into usable scope. Do NOT re-record an input artifact — the console al
 
 ## Phase 2: provision  (`set-phase provision`)
 
-- `creds.check_all(target, env)` — any failure is a hard, UNRETRYABLE block: `add-blocker
-  <projects_dir> <project_id> "<check.name>: <check.detail>" credential` (SOF-148 — the `credential`
-  category is what tells the host's auto-resume machinery never to relaunch this doomed attempt).
-  Then **STOP THIS STAGE IMMEDIATELY** — do not attempt `provision-repo`, do not proceed to Phase 3
-  research, do not spend any further budget. A rejected/missing credential cannot be fixed by
-  retrying or by working around it; only an operator provisioning the real credential and retrying
-  the run can. Recording the blocker and continuing anyway is exactly the retry-burn SOF-148 fixed —
-  never do it.
+- `creds.check_all(target, env)` — any failure is a hard block: **STOP THIS STAGE IMMEDIATELY**
+  (do not attempt `provision-repo`, do not proceed to Phase 3 research, do not spend any further
+  budget) and record each failure with the category the check itself reports in `check.blocks`:
+  `add-blocker <projects_dir> <project_id> "<check.name>: <check.detail>" <check.blocks>`.
+    - `credential` — a real rejected/missing credential. NON-resumable (SOF-148 — this category is
+      what tells the host's auto-resume machinery never to relaunch this doomed attempt); it cannot
+      be fixed by retrying or working around it, only by an operator provisioning the real credential
+      and retrying the run. Recording it and continuing anyway is exactly the retry-burn SOF-148
+      fixed — never do it.
+    - `transient` — a provider 5xx / network blip that survived the check's own retries (SOF-194).
+      Resumable: still stop this turn, but the host's auto-resume relaunches the stage once the
+      provider recovers, so do NOT mark the credential permanently dead. (The check already retries
+      a fast blip internally; reaching here means it stayed down across those retries.)
 - `workspace.create`, then from inside it: `python3 -m software_factory.db provision-repo <projects_dir>
   <project_id> <slug>` — creates this project's ONE canonical GitHub repo (named `<slug>-<8-hex
   project id prefix>`), clones it into your cwd, persists it to `ProjectState`, and records the
