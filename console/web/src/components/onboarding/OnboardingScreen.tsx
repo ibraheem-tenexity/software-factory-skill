@@ -281,6 +281,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const [editOrg, setEditOrg] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [orgError, setOrgError] = useState("");  // SOF-196: company-name-taken (409), shown inline
 
   // the one draft the form + rail share — created explicitly when the user saves Project basics
   const [draftId, setDraftId] = useState<string | null>(null);
@@ -429,7 +430,13 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     try {
       if (!orgSavedRef.current) { await api.createOrg(body as OrgInput); orgSavedRef.current = true; }
       else { await api.patchOrg(body); }
-    } catch { /* transient — retried on next debounce / flushed at handoff */ }
+      setOrgError("");
+    } catch (e: any) {
+      // SOF-196: a 409 means this company name already belongs to another active org. Self-serve must
+      // NOT silently join a stranger's org, so surface it honestly and let the user pick another name.
+      // Everything else stays transient (retried on next debounce / flushed at hand-off).
+      if (e?.status === 409) setOrgError(typeof e.detail === "string" ? e.detail : "That organization name is already taken.");
+    }
     orgBusyRef.current = false;
   }, [f]);
 
@@ -690,7 +697,10 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
 
                   <Card cat="Your company" title="Company profile">
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                      <Field label="Company name" style={{ gridColumn: "1 / -1" }}><TextInput value={f.name} onChange={(v) => setFresh("name", v)} placeholder="e.g. Acme Industrial Supply" /></Field>
+                      <Field label="Company name" style={{ gridColumn: "1 / -1" }}>
+                        <TextInput value={f.name} onChange={(v) => { setFresh("name", v); if (orgError) setOrgError(""); }} placeholder="e.g. Acme Industrial Supply" />
+                        {orgError && <div style={{ marginTop: 6, font: `400 12px/1.4 ${T.sans}`, color: T.danger }}>{orgError}</div>}
+                      </Field>
                       <Field label="Headcount"><Chips options={SIZES} value={f.size} onChange={(v) => setFresh("size", v)} /></Field>
                       <Field label="Annual revenue"><Chips options={REVENUE} value={f.revenue} onChange={(v) => setFresh("revenue", v)} /></Field>
                       <Field label="Your role"><Chips options={ROLES} value={f.role} onChange={(v) => setFresh("role", v)} /></Field>
