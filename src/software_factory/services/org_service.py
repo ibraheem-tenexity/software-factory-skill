@@ -75,6 +75,14 @@ class OrgService:
     def patch_org(self, email: str, body) -> dict:
         org = self._require_org(email)
         fields = {k: val for k, val in body.model_dump().items() if val is not None}
+        # SOF-198: same rename guard as update_client — renaming to a name another active org holds
+        # would duplicate (and 500 once the SOF-196 0028 index is live). Exclude this org's own row
+        # so a self-rename / case-only change passes.
+        new_name = fields.get("name")
+        if new_name:
+            existing = self.users.get_org_by_name(new_name)
+            if existing and existing["id"] != org["id"]:
+                raise Conflict(f"An organization named “{new_name.strip()}” already exists")
         self.users.update_org(org["id"], **fields)
         return self.users.get_org(org["id"])
 

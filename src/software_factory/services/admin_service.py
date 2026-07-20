@@ -231,6 +231,14 @@ class AdminService:
         if not self.users.get_org(org_id):
             raise NotFound("unknown org")
         fields = {k: val for k, val in body.model_dump().items() if val is not None}
+        # SOF-198: renaming to a name ANOTHER active org already holds would create a duplicate (and
+        # a raw 500 once the SOF-196 0028 unique index is live). Guard it — but exclude THIS org's own
+        # row so a self-rename / case-only change on itself doesn't false-collide.
+        new_name = fields.get("name")
+        if new_name:
+            existing = self.users.get_org_by_name(new_name)
+            if existing and existing["id"] != org_id:
+                raise Conflict(f"An organization named “{new_name.strip()}” already exists")
         self.users.update_org(org_id, **fields)
         return {"client": self.users.get_org(org_id)}
 
