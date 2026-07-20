@@ -10,13 +10,11 @@ from __future__ import annotations
 import base64
 import datetime
 import json
-import logging
 import os
 
 from software_factory import notify, tenexity_os
 from software_factory.users import TENEXITY_ORG_ID
 from .errors import Invalid, NotFound, Conflict, Unprocessable
-from .org_service import CONSOLE_URL
 
 
 def _midnight_epoch() -> float:
@@ -280,35 +278,14 @@ class AdminService:
             self.users.set_status(email, "active")
         else:
             self.users.set_status(email, "invited")
-        # SOF-195: mirror org_service's SOF-140 invite email — fire-and-forget, never fail the
-        # provisioning (the user row is already created), UI reads invite_email_sent honestly.
+        # SOF-197: the one shared invite-email builder (SOF-140 org path uses the same function).
+        # Fire-and-forget, never fails the provisioning (the user row is already created); the UI
+        # reads invite_email_sent honestly. granted=True only for a password-method admin add — the
+        # password itself is shared out-of-band, never in this email.
         payload = self._access_rows()
-        payload["invite_email_sent"] = self._send_invite_email(
-            email, org_name=org_name, inviter=by, method=method, access_type=body.access_type)
+        payload["invite_email_sent"] = notify.send_invite(
+            email, org_name=org_name, inviter=by, granted=(method == "password"))
         return payload
-
-    def _send_invite_email(self, email: str, *, org_name: str, inviter: str, method: str,
-                           access_type: str) -> bool:
-        internal = access_type == "tenexity"
-        where = "Tenexity" if internal else org_name
-        verb = "granted access to" if method == "password" else "invited to"
-        subject = f"You've been {verb} {where} on Software Factory"
-        # method == "password": the admin set a real password directly (shared out-of-band —
-        # NEVER put it in this email, which is a notification, not a secret carrier). Everything
-        # else (invited): same "sign in with this email, no link needed" wording SOF-140 uses.
-        if method == "password":
-            action = (f"{inviter or 'An admin'} granted you access to {where} on Software Factory. "
-                     f"Sign in with this email address ({email}) at:\n{CONSOLE_URL}\n")
-        else:
-            action = (f"{inviter or 'An admin'} invited you to {where} on Software Factory.\n\n"
-                     f"Sign in with this email address ({email}) to get started — no invite link "
-                     f"needed:\n{CONSOLE_URL}\n")
-        sent = notify.send_to(email, subject, action)
-        if not sent:
-            logging.getLogger(__name__).warning(
-                "invite email to %s not sent (Resend disabled or rejected — check RESEND_API_KEY / "
-                "SF_NOTIFY_FROM verified sender); access still granted", email)
-        return sent
 
     def access_update(self, email: str, body, caller: str) -> dict:
         em = (email or "").strip().lower()
