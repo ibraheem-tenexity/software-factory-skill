@@ -235,8 +235,8 @@ parity review because those two schema construction paths can drift.
 - **Drafts:** the onboarding interview persists on a `phase="draft"` project. It may already have uploaded
   material artifacts, but `is_pipeline_project` excludes it solely by phase until `promote_draft` launches Stage 1.
 - **Multi-deliverable:** a project ships **1..N deliverables**; per-app deploy/verify state lives in the
-  `deployments` table (no scalar project-level `deploy_url`). Source-of-truth ERD:
-  [`schema-erd.svg`](schema-erd.svg).
+  `deployments` table (no scalar project-level `deploy_url`), read via `GET /api/projects/{id}/deployments`
+  (→ `Console.deployments`). Source-of-truth ERD: [`schema-erd.svg`](schema-erd.svg).
 
 **Persistent and file surfaces:**
 - **Postgres:** project state/canvas/tickets/agent telemetry, conversation turns, artifact Markdown in
