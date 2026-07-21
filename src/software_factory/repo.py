@@ -5,6 +5,7 @@ logic worth its salt lives in `merge_if_green` — merge-on-green, and never an 
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -27,7 +28,14 @@ class GitHub:
         self._run = run
 
     def create_repo(self, name: str, private: bool = True) -> str:
-        args = ["repo", "create", name, "--clone"]
+        """SOF-204: create under SF_GITHUB_ORG when set (e.g. `Tenexity-Factory`) — an org-prefixed
+        `gh repo create org/name` — otherwise unprefixed, which `gh` resolves to the authenticated
+        user (`ibraheem-tenexity`), the SAME real-world default `reap_github_repos.py`'s own
+        `SF_GITHUB_ORG` fallback already points at. Existing personal-account repos are untouched;
+        this only changes where NEW repos land."""
+        org = os.environ.get("SF_GITHUB_ORG", "").strip()
+        target = f"{org}/{name}" if org else name
+        args = ["repo", "create", target, "--clone"]
         args.append("--private" if private else "--public")
         return self._run(args).stdout.strip()
 
