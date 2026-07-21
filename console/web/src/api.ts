@@ -563,9 +563,9 @@ export const api = {
   },
   adminConversationTranscript: (sessionId: string) => get<AdminConversationTranscript>(`/api/admin/conversations/${encodeURIComponent(sessionId)}`),
   // ── Onboarding draft model (docs/plans/concierge-onboarding-api.md) ──
-  // runtime ("claude"|"opencode") + model ("kimi"|"glm") are persisted by the backend (DraftCreateIn
+  // runtime ("claude"|"opencode"|"codex") + model ("kimi"|"glm") are persisted by the backend (DraftCreateIn
   // → projectstate). BYOK keys: when keySource="byok", the FE POSTs the runtime-specific runner key
-  // (ANTHROPIC_API_KEY for claude, OPENROUTER_API_KEY for opencode) to /creds, which Vault-stores it
+  // (ANTHROPIC_API_KEY for Claude, OPENROUTER_API_KEY for OpenCode, CODEX_API_KEY for Codex) to /creds, which Vault-stores it
   // and records creds_vault_ids on the draft; promote threads those into the runner env (BYOK wins
   // over the platform key). keySource/key on createDraft/patchDraft are passthrough (ignored by
   // Pydantic); the real BYOK path is submitCreds.
@@ -582,7 +582,7 @@ export const api = {
   // when RESUMING an existing draft instead of minting a new one. budget (SOF-137) is included
   // since it's now one of the three required intake fields (name+goal+budget, scope optional).
   getDraft: (id: string) =>
-    get<{ name: string; goal: string; scope: string[]; description: string; budget: number | null; recipe_id?: string }>(`/api/projects/${id}/draft`),
+    get<{ name: string; goal: string; scope: string[]; description: string; budget: number | null; runtime: string; model: string; recipe_id?: string }>(`/api/projects/${id}/draft`),
   // BYOK key submission (qsvigmth's draft-BYOK PR). Vault-stores each credential; records UUIDs in
   // state.creds_vault_ids; promote threads them into the runner env. Returns names only, never values.
   submitCreds: (id: string, credentials: Record<string, string>) =>

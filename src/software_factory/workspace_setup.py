@@ -1,9 +1,8 @@
-"""Prepare a structured workspace for each stage's claude -p invocation.
+"""Prepare a structured workspace for each stage runner invocation.
 
-The workspace gets: the correct stage skill, .mcp.json, claude-settings.json,
-phase files, and (for Stage 2+) the prior stage's artifacts. This ensures the
-headless Claude has everything it needs — and that MCP is configured correctly
-in the workspace, not just in the Docker image root.
+The workspace gets: the correct stage skill, runtime-specific MCP setup, phase
+files, and (for Stage 2+) the prior stage's artifacts. Each headless runner gets
+the same stage contract and MCP availability from the workspace, not the image root.
 """
 from __future__ import annotations
 
@@ -224,6 +223,88 @@ def opencode_config(stage: int) -> dict:
     return cfg
 
 
+def _env_name(value: str) -> str | None:
+    """Return the sole ${VAR} name when a config value is an environment reference."""
+    import re
+    match = re.fullmatch(r"\$\{(\w+)\}", value or "")
+    return match.group(1) if match else None
+
+
+def _toml(value: object) -> str:
+    """JSON string/array syntax is valid TOML for the configuration values we emit."""
+    return json.dumps(value)
+
+
+def codex_config(stage: int, stage_env: dict) -> str:
+    """Translate the canonical MCP registry into Codex's project-scoped TOML.
+
+    Codex does not expand `${VAR}` in URLs or headers. Resolve the per-run memory URL here and
+    reference secrets by environment-variable name, so no credential is written to the workspace.
+    Playwright remains required in Codex itself as well as in the existing pre-launch health gate.
+    """
+    lines: list[str] = []
+    for name, server in mcp_config(stage)["mcpServers"].items():
+        lines.extend(("", f"[mcp_servers.{name}]"))
+        if server.get("url"):
+            url = server["url"]
+            url_env = _env_name(url)
+            if url_env:
+                url = stage_env.get(url_env, url)
+            lines.append(f"url = {_toml(url)}")
+            env_headers: dict[str, str] = {}
+            static_headers: dict[str, str] = {}
+            for header, value in (server.get("headers") or {}).items():
+                if header.lower() == "authorization" and value.startswith("Bearer "):
+                    token_env = _env_name(value.removeprefix("Bearer "))
+                    if token_env:
+                        lines.append(f"bearer_token_env_var = {_toml(token_env)}")
+                        continue
+                env_name = _env_name(value)
+                if env_name:
+                    env_headers[header] = env_name
+                else:
+                    static_headers[header] = value
+            if static_headers:
+                entries = ", ".join(f"{_toml(k)} = {_toml(v)}" for k, v in static_headers.items())
+                lines.append(f"http_headers = {{ {entries} }}")
+            if env_headers:
+                entries = ", ".join(f"{_toml(k)} = {_toml(v)}" for k, v in env_headers.items())
+                lines.append(f"env_http_headers = {{ {entries} }}")
+        else:
+            lines.append(f"command = {_toml(server['command'])}")
+            lines.append(f"args = {_toml(server.get('args') or [])}")
+            # Explicit forwarding keeps the command server's credential surface intentional.
+            if name == "railway":
+                lines.append("env_vars = [\"RAILWAY_TOKEN\"]")
+        if name == "playwright":
+            lines.append("required = true")
+    return "\n".join(lines).lstrip() + "\n"
+
+
+def _write_codex_workspace(ws: str, stage: int, stage_env: dict) -> None:
+    codex_dir = os.path.join(ws, ".codex")
+    os.makedirs(codex_dir, exist_ok=True)
+    with open(os.path.join(codex_dir, "config.toml"), "w") as f:
+        f.write(codex_config(stage, stage_env))
+
+
+def _write_codex_agents_bridge(ws: str) -> None:
+    """Make the shared stage contract visible to Codex without replacing recipe guidance."""
+    path = os.path.join(ws, "AGENTS.md")
+    bridge = "# Software Factory Stage\n\nFollow `SKILL.md` in this workspace. It is the complete stage contract.\n"
+    if os.path.isfile(path):
+        with open(path) as f:
+            existing = f.read()
+    else:
+        existing = ""
+    if bridge in existing:
+        return
+    if not existing and os.path.isfile(os.path.join(ws, "CLAUDE.md")):
+        bridge += "\nAlso read the recipe's `CLAUDE.md` for its local conventions.\n"
+    with open(path, "w") as f:
+        f.write(bridge + ("\n" + existing if existing else ""))
+
+
 def _skill_file(stage: int, skills_dir: str | None = None) -> str:
     names = {1: "stage-1-research", 2: "stage-2-design", 3: "stage-3-build"}
     base = skills_dir or SKILLS_DIR
@@ -277,6 +358,7 @@ def prepare_workspace(
     runtime: str = "claude",
     skill_override: str | None = None,
     recipe: dict | None = None,
+    stage_env: dict | None = None,
 ) -> str:
     ws = workspace.create(projects_dir, project_id)
 
@@ -287,6 +369,8 @@ def prepare_workspace(
     if runtime == "opencode":
         with open(os.path.join(ws, "opencode.json"), "w") as f:
             json.dump(opencode_config(stage), f, indent=2)
+    elif runtime == "codex":
+        _write_codex_workspace(ws, stage, stage_env or {})
     else:
         with open(os.path.join(ws, "claude-settings.json"), "w") as f:
             json.dump(CLAUDE_SETTINGS, f, indent=2)
@@ -383,6 +467,9 @@ def prepare_workspace(
             projects_dir, project_id, ws,
             ["architecture.md", "architecture.svg", "flow-map.md"])   # flow-map.md: SOF-100
         _copy_prior_dir(projects_dir, project_id, ws, "mockups")       # SOF-100
+
+    if runtime == "codex":
+        _write_codex_agents_bridge(ws)
 
     return ws
 

@@ -117,7 +117,7 @@ class ProjectState:
     # real pipeline run from a project row seeded directly for a test/verify fixture, which never
     # goes through _launch_stage at all. See Console.auto_resume_dead_stage.
     launch_attempted: bool = False
-    runtime: str = "claude"  # agent runtime for this run: claude | opencode; pinned at promote_draft
+    runtime: str = "claude"  # agent runtime for this run: claude | opencode | codex; pinned at promote_draft
     # Operator-picked models, pinned at promote_draft (claude runtime; empty = stage defaults):
     # planning drives the S1/S2 orchestrators, impl drives S3.
     planning_model: str = ""

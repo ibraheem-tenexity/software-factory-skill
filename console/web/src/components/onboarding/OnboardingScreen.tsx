@@ -143,18 +143,20 @@ function ScopeOfWork({ options, value, onChange, onAddOption }:
 }
 
 // ── Build engine picker (the "Build engine" card). MODULE-SCOPE — never define inside render
-//    (that remounts inputs on each keystroke → focus loss). provider=claude|opencode;
+//    (that remounts inputs on each keystroke -> focus loss). provider=claude|opencode|codex;
 //    model=kimi|glm; keySource=tenexity|byok. Backend persists `runtime` + maps `model` to the
-//    full id (kimi→moonshot, glm→z-ai/glm-5.2). BYOK key POSTs to /creds (Vault-stored) and the
-//    runtime-specific runner key (ANTHROPIC_API_KEY / OPENROUTER_API_KEY) wins over the platform key. ──
-export type EngineValue = { provider: "claude" | "opencode"; model: "kimi" | "glm"; keySource: "tenexity" | "byok"; key: string };
+//    full id (kimi->K3, glm->z-ai/glm-5.2). BYOK key POSTs to /creds (Vault-stored) and the
+//    runtime-specific runner key wins over the platform key.
+type EngineProvider = "claude" | "opencode" | "codex";
+export type EngineValue = { provider: EngineProvider; model: "kimi" | "glm"; keySource: "tenexity" | "byok"; key: string };
 
 const ENGINES = [
   { id: "claude", name: "Claude", tag: "Default", desc: "Anthropic Claude — the factory's native build agent." },
   { id: "opencode", name: "OpenCode", tag: "", desc: "Open-source agent runtime — pick the model below." },
+  { id: "codex", name: "Codex", tag: "", desc: "OpenAI Codex running GPT-5.6 with the same factory stages." },
 ] as const;
 const OC_MODELS = [
-  { id: "kimi", name: "Kimi K2.7", vendor: "Moonshot AI" },
+  { id: "kimi", name: "Kimi K3", vendor: "Moonshot AI" },
   { id: "glm", name: "GLM 5.2", vendor: "Zhipu AI" },
 ] as const;
 
@@ -180,13 +182,15 @@ function EnginePicker({ value, onChange }:
   const set = (patch: Partial<EngineValue>) => onChange({ ...value, ...patch });
   // Switching provider away from opencode resets model to the default (kimi); switching to opencode
   // keeps whatever model was set (default kimi). key is cleared whenever BYOK is left.
-  const chooseProvider = (p: "claude" | "opencode") => set({ provider: p, key: p === "claude" ? "" : value.key });
+  const chooseProvider = (p: EngineProvider) => set({ provider: p, key: p === "claude" ? "" : value.key });
   const chooseKeySource = (k: string) => set({ keySource: k as "tenexity" | "byok", key: k === "tenexity" ? "" : value.key });
+  const engineName = value.provider === "codex" ? "Codex" : value.provider === "opencode" ? "OpenCode" : "Claude";
+  const keyPlaceholder = value.provider === "claude" ? "sk-ant-..." : value.provider === "codex" ? "sk-..." : "paste provider API key";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 10 }}>
         {ENGINES.map((it) => (
-          <EngineCardBtn key={it.id} item={it} selected={value.provider === it.id} onClick={() => chooseProvider(it.id as "claude" | "opencode")} />
+          <EngineCardBtn key={it.id} item={it} selected={value.provider === it.id} onClick={() => chooseProvider(it.id as EngineProvider)} />
         ))}
       </div>
 
@@ -217,11 +221,11 @@ function EnginePicker({ value, onChange }:
             ? <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 11px", background: T.brandSoft + "66", border: `1px solid ${T.brand}33`, borderRadius: T.rMd }}>
               <Sparkle size={12} color={T.brandDeep} />
               <span style={{ font: `400 12px/1.4 ${T.sans}`, color: T.secondary }}>
-                {value.provider === "claude" ? "Claude" : "OpenCode"} runs on Tenexity's key — billed through your plan + rolled into the project budget.
+                {engineName} runs on Tenexity's key — billed through your plan + rolled into the project budget.
               </span>
             </div>
             : <TextInput type="password" value={value.key} onChange={(v) => set({ key: v })}
-                placeholder={value.provider === "claude" ? "sk-ant-…" : "paste provider API key"} />}
+                placeholder={keyPlaceholder} />}
         </div>
       </Field>
     </div>
@@ -454,6 +458,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       setDraftId(resumeProjectId);
       api.getDraft(resumeProjectId).then((d) => {
         setP((x) => ({ ...x, name: d.name || "", goal: d.goal || d.description || "", scope: d.scope || [] }));
+        if (d.runtime === "claude" || d.runtime === "opencode" || d.runtime === "codex") {
+          setEngine((x) => ({ ...x, provider: d.runtime as EngineProvider, model: d.model === "glm" ? "glm" : "kimi" }));
+        }
         if (d.scope) setScopeOptions((opts) => Array.from(new Set([...opts, ...d.scope])));
         // SOF-137: budget is now a required intake field (scope became optional) — a resumed
         // draft must rehydrate it, or Continue can never be satisfied again after leaving the page.
@@ -485,7 +492,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     return () => clearTimeout(t);
   }, [draftId, p.name, p.goal, p.scope]);
 
-  // DEBOUNCED build-engine write-through: runtime (claude|opencode) + model (kimi|glm) persist on
+  // DEBOUNCED build-engine write-through: runtime (claude|opencode|codex) + model (kimi|glm) persist on
   // the draft (DraftCreateIn/DraftPatchIn). keySource/key are passthrough (ignored by Pydantic) —
   // the real BYOK path is submitCreds below. Without this the eager create's runtime (default
   // claude) is the value used at promote, silently dropping an OpenCode selection.
@@ -505,13 +512,14 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
 
   // BYOK key submission: when the user brings their own key, POST it to /creds (Vault-stored; promote
   // threads creds_vault_ids into the runner env, BYOK wins over the platform key). The key NAME is
-  // runtime-specific (ANTHROPIC_API_KEY for claude, OPENROUTER_API_KEY for opencode) — the runner-key
+  // runtime-specific (ANTHROPIC_API_KEY, OPENROUTER_API_KEY, CODEX_API_KEY) — the runner-key
   // _launch_stage resolves. Debounced so a paste + edit doesn't fire per keystroke; the response is
   // ignored (never surfaces the key back). Only fires when keySource is byok AND a non-empty key exists.
   const byokBusyRef = useRef(false);
   useEffect(() => {
     if (!draftId || engine.keySource !== "byok" || !engine.key.trim()) return;
-    const keyName = engine.provider === "claude" ? "ANTHROPIC_API_KEY" : "OPENROUTER_API_KEY";
+    const keyName = engine.provider === "claude" ? "ANTHROPIC_API_KEY"
+      : engine.provider === "codex" ? "CODEX_API_KEY" : "OPENROUTER_API_KEY";
     const t = setTimeout(() => {
       if (byokBusyRef.current) return;
       byokBusyRef.current = true;
@@ -689,7 +697,8 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       await api.patchDraft(draftId, { runtime: engine.provider, model: engine.model, keySource: engine.keySource, key: engine.key }).catch(() => {}); // flush engine
       if (budget != null) await api.patchDraft(draftId, { budget }).catch(() => {});  // flush budget cap
       if (engine.keySource === "byok" && engine.key.trim()) {                 // flush BYOK key → Vault
-        const keyName = engine.provider === "claude" ? "ANTHROPIC_API_KEY" : "OPENROUTER_API_KEY";
+        const keyName = engine.provider === "claude" ? "ANTHROPIC_API_KEY"
+          : engine.provider === "codex" ? "CODEX_API_KEY" : "OPENROUTER_API_KEY";
         await api.submitCreds(draftId, { [keyName]: engine.key.trim() }).catch(() => {});
       }
       const { project_id } = await api.promote(draftId, { target: "railway" });

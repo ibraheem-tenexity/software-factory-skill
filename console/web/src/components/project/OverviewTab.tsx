@@ -373,7 +373,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                   {([
                     ["Project brief", !!(brief.goal || brief.description)],
                     ["Scope of work", !!(brief.scope && brief.scope.length)],
-                    [`Build engine · ${brief.runtime === "opencode" ? "OpenCode" : "Claude"}`, true],
+                    [`Build engine · ${brief.runtime === "opencode" ? "OpenCode" : brief.runtime === "codex" ? "Codex" : "Claude"}`, true],
                     ["Materials (optional)", materials.length > 0],
                   ] as [string, boolean][]).map(([k, done]) => (
                     <div key={k} style={{ display: "flex", alignItems: "center", gap: 9 }}>

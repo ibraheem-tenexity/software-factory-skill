@@ -53,6 +53,12 @@ RUN curl -fsSL https://opencode.ai/install | VERSION=1.16.0 bash \
     && ln -sf /home/node/.opencode/bin/opencode /usr/local/bin/opencode \
     && opencode --version
 
+# Codex is the third headless build engine. Pin the official CLI package because its JSONL event
+# vocabulary is a runtime contract for streamlog.py; a deliberate version bump requires a real-run
+# verification before changing this line. CODEX_API_KEY is supplied only to `codex exec` at runtime.
+RUN npm install -g @openai/codex@0.144.6 \
+    && codex --version
+
 # opencode-swarm (SF_SWARM=1 stage-3 build mode, SPEC §9) — the pinned release ships a
 # compiled binary + bundled plugin, so no bun in the image. The runner finds the plugin
 # next to the executable, but containers move things: OPENCODE_SWARM_PLUGIN is explicit.
@@ -98,7 +104,7 @@ RUN mkdir -p /home/node/.claude/skills /ms-puppeteer \
     && chown -R node:node /app /home/node /ms-playwright /ms-puppeteer
 
 # Entrypoint drops to uid 1000 (node) even if the platform starts us as root.
-# Required at runtime (set on the service): ANTHROPIC_API_KEY, OPENAI_API_KEY, GH_TOKEN,
+# Required at runtime (set on the service): ANTHROPIC_API_KEY, CODEX_API_KEY, OPENAI_API_KEY, GH_TOKEN,
 # RAILWAY_TOKEN, SUPABASE_ACCESS_TOKEN, OPENROUTER_API_KEY (opencode runtime + concierge),
 # and optionally SF_RUNTIME / SF_CHAT_MODEL (runtime defaults; the UI picker overrides per-run).
 # PYTHONPATH so `import software_factory` works for any python invocation (the orchestrator
