@@ -9,6 +9,7 @@ from console.deps import require_authed, require_admin
 from console.schemas import (OrgIn, OrgPatchIn, OrgDocIn, OrgDocPatchIn, OrgDocUseIn, OrgMemberIn,
                              OrgMemberPatchIn, OrgBillingIn, SecretCreateIn, SecretRotateIn,
                              OrgDiscoveryIn)
+from software_factory import storage
 from software_factory.ingestion import discovery
 from software_factory.ingestion.discovery import DiscoveryError
 
@@ -67,6 +68,19 @@ def org_doc_update(doc_id: int, body: OrgDocPatchIn, v: tuple = Depends(require_
 def org_doc_delete(doc_id: int, v: tuple = Depends(require_admin)):
     state.org_service.delete_doc(v[0], doc_id)
     return {"ok": True}
+
+
+@router.get("/api/org/docs/{doc_id}/content")
+def org_doc_content(doc_id: int, v: tuple = Depends(require_authed)):
+    """Raw text for the standalone Artifact Viewer (`?blob=<id>`) — the KB upload/CRUD routes
+    above only ever handled metadata; this is the first thing that reads a doc's bytes back out
+    of storage. Same scope check as `OrgService._org_doc_or_404`."""
+    org_id = _org_id_or_404(v[0])
+    blob = state.blobs.get_blob(doc_id)
+    if not blob or blob["scope"] != "org" or blob["scope_id"] != org_id:
+        raise HTTPException(status_code=404, detail="doc not found")
+    raw = storage.get_by_path(blob["storage_key"])
+    return {"content": raw.decode("utf-8", errors="replace")}
 
 
 # Codebase discovery (CBT-6/7) ---------------------------------------------------------------------

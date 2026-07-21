@@ -24,6 +24,14 @@ export function openArtifact(id: number | string) {
   window.open(`/ArtifactViewer.html?doc=${id}`, "_blank");
 }
 
+// Open the standalone artifact viewer in a new tab for an ORG-scope knowledge-base blob (a
+// different table/id-space from the project `artifacts` above — e.g. codebase-discovery's
+// generated AGENTS.md/CLAUDE.md/integrations.md). `name` carries the filename through so the
+// viewer can title/render it without a second round trip.
+export function openOrgDoc(id: number | string, name: string) {
+  window.open(`/ArtifactViewer.html?blob=${id}&name=${encodeURIComponent(name)}`, "_blank");
+}
+
 // Badge kind from the artifact's path/url (design KIND_BADGE keys; unknown ⇒ the raw extension).
 export function artifactKind(path: string, url?: string | null): string {
   const p = (path || "").toLowerCase();
