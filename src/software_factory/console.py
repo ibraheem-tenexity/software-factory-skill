@@ -675,11 +675,29 @@ class Console:
         live log cost (project.log from spend_seal_offset onward), floored by the persisted
         high-water spent_usd. Monotonic across a stage auto-resume/retry: retry_stage banks the dead
         attempt into prior_attempts_usd and reseals, so the relaunched attempt ADDS on top instead of
-        the live parse silently dropping the dead attempt (the $20.07->$14.13 regression). Pure — it
-        never writes; _project_spend owns floor persistence."""
+        the live parse silently dropping the dead attempt (the $20.07->$14.13 regression).
+
+        SOF-215: the persisted floor is raised using ONLY the authoritative half of the current
+        attempt's cost (completed sessions' real `result.total_cost_usd`/opencode step costs) —
+        NEVER a still-in-flight session's token estimate. An estimate can substantially overshoot
+        what that session's eventual authoritative total turns out to be (observed live: a stage-2
+        session's in-flight estimate read $22.77 against its own final, authoritative $7.12). Once
+        an inflated estimate got locked into "spend only ever goes up," an entire later stage's
+        real cost (~$8, stage 3) became invisible — never displayed, never re-persisted — because
+        it never organically exceeded the false ceiling. The RETURNED value still includes the
+        fuller estimate-inclusive total (budget enforcement must see a still-growing in-flight cost
+        in real time, not wait for a session's terminal result) — only the PERSISTED floor is
+        estimate-immune. Despite the name (kept for the docstring history above), this is the one
+        place that owns floor persistence: every direct `state.spent_usd = self._run_spend(...)`
+        call site relies on this write happening here."""
         state = state or self._load_state(project_id)
-        live = (state.prior_attempts_usd or 0.0) + self._attempt_cost(project_id, state)
-        return max(live, state.spent_usd or 0.0)
+        prior = state.prior_attempts_usd or 0.0
+        authoritative, estimate = self._attempt_cost_components(project_id, state)
+        authoritative_total = prior + authoritative
+        if authoritative_total > (state.spent_usd or 0.0):
+            state.spent_usd = authoritative_total
+            state.save()
+        return max(prior + authoritative + estimate, state.spent_usd or 0.0)
 
     def _project_spend(self, project_id: str) -> float:
         """THIS run's own spend (the per-project budget basis). Prior runs/projects do NOT count —
@@ -687,14 +705,7 @@ class Console:
         _run_spend) PLUS console-side ingestion spend (SOF-27) — a separate accumulator, since
         ingestion never runs as a stage process and so never appears in project.log."""
         state = self._load_state(project_id)
-        live = (state.prior_attempts_usd or 0.0) + self._attempt_cost(project_id, state)
-        # Persist the monotonic high-water floor so a later live-parse dip (an in-flight token
-        # estimate resolving into a lower authoritative result) can never lower recorded spend —
-        # and so it survives log loss. Only ever raised, never lowered.
-        if live > (state.spent_usd or 0.0):
-            state.spent_usd = live
-            state.save()
-        return max(live, state.spent_usd or 0.0) + (state.ingestion_spent_usd or 0.0)
+        return self._run_spend(project_id, state) + (state.ingestion_spent_usd or 0.0)
 
     def _budget_ceiling(self, project_id: str) -> float:
         """SPEC §4: per-project ceiling — the run's own override, else SF_COST_CEILING (default 30)."""
@@ -2219,12 +2230,19 @@ class Console:
         return project_id if result is not None else None
 
     def _attempt_cost(self, project_id: str, state=None) -> float:
-        """SOF-186: streamlog.cost_usd over the CURRENT stage attempt's region of project.log —
-        the bytes from the run's spend_seal_offset onward (retry_stage reseals to the log end on
-        every relaunch, so prior attempts live before the offset and are banked in
-        prior_attempts_usd instead). streamlog.cost_usd already takes each session's authoritative
-        `result` total when present, else its token estimate, so a completed attempt is
-        authoritative and a killed one keeps its estimate.
+        """SOF-186: the CURRENT stage attempt's total cost (authoritative + in-flight estimate) —
+        see `_attempt_cost_components` for the split this sums. Used by `retry_stage`'s banking
+        write: at that moment the attempt's process is already confirmed dead, so whatever this
+        returns for its now-frozen log region IS the final answer for it (a killed session's own
+        estimate never becomes MORE authoritative later — the process is gone), unlike the
+        still-alive-session case `_run_spend` guards against."""
+        return sum(self._attempt_cost_components(project_id, state))
+
+    def _attempt_cost_components(self, project_id: str, state=None) -> tuple[float, float]:
+        """(authoritative, estimate) over the CURRENT stage attempt's region of project.log — the
+        bytes from the run's spend_seal_offset onward (retry_stage reseals to the log end on every
+        relaunch, so prior attempts live before the offset and are banked in prior_attempts_usd
+        instead). See `streamlog.cost_components` for what each half means.
 
         (mtime,size,offset)-keyed cache — an unchanged log always yields the same cost, so the
         multi-MB reparse only happens when the log grew or was resealed; a stale hit is impossible
@@ -2236,7 +2254,7 @@ class Console:
             st = os.stat(p)
             key = (st.st_mtime_ns, st.st_size, off)
         except OSError:
-            return 0.0
+            return (0.0, 0.0)
         hit = self._cost_cache.get(project_id)
         if hit and hit[0] == key:
             return hit[1]
@@ -2245,8 +2263,8 @@ class Console:
                 f.seek(off)
                 text = f.read().decode("utf-8", "replace")
         except OSError:
-            return 0.0
-        val = streamlog.cost_usd(text)
+            return (0.0, 0.0)
+        val = streamlog.cost_components(text)
         self._cost_cache[project_id] = (key, val)
         return val
 
