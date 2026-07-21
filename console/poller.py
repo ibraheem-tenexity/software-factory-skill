@@ -404,6 +404,16 @@ def _boot():
                 print(f"[janitor] quarantined {name}", flush=True)
     except Exception as e:
         print(f"[janitor] FAILED: {e}", flush=True)
+    # SOF-208: a console restart mid-discovery-run kills the in-process budget watcher thread
+    # while the `claude -p` child keeps running uncapped. start()/status() reap this lazily on the
+    # org's next interaction (SOF-205/#391); this boot-time sweep catches the org that never has one.
+    try:
+        from software_factory.ingestion.discovery import sweep_orphaned_discovery_runs
+        reaped = sweep_orphaned_discovery_runs()
+        if reaped:
+            print(f"[discovery-sweep] reaped orphaned agents for org(s): {reaped}", flush=True)
+    except Exception as e:
+        print(f"[discovery-sweep] FAILED: {e}", flush=True)
     if _env.sf_environment() == "prod":
         # Apply migrations (Alembic upgrade head) so every table exists. Defensive backstop to
         # entrypoint.sh (idempotent).
