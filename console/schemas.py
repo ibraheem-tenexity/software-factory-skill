@@ -159,6 +159,7 @@ class DraftPatchIn(BaseModel):
     runtime: str | None = None   # "claude"|"opencode" — lets the Build-engine card update the draft's runtime after the eager create
     model: str | None = None     # opencode model alias: "kimi"|"glm"
     budget: float | None = None  # update the spend ceiling
+    recipe_id: str | None = None  # CBT-9: the picked recipe id (must name a published recipe), or "" to clear
 
 
 class CredsIn(BaseModel):

@@ -495,13 +495,21 @@ def get_draft(pid: str, v: tuple = Depends(authorize_project)):
 
 @router.patch("/api/projects/{pid}/draft")
 def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_project)):
-    """Structured project write-through: {name?, goal?, scope?, runtime?}. Server composes the canonical
-    description (goal + scope-of-work line). runtime updates the draft's build engine (claude|opencode)
-    after the eager create. Call debounced/on-blur, NOT per keystroke."""
+    """Structured project write-through: {name?, goal?, scope?, runtime?, recipe_id?}. Server composes
+    the canonical description (goal + scope-of-work line). runtime updates the draft's build engine
+    (claude|opencode) after the eager create. recipe_id (CBT-9) must name a published recipe — a bad
+    id is refused with the real reason instead of silently pinning a draft/archived one; "" clears the
+    selection. Call debounced/on-blur, NOT per keystroke."""
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
+    if body.recipe_id:
+        recipe = state.recipes.get(body.recipe_id)
+        if not recipe or recipe.get("status") != "published":
+            raise HTTPException(status_code=400,
+                                detail=f"recipe_id {body.recipe_id!r} does not name a published recipe")
     result = state.console.set_draft_project(pid, name=body.name, goal=body.goal, scope=body.scope,
-                                             runtime=body.runtime, model=body.model)
+                                             runtime=body.runtime, model=body.model,
+                                             recipe_id=body.recipe_id)
     if body.budget is not None:
         state.console.raise_budget(pid, body.budget)
         result["budget_ceiling"] = body.budget

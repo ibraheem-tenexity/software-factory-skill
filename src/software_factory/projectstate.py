@@ -59,6 +59,7 @@ _PERSISTED = {
     "ingestion_spent_usd",
     "memory_overview",
     "concierge_notes",
+    "recipe_id",
 }
 
 
@@ -150,6 +151,10 @@ class ProjectState:
     # for the project description: description = compose(goal, scope), recomposed idempotently
     # whenever goal or scope changes via Console.set_draft_project.
     scope: list = field(default_factory=list)
+    # CBT-9: the picked recipe (a `recipes` row id, or "" for none). When set, its body_md drives
+    # the concierge context + Stage-1 input IN PLACE OF the SOW/genre path (services/conversation.py,
+    # console.py::_provision_and_launch) and its repo_url seeds the build workspace (workspace_setup.py).
+    recipe_id: str = ""
 
     # Tenexity OS REAL/DEMO toggle (§3.3). False = real customer project; True = demo/internal.
     is_demo: bool = False
