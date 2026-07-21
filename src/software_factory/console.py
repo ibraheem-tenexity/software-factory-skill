@@ -668,16 +668,32 @@ class Console:
             return state.phase
         return max(active, key=lambda n: idx[n])
 
+    def _run_spend(self, project_id: str, state=None) -> float:
+        """SOF-186: THIS run's monotonic spend basis, EXCLUDING console-side ingestion. It is the
+        banked cost of all superseded stage attempts (prior_attempts_usd) PLUS the current attempt's
+        live log cost (project.log from spend_seal_offset onward), floored by the persisted
+        high-water spent_usd. Monotonic across a stage auto-resume/retry: retry_stage banks the dead
+        attempt into prior_attempts_usd and reseals, so the relaunched attempt ADDS on top instead of
+        the live parse silently dropping the dead attempt (the $20.07->$14.13 regression). Pure — it
+        never writes; _project_spend owns floor persistence."""
+        state = state or self._load_state(project_id)
+        live = (state.prior_attempts_usd or 0.0) + self._attempt_cost(project_id, state)
+        return max(live, state.spent_usd or 0.0)
+
     def _project_spend(self, project_id: str) -> float:
         """THIS run's own spend (the per-project budget basis). Prior runs/projects do NOT count —
-        each run/project is independently capped. Authoritative cost from the project.log, falling
-        back to the recorded projectstate spend, PLUS console-side ingestion spend (SOF-27) — a
-        separate accumulator, since ingestion never runs as a stage process and so never appears
-        in project.log or gets counted by the max() below."""
-        # max(): the log-derived figure normally leads, but the persisted projectstate spend survives
-        # log loss / parser regressions — the budget guard must never silently under-count.
+        each run/project is independently capped. The run spend (SOF-186 monotonic accumulator, see
+        _run_spend) PLUS console-side ingestion spend (SOF-27) — a separate accumulator, since
+        ingestion never runs as a stage process and so never appears in project.log."""
         state = self._load_state(project_id)
-        return max(self._cost(project_id), state.spent_usd or 0) + (state.ingestion_spent_usd or 0)
+        live = (state.prior_attempts_usd or 0.0) + self._attempt_cost(project_id, state)
+        # Persist the monotonic high-water floor so a later live-parse dip (an in-flight token
+        # estimate resolving into a lower authoritative result) can never lower recorded spend —
+        # and so it survives log loss. Only ever raised, never lowered.
+        if live > (state.spent_usd or 0.0):
+            state.spent_usd = live
+            state.save()
+        return max(live, state.spent_usd or 0.0) + (state.ingestion_spent_usd or 0.0)
 
     def _budget_ceiling(self, project_id: str) -> float:
         """SPEC §4: per-project ceiling — the run's own override, else SF_COST_CEILING (default 30)."""
@@ -759,7 +775,7 @@ class Console:
         state = self._load_state(project_id)
         if state.phase != "stopped":
             state.phase = "stopped"
-            state.spent_usd = max(state.spent_usd or 0, self._cost(project_id))
+            state.spent_usd = self._run_spend(project_id, state)
             self._upload_project_log(project_id, state)
             state.save()
             AgentRegistry(self._paths(project_id)["agents_db"]).finalize_orphans(project_id, stage_ok=False)
@@ -1814,7 +1830,7 @@ class Console:
                 if ok:
                     state.stage1_done = True
                     state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
-                    state.spent_usd = self._cost(project_id) or state.spent_usd
+                    state.spent_usd = self._run_spend(project_id, state)
                     self._upload_project_log(project_id, state)
                     state.save()
                     ckpt.write(project_id, "stage:1")
@@ -1899,7 +1915,7 @@ class Console:
             return False
         state.stage2_done = True
         state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
-        state.spent_usd = self._cost(project_id) or state.spent_usd
+        state.spent_usd = self._run_spend(project_id, state)
         self._upload_project_log(project_id, state)
         # Parse required tokens from architecture.md
         for root, _dirs, files in os.walk(base):
@@ -1973,7 +1989,7 @@ class Console:
         state.phase = "done"
         state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
         # Persist the final spend into project store so cost survives log loss (SPEC §4 durability).
-        state.spent_usd = max(state.spent_usd or 0, self._cost(project_id))
+        state.spent_usd = self._run_spend(project_id, state)
         self._upload_project_log(project_id, state)
         state.save()
         ckpt.write(project_id, "stage:3")
@@ -2152,6 +2168,14 @@ class Console:
             state.stage1_done = False
         if stage <= 2:
             state.stage2_done = False
+        # SOF-186: bank the just-ended attempt's cost into the run-level accumulator and reseal the
+        # log at its current end, so the relaunched attempt's spend ADDS to the run total instead of
+        # the live log-parse silently dropping the dead attempt (the $20.07->$14.13 regression). The
+        # prior orchestrator is already gone (the _stage_process_alive guard above returned), so its
+        # log region is complete; _attempt_cost reads it (authoritative result if it produced one,
+        # else the token estimate) before we move the seal past it.
+        state.prior_attempts_usd = (state.prior_attempts_usd or 0.0) + self._attempt_cost(project_id, state)
+        state.spend_seal_offset = self._log_size(project_id)
         state.save()
 
         req = ProjectRequest(description=state.description or "", target=state.deploy_target or "railway")
@@ -2168,34 +2192,43 @@ class Console:
         result = self._launch_stage(project_id, stage, prompt, env)
         return project_id if result is not None else None
 
-    def _cost(self, project_id: str) -> float:
-        """streamlog.cost_usd with an (mtime,size)-keyed cache — an unchanged project.log always
-        yields the same cost, so the multi-MB reparse only happens when the log actually grew.
-        Safe for the budget teeth: a stale hit is impossible (any append changes the key)."""
+    def _attempt_cost(self, project_id: str, state=None) -> float:
+        """SOF-186: streamlog.cost_usd over the CURRENT stage attempt's region of project.log —
+        the bytes from the run's spend_seal_offset onward (retry_stage reseals to the log end on
+        every relaunch, so prior attempts live before the offset and are banked in
+        prior_attempts_usd instead). streamlog.cost_usd already takes each session's authoritative
+        `result` total when present, else its token estimate, so a completed attempt is
+        authoritative and a killed one keeps its estimate.
+
+        (mtime,size,offset)-keyed cache — an unchanged log always yields the same cost, so the
+        multi-MB reparse only happens when the log grew or was resealed; a stale hit is impossible
+        (any append changes st_size, any reseal changes the offset)."""
+        state = state or self._load_state(project_id)
+        off = state.spend_seal_offset or 0
         p = os.path.join(self._paths(project_id)["base"], "project.log")
         try:
             st = os.stat(p)
-            key = (st.st_mtime_ns, st.st_size)
+            key = (st.st_mtime_ns, st.st_size, off)
         except OSError:
             return 0.0
         hit = self._cost_cache.get(project_id)
         if hit and hit[0] == key:
             return hit[1]
-        val = streamlog.cost_usd(self._full_log(project_id))
+        try:
+            with open(p, "rb") as f:
+                f.seek(off)
+                text = f.read().decode("utf-8", "replace")
+        except OSError:
+            return 0.0
+        val = streamlog.cost_usd(text)
         self._cost_cache[project_id] = (key, val)
-        if val:
-            state = self._load_state(project_id)
-            if val != (state.spent_usd or 0):
-                state.spent_usd = val
-                state.save()
         return val
 
-    def _full_log(self, project_id: str) -> str:
-        p = os.path.join(self._paths(project_id)["base"], "project.log")
-        if not os.path.exists(p):
-            return ""
-        with open(p, "r", errors="replace") as f:
-            return f.read()
+    def _log_size(self, project_id: str) -> int:
+        try:
+            return os.path.getsize(os.path.join(self._paths(project_id)["base"], "project.log"))
+        except OSError:
+            return 0
 
     def _workspace_state(self, project_id: str, phase: str) -> str:
         ws = os.path.join(self._paths(project_id)["base"], "workspace")
@@ -2217,7 +2250,7 @@ class Console:
             "phase": self.current_phase(project_id),
             "done": state.phase == "done",
             "deploy_url": state.deploy_url,
-            "spent_usd": self._cost(project_id) or state.spent_usd,
+            "spent_usd": self._run_spend(project_id, state),
             "creds_provided": state.creds_provided,
             "byo_railway": "RAILWAY_TOKEN" in (state.creds_provided or []),
             "workspace": self._workspace_state(project_id, state.phase),
