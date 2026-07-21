@@ -346,3 +346,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. CLAUDE.md and docs/{ARCHITECTURE,STRUCTURE}.md on agent/structure-direction-20260720.
 3. The policy applies to parallel work: feature ownership over generic layers, no pass-through files, preserve behavior, and keep migrations/vendor tooling isolated.
 4. Summary: source-backed audit covered 153 non-test Python files; refactor plan follows this decision record.
+
+# CBT Wave 1 shipped (2026-07-21)
+1. Four lanes merged to staging 019ba9b: repo-backed recipes (recipes/ context, migration 0029, fork-and-extend build seed), company-enrich wow prefill (research router + enrich_company tool + found-card), codebase discovery (ingestion/ context, org KB), Kimi K3 bump.
+2. Spec/plan: docs/superpowers/{specs,plans}/2026-07-21-cbt-wave1-*. Gate record: 1 Critical (PAT leak) + 8 Important caught pre-merge; final whole-branch review READY; follow-ups SOF-210.
+3. Recipes rule: recipe body replaces SOW in concierge context; repo seeds stage-3; NO fork-verification code (prompt-delivered, outcome gates only). Sources-only product-wide (no confidence tiers) — operator ruling.
+4. Staging ACs (K3/A6/B4/C4) pending SOF-207 green; codex adapter = SOF-200 (separate agent).

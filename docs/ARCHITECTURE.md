@@ -130,6 +130,8 @@ granularity instead.
 | `notify.py` | Resend email on the four operator events; env-gated no-op. |
 | `swarm_adapter.py`, `swarm_stage3.py` | `SF_SWARM=1` parallel-ticket stage-3 driver (opencode swarm). |
 | `skills/stage-{1,2,3}-*` | The stage contracts (Claude and OpenCode variants); `skills/tenexity-design/` is the vendored brand canon. The Tenexity OS surfaces the three stage skills and the Concierge as live orchestrator cards. A prompt edit is stored in one `system_agents` row per bare callsign, so a stage override applies to both runtime variants on the next launch; the Concierge override is cached for 60 seconds. Specialist cards remain stored but not applied to runtime prompts. |
+| `recipes/store.py` | **Recipes bounded context (CBT-9, SOF-202):** the `recipes` table CRUD + the one fact gate — saving a `repo_url` shallow-clones and requires `AGENTS.md`/`CLAUDE.md` at the repo root, refusing with the verbatim reason (`RecipeValidationError` → HTTP 400). `published()` is the customer picker source (light fields, public images only). A selected recipe's `body_md` REPLACES the SOW/genre text in the concierge context and lands as `input/recipe.md` at promote; its repo is cloned into the stage-3 workspace as the build seed with a fork-and-extend SKILL block (prompt-delivered, deliberately unverified by code — the outcome gates remain the only proof). Admin CRUD in `admin_os` routes; `GET /api/recipes` for intake. |
+| `ingestion/discovery.py` | **Ingestion bounded context (CBT-6/7, SOF-205):** org codebase discovery — repo URL + vault-stored PAT → shallow clone → ONE headless `claude -p` agent whose DISCOVERY_PROMPT owns all analysis judgment (code never parses manifests) → `AGENTS.md`/`CLAUDE.md`/`integrations.md` land as org-scope KB blobs (same lazy-ingest path as uploads). Money machinery only: `SF_DISCOVERY_COST_CEILING` (default 10) watcher kill; status is a projection of live process + log + blobs (pid-file breadcrumb for restart orphans — boot sweep is SOF-208). Routes `POST/GET /api/org/discovery`. |
 
 ---
 
@@ -217,6 +219,10 @@ parity review because those two schema construction paths can drift.
   MCP/API registry; `sow` — statement-of-work records; `org_secrets` — org-secret metadata with Vault
   pointers; `autopsy_processed_runs` / `autopsy_signatures`, `recovery_actions`, and `eval_scores` —
   durable benchmark, recovery, and evaluation ledgers.
+- `recipes` (migration 0029) — repo-backed build recipes: customer-facing fields (name/tagline/
+  category/capabilities/images w/ `public` flag), `body_md` (the concierge/brief input), `repo_url`
+  (the validated build seed), `status ∈ draft|published|archived`. `ProjectState.recipe_id` links a
+  draft to one; no recipe → exactly the legacy SOW/genre behavior.
 
 *Access + migrations:*
 - `dbshim` is the storage seam: `connect(path)` returns a **minimal DB-API wrapper over psycopg3**
