@@ -198,15 +198,6 @@ def project_overview(pid: str, v: tuple = Depends(authorize_project)):
     }
 
 
-@router.get("/api/projects/{pid}/deployments")
-def project_deployments(pid: str, v: tuple = Depends(authorize_project)):
-    """SOF-215 rider: `Console.deployments()` has always existed and is used internally (the
-    Overview route above), but was never exposed as its own endpoint — ARCHITECTURE.md documents
-    it as one, and this 404'd for any direct caller (verification scripts, external tooling).
-    Same shape Console.deployments() already returns: {"deployments": [...], "apps": [...]}."""
-    return state.console.deployments(pid)
-
-
 def _project_documents(pid: str) -> dict:
     """Documents tab payload, enriched with each doc's AI summary (SOF-36) when memory has one —
     `list_doc_summaries` returns {} if nothing's been ingested yet (or ingestion is still running),
