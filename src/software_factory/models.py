@@ -396,10 +396,10 @@ recipes = Table(
     Column("name", Text, nullable=False, unique=True),
     Column("tagline", Text),
     Column("category", Text),
-    Column("capabilities", JSONB, server_default=text("'[]'::jsonb")),  # customer-facing bullets
+    Column("capabilities", JSONB, nullable=False, server_default=text("'[]'::jsonb")),  # customer-facing bullets
     Column("body_md", Text),          # recipe text — concierge/brief input
     Column("repo_url", Text),         # build-seed repo (nullable until connected)
-    Column("images", JSONB, server_default=text("'[]'::jsonb")),  # [{url, public: bool}]
+    Column("images", JSONB, nullable=False, server_default=text("'[]'::jsonb")),  # [{url, public: bool}]
     Column("status", Text, nullable=False, server_default=text("'draft'")),
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
     Column("updated_at", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()),

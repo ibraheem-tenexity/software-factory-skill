@@ -248,6 +248,13 @@ class RecipeSeedError(Exception):
     """Raised with the real git error when a recipe's seed repo can't be cloned at launch time."""
 
 
+# Names the stage-3 seed flatten must never overwrite/shadow — .mcp.json feeds the MCP hard-gate
+# above; SKILL.md already carries this stage's contract (incl. the fork-and-extend block); phases/
+# and context/ are the factory's own prior-stage-artifact dirs; .claude/ is the factory's own
+# settings dir. A seed entry with one of these names is skipped during the flatten, never moved.
+_RESERVED_WORKSPACE_NAMES = {".mcp.json", "SKILL.md", "phases", "context", ".claude"}
+
+
 def _clone_recipe_seed(repo_url: str, dest: str) -> None:
     r = subprocess.run(["git", "clone", "--depth", "1", repo_url, dest],
                        capture_output=True, text=True, timeout=180)
@@ -317,14 +324,31 @@ def prepare_workspace(
             f.write(block)
 
         if stage == 3:
-            if not os.path.exists(os.path.join(ws, "AGENTS.md")):
+            # Idempotent across retries: validation guarantees AGENTS.md OR CLAUDE.md at the seed
+            # root, so either one already present at ws root means this stage's seed placement
+            # already ran — re-cloning+flattening onto an already-populated root would nest the
+            # seed tree inside itself.
+            if not (os.path.exists(os.path.join(ws, "AGENTS.md"))
+                    or os.path.exists(os.path.join(ws, "CLAUDE.md"))):
                 seed_dir = os.path.join(ws, "seed")
                 _clone_recipe_seed(repo_url, seed_dir)
+                # Never let the seed overwrite/shadow factory control files the workspace already
+                # depends on (.mcp.json in particular feeds the MCP hard-gate above) — skip these
+                # names during the flatten and say so in the SKILL.md block, rather than silently
+                # dropping or refusing the whole build over it.
+                skipped = []
                 for name in os.listdir(seed_dir):
                     if name == ".git":
                         continue
+                    if name in _RESERVED_WORKSPACE_NAMES:
+                        skipped.append(name)
+                        continue
                     shutil.move(os.path.join(seed_dir, name), os.path.join(ws, name))
                 shutil.rmtree(seed_dir, ignore_errors=True)  # drop seed history; the factory pushes its own repo
+                if skipped:
+                    with open(os.path.join(ws, "SKILL.md"), "a") as f:
+                        f.write(f"\nSeed's {', '.join(sorted(skipped))} not imported — "
+                                f"factory-reserved.\n")
         else:
             with tempfile.TemporaryDirectory() as tmp:
                 _clone_recipe_seed(repo_url, tmp)
