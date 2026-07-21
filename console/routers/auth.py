@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from software_factory import auth
 
 import console.state as state
-from console.deps import require_authed, require_admin
+from console.deps import require_authed, require_staff
 from console.schemas import UserMgmtIn, GoogleLoginIn, PasswordLoginIn
 
 router = APIRouter()
@@ -26,13 +26,19 @@ def me(v: tuple = Depends(require_authed)):
     return {"email": email, "role": role, "name": name, "is_internal": is_internal, "auth": auth.enabled()}
 
 
+# SOF-221: the GLOBAL cross-org user directory + allowlist management. These were gated on
+# require_admin (role=="admin" alone), so a non-internal customer org-admin could enumerate EVERY
+# org's users (GET) and upsert/remove ANY user globally (POST — a privilege-escalation vector).
+# Same root cause as the projects leak: role-only gate ignoring is_internal. Locked to require_staff
+# (internal operators only). No frontend consumer — the customer team screen uses the org-scoped
+# /api/org/members (see api.ts: "NOT /api/users (that's the global cross-org dir)").
 @router.get("/api/users")
-def list_users(v: tuple = Depends(require_admin)):
+def list_users(v: tuple = Depends(require_staff)):
     return {"users": state.users.list_users()}
 
 
 @router.post("/api/users")
-def manage_users(body: UserMgmtIn, v: tuple = Depends(require_admin)):
+def manage_users(body: UserMgmtIn, v: tuple = Depends(require_staff)):
     email = (body.email or "").strip().lower()
     role = body.role
     if not email or role not in ("admin", "member", "remove"):

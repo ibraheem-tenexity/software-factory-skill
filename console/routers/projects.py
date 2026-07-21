@@ -17,7 +17,7 @@ from software_factory.input_pipeline import make_prompt
 from software_factory.memory.ingest import maybe_ingest_async
 
 import console.state as state
-from console.deps import require_authed, authorize_project, _can_see
+from console.deps import require_authed, authorize_project, _can_see, project_visibility
 from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, MaintenanceToggleIn,
                              OrgDocIn, DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
                              RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn)
@@ -47,8 +47,18 @@ def list_recipes(v: tuple = Depends(require_authed)):
 # ── Runs: list + create ───────────────────────────────────────────────────────────────────────
 @router.get("/api/projects")
 def projects_list(include_archived: bool = False, v: tuple = Depends(require_authed)):
-    owner = None if v[1] == "admin" else v[0]
-    return {"projects": state.console.list_projects(owner=owner, include_archived=include_archived)}
+    # SOF-221: scope to the session's tenancy boundary (was v[1]=="admin" → every org's runs, a
+    # cross-tenant leak for non-internal customer org-admins). project_visibility() returns None for
+    # the operator god-view, else the set of run-owner emails this session may see.
+    scope = project_visibility(v)
+    if scope is None:
+        runs = state.console.list_projects(owner=None, include_archived=include_archived)
+    elif len(scope) == 1:                       # member / org-less admin → own only (efficient path)
+        runs = state.console.list_projects(owner=next(iter(scope)), include_archived=include_archived)
+    else:                                       # org-admin → their org's runs (any member as owner)
+        runs = [r for r in state.console.list_projects(owner=None, include_archived=include_archived)
+                if (r.get("owner") or "").lower() in scope]
+    return {"projects": runs}
 
 
 # ── Drafts (Option C onboarding) ──────────────────────────────────────────────────────────────
