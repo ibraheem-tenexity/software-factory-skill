@@ -8,7 +8,6 @@ import { UsersManagement } from "./users";
 import { AccountMenu } from "./AccountMenu";
 import { AdminProjectDashboard } from "./AdminProjectDashboard";
 import { AdminClients, AdminProjectsView, AdminAgents, AdminTools, AdminOverview, AdminFactories, AdminSettings, AdminSymphony, AdminBtn } from "./views";
-import { SowManagement } from "./sow";
 import { RecipesManagement } from "./recipes";
 import { AdminConversations } from "./conversations";
 import { AgentPromptPanel, ClientModal, AgentModal, ToolModal, ConfirmDelete } from "./modals";
@@ -26,7 +25,6 @@ const NAV_PATHS: Record<string, string> = {
   tools: "M14.7 6.3a4 4 0 0 0 5 5l-9 9a2 2 0 0 1-3-3l9-9a4 4 0 0 0-2-2z",
   factories: "M2 20h20 M4 20V8l5 4V8l5 4V8l5 4v8",
   symphony: "M6 3v12 M18 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M18 9V3l-9 2",
-  sow: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8",
   recipes: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20 M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15Z",
   conversations: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
   settings:
@@ -89,7 +87,6 @@ export function AdminPortal() {
     { id: "tools", label: "Tools", icon: "tools" },
     { id: "factories", label: "Factories", icon: "factories" },
     { id: "symphony", label: "Symphony", icon: "symphony" },
-    { id: "sow", label: "SOW", icon: "sow" },
     { id: "recipes", label: "Recipes", icon: "recipes" },
     { id: "conversations", label: "Conversations", icon: "conversations" },
     { id: "settings", label: "Settings", icon: "settings" },
@@ -328,7 +325,6 @@ export function AdminPortal() {
             )}
             {view === "factories" && <AdminFactories />}
             {view === "symphony" && <AdminSymphony />}
-            {view === "sow" && <SowManagement />}
             {view === "recipes" && <RecipesManagement />}
             {view === "conversations" && <AdminConversations />}
             {view === "settings" && <AdminSettings />}
