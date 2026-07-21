@@ -14,15 +14,16 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import threading
+import time
 from urllib.parse import urlsplit, urlunsplit
 
 from .. import env as _env
 from .. import storage
 from ..blobs import BlobStore
 from ..log import get_logger
-from ..memory.ingest import maybe_ingest_async
 from ..repositories._exec import GlobalExec
 from ..repositories.org_secrets import OrgSecretsRepository
 from ..services.secrets import Secrets
@@ -53,8 +54,11 @@ invent. If something is genuinely unclear from the repo, say so plainly instead 
 _ARTIFACTS = ("AGENTS.md", "CLAUDE.md", "integrations.md")
 _SCRATCH_ROOT = os.environ.get("SF_DISCOVERY_DIR", "/data/org")  # override for local dev, mirrors SF_PROJECTS_DIR
 _CHECK_INTERVAL_S = 15.0
+_SENTINEL = "cloning"  # reserves an org's slot in _procs while the (possibly slow) clone is in
+                        # flight, so the lock only needs to be held for the check-and-reserve, not
+                        # for the whole clone+launch — a second org's start() must not wait on it.
 
-_procs: dict[str, subprocess.Popen] = {}
+_procs: dict[str, subprocess.Popen | str] = {}
 _lock = threading.Lock()
 
 
@@ -72,6 +76,49 @@ def _log_path(org_id: str) -> str:
 
 def _clone_dir(org_id: str) -> str:
     return os.path.join(_scratch_dir(org_id), "clone")
+
+
+def _pid_path(org_id: str) -> str:
+    return os.path.join(_scratch_dir(org_id), "pid")
+
+
+def _read_pid_file(org_id: str) -> int | None:
+    try:
+        with open(_pid_path(org_id)) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _is_orphaned_agent(org_id: str, pid: int) -> bool:
+    """True when `pid` names a still-live process whose cwd is this org's own clone dir — i.e. the
+    watcher thread that owned it died (a console restart) while the `claude` child lived on,
+    uncapped by the budget watcher. Filesystem breadcrumb only, no DB state; the pid itself could
+    already be recycled by an unrelated process, so the cwd check is what makes this safe."""
+    try:
+        cwd = os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        return False
+    return cwd == _clone_dir(org_id)
+
+
+def _reap_orphan(pid: int) -> None:
+    """SIGTERM→(~5s)→SIGKILL a real orphaned agent process. Caller is responsible for logging the
+    honest reason — this runs BEFORE the run's own log file is (re)opened, since the reap must
+    happen while the orphan's clone dir still exists (its `/proc/<pid>/cwd` check would otherwise
+    resolve to "<path> (deleted)" once this run's fresh clone starts by removing that directory)."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(50):
+            time.sleep(0.1)
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                break
+        else:
+            os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass  # already gone by the time we got here
 
 
 def _authed_url(repo_url: str, pat: str) -> str:
@@ -120,12 +167,28 @@ def _launch(argv: list[str], env: dict, cwd: str, log_path: str) -> subprocess.P
 def start(org_id: str, repo_url: str, pat_secret: str | None = None) -> dict:
     """Clone `repo_url` (optionally authed via the org secret named `pat_secret`) and launch one
     discovery agent over it. Raises `DiscoveryError` with the honest reason on refusal — a run
-    already in progress for this org, an unresolvable secret, or a clone failure (the verbatim
-    git error)."""
+    already in progress for this org, an unresolvable secret, a clone timeout, or a clone failure
+    (the verbatim git error, PAT scrubbed).
+
+    The lock is held only long enough to check-and-reserve this org's slot (a `_SENTINEL`
+    placeholder) — the clone itself (up to 120s) and the launch run OUTSIDE the lock, so a second
+    org's `start()` never waits on this one's clone. Any failure clears the reservation."""
     with _lock:
         p = _procs.get(org_id)
-        if p and p.poll() is None:
+        if p is not None and (p == _SENTINEL or p.poll() is None):
             raise DiscoveryError("a discovery run is already in progress for this org")
+        # No in-memory handle for this org — note (don't act on yet) whether a prior console
+        # restart orphaned a live agent for it; the reap itself must run OUTSIDE the lock (it can
+        # take up to ~5s) and BEFORE this run's own clone dir gets removed below (an orphan's
+        # `/proc/<pid>/cwd` would otherwise resolve to "<path> (deleted)" and evade detection).
+        orphan_pid = _read_pid_file(org_id) if p is None else None
+        _procs[org_id] = _SENTINEL
+
+    try:
+        reaped_pid = None
+        if orphan_pid and _is_orphaned_agent(org_id, orphan_pid):
+            _reap_orphan(orphan_pid)
+            reaped_pid = orphan_pid
 
         pat = None
         if pat_secret:
@@ -142,9 +205,21 @@ def start(org_id: str, repo_url: str, pat_secret: str | None = None) -> dict:
 
         clone_url = _authed_url(repo_url, pat) if pat else repo_url
         with open(log_path, "w") as f:
+            if reaped_pid:
+                f.write(f"[discovery] reaped an orphaned agent (pid {reaped_pid}) left running "
+                       f"uncapped by a prior console restart\n")
             f.write(f"cloning {repo_url} (shallow)...\n")
-        result = subprocess.run(["git", "clone", "--depth", "1", clone_url, clone_dir],
-                                capture_output=True, text=True, timeout=120)
+        try:
+            result = subprocess.run(["git", "clone", "--depth", "1", clone_url, clone_dir],
+                                    capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired as exc:
+            # TimeoutExpired's own str()/repr() embeds the full argv — i.e. the PAT-bearing clone
+            # URL — so exc itself must never be logged or raised; only this scrubbed, hand-written
+            # message may reach the log or the caller.
+            err = _scrub(f"clone timed out after {exc.timeout:.0f}s", pat)
+            with open(log_path, "a") as f:
+                f.write(f"clone failed: {err}\n")
+            raise DiscoveryError(f"could not clone {repo_url}: {err}") from None
         if result.returncode != 0:
             err = _scrub((result.stderr or result.stdout).strip(), pat)[-500:]
             with open(log_path, "a") as f:
@@ -157,7 +232,14 @@ def start(org_id: str, repo_url: str, pat_secret: str | None = None) -> dict:
                "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose"]
         proc = _launch(argv, {"ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", "")},
                       cwd=clone_dir, log_path=log_path)
-        _procs[org_id] = proc
+        with open(_pid_path(org_id), "w") as f:
+            f.write(str(proc.pid))
+        with _lock:
+            _procs[org_id] = proc
+    except Exception:
+        with _lock:
+            _procs.pop(org_id, None)
+        raise
 
     threading.Thread(target=_watch, args=(org_id, proc), daemon=True,
                      name=f"discovery-{org_id}").start()
@@ -206,6 +288,10 @@ def _watch(org_id: str, proc: subprocess.Popen) -> None:
     except Exception:
         logger.exception("[discovery] %s: failed landing artifacts", org_id)
     finally:
+        try:
+            os.remove(_pid_path(org_id))
+        except OSError:
+            pass  # already gone, or was never written (e.g. failed before launch)
         with _lock:
             _procs.pop(org_id, None)
 
@@ -213,8 +299,10 @@ def _watch(org_id: str, proc: subprocess.Popen) -> None:
 def _land_artifacts(org_id: str) -> None:
     """Persist whatever of the three files the agent actually wrote as org-scope KB blobs —
     mirrors the persistence block of the org KB upload route (OrgService.upload_doc): storage.put
-    + BlobStore.record, then the same memory-ingestion call the KB makes so each doc is searchable
-    immediately, not only once a project imports it."""
+    + BlobStore.record only. Ingestion is deliberately LAZY here too, exactly like an uploaded KB
+    doc — it fires at project-import time (`record_doc_use` → `maybe_ingest_async`, SOF-32), not
+    eagerly at landing time. An eager per-file ingest call here would be a cost-bearing behavior
+    deviation from every other KB doc, not a mirror of it."""
     clone_dir = _clone_dir(org_id)
     scope_id = f"org/{org_id}"
     blobs = BlobStore()
@@ -226,18 +314,27 @@ def _land_artifacts(org_id: str) -> None:
             raw = f.read()
         key = f"kb/{name}"
         storage.put(scope_id, key, raw)
-        blob_id = blobs.record("org", org_id, f"{scope_id}/{key}", name=name, tag="discovery",
-                               kind="doc", content_type="text/markdown",
-                               size_bytes=len(raw), sha256=storage.sha256(raw))
-        maybe_ingest_async(blob_id, None)
+        blobs.record("org", org_id, f"{scope_id}/{key}", name=name, tag="discovery",
+                     kind="doc", content_type="text/markdown",
+                     size_bytes=len(raw), sha256=storage.sha256(raw))
     shutil.rmtree(clone_dir, ignore_errors=True)
 
 
 def status(org_id: str) -> dict:
     """A projection of live state — never stored: is the process alive, what the log says so
-    far, what's landed in the KB, and what this run has spent."""
+    far, what's landed in the KB, and what this run has spent.
+
+    `running` cross-checks the pid-file breadcrumb when this process has no in-memory handle for
+    the org (e.g. this console restarted since the run was launched) — an unmanaged-but-still-live
+    agent is honestly reported as running, not silently dropped to False."""
     p = _procs.get(org_id)
-    running = bool(p and p.poll() is None)
+    if p is None:
+        orphan_pid = _read_pid_file(org_id)
+        running = bool(orphan_pid and _is_orphaned_agent(org_id, orphan_pid))
+    elif p == _SENTINEL:
+        running = True
+    else:
+        running = p.poll() is None
     log_path = _log_path(org_id)
     log_tail, spent = "", 0.0
     if os.path.exists(log_path):
