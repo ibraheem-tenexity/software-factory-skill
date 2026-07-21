@@ -27,7 +27,7 @@ STAGE_MODEL = {1: "claude-opus-4-8", 2: "claude-opus-4-8", 3: "claude-sonnet-4-6
 
 # opencode runtime: short alias → full OpenRouter model ID (all stages use the same model).
 OPENCODE_MODEL_IDS = {
-    "kimi": "openrouter/moonshotai/kimi-k2.7-code",
+    "kimi": "openrouter/moonshotai/kimi-k3",
     "glm":  "z-ai/glm-5.2",
 }
 OPENCODE_DEFAULT_ALIAS = "kimi"
@@ -87,5 +87,11 @@ PRICES: dict[str, dict[str, float]] = {
         "input": 0.75 / 1_000_000,
         "cached": 0.375 / 1_000_000,
         "output": 3.50 / 1_000_000,
+    },
+    # OpenRouter list pricing, confirmed 2026-07-20 via /api/v1/models (K3 bump, CBT-13 rider).
+    "openrouter/moonshotai/kimi-k3": {
+        "input": 3.0 / 1_000_000,
+        "cached": 0.3 / 1_000_000,
+        "output": 15.0 / 1_000_000,
     },
 }
