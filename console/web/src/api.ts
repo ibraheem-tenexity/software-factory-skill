@@ -139,6 +139,17 @@ export type RecipeLight = {
   capabilities: string[]; images: { url: string; public: boolean }[];
 };
 
+// CBT-9 (admin): the full recipe row — the Tenexity OS Recipes library editor's shape. `repo_url`
+// is validated server-side (store.py's one AGENTS.md/CLAUDE.md fact gate) — a save can 400 with
+// the exact reason, which the editor must render verbatim (never a generic "save failed").
+export type RecipeImage = { url: string; public: boolean; caption?: string | null };
+export type AdminRecipe = {
+  id: string; name: string; tagline?: string | null; category?: string | null;
+  capabilities: string[]; body_md?: string | null; repo_url?: string | null;
+  images: RecipeImage[]; status: string;
+  created_at?: number | string | null; updated_at?: number | string | null;
+};
+
 // Codebase discovery (CBT-6/7) — status is a projection of the live run, not stored state.
 export type DiscoveryArtifact = { name: string; blob_id: number; updated: number };
 export type DiscoveryStatus = { running: boolean; log_tail: string; artifacts: DiscoveryArtifact[]; spent_usd: number };
@@ -536,6 +547,14 @@ export const api = {
   adminSowGet: (id: number) => get<AdminSow>(`/api/admin/sow/${id}`),
   adminSowCreate: (body: { title: string; org?: string; project?: string; value?: string; file?: string; version?: number; status?: string; body?: string }) => send<AdminSow>("/api/admin/sow", "POST", body),
   adminSowUpdate: (id: number, body: { title?: string; org?: string; project?: string; value?: string; file?: string; version?: number; status?: string; body?: string }) => send<AdminSow>(`/api/admin/sow/${id}`, "PATCH", body),
+  // CBT-9 (admin): Recipes library CRUD. Create/patch may reject with a 400 whose `.detail` is
+  // the store's verbatim reason (e.g. a repo missing AGENTS.md/CLAUDE.md) — callers must surface it.
+  adminListRecipes: () => get<{ recipes: AdminRecipe[] }>("/api/admin/recipes"),
+  adminGetRecipe: (id: string) => get<AdminRecipe>(`/api/admin/recipes/${id}`),
+  adminCreateRecipe: (body: { name: string; tagline?: string; category?: string; capabilities?: string[]; body_md?: string; repo_url?: string; images?: RecipeImage[]; status?: string }) =>
+    send<AdminRecipe>("/api/admin/recipes", "POST", body),
+  adminPatchRecipe: (id: string, body: { name?: string; tagline?: string; category?: string; capabilities?: string[]; body_md?: string; repo_url?: string; images?: RecipeImage[]; status?: string }) =>
+    send<AdminRecipe>(`/api/admin/recipes/${id}`, "PATCH", body),
   // SOF-34/T1.5 — cross-tenant conversation history.
   adminConversations: (filter: AdminConversationsFilter = {}) => {
     const params = new URLSearchParams();
