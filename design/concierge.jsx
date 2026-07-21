@@ -209,7 +209,7 @@ const INTERVIEW_Q = [
 ];
 
 function InterviewRail({ onComplete }) {
-  const seed = [{ who: 'agent', text: "I’ve read your profile and everything you uploaded. I’ve drafted assumptions in the panel on the left — a few questions to sharpen the build before we start.", confidence: 'high' }, { who: 'agent', text: INTERVIEW_Q[0].q }];
+  const seed = [{ who: 'agent', text: "I’ve read your profile and everything you uploaded. I’ve drafted assumptions in the panel on the left — a few questions to sharpen the build before we start." }, { who: 'agent', text: INTERVIEW_Q[0].q }];
   const chat = useConciergeChat(seed, null);
   const [step, setStep] = React.useState(0); // questions answered
   const total = INTERVIEW_Q.length;
@@ -227,7 +227,7 @@ function InterviewRail({ onComplete }) {
         chat.push({ who: 'agent', text: 'Got it.' });
         timers.current.push(setTimeout(() => chat.push({ who: 'agent', text: INTERVIEW_Q[next].q }), 650));
       } else {
-        chat.push({ who: 'agent', text: 'That’s everything I need. I’ve turned this into a build plan and a design step for your screens — hand off whenever you’re ready.', confidence: 'exact' });
+        chat.push({ who: 'agent', text: 'That’s everything I need. I’ve turned this into a build plan and a design step for your screens — hand off whenever you’re ready.' });
         if (onComplete) onComplete();
       }
       setStep(next);
@@ -265,7 +265,7 @@ function InterviewRail({ onComplete }) {
 function conciergeSeed(context, build) {
   if (context === 'build') {
     return build && build.allDone
-      ? [{ who: 'agent', text: `All ${build.total} tickets are green and the app is deployed. Want me to walk you through the live build?`, confidence: 'exact' }]
+      ? [{ who: 'agent', text: `All ${build.total} tickets are green and the app is deployed. Want me to walk you through the live build?` }]
       : [{ who: 'agent', text: `Build is underway — ${build ? build.done : 5}/${build ? build.total : 11} tickets done. The Architect, Research, and Product agents have filed their work below.` },
          { who: 'agent', text: 'Heads up: Playwright caught a tax-rounding bug on SF-11 — Sonnet pulled it back into Building to fix.' }];
   }

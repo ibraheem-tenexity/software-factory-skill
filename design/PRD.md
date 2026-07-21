@@ -28,7 +28,7 @@ There are two audiences / two app surfaces:
 - **Brand** `#1A7BFF` (deep `#0958C9`, soft `#E8F1FF`). Bg `#FAFAFA`, raised `#FFF`, sunken `#F4F4F5`.
 - **Type**: Hanken Grotesk (UI/sans), Georgia (display/headlines), JetBrains Mono (data, labels, technical).
 - **Category labels**: 11px, uppercase, letter-spacing 0.12em, tertiary color.
-- **Confidence cascade** for AI-derived values: Exact (green) / High (teal) / Medium (amber) / Low (red) / Unknown (grey), shown as a pill with a 4-point sparkle.
+- **Sources, not confidence tiers** (operator ruling, 2026-07-21; product Principle 4): AI-derived values NEVER show an asserted confidence level — we have no evidence-derived way to compute one. Every AI-derived value carries a **source label** instead (mono, link icon; url, file name, or crawl step). The former Exact/High/Medium/Low/Unknown pill cascade is retired product-wide.
 - **AI tell**: AI-derived/unconfirmed values get a faint brand tint + inset brand bar + sparkle (`.ai-tint`).
 - **Conversation**: single bubble shape, identified by avatar + name, never by left/right alternation. The two speakers are distinguished by **fill color**: the **Concierge/agent** bubble is a solid brand-soft fill (`T.brandSoft`) with a brand left-accent bar (inset `3px` `T.brand`) and a brand-tinted border; the **user** bubble is a solid neutral fill (`T.sunken`) with a default border. (These replaced the near-identical near-white treatments that made the two speakers hard to tell apart.)
 - **Focus ring**: 2px offset white + brand ring on all interactive elements.
@@ -46,7 +46,7 @@ Everything read from the database renders a **skeleton** while in flight, then s
 
 Shared primitives (in `shared.jsx`): `Btn`, `TextInput`, `TextArea`, `Field`,
 `Chip(s)`, `IndustryTile`, `Dropzone` (+ per-file description & scope), `IntegrationRow`,
-`StatusPill`, `ConfidencePill`, `Avatar`, `AiTint`, `Message`, `Composer`, `Wordmark`,
+`StatusPill`, `Avatar`, `AiTint`, `Message`, `Composer`, `Wordmark`,
 `CategoryLabel`, `SectionDivider`, `ScopeToggle`, `Icon`, `Sparkle`.
 
 ---
@@ -103,7 +103,7 @@ allow-list managed in Tenexity OS (§3.6).
   and **Use these details** / "Not right — look again". Accepting fills the industry tiles,
   sub-focus chips, profile fields, and connected systems below; the card collapses to a green
   confirmation ("Pulled from the web — review and adjust anything"). **Nothing writes until
-  the user accepts** — unconfirmed AI values keep the ai-tint treatment (the confidence-cascade
+  the user accepts** — unconfirmed AI values keep the ai-tint treatment (the sources-not-tiers
   contract from §1). Then company setup (industry, profile, systems) **then** first project.
   Copy promises "we'll remember this."
 - **Returning** (org on file): company context shown as **"on file · reused"** (collapsible, Manage to edit); only project questions are asked.
@@ -111,7 +111,7 @@ allow-list managed in Tenexity OS (§3.6).
 data from **this-project** data.
 **Project inputs:** project name, "what are you building" (goal), **project budget cap**, **recipe** (optional blueprint), scope-of-work chips, build engine, materials.
 - **Recipe** (`RecipePicker`, from `recipes.jsx`) is an **optional** starting blueprint the customer picks from the Published entries of the OS recipe library (§3.4b). The picker shows only the light customer-facing fields (category, name, tagline, a few capabilities); the recipe's GitHub repos, image artifacts, and internal notes are **not** shown. A **No template** card is always present — the customer can build purely from their brief. Lives in the "This project" section (inside `LockedGroup`, so it unlocks after the project is created); the value is a recipe id or `null`. Arriving from the **Explore** gallery (§2.8) preselects the recipe (`initialRecipe` prop).
-  - **Recipe at runtime (how a recipe drives the build):** the recipe's text (name, tagline, capabilities, description) **replaces the SOW as the Concierge's intake input** — the interview starts from what the recipe already knows instead of a blank brief. The pipeline receives the recipe's **linked GitHub repo as the build seed**: the factory's skills **fork-and-extend** it — never greenfield when a recipe is selected — and the repo's `AGENTS.md`/`CLAUDE.md` teaches the build agents its architecture and conventions. A recipe without a valid repo/AGENTS.md is refused at load time (§3.4b).
+  - **Recipe at runtime (how a recipe drives the build):** the recipe's text (name, tagline, capabilities, description) **replaces the SOW as the Concierge's intake input** — delivered via the existing conversation-context seam, and `recipe.md` becomes the **stage-1 (research) input** — the interview starts from what the recipe already knows instead of a blank brief. The pipeline receives the recipe's **linked GitHub repo as the build seed**: cloned into the **stage-3 (build) workspace**, the factory's skills **fork-and-extend** it (a dedicated SKILL block) — never greenfield when a recipe is selected — and the repo's `AGENTS.md`/`CLAUDE.md` teaches the build agents its architecture and conventions. A recipe without a valid repo/AGENTS.md is refused at load time (§3.4b).
   - **Concierge recipe suggestion:** when the goal text matches a Published recipe and none is picked, the intake Concierge rail shows an inline **"Recipe match"** card (ai-tint; name, tagline, builds count, **Use this recipe** / **No thanks**, dismissible ×). Accepting sets the picker's value and the card flips to a green "Building from the `<name>` recipe" confirmation; dismissing suppresses it for the session (no nagging). The prototype matcher is `suggestRecipe(goal)` (keyword overlap); the live version is a concierge tool over recipe taglines (see `TICKETS.md` CBT-11).
 - **Create the project first (gate).** The **very first action** in intake is naming the
   **project** and clicking **Create project** (`SaveBasics`, in `optionC.jsx`). This is a real
@@ -247,7 +247,7 @@ the user must finish.
   mono badge reading **"STEP 3 OF 3 · INTERVIEW"**.
 - A **"What I learned from your materials"** card: each row is an `.ai-tint` block (the
   standard AI-tell treatment from §1) carrying a learned fact, the source file name (with a
-  `file` icon, in mono), and a `ConfidencePill` whose band is `exact`/`high`/`medium`. The
+  `file` icon, in mono) — the per-fact source trace; no confidence tier (§1). The
   rows come from the `LEARNED` constant at the top of the interview code — edit that array to
   change them.
 - A **"This project"** card echoing the project name and the goal, rendered through
@@ -371,7 +371,7 @@ in the same spot — right side — on the overview, console, and documents scre
 - **Wait-for-deps bar** — **stage-triggered**: appears *only after* the build reaches the wait-for-deps stage (not shown the rest of the run), marked with a `STAGE-TRIGGERED` badge and copy explaining why it surfaced now. The dependency set is **derived from the project's architecture**, so the **count varies per project** (factory + app design); the layout is an auto-wrapping grid that **scales to any number** of dependencies. Header tracks `resolved / total` and flips to "Dependencies resolved — build unblocked" when complete. Each dependency offers **3 resolution options**: **Get from MCP**, **Mock it**, or **Input key**. Build is gated until all are resolved. **Input key** additionally offers **Import from org secrets** (§2.3): a picker of the organization vault (`ORG_SECRETS`) with the best name/kind match badged `MATCH`; choosing one wires the dependency to that secret **by reference** (`org:<NAME>`) — the raw value is never shown — or the operator can still paste a key manually.
 - **Design review bar** (`DesignReviewBar`, `buildprogress.jsx`) — **stage-triggered** like the deps bar: surfaces only once the **design** node has completed. The design node (Kimi K3) generates high-fidelity screens from the PRD + the org's brand theme (§2.3 Brand & theme), then waits for the customer. The bar shows the generated screens as clickable mockup tiles (each opens the `screens` fig artifact in the Artifact Viewer), header `design · Kimi K3 · on your brand theme`, and copy explaining the two paths: **Approve & continue** locks the look (bar flips to a green "Design locked — tickets and the build proceed from these N screens", with **Re-open review**) — or **iterate via the Concierge** ("denser quote table", "approvals first"), which re-generates only the affected screens. Rendered between the stage-rail/Recovery bar and the wait-for-deps bar (design precedes deps in the pipeline).
 - **View toggle: Kanban · Tree · Map**
-  - **Kanban**: columns Backlog → Claimed → Building (WIP cap) → Testing → Done; ticket cards show id, title, assigned agent (avatar), tags (bug / needs-key / e2e), confidence. "Run agents" advances the live sim; bugs in Testing loop back to Building.
+  - **Kanban**: columns Backlog → Claimed → Building (WIP cap) → Testing → Done; ticket cards show id, title, assigned agent (avatar), tags (bug / needs-key / e2e). "Run agents" advances the live sim; bugs in Testing loop back to Building.
   - **Tree**: process tree — orchestrator root → each pipeline node → its spawned sub-agent → the artifacts it produced (clickable).
   - **Map**: force-graph layout of the same pipeline with curved edges, the active path highlighted, satellites for sub-agents/deps.
 - **Delivery footer**: when 100%, deploy unlocks → Repository + Open live app.
@@ -382,7 +382,7 @@ The Concierge surfaces them as an "Artifacts produced" list with open-links.
 
 ### 2.7 Artifact Viewer  (`ArtifactViewer.html` → `ArtifactViewer`; `artifactviewer.jsx`)
 **Purpose:** a standalone, full-page file viewer for everything the factory produces or operators author. Opened in a **new browser tab** from anywhere a file is clickable (project docs, console tree/map/concierge, OS Artifacts index, recipe editor) via `openArtifact(id)` → `ArtifactViewer.html?doc=<id>`.
-**Layout:** left **file rail** (all artifacts, grouped by project, searchable) + topbar (breadcrumb project ▸ node, file name, type badge, confidence, updated, Copy / Download) + typed body.
+**Layout:** left **file rail** (all artifacts, grouped by project, searchable) + topbar (breadcrumb project ▸ node, file name, type badge, updated, Copy / Download) + typed body.
 **Supported types** (`ART` registry): **md** → real markdown renderer (`Markdown`) in a reading column with an **"On this page" TOC** (recipe descriptions register as `md`); **svg** → architecture diagram; **code** → line-numbered source (sql/bash/etc.); **json**; **csv** → table; **repo** → file tree; **fig** → frame grid; **image**. Selecting a file in the rail updates the URL so it's linkable.
 **Markdown renderer** (`Markdown`, exported): headings, lists (ordered/unordered), tables, fenced code, blockquotes, rules, inline bold/italic/code/links. Reused by the recipe editor's live preview.
 
@@ -686,8 +686,8 @@ leads with **Start with your website**: type a domain → **Find my company** �
 lookup runs visibly → the **found-company card** appears: ai-tint rows for company / industry / HQ /
 headcount / systems-in-use / brand palette, each with a **source label**. **Use these
 details** fills the whole setup form (industry tiles, sub-focus, profile, Epicor connection); the card
-collapses to a green confirmation. Nothing writes until the user accepts — the confidence-cascade
-contract. Same flow lives in Org admin → Company profile as **Enrich from web**. Files: `discovery.jsx`
+collapses to a green confirmation. Nothing writes until the user accepts — the sources-not-tiers
+contract (§1). Same flow lives in Org admin → Company profile as **Enrich from web**. Files: `discovery.jsx`
 (`EnrichFromWeb`, `FoundCompanyCard`, `MiniLog`), `optionC.jsx` (fresh-mode card + `applyEnrich`),
 `orgproject.jsx` (profile enrich panel).
 
@@ -746,6 +746,20 @@ badge ("injected as `EXA_API_KEY` at console startup" — startup hydration, §3
 agent list, and **honest status** (`live` only after a real call succeeded; otherwise `missing key` /
 `failing — <real error>`). Logical separation: tool settings live on the tool, platform settings live
 in §3.8 — never mixed.
+
+**41 · Confidence pills retired product-wide — sources, not tiers** (§1; operator ruling, 2026-07-21)
+— no asserted confidence level appears anywhere: we have no evidence-derived way to compute one
+(Principle 4). Stripped from: the **enrichment surfaces** (found-company card, discovery generated
+docs, theme token pack — entry 33/34/35 surfaces), the **interview LEARNED rows** (per-fact
+source-file chip stays — the §2.4a trace contract is unchanged), **concierge message pills**
+(interview rail + persistent dock seeds), **kanban ticket confidence** (Building tickets show the
+working dot), the **artifact topbar** band, the PRD-artifact mock content, and the **agent prompt
+texts** in the OS roster (they now instruct "cite the source — never assert a confidence tier").
+Every AI-derived value carries a **source label** (mono + link icon: url, file, or crawl step). The
+`ConfidencePill` primitive remains in `shared.jsx` for now but renders nowhere; §1 documents the rule.
+Files: `discovery.jsx`, `optionC.jsx`, `concierge.jsx`, `buildprogress.jsx`, `buildboard.jsx`,
+`artifactviewer.jsx`, `artifacts.jsx`, `admin.jsx`, `shared.jsx` (comments), `PRD.md` (§1, §2.4a,
+§2.6, §2.7, this entry).
 
 ---
 

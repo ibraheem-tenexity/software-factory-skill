@@ -225,6 +225,9 @@ function OptionC({ onExit, onBackground, initialRecipe }) {
   // web prefill: set once the user accepts the found-company card (EnrichFromWeb)
   const [enriched, setEnriched] = React.useState(false);
   const applyEnrich = (vals) => { setF((x) => ({ ...x, name: vals.name, industry: vals.industry, sub: vals.sub, size: vals.size, revenue: vals.revenue, site: vals.site, ints: vals.ints })); setEnriched(true); };
+  // concierge recipe suggestion dismissal — HOOKS MUST LIVE ABOVE THE view
+  // EARLY-RETURNS below, or a view transition runs fewer hooks and React throws.
+  const [suggestOff, setSuggestOff] = React.useState(false);
   // project answers (shared; prefilled so returning is one-click). `recipe` is
   // set when the user arrived from the Explore gallery ("Start from this →").
   const [p, setP] = React.useState({
@@ -254,7 +257,6 @@ function OptionC({ onExit, onBackground, initialRecipe }) {
   const ready = fresh ? (f.industry && f.name && f.size && projReady) : projReady;
   // concierge recipe suggestion: offered only while no recipe is picked and
   // not dismissed; accepting sets the RecipePicker value in the main column.
-  const [suggestOff, setSuggestOff] = React.useState(false);
   const suggestedRecipe = (!p.recipe && !suggestOff) ? suggestRecipe(p.goal) : null;
   const appliedRecipe = p.recipe ? (typeof RECIPES !== 'undefined' ? RECIPES : []).find((x) => x.id === p.recipe) : null;
   // Step 0: the project must be created before the rest of intake is usable.
@@ -578,10 +580,10 @@ Object.assign(window, { OptionC });
 // "what I learned" review of the assumptions pulled from the uploads; the right
 // rail is the active Concierge interview the user must complete before handoff.
 const LEARNED = [
-  { text: 'Quoting runs on Epicor; quotes are built in spreadsheets and re-keyed by hand.', band: 'exact', src: 'process-walkthrough.mp4' },
-  { text: 'Standard price book covers 1,840 SKUs across 6 product lines with tiered discounts.', band: 'high', src: 'standard-pricing.xlsx' },
-  { text: 'Discounts over 15% route to a sales manager for approval.', band: 'high', src: 'discount-matrix.xlsx' },
-  { text: 'Volume looks like ~120 quotes/week — worth confirming.', band: 'medium', src: 'rfq-sop.pdf' },
+  { text: 'Quoting runs on Epicor; quotes are built in spreadsheets and re-keyed by hand.', src: 'process-walkthrough.mp4' },
+  { text: 'Standard price book covers 1,840 SKUs across 6 product lines with tiered discounts.', src: 'standard-pricing.xlsx' },
+  { text: 'Discounts over 15% route to a sales manager for approval.', src: 'discount-matrix.xlsx' },
+  { text: 'Volume looks like ~120 quotes/week — worth confirming.', src: 'rfq-sop.pdf' },
 ];
 function InterviewView({ p, engine, onFile, done, onComplete, onBack, onHandoff }) {
   return (
@@ -618,7 +620,6 @@ function InterviewView({ p, engine, onFile, done, onComplete, onBack, onHandoff 
                       <span style={{ flex: 1, font: `400 13px/1.5 ${T.sans}`, color: T.fg }}>{l.text}
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 7, font: `400 11px/1 ${T.mono}`, color: T.tertiary }}><Icon name="file" size={11} color={T.tertiary} />{l.src}</span>
                       </span>
-                      <ConfidencePill band={l.band} />
                     </div>
                   ))}
                 </div>

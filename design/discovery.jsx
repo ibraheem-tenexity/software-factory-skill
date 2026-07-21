@@ -256,7 +256,7 @@ Standards:  ${v.standards || '—'}`}
 
 // ---- Brand & theme (org admin) -----------------------------------------------
 // "Process theme from my website": crawl the site → token pack (colors, type,
-// logo) with sources + confidence. Applied to Kimi K3 mockups and every app
+// logo) with a source per value. Applied to Kimi K3 mockups and every app
 // the factory builds for this org. Manual fallback: brand book in the KB.
 const THEME_LINES = (domain) => [
   `Reading ${domain}…`,

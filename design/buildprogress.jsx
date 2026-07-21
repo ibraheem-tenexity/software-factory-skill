@@ -187,7 +187,7 @@ function DesignReviewBar() {
 }
 
 function ConciergeRail({ done, total, allDone, onOpen }) {  const seed = allDone
-    ? [{ who: 'agent', text: 'All ' + total + ' tickets are green and the app is deployed. Want me to walk you through the live build?', confidence: 'exact' }]
+    ? [{ who: 'agent', text: 'All ' + total + ' tickets are green and the app is deployed. Want me to walk you through the live build?' }]
     : [{ who: 'agent', text: 'Build is underway — ' + done + '/' + total + ' tickets done. The Architect, Research, and Product agents have all filed their work below.' },
        { who: 'agent', text: 'Heads up: Playwright caught a tax-rounding bug on SF-11. Sonnet already pulled it back into Building to fix.' }];
 

@@ -1,7 +1,8 @@
 // shared.jsx — Tenexity design system tokens, data, icons, and primitives
 // for the Software Factory onboarding. Faithful to tenexity-design-master:
-// brand #1A7BFF, Hanken Grotesk / Georgia / JetBrains Mono, confidence
-// cascade, ai-tint, single-bubble conversation. Exported to window.
+// brand #1A7BFF, Hanken Grotesk / Georgia / JetBrains Mono. AI-derived values
+// carry SOURCE LABELS only — no asserted confidence tiers (operator ruling,
+// 2026-07-21; Principle 4). ai-tint, single-bubble conversation. Exported to window.
 
 const T = {
   bg: '#FAFAFA', raised: '#FFFFFF', sunken: '#F4F4F5', ink: '#060709',

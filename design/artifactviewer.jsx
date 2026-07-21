@@ -198,7 +198,7 @@ epicor_sync(quote_id, order_no, synced_at)
   designspec: { id: 'designspec', name: 'design-spec.md', type: 'md', node: 'design', agent: 'Design agent · CHROMA', project: PROJ_ACME, updated: '1h ago', content: `# Design spec — handed to the build agents
 
 ## System
-- Tenexity design system: brand \`#1A7BFF\`, Hanken Grotesk / Georgia / JetBrains Mono, the confidence cascade.
+- Tenexity design system: brand \`#1A7BFF\`, Hanken Grotesk / Georgia / JetBrains Mono, source-labeled AI values.
 
 ## Screens → archetypes
 - **Quote builder** → Catalog + Processing-Queue archetypes.
@@ -494,7 +494,6 @@ function ArtifactViewer({ initialId }) {
               <TypeBadge type={art ? art.type : 'md'} big />
               <h1 style={{ margin: 0, font: `600 17px/1.2 ${T.mono}`, color: T.fg, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{art ? art.name : 'Artifact'}</h1>
               {art && art.agent && <span style={{ font: `400 12px/1 ${T.sans}`, color: T.tertiary }}>· {art.agent}</span>}
-              {art && art.conf && typeof ConfidencePill !== 'undefined' && <ConfidencePill band={art.conf} />}
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>

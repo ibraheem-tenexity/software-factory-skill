@@ -327,7 +327,7 @@ function TicketCard({ t, moving }) {
           <span style={{ font: `500 10px/1 ${T.mono}`, color: T.tertiary }}>{t.id}</span>
           {a && <Avatar name={a.name} size={18} tone={a.tone} />}
         </div>
-        {t.col === 'building' && (t.conf ? <ConfidencePill band={t.conf} /> : <span style={{ font: `500 10px/1 ${T.mono}`, color: T.warning }}>● working</span>)}
+        {t.col === 'building' && <span style={{ font: `500 10px/1 ${T.mono}`, color: T.warning }}>● working</span>}
         {t.col === 'testing' && <span style={{ font: `500 10px/1 ${T.mono}`, color: T.brandDeep }}>● testing</span>}
         {t.col === 'done' && <Icon name="check" size={14} color={T.success} />}
       </div>
