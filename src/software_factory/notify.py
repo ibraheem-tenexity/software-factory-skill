@@ -29,9 +29,15 @@ def should_email(key: str) -> bool:
 
 
 def _post(url: str, payload: dict, headers: dict) -> bool:
+    """SOF-201: Resend is fronted by Cloudflare, which bans urllib's default `Python-urllib/x.y`
+    User-Agent with HTTP 403 "error code: 1010" BEFORE the request ever reaches Resend — same class
+    as SOF-160's Railway GraphQL fix. Every send silently failed on the deployed app (correct
+    RESEND_API_KEY + SF_NOTIFY_FROM, wrong UA) until this header was added."""
     req = urllib.request.Request(
         url, data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", **headers}, method="POST")
+        headers={"Content-Type": "application/json", "User-Agent": "software-factory-notify/1.0",
+                 **headers},
+        method="POST")
     with urllib.request.urlopen(req, timeout=10) as r:
         return 200 <= r.status < 300
 
@@ -48,6 +54,9 @@ def send(subject: str, body: str) -> bool:
              "to": [to], "subject": subject, "text": body},
             {"Authorization": f"Bearer {key}"})
     except Exception:
+        # SOF-201 / CLAUDE.md 2026-07-21: log the full traceback BEFORE falling back — a swallowed
+        # `except Exception: return False` right here hid a real, fixable Cloudflare 403 for hours.
+        logging.getLogger(__name__).exception("notify.send: Resend request failed")
         return False
 
 
@@ -71,6 +80,8 @@ def send_to(to: str, subject: str, body: str) -> bool:
              "to": [to], "subject": subject, "text": body},
             {"Authorization": f"Bearer {key}"})
     except Exception:
+        # SOF-201 / CLAUDE.md 2026-07-21: see send()'s matching comment — never swallow silently.
+        logging.getLogger(__name__).exception("notify.send_to: Resend request failed (to=%s)", to)
         return False
 
 
@@ -96,7 +107,10 @@ def send_invite(to: str, *, org_name: str, inviter: str, granted: bool = False) 
                 f"{CONSOLE_URL}\n")
     sent = send_to(to, subject, body)
     if not sent:
+        # SOF-201: don't presume it's a config problem here — send_to already logged the real
+        # exception (or the missing-key/missing-recipient short-circuit) above; this is just the
+        # user-facing confirmation that the invite/access grant itself still went through.
         logging.getLogger(__name__).warning(
-            "invite email to %s not sent (Resend disabled or rejected — check RESEND_API_KEY / "
-            "SF_NOTIFY_FROM verified sender); invite/access still granted", to)
+            "invite email to %s not sent — see the exception logged above for why; "
+            "invite/access still granted", to)
     return sent
