@@ -132,6 +132,13 @@ export type OrgUsage = {
 
 export type OrgSecret = { name: string; kind: string; last4: string; used_by: number; updated_at: string };
 
+// CBT-9: a published recipe's customer-facing fields — the intake picker's RecipePicker card grid.
+// No body_md/repo_url (internal-only); images already filtered to public: true by the store.
+export type RecipeLight = {
+  id: string; name: string; tagline?: string | null; category?: string | null;
+  capabilities: string[]; images: { url: string; public: boolean }[];
+};
+
 // Public boot config the SPA reads to decide whether to gate on login (auth on) or open
 // straight to the console (auth off, dev/test). client_id feeds the Google sign-in button.
 export type AuthConfig = { enabled: boolean; client_id: string };
@@ -519,13 +526,16 @@ export const api = {
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),
   // SOF-108: DB-backed scope chips — genre recipes authored on the SOW screen (status='Template').
   scopeGenres: () => get<{ genres: { name: string; description: string }[] }>("/api/scope-genres"),
-  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number }) =>
-    send<{ name: string; goal: string; scope: string[]; description: string }>(`/api/projects/${id}/draft`, "PATCH", body),
+  // CBT-9: published recipes — the intake picker source (light fields only; body_md/repo_url stay
+  // internal-only, per the store's published() projection).
+  listRecipes: () => get<{ recipes: RecipeLight[] }>("/api/recipes"),
+  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number; recipe_id?: string }) =>
+    send<{ name: string; goal: string; scope: string[]; description: string; recipe_id?: string }>(`/api/projects/${id}/draft`, "PATCH", body),
   // Read counterpart to PATCH /draft (qsvigmth's run-control PR #48) — rehydrates the intake form
   // when RESUMING an existing draft instead of minting a new one. budget (SOF-137) is included
   // since it's now one of the three required intake fields (name+goal+budget, scope optional).
   getDraft: (id: string) =>
-    get<{ name: string; goal: string; scope: string[]; description: string; budget: number | null }>(`/api/projects/${id}/draft`),
+    get<{ name: string; goal: string; scope: string[]; description: string; budget: number | null; recipe_id?: string }>(`/api/projects/${id}/draft`),
   // BYOK key submission (qsvigmth's draft-BYOK PR). Vault-stores each credential; records UUIDs in
   // state.creds_vault_ids; promote threads them into the runner env. Returns names only, never values.
   submitCreds: (id: string, credentials: Record<string, string>) =>
