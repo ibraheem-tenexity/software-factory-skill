@@ -25,7 +25,14 @@ def _events(text: str):
 
 
 # OpenCode events carry no model id, so the token-pricing fallback uses the run's model.
-OPENCODE_FALLBACK_MODEL = "openrouter/moonshotai/kimi-k2.7-code"
+# Accepted risk: this is a single GLOBAL constant, not per-run — recomputing cost_usd() on a
+# HISTORICAL log whose step_finish events lack authoritative part.cost (the `else` branch below,
+# ~line 68-72) reprices those old steps at whatever model this constant currently names. A
+# K2.7-run log recomputed after this bump reprices its fallback-priced steps at K3 rates (~4x,
+# upward only). Accepted: the normal path always carries authoritative part.cost (this fallback
+# rarely fires) and per-event model tracking is machinery a model-alias bump doesn't justify.
+# Revisit only if opencode ever starts emitting a model id per event.
+OPENCODE_FALLBACK_MODEL = "openrouter/moonshotai/kimi-k3"
 
 
 def cost_usd(text: str, prices: dict | None = None) -> float:
