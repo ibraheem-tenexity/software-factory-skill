@@ -166,6 +166,25 @@ export type OrgInput = Partial<Omit<Org, "id" | "created_at" | "created_by">> & 
   role_description?: string;
 };
 
+// Company-enrich wow prefill (CBT-1) — POST /api/research/company response. Sources only, no
+// confidence field: `sources` is the overall list of URLs consulted (quick mode, the UI's only
+// caller); `field_sources` is deep-mode-only per-field attribution and is always absent here.
+export type CompanyProfile = {
+  name: string;
+  website: string | null;
+  industry: string | null;
+  size_hint: string | null;
+  sub_focus: string | null;
+  connected_systems: string[];
+  description: string;
+  products: string[];
+  competitors: { name: string; url?: string; description?: string }[];
+  recent_news: string[];
+  sources: string[];
+  mode: string;
+  field_sources: Record<string, string> | null;
+};
+
 // ── Tenexity OS admin portal (§3) — staff-gated, cross-tenant. Degrade to empty until live.
 export type AdminPulse = {
   tenants?: number;
@@ -454,6 +473,9 @@ export const api = {
   getOrg: () => get<{ org: Org | null }>("/api/org"),
   createOrg: (body: OrgInput) => send<{ org: Org }>("/api/org", "POST", body),
   patchOrg: (body: Partial<Org>) => send<{ org: Org }>("/api/org", "PATCH", body),
+  // CBT-1 wow prefill: always depth=quick (deep is a concierge-only ~165-180s call, SOF-79).
+  enrichCompany: (body: { name?: string; website?: string; email_domain?: string }) =>
+    send<CompanyProfile>("/api/research/company?depth=quick", "POST", body),
   // Org-admin §2.3 — org-scoped (resolve org from session). Backend in progress (tjyb5gmy);
   // callers degrade to empty/null until live. NOT /api/users (that's the global cross-org dir).
   orgMembers: () => get<{ members: Member[] }>("/api/org/members"),

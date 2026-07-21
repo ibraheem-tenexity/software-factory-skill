@@ -69,6 +69,12 @@ class OrgBillingIn(BaseModel):
     monthly_budget_cap: float | None = None
 
 
+class CompanyEnrichIn(BaseModel):
+    name: str | None = None
+    website: str | None = None
+    email_domain: str | None = None
+
+
 class ChatIn(BaseModel):
     project_id: str | None = None
     message: str = ""

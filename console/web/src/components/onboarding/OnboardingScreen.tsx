@@ -13,14 +13,24 @@
 // defined inside render gets a new identity each keystroke → React remounts the <input> → focus
 // lost). Keep it that way — do NOT move Card/CheckRow/GroupHead back inside the component.
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { api, Org, OrgInput, RecipeLight } from "../../api";
+import { api, Org, OrgInput, RecipeLight, CompanyProfile } from "../../api";
 import {
   T, Icon, Sparkle, Wordmark, Avatar, StatusPill, CategoryLabel, SectionDivider, Btn, TextInput, TextArea,
   Field, Chip, Chips, IndustryTile, IntegrationRow, Dropzone, Message, Composer, Segmented,
   OrgImportPicker, SuggestedResponseList, SuggestedResponseOption, INDUSTRIES, SIZES, REVENUE, ROLES, INTEGRATIONS,
 } from "./design";
+import { EnrichFromWeb } from "./EnrichFromWeb";
 import { ProcessingScreen } from "./ProcessingScreen";
 import { InterviewView } from "./InterviewView";
+import { useMe } from "../MeContext";
+
+// CBT-3: prefill "Start with your website" from the signup email domain — but only when it isn't
+// a public webmail provider (looking up "gmail.com" itself would be nonsense).
+const _PUBLIC_EMAIL_DOMAINS = new Set(["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com", "aol.com", "protonmail.com"]);
+function domainFromEmail(email?: string): string {
+  const domain = (email || "").split("@")[1]?.toLowerCase() || "";
+  return domain && !_PUBLIC_EMAIL_DOMAINS.has(domain) ? domain : "";
+}
 
 type Check = { id: string; label: string; done: boolean; optional?: boolean; nudge?: string };
 // T2.2: suggestedResponses replaces choices — {response,type} drives single/multi-select render.
@@ -337,6 +347,7 @@ function BudgetPicker({ value, onChange }: { value: number | null; onChange: (v:
 }
 
 export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onComplete: (projectId: string) => void; onBack?: () => void; resumeProjectId?: string | null }) {
+  const me = useMe();
   const [mode, setMode] = useState<"loading" | "fresh" | "returning">("loading");
   // Intake → Processing → Interview state machine (PRD §2.4a). Handoff itself only ever fires
   // from the Interview step, not directly off the intake screen — intake's CTA just advances.
@@ -370,6 +381,12 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const [f, setF] = useState<{ industry: string; sub: string[]; name: string; size: string; revenue: string; role: string; site: string; ints: string[] }>(
     { industry: "", sub: [], name: "", size: "", revenue: "", role: "", site: "", ints: [] });
   const setFresh = (k: string, v: any) => setF((x) => ({ ...x, [k]: v }));
+  // CBT-3 accept: only name/website map cleanly onto this tile-based form (industry/size/revenue
+  // are constrained chip values, not free text — quick-mode research also doesn't populate them
+  // today) — fill what's honest, leave the rest for the user to pick via the tiles below.
+  const acceptEnrichedCompany = (profile: CompanyProfile) => {
+    setF((x) => ({ ...x, name: profile.name || x.name, site: profile.website || x.site }));
+  };
 
   // project answers (shared)
   const [p, setP] = useState<{ name: string; goal: string; scope: string[]; video: boolean; docs: boolean }>(
@@ -777,6 +794,10 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       We’ll remember all of this — next time you start a project we won’t ask again. The Concierge on the right will guide you.
                     </p>
                   </div>
+
+                  <Card cat="Your company" title="Start with your website" desc="We'll pull what we can find — the fields below stay yours to fill in either way.">
+                    <EnrichFromWeb initialWebsite={domainFromEmail(me?.email)} onAccept={acceptEnrichedCompany} />
+                  </Card>
 
                   <SectionDivider label="Your organization" sub="set up once · reused on every project" icon="building" />
 
