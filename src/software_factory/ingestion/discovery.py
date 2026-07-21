@@ -51,7 +51,7 @@ Every claim in your three files must trace back to a file you actually read — 
 invent. If something is genuinely unclear from the repo, say so plainly instead of making it up."""
 
 _ARTIFACTS = ("AGENTS.md", "CLAUDE.md", "integrations.md")
-_SCRATCH_ROOT = "/data/org"
+_SCRATCH_ROOT = os.environ.get("SF_DISCOVERY_DIR", "/data/org")  # override for local dev, mirrors SF_PROJECTS_DIR
 _CHECK_INTERVAL_S = 15.0
 
 _procs: dict[str, subprocess.Popen] = {}

@@ -2,14 +2,26 @@
 billing. Thin HTTP layer — each handler runs its auth dependency, extracts the caller email, and
 delegates to `state.org_service`; validation/orchestration live there (raising domain errors that
 console/app.py maps to HTTP). Admin-only gating stays here as a FastAPI dependency (transport)."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 import console.state as state
 from console.deps import require_authed, require_admin
 from console.schemas import (OrgIn, OrgPatchIn, OrgDocIn, OrgDocPatchIn, OrgDocUseIn, OrgMemberIn,
-                             OrgMemberPatchIn, OrgBillingIn, SecretCreateIn, SecretRotateIn)
+                             OrgMemberPatchIn, OrgBillingIn, SecretCreateIn, SecretRotateIn,
+                             OrgDiscoveryIn)
+from software_factory.ingestion import discovery
+from software_factory.ingestion.discovery import DiscoveryError
 
 router = APIRouter()
+
+
+def _org_id_or_404(email: str) -> str:
+    """Mirrors OrgService._require_org — the discovery routes need only the id, and discovery
+    itself stays out of org_service (an ingestion-owned job, not org profile/KB policy)."""
+    org = state.users.org_for_user(email) if email else None
+    if not org:
+        raise HTTPException(status_code=404, detail="no org on file")
+    return org["id"]
 
 
 # ── Organization (onboarding front door) ──────────────────────────────────────────────────────
@@ -55,6 +67,20 @@ def org_doc_update(doc_id: int, body: OrgDocPatchIn, v: tuple = Depends(require_
 def org_doc_delete(doc_id: int, v: tuple = Depends(require_admin)):
     state.org_service.delete_doc(v[0], doc_id)
     return {"ok": True}
+
+
+# Codebase discovery (CBT-6/7) ---------------------------------------------------------------------
+@router.post("/api/org/discovery")
+def start_discovery(body: OrgDiscoveryIn, v: tuple = Depends(require_admin)):
+    try:
+        return discovery.start(_org_id_or_404(v[0]), body.repo_url, body.pat_secret)
+    except DiscoveryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/api/org/discovery")
+def discovery_status(v: tuple = Depends(require_admin)):
+    return discovery.status(_org_id_or_404(v[0]))
 
 
 # Team & access -----------------------------------------------------------------------------------
