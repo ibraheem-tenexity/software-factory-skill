@@ -57,6 +57,7 @@ _PERSISTED = {
     "owner_github_username",
     "launch_attempted",
     "ingestion_spent_usd",
+    "prior_attempts_usd", "spend_seal_offset",
     "memory_overview",
     "concierge_notes",
 }
@@ -68,10 +69,20 @@ class ProjectState:
     phase: str = "provision"
     spent_usd: float = 0.0
     # SOF-27: console-side ingestion spend (embedding/summarization/extraction), accumulated
-    # separately from spent_usd. It must NOT live in spent_usd: Console._cost() overwrites
-    # spent_usd wholesale from project.log's own cost every time it reparses the log, which
-    # would silently clobber any ingestion charge folded in there. See Console._project_spend.
+    # separately from spent_usd. It must NOT live in spent_usd: run spend is derived from
+    # project.log (see Console._run_spend) and would clobber any ingestion charge folded in there.
+    # Console._project_spend adds this on top of the log-derived run spend.
     ingestion_spent_usd: float = 0.0
+    # SOF-186: durable per-attempt spend accumulator so run spend is MONOTONIC across a stage
+    # auto-resume/retry. prior_attempts_usd banks the (authoritative-if-present, else estimated)
+    # cost of every SUPERSEDED stage attempt, captured at retry_stage relaunch; spend_seal_offset
+    # is the byte offset into project.log where the CURRENT attempt's region begins. Run spend =
+    # prior_attempts_usd + cost of log[spend_seal_offset:], floored by the high-water spent_usd, so
+    # a relaunch ADDS a new attempt on top of a frozen prior total instead of letting the live
+    # log-parse silently drop a dead attempt's cost (the $20.07->$14.13 regression). See
+    # Console._run_spend / _attempt_cost / retry_stage.
+    prior_attempts_usd: float = 0.0
+    spend_seal_offset: int = 0
     # SOF-32: the cached project-overview rollup (coarse "2,000-ft view" over this project's
     # ready doc_summary rows) — no third table, per the locked decision (build-plan §7 #4).
     # T3.1's MemoryStore.overview() reads this same key directly off the raw projectstate.data
