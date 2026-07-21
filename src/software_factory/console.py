@@ -1161,11 +1161,14 @@ class Console:
         if spend + reserve > ceiling:
             logger.info("[launch] %s stage %s refused — per-run budget: $%.2f + reserve $%.2f > ceiling $%.2f",
                         project_id, stage, spend, reserve, ceiling)
-            ProjectStore(paths["db"]).add_blocker(
-                f"Per-run budget: this run ${spend:.2f} + reserve ${reserve:.2f} "
-                f"> ceiling ${ceiling:.2f} — stage {stage} launch refused",
-                blocks="budget",
-            )
+            db = ProjectStore(paths["db"])
+            already = any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers())
+            if not already:
+                db.add_blocker(
+                    f"Per-run budget: this run ${spend:.2f} + reserve ${reserve:.2f} "
+                    f"> ceiling ${ceiling:.2f} — stage {stage} launch refused",
+                    blocks="budget",
+                )
             return None
 
         state = self._load_state(project_id)
