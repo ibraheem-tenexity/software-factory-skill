@@ -27,6 +27,7 @@ from .constants import (
     RUNNER_KEYS as _RUNNER_KEYS,
 )
 from . import artifacts, checkpoint as ckpt, deploy_db, env as _env, recovery, streamlog, vault as _vault
+from .project_view import INPUT_ONLY_KINDS
 from .runtime_agents import AgentRegistry
 from .input_pipeline import persist_and_compose
 from .pdf_extract import extract_to_markdown
@@ -2750,8 +2751,11 @@ class Console:
             src = "phase:" + rec.phase if rec.phase in PIPELINE else "orchestrator"
             edges.append({"data": {"source": src, "target": nid, "etype": "hierarchy"}})
 
-        # Artifacts — from the artifacts table
-        for i, a in enumerate(db.artifacts()):
+        # Artifacts — from the artifacts table. SOF-199: skip input-only kinds (context,
+        # product_brief) the same way project_view.documents() already does for the Documents tab
+        # — an input artifact shouldn't appear as a peer node of the factory's real output (the
+        # product_brief-vs-prd duplication SOF-182 found).
+        for i, a in enumerate(a for a in db.artifacts() if a.get("kind") not in INPUT_ONLY_KINDS):
             path = a.get("path") or ""
             if path.startswith("http"):
                 status = "created"

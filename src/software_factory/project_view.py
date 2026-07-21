@@ -11,6 +11,16 @@ import os
 # Ticket statuses that count as delivered for the % complete bar.
 _DONE_TICKET_STATES = {"done", "deployed", "approved"}
 
+# SOF-199: artifact `kind`s that are INPUT material (read by a stage), not factory OUTPUT — never
+# surfaced as a produced deliverable. 'context' = Stage-1's own reading material (SOF-70).
+# 'product_brief' = the concierge's pre-handoff onboarding doc (SOF-137) — content-wise it's the
+# precursor Stage 1 synthesizes the real PRD from, not the PRD itself; showing it as a peer of the
+# real `kind=prd` artifact is exactly the "two pointers to the same spec" duplication SOF-182 found
+# (the brief has no DB-inlined content and no source_blob_id, so it renders as a bare external link
+# while the real PRD renders natively — same conceptual role, two different broken-feeling
+# experiences). It stays reachable via the Overview tab's own dedicated brief link either way.
+INPUT_ONLY_KINDS = {"context", "product_brief"}
+
 _EXT_KIND = {"pdf": "pdf", "xlsx": "xlsx", "xls": "xlsx", "csv": "csv", "doc": "doc", "docx": "doc",
              "mp4": "video", "mov": "video", "png": "img", "jpg": "img", "jpeg": "img"}
 
@@ -92,14 +102,15 @@ def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None,
                          "summary": ds.get("summary_md"), "summary_status": ds.get("status")})
     # SOF-60: origin='user' artifact rows are user-deposited document markdown (agent reading
     # material), not factory output — they'd double-list next to their own upload here.
-    # SOF-70: kind='context' rows (Console._provision_and_launch's "input" artifacts, e.g.
+    # SOF-70/SOF-199: kind='context' rows (Console._provision_and_launch's "input" artifacts, e.g.
     # input/interview.md, input/context.md) are Stage-1's OWN reading material — composed by the
     # console from the intake, not something the factory produced — so they default origin='agent'
     # (unlike SOF-60's user-deposited markdown) and slipped past the origin-only filter above.
+    # kind='product_brief' is the same category (SOF-199) — see INPUT_ONLY_KINDS.
     produced = [{"id": a.get("id"), "title": a.get("title", ""), "path": a.get("path", ""),
                  "kind": a.get("kind", ""), "agent": a.get("agent", ""), "ts": a.get("ts")}
                 for a in (artifacts or [])
-                if a.get("origin") != "user" and a.get("kind") != "context"]
+                if a.get("origin") != "user" and a.get("kind") not in INPUT_ONLY_KINDS]
     # Org knowledge base surfaced on the project Documents tab (design #32 / PRD §2.5b). Each row
     # keeps scope="org" so the tile renders the toggle with "Org-wide" active — flipping it to
     # "Project" moves the doc back into this project (the reverse of the vanish-on-toggle bug).
