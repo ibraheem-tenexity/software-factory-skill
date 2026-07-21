@@ -19,9 +19,23 @@ import urllib.request
 _EMAIL_KEYS = ("done", "depswait", "crashed-final")
 _EMAIL_PREFIXES = ("budget-", "resume-")
 
-# Env-driven so an invite sent from staging links the invitee to staging, not prod; the default
-# covers prod (staging sets SF_CONSOLE_URL).
-CONSOLE_URL = os.environ.get("SF_CONSOLE_URL", "https://softwarefactory-console.up.railway.app")
+def _console_url() -> str:
+    """Public console base URL for links in outbound email (invites), per environment.
+
+    Bug: this read SF_CONSOLE_URL, which is set NOWHERE, so every invite fell back to a stale
+    hardcoded railway host — wrong for BOTH staging (should be factory-console-staging.up.railway.app)
+    AND prod (should be console.tenexity.ai). Fix: use the SAME derivation console.py already uses for
+    the per-run proxy callbacks (SOF-155) — SF_APP_URL is the canonical per-env public URL and is
+    already set correctly in every environment (factory-console-staging on staging, console.tenexity.ai
+    on prod); fall back to Railway's always-auto-injected RAILWAY_PUBLIC_DOMAIN, then the prod custom
+    domain as a last resort so a forgotten var can never resurrect the old railway host. SF_CONSOLE_URL
+    stays as an explicit highest-priority override for back-compat."""
+    for var in ("SF_CONSOLE_URL", "SF_APP_URL"):
+        v = (os.environ.get(var) or "").strip()
+        if v:
+            return v.rstrip("/")
+    pub = (os.environ.get("RAILWAY_PUBLIC_DOMAIN") or "").strip()
+    return f"https://{pub}" if pub else "https://console.tenexity.ai"
 
 
 def should_email(key: str) -> bool:
@@ -96,15 +110,16 @@ def send_invite(to: str, *, org_name: str, inviter: str, granted: bool = False) 
     granted=True — the admin path's password-method users only: "granted access to {org_name}...
     sign in at {url}." Still NEVER includes the password itself — that's shared out-of-band by
     the admin; this email is a notification, not a secret carrier."""
+    url = _console_url()
     verb = "granted access to" if granted else "invited to"
     subject = f"You've been {verb} {org_name} on Software Factory"
     if granted:
         body = (f"{inviter or 'An admin'} granted you access to {org_name} on Software Factory. "
-                f"Sign in with this email address ({to}) at:\n{CONSOLE_URL}\n")
+                f"Sign in with this email address ({to}) at:\n{url}\n")
     else:
         body = (f"{inviter or 'A teammate'} invited you to join {org_name} on Software Factory.\n\n"
                 f"Sign in with this email address ({to}) to get started — no invite link needed:\n"
-                f"{CONSOLE_URL}\n")
+                f"{url}\n")
     sent = send_to(to, subject, body)
     if not sent:
         # SOF-201: don't presume it's a config problem here — send_to already logged the real
