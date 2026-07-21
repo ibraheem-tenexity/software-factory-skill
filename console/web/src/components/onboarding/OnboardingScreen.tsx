@@ -13,7 +13,7 @@
 // defined inside render gets a new identity each keystroke → React remounts the <input> → focus
 // lost). Keep it that way — do NOT move Card/CheckRow/GroupHead back inside the component.
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { api, Org, OrgInput } from "../../api";
+import { api, Org, OrgInput, RecipeLight } from "../../api";
 import {
   T, Icon, Sparkle, Wordmark, Avatar, StatusPill, CategoryLabel, SectionDivider, Btn, TextInput, TextArea,
   Field, Chip, Chips, IndustryTile, IntegrationRow, Dropzone, Message, Composer, Segmented,
@@ -218,6 +218,70 @@ function EnginePicker({ value, onChange }:
   );
 }
 
+// ── Recipe picker (CBT-9). Customer sees only PUBLISHED recipes' light fields (name/tagline/
+//    category/capabilities) — never body_md/repo_url. "No recipe" is always available and is
+//    the honest default (value ""), matching a draft's unset recipe_id — sources only, no
+//    confidence pills anywhere. MODULE-SCOPE (props only, no state closure). ──
+function RecipeCardSkeleton() {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 11 }}>
+      {[0, 1, 2].map((i) => (
+        <div key={i} style={{ display: "flex", flexDirection: "column", gap: 9, padding: "15px 16px", borderRadius: T.rLg, border: `1.5px solid ${T.borderSubtle}`, background: T.raised }}>
+          <span style={{ width: 70, height: 9, borderRadius: 4, background: T.sunken, animation: "sfPulse 1.4s ease-in-out infinite" }} />
+          <span style={{ width: "70%", height: 15, borderRadius: 5, background: T.sunken, animation: "sfPulse 1.4s ease-in-out infinite" }} />
+          <span style={{ width: "90%", height: 11, borderRadius: 5, background: T.sunken, animation: "sfPulse 1.4s ease-in-out infinite" }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RecipeCard({ selected, category, name, tagline, capabilities, onClick, noneVariant }:
+  { selected: boolean; category: string; name: string; tagline?: string; capabilities?: string[]; onClick: () => void; noneVariant?: boolean }) {
+  return (
+    <button onClick={onClick} style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 9, padding: "15px 16px", borderRadius: T.rLg, cursor: "pointer",
+      border: `1.5px solid ${selected ? T.brand : T.borderSubtle}`, background: selected ? T.brandSoft : T.raised, position: "relative" }}>
+      {selected && <span style={{ position: "absolute", top: 12, right: 12, width: 20, height: 20, borderRadius: "50%", background: T.brand, display: "grid", placeItems: "center" }}><Icon name="check" size={12} color="#fff" /></span>}
+      <CategoryLabel tone={selected ? "brand" : "tertiary"}>{category}</CategoryLabel>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, paddingRight: 24 }}>
+        <span style={{ width: 26, height: 26, flexShrink: 0, borderRadius: 7, display: "grid", placeItems: "center", background: selected ? T.brand : T.sunken }}>
+          <Icon name={noneVariant ? "x" : "flask"} size={14} color={selected ? "#fff" : T.tertiary} />
+        </span>
+        <span style={{ font: `700 15px/1.2 ${T.display}`, letterSpacing: "-0.01em", color: T.fg }}>{name}</span>
+      </div>
+      {tagline && <span style={{ font: `400 12.5px/1.5 ${T.sans}`, color: T.secondary }}>{tagline}</span>}
+      {capabilities && capabilities.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 2 }}>
+          {capabilities.slice(0, 3).map((c) => (
+            <span key={c} style={{ font: `500 10.5px/1 ${T.sans}`, color: T.secondary, background: selected ? "#fff" : T.sunken, border: `1px solid ${T.borderSubtle}`, padding: "4px 7px", borderRadius: 9999 }}>{c}</span>
+          ))}
+          {capabilities.length > 3 && <span style={{ font: `500 10.5px/1 ${T.mono}`, color: T.tertiary, padding: "4px 3px" }}>+{capabilities.length - 3}</span>}
+        </div>
+      )}
+    </button>
+  );
+}
+
+// value/onChange: "" = no recipe (the default — a draft's unset recipe_id). Selecting a card
+// PATCHes recipe_id onto the draft immediately (see selectRecipe in the screen below) — it's a
+// draft-enrichment write, not a silent side effect, and the card's own selected state is the
+// confirmation, so there's no separate "saved" toast.
+function RecipePicker({ recipes, loading, value, onChange }:
+  { recipes: RecipeLight[]; loading: boolean; value: string; onChange: (id: string) => void }) {
+  if (loading) return <RecipeCardSkeleton />;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 11 }}>
+      {recipes.map((r) => (
+        <RecipeCard key={r.id} selected={value === r.id} category={r.category || "Recipe"} name={r.name}
+          tagline={r.tagline || undefined} capabilities={r.capabilities} onClick={() => onChange(r.id)} />
+      ))}
+      <RecipeCard selected={value === ""} category="No template" name="No recipe"
+        tagline="Start from a blank build — the factory works only from your brief and materials."
+        onClick={() => onChange("")} noneVariant />
+    </div>
+  );
+}
+
 const fileToB64 = (file: File): Promise<string> => new Promise((resolve) => {
   const r = new FileReader();
   r.onload = () => resolve(String(r.result || "").split(",")[1] || "");
@@ -317,6 +381,28 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const [budget, setBudget] = useState<number | null>(null);
   const budgetRef = useRef<number | null>(null);
   useEffect(() => { budgetRef.current = budget; }, [budget]);
+  // CBT-9: recipe picker. "" = no recipe (the honest default — matches a draft's unset recipe_id).
+  const [recipes, setRecipes] = useState<RecipeLight[]>([]);
+  const [recipesLoading, setRecipesLoading] = useState(true);
+  const [recipeId, setRecipeId] = useState("");
+  useEffect(() => {
+    api.listRecipes().then((r) => setRecipes(r.recipes || [])).catch(() => undefined)
+      .finally(() => setRecipesLoading(false));
+  }, []);
+  // Selecting a card PATCHes the draft immediately (not debounced — this is a deliberate choice,
+  // not a keystroke). Optimistic: the card's selected state updates right away; a refusal (e.g. a
+  // stale/unpublished id) reverts and surfaces the server's real reason.
+  const selectRecipe = async (id: string) => {
+    if (!draftId || id === recipeId) return;
+    const prev = recipeId;
+    setRecipeId(id);
+    try {
+      await api.patchDraft(draftId, { recipe_id: id });
+    } catch (e: any) {
+      setRecipeId(prev);
+      setError(typeof e?.detail === "string" ? e.detail : "Couldn’t select that recipe — try again.");
+    }
+  };
   // Real uploaded filenames per material slot (drives the Dropzone list — no dummy data).
   // SOF-49: blobId/ingestStage/ingestPct/ingestStatus are populated once ingestion starts
   // (see the ingest-progress SSE subscription below) — absent (SF_MEMORY off, or the file's
@@ -355,6 +441,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
         // SOF-137: budget is now a required intake field (scope became optional) — a resumed
         // draft must rehydrate it, or Continue can never be satisfied again after leaving the page.
         if (d.budget != null) setBudget(d.budget);
+        if (d.recipe_id) setRecipeId(d.recipe_id);
       }).catch(() => {});
       api.documents(resumeProjectId).then((docs) => {
         const ups = docs.uploaded || [];
@@ -754,6 +841,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                     <div aria-hidden={!draftId} style={draftId
                       ? { display: "flex", flexDirection: "column", gap: 16 }
                       : { display: "flex", flexDirection: "column", gap: 16, opacity: 0.4, filter: "grayscale(0.5)", pointerEvents: "none", userSelect: "none" }}>
+                  <Card cat="Your first project" title="Starting point" desc="Fork a proven recipe, or start from a blank build.">
+                    <RecipePicker recipes={recipes} loading={recipesLoading} value={recipeId} onChange={selectRecipe} />
+                  </Card>
                   <Card cat="Your first project" title="Scope of work" desc="Which parts of the business does this project touch?">
                     <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
                   </Card>
@@ -854,6 +944,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                     <div aria-hidden={!draftId} style={draftId
                       ? { display: "flex", flexDirection: "column", gap: 16 }
                       : { display: "flex", flexDirection: "column", gap: 16, opacity: 0.4, filter: "grayscale(0.5)", pointerEvents: "none", userSelect: "none" }}>
+                  <Card cat="This project" title="Starting point" desc="Fork a proven recipe, or start from a blank build.">
+                    <RecipePicker recipes={recipes} loading={recipesLoading} value={recipeId} onChange={selectRecipe} />
+                  </Card>
                   <Card cat="This project" title="Scope of work" desc="Which parts of the business does this project touch?">
                     <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
                   </Card>

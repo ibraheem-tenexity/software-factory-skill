@@ -31,6 +31,7 @@ from .project_view import INPUT_ONLY_KINDS
 from .runtime_agents import AgentRegistry
 from .input_pipeline import persist_and_compose
 from .pdf_extract import extract_to_markdown
+from .recipes.store import RecipeStore
 from . import deps as deps_mod
 from .mcp_health import check_mcp
 from .projectstate import ProjectState
@@ -40,7 +41,7 @@ from .repositories._exec import PathExec
 from .repositories.canvas import ProjectStateRepository, PhaseRepository, BlockerRepository, ArtifactRepository
 from .repositories.runtime_agents import AgentRepository
 from .tickets import TicketStore
-from .workspace_setup import prepare_workspace, tool_env_overrides, write_agent_file
+from .workspace_setup import prepare_workspace, tool_env_overrides, write_agent_file, RecipeSeedError
 from .log import get_logger
 
 logger = get_logger(__name__)
@@ -1249,9 +1250,20 @@ class Console:
             logger.debug("[launch] %s prompt-override lookup failed — using on-disk default",
                          project_id, exc_info=True)
             override = None
-        ws = prepare_workspace(
-            self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
-        )
+        # CBT-9: a picked recipe seeds the workspace (build tree at stage 3, AGENTS.md context at
+        # stages 1-2) + the fork-and-extend SKILL block. A seed clone failure is an honest launch
+        # refusal (the git error recorded as a blocker), same shape as the hard-gated MCP check below.
+        recipe = RecipeStore().get(state.recipe_id) if state.recipe_id else None
+        try:
+            ws = prepare_workspace(
+                self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
+                recipe=recipe,
+            )
+        except RecipeSeedError as e:
+            logger.warning("[launch] %s stage %s refused — recipe seed clone failed: %s",
+                           project_id, stage, e)
+            ProjectStore(paths["db"]).add_blocker(f"Recipe seed: {e}", blocks="recipe")
+            return None
         for callsign, row in agent_rows:
             try:
                 write_agent_file(ws, callsign, row)
@@ -1391,14 +1403,23 @@ class Console:
         # SOF-96: selected scope genres' recipe bodies (SOF-108, sow rows with status='Template')
         # reach Stage 1 as their own input file — until now genre recipes only fed the Concierge's
         # onboarding chat context, never the product-synthesis phase itself.
-        from .services.conversation import _genre_recipes
-        recipes = _genre_recipes(self._load_state(project_id).scope)
-        recipes_md = "\n\n".join(f"## {r['title']}\n\n{r['body']}" for r in recipes) if recipes else ""
+        # CBT-9: a picked recipe's body IS the Stage-1 baseline input (written as recipe.md) — it
+        # replaces the genre-recipes path entirely for this run (mirrors the concierge-context swap
+        # in services/conversation.py).
+        recipe_id = self._load_state(project_id).recipe_id
+        recipe_md = RecipeStore().body(recipe_id) if recipe_id else None
+        if recipe_md:
+            recipes_md = ""
+        else:
+            from .services.conversation import _genre_recipes
+            recipes = _genre_recipes(self._load_state(project_id).scope)
+            recipes_md = "\n\n".join(f"## {r['title']}\n\n{r['body']}" for r in recipes) if recipes else ""
         written = persist_and_compose(
             paths["input_dir"], req.description, req.context_files or [],
             extract=self._extract, interview_md=interview_md,
             product_brief_md=brief_block or None,
             genre_recipes_md=recipes_md or None,
+            recipe_md=recipe_md,
         )
         input_db = ProjectStore(paths["db"])
         for name in written:
@@ -1566,14 +1587,17 @@ class Console:
         rehydrate it or the Continue gate can never be satisfied again after leaving the page."""
         state = self._load_state(project_id)
         return {"name": state.name, "goal": state.goal or "", "scope": list(state.scope or []),
-                "description": state.description or "", "budget": state.budget_ceiling}
+                "description": state.description or "", "budget": state.budget_ceiling,
+                "recipe_id": state.recipe_id or ""}
 
     def set_draft_project(self, project_id: str, name: str | None = None,
                           goal: str | None = None, scope: list | None = None,
-                          runtime: str | None = None, model: str | None = None) -> dict:
+                          runtime: str | None = None, model: str | None = None,
+                          recipe_id: str | None = None) -> dict:
         """Structured project setter for the Option C onboarding (draft phase). Writes the project
-        name, the plain goal (state.goal), the scope-of-work backing, and the build-engine runtime
-        (claude|opencode) — then RECOMPOSES the canonical description = compose(goal, scope)
+        name, the plain goal (state.goal), the scope-of-work backing, the build-engine runtime
+        (claude|opencode), and the picked recipe (CBT-9; caller has already validated it names a
+        published recipe) — then RECOMPOSES the canonical description = compose(goal, scope)
         server-side, so the form and the concierge agent never duplicate the format. Each field is
         optional; goal and scope recompose against each other's persisted value so independent
         calls stay idempotent.
@@ -1585,6 +1609,8 @@ class Console:
             state.runtime = runtime
         if model is not None:
             state.opencode_model = model if model in _OPENCODE_MODEL_IDS else ""
+        if recipe_id is not None:
+            state.recipe_id = recipe_id
         if goal is not None:
             state.goal = goal
         if scope is not None:
@@ -1597,7 +1623,7 @@ class Console:
             state.description = _compose_description(eff_goal, eff_scope)
         state.save()
         return {"name": state.name, "goal": state.goal or "", "scope": list(state.scope or []),
-                "description": state.description or ""}
+                "description": state.description or "", "recipe_id": state.recipe_id or ""}
 
     def store_draft_creds(self, project_id: str, credentials: dict) -> dict:
         """Vault-store BYOK credentials against a draft and record the vault UUIDs in state.

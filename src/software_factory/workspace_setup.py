@@ -11,6 +11,8 @@ import json
 import logging
 import os
 import shutil
+import subprocess
+import tempfile
 
 from . import workspace
 
@@ -242,6 +244,25 @@ def write_agent_file(ws: str, callsign: str, row: dict) -> None:
         f.write(frontmatter + (row.get("prompt") or ""))
 
 
+class RecipeSeedError(Exception):
+    """Raised with the real git error when a recipe's seed repo can't be cloned at launch time."""
+
+
+# Names the stage-3 seed flatten must never overwrite/shadow — .mcp.json feeds the MCP hard-gate
+# above; SKILL.md already carries this stage's contract (incl. the fork-and-extend block); phases/
+# and context/ are the factory's own prior-stage-artifact dirs; .claude/ is the factory's own
+# settings dir. A seed entry with one of these names is skipped during the flatten, never moved.
+_RESERVED_WORKSPACE_NAMES = {".mcp.json", "SKILL.md", "phases", "context", ".claude"}
+
+
+def _clone_recipe_seed(repo_url: str, dest: str) -> None:
+    r = subprocess.run(["git", "clone", "--depth", "1", repo_url, dest],
+                       capture_output=True, text=True, timeout=180)
+    if r.returncode != 0:
+        raise RecipeSeedError(
+            f"could not clone recipe seed {repo_url}: {(r.stderr or r.stdout).strip()[-500:]}")
+
+
 def prepare_workspace(
     projects_dir: str,
     project_id: str,
@@ -250,6 +271,7 @@ def prepare_workspace(
     phase_dir: str | None = None,
     runtime: str = "claude",
     skill_override: str | None = None,
+    recipe: dict | None = None,
 ) -> str:
     ws = workspace.create(projects_dir, project_id)
 
@@ -282,6 +304,59 @@ def prepare_workspace(
                 src_skill = oc_skill
         if os.path.isfile(src_skill):
             shutil.copy2(src_skill, os.path.join(ws, "SKILL.md"))
+
+    # CBT-9: fork-and-extend. Prompt-delivered judgment, deliberately unverified by code — there
+    # is no "did it really fork" checker; the existing deploy/happy-flow/QA gates are the only
+    # proof a recipe build worked. Never scaffold from scratch when a recipe is selected.
+    if recipe and recipe.get("repo_url"):
+        repo_url = recipe["repo_url"]
+        if stage == 3:
+            note = "Its working tree is already in this workspace."
+        else:
+            note = ("Its AGENTS.md is included as context (context/recipe-AGENTS.md) — read it "
+                    "before framing the plan so tickets target real extension points.")
+        block = (f"\n\n## RECIPE BUILD — {recipe['name']}\n"
+                f"This app is FORKED from the recipe repository ({repo_url}). {note} "
+                f"Read its AGENTS.md first; keep its architecture and conventions; implement the "
+                f"tickets as extensions and modifications of this codebase. Never scaffold a new "
+                f"app from scratch.\n")
+        with open(os.path.join(ws, "SKILL.md"), "a") as f:
+            f.write(block)
+
+        if stage == 3:
+            # Idempotent across retries: validation guarantees AGENTS.md OR CLAUDE.md at the seed
+            # root, so either one already present at ws root means this stage's seed placement
+            # already ran — re-cloning+flattening onto an already-populated root would nest the
+            # seed tree inside itself.
+            if not (os.path.exists(os.path.join(ws, "AGENTS.md"))
+                    or os.path.exists(os.path.join(ws, "CLAUDE.md"))):
+                seed_dir = os.path.join(ws, "seed")
+                _clone_recipe_seed(repo_url, seed_dir)
+                # Never let the seed overwrite/shadow factory control files the workspace already
+                # depends on (.mcp.json in particular feeds the MCP hard-gate above) — skip these
+                # names during the flatten and say so in the SKILL.md block, rather than silently
+                # dropping or refusing the whole build over it.
+                skipped = []
+                for name in os.listdir(seed_dir):
+                    if name == ".git":
+                        continue
+                    if name in _RESERVED_WORKSPACE_NAMES:
+                        skipped.append(name)
+                        continue
+                    shutil.move(os.path.join(seed_dir, name), os.path.join(ws, name))
+                shutil.rmtree(seed_dir, ignore_errors=True)  # drop seed history; the factory pushes its own repo
+                if skipped:
+                    with open(os.path.join(ws, "SKILL.md"), "a") as f:
+                        f.write(f"\nSeed's {', '.join(sorted(skipped))} not imported — "
+                                f"factory-reserved.\n")
+        else:
+            with tempfile.TemporaryDirectory() as tmp:
+                _clone_recipe_seed(repo_url, tmp)
+                agents_src = os.path.join(tmp, "AGENTS.md")
+                if os.path.isfile(agents_src):
+                    ctx_dir = os.path.join(ws, "context")
+                    os.makedirs(ctx_dir, exist_ok=True)
+                    shutil.copy2(agents_src, os.path.join(ctx_dir, "recipe-AGENTS.md"))
 
     src_phases = phase_dir or PHASE_DIR
     if os.path.isdir(src_phases):
