@@ -332,6 +332,46 @@ def _land_artifacts(org_id: str) -> None:
     shutil.rmtree(clone_dir, ignore_errors=True)
 
 
+def sweep_orphaned_discovery_runs() -> list[str]:
+    """SOF-208 boot-time sweep. `start()`/`status()` already reap an orphan lazily on the NEXT org
+    interaction (SOF-205/#391) — but an org nobody interacts with again is never swept, and the
+    `claude -p` child it left behind keeps running with no budget watcher, uncapped. Call once at
+    boot (console/poller.py::_boot()). Mirrors `reap_completed_zombie`'s posture: kill machinery
+    only for money/lifecycle, small and bounded, no DB state — a pure filesystem scan of
+    `_SCRATCH_ROOT`'s per-org pid breadcrumbs, reusing the exact same helpers the lazy path uses so
+    the two can't diverge.
+
+    For each org with a pid breadcrumb: a still-live process whose cwd anchors to that org's clone
+    dir is reaped (SIGTERM->SIGKILL) and logged. Anything else — pid file missing/unreadable, pid
+    dead, or cwd mismatch (a recycled pid) — is just a stale breadcrumb: delete it, no other
+    action. Returns the org_ids actually reaped (for the caller's boot-log summary)."""
+    reaped: list[str] = []
+    try:
+        org_ids = os.listdir(_SCRATCH_ROOT)
+    except OSError:
+        return reaped  # scratch root doesn't exist yet (no discovery run has ever happened)
+    for org_id in org_ids:
+        pid_path = _pid_path(org_id)
+        if not os.path.exists(pid_path):
+            continue  # no breadcrumb for this org — nothing to do
+        pid = _read_pid_file(org_id)
+        try:
+            if pid is not None and _is_orphaned_agent(org_id, pid):
+                _reap_orphan(pid)
+                logger.info(
+                    "[discovery-sweep] org %s: reaped an orphaned agent (pid %s) left running "
+                    "uncapped by a prior console restart", org_id, pid)
+                reaped.append(org_id)
+        except Exception:
+            logger.exception("[discovery-sweep] org %s: reap attempt failed", org_id)
+        finally:
+            try:
+                os.remove(pid_path)
+            except OSError:
+                pass  # already gone
+    return reaped
+
+
 def status(org_id: str) -> dict:
     """A projection of live state — never stored: is the process alive, what the log says so
     far, what's landed in the KB, and what this run has spent.
