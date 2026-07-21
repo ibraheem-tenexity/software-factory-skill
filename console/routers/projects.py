@@ -90,6 +90,14 @@ def project_tickets(pid: str, v: tuple = Depends(authorize_project)):
     return state.console.tickets(pid)
 
 
+@router.get("/api/projects/{pid}/deployments")
+def project_deployments(pid: str, v: tuple = Depends(authorize_project)):
+    """Per-deliverable deploy state (a run ships 1..N apps; no scalar run-level deploy_url). SOF-216:
+    the route delegating to Console.deployments was dropped in the app.py→routers split, leaving the
+    method orphaned; this restores it (thin transport, same authorize_project guard as the siblings)."""
+    return state.console.deployments(pid)
+
+
 @router.get("/api/projects/{pid}/brief")
 def project_brief(pid: str, v: tuple = Depends(authorize_project)):
     """The concierge-finalized product brief — markdown (null until the concierge records the
