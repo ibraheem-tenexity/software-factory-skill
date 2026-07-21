@@ -9,7 +9,8 @@ drive and watch it.
 **Sources and diagrams:** [`src/software_factory/models.py`](../src/software_factory/models.py) is the
 schema source of truth. [`schema-erd.dot`](schema-erd.dot), [`schema-erd.svg`](schema-erd.svg), and
 [`schema-erd.md`](schema-erd.md) are synchronized schema references. [`service-architecture.svg`](service-architecture.svg)
-is the manually maintained service/storage topology.
+is the manually maintained service/storage topology. [`STRUCTURE.md`](STRUCTURE.md) is the canonical
+target for backend package organization and the behavior-preserving refactor program.
 
 ---
 

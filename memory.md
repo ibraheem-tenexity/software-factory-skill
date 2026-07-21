@@ -340,3 +340,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. src/software_factory/creds.py (retry + transient/terminal classify, capture stderr); skills/stage-1-research/SKILL.md + SKILL.opencode.md (record check.blocks category, not hardcoded 'credential').
 3. check_gh/check_railway retry a non-definitive failure (3 attempts, 1s/2s backoff); a surviving 5xx/network signal → resumable 'transient' blocker (auto-resume relaunches), only a real auth reject (401/403/Bad credentials) → non-resumable 'credential' (SOF-148 preserved).
 4. Summary: creds.py compiles; verified via injected-runner driver (10 cases incl. simulated 5xx + auth-reject + the exact incident) — all pass; poller credential_stopped is category-keyed so 'transient' correctly auto-resumes.
+
+# Codex Update at Time: 20:07:2026:20:03:35.000
+1. Recorded the approved backend structure direction: bounded-context modular monolith.
+2. CLAUDE.md and docs/{ARCHITECTURE,STRUCTURE}.md on agent/structure-direction-20260720.
+3. The policy applies to parallel work: feature ownership over generic layers, no pass-through files, preserve behavior, and keep migrations/vendor tooling isolated.
+4. Summary: source-backed audit covered 153 non-test Python files; refactor plan follows this decision record.
