@@ -91,6 +91,10 @@ def cost_components(text: str, prices: dict | None = None) -> tuple[float, float
             tail[sid] = tail.get(sid, 0.0) + (
                 usage.get("input_tokens", 0) * rate["input"]
                 + usage.get("cache_read_input_tokens", 0) * rate["cached"]
+                # SOF-218: a cache-write-heavy in-flight session undershoots without this term —
+                # the authoritative `result.total_cost_usd` above already bills it correctly, only
+                # the pre-result token estimate was missing it.
+                + usage.get("cache_creation_input_tokens", 0) * rate.get("cache_write", rate["input"])
                 + usage.get("output_tokens", 0) * rate["output"]
             )
     return round(sum(finished.values()), 6), round(sum(tail.values()), 6)
