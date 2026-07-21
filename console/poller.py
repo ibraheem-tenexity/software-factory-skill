@@ -389,13 +389,16 @@ def _boot():
         print("[warn] no OPENAI_API_KEY or OPENROUTER_API_KEY — chat agent disabled, API-only mode")
     # Quarantine debris under projects_dir: agents misusing db verbs once created dirs like
     # "build-plan.md/project store" on the volume — moved aside (never deleted), so discovery and
-    # the boot backfill only ever see real runs.
+    # the boot backfill only ever see real runs. `_org` is a second sanctioned non-project entry
+    # (ingestion's codebase-discovery scratch, CBT-6 — org-level clones/logs live under
+    # PROJECTS_DIR/_org/<org_id>/, the same writable volume the project runs use) — exempted by
+    # name exactly like `_quarantine` itself, so a boot/redeploy never sweeps a live discovery run.
     try:
         from software_factory.constants import PROJECT_ID_RE
         qdir = os.path.join(state.PROJECTS_DIR, "_quarantine")
         for name in os.listdir(state.PROJECTS_DIR):
             p = os.path.join(state.PROJECTS_DIR, name)
-            if os.path.isdir(p) and name != "_quarantine" and not PROJECT_ID_RE.fullmatch(name):
+            if os.path.isdir(p) and name not in ("_quarantine", "_org") and not PROJECT_ID_RE.fullmatch(name):
                 os.makedirs(qdir, exist_ok=True)
                 os.rename(p, os.path.join(qdir, f"{name}.{int(time.time())}"))
                 print(f"[janitor] quarantined {name}", flush=True)
