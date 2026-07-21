@@ -117,8 +117,20 @@ function FileTile({ d, onDelete, onSave }: { d: OrgDoc; onDelete?: () => void; o
   );
 }
 
+function readInitialSection(): Section {
+  const s = new URLSearchParams(location.search).get("section");
+  return SECTIONS.some((x) => x.id === s) ? (s as Section) : "profile";
+}
+
 export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
-  const [sec, setSec] = useState<Section>("profile");
+  const [sec, setSec] = useState<Section>(readInitialSection());
+  // Sync sec → ?section= (SOF-220) so reloading on a specific admin tab (Team, Knowledge base, …)
+  // stays on that tab instead of resetting to Company profile.
+  useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    if (sec !== "profile") p.set("section", sec); else p.delete("section");
+    history.replaceState(null, "", "?" + p.toString());
+  }, [sec]);
   const [org, setOrg] = useState<Org | null>(null);
   const me = useMe();
   const [members, setMembers] = useState<Member[]>([]);
