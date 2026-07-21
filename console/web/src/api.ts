@@ -139,6 +139,10 @@ export type RecipeLight = {
   capabilities: string[]; images: { url: string; public: boolean }[];
 };
 
+// Codebase discovery (CBT-6/7) — status is a projection of the live run, not stored state.
+export type DiscoveryArtifact = { name: string; blob_id: number; updated: number };
+export type DiscoveryStatus = { running: boolean; log_tail: string; artifacts: DiscoveryArtifact[]; spent_usd: number };
+
 // Public boot config the SPA reads to decide whether to gate on login (auth on) or open
 // straight to the console (auth off, dev/test). client_id feeds the Google sign-in button.
 export type AuthConfig = { enabled: boolean; client_id: string };
@@ -483,6 +487,9 @@ export const api = {
   updateMember: (email: string, body: { role?: string; designation?: string }) => send<{ members?: Member[] }>(`/api/org/members/${encodeURIComponent(email)}`, "PATCH", body),
   removeMember: (email: string) => send<{ ok?: boolean }>(`/api/org/members/${encodeURIComponent(email)}`, "DELETE"),
   orgDocs: () => get<{ docs: OrgDoc[] }>("/api/org/docs"),
+  orgDocContent: (id: number) => get<{ content: string | null }>(`/api/org/docs/${id}/content`),
+  startDiscovery: (body: { repo_url: string; pat_secret?: string }) => send<DiscoveryStatus>("/api/org/discovery", "POST", body),
+  discoveryStatus: () => get<DiscoveryStatus>("/api/org/discovery"),
   orgUsage: () => get<OrgUsage>("/api/org/usage"),
   patchBilling: (body: { plan?: string; monthly_budget_cap?: number }) => send<OrgUsage>("/api/org/billing", "PATCH", body),
   listSecrets: () => get<{ secrets: OrgSecret[] }>("/api/org/secrets"),

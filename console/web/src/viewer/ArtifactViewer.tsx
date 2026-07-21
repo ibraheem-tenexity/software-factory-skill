@@ -1,7 +1,8 @@
 // ArtifactViewer.tsx — standalone new-tab artifact viewer.
-// Entry: ArtifactViewer.html?doc=<artifact_id>
-// Fetches GET /api/artifacts/{id} for the main artifact, then
-// GET /api/projects/{project_id}/overview to populate the left rail.
+// Entry: ArtifactViewer.html?doc=<artifact_id> (project artifact; fetches GET /api/artifacts/{id},
+// then GET /api/projects/{project_id}/overview for the left rail) — or ?sow=<sow_id> (Tenexity OS
+// SOW) — or ?blob=<blob_id>&name=<filename> (an org-scope KB blob, e.g. codebase-discovery's
+// generated docs; fetches GET /api/org/docs/{id}/content, no rail).
 import { useEffect, useState } from "react";
 import { api, ApiError, ProjectArtifact } from "../api";
 import { T, Icon } from "../components/onboarding/design";
@@ -140,6 +141,8 @@ export function ArtifactViewer() {
   const params = new URLSearchParams(location.search);
   const docId = params.get("doc");
   const sowId = params.get("sow");
+  const blobId = params.get("blob");
+  const blobName = params.get("name") || "";
 
   const [artifact, setArtifact] = useState<ArtifactDetail | null>(null);
   const [railItems, setRailItems] = useState<ProjectArtifact[]>([]);
@@ -169,7 +172,29 @@ export function ArtifactViewer() {
         .catch((e) => setError(String(e)));
       return;
     }
-    if (!docId) { setError("No doc= or sow= parameter in URL."); return; }
+    if (blobId) {
+      // Org-scope KB blob mode (e.g. codebase-discovery's generated docs) — a different
+      // table/id-space from `artifacts`, no project rail to load, mirrors the sow-mode shape above.
+      api.orgDocContent(Number(blobId))
+        .then((r) => {
+          setArtifact({
+            id: Number(blobId),
+            project_id: `org-doc-${blobId}`,
+            title: blobName || null,
+            kind: "md",
+            path: blobName || `org-doc-${blobId}.md`,
+            content: r.content ?? null,
+            updated: 0,
+            agent: null,
+          });
+        })
+        .catch((e) => {
+          const detail = (e as ApiError)?.detail;
+          setError(typeof detail === "string" && detail ? detail : "This artifact couldn't be loaded.");
+        });
+      return;
+    }
+    if (!docId) { setError("No doc=, sow=, or blob= parameter in URL."); return; }
     api.getArtifact(docId)
       .then((a) => {
         setArtifact(a as ArtifactDetail);
@@ -185,7 +210,7 @@ export function ArtifactViewer() {
         const detail = (e as ApiError)?.detail;
         setError(typeof detail === "string" && detail ? detail : "This artifact couldn't be loaded.");
       });
-  }, [docId, sowId]);
+  }, [docId, sowId, blobId, blobName]);
 
   const displayArtifact = artifact
     ? (override
@@ -199,6 +224,21 @@ export function ArtifactViewer() {
 
   const copyContent = () => {
     if (displayArtifact?.content) navigator.clipboard.writeText(displayArtifact.content).catch(() => {});
+  };
+
+  // Blob mode has no `/api/projects/{project_id}/artifact?path=` to download from (there's no
+  // project) — the download route's own response is `{content}` JSON, not raw bytes, so a plain
+  // `<a href>` to it would save a JSON-wrapped file under the right name but the wrong content.
+  // The content is already in hand (fetched once at load), so build the real file client-side.
+  const downloadBlobContent = () => {
+    if (!displayArtifact?.content) return;
+    const blob = new Blob([displayArtifact.content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = displayArtifact.path.split("/").pop() || "artifact.txt";
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const selectRailItem = async (item: ProjectArtifact) => {
@@ -275,7 +315,14 @@ export function ArtifactViewer() {
               <Icon name="file" size={13} color={T.secondary} /> Copy
             </button>
           )}
-          {activePath && (
+          {activePath && (blobId ? (
+            <button onClick={downloadBlobContent}
+              style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 11px", borderRadius: T.rMd,
+                border: `1px solid ${T.borderSubtle}`, background: T.raised, cursor: "pointer",
+                font: `500 12.5px/1 ${T.sans}`, color: T.fg }}>
+              <Icon name="external" size={13} color={T.secondary} /> Download
+            </button>
+          ) : (
             <a href={activePath.startsWith("http") ? activePath : `/api/projects/${artifact.project_id}/artifact?path=${encodeURIComponent(activePath)}`}
               download={!activePath.startsWith("http")} target="_blank" rel="noreferrer"
               style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 11px", borderRadius: T.rMd,
@@ -283,7 +330,7 @@ export function ArtifactViewer() {
                 font: `500 12.5px/1 ${T.sans}`, color: T.fg, textDecoration: "none" }}>
               <Icon name="external" size={13} color={T.secondary} /> Download
             </a>
-          )}
+          ))}
         </div>
       </header>
 

@@ -49,6 +49,11 @@ class OrgDocPatchIn(BaseModel):
     tag: str | None = None
 
 
+class OrgDiscoveryIn(BaseModel):
+    repo_url: str = ""
+    pat_secret: str | None = None
+
+
 class OrgDocUseIn(BaseModel):
     project_id: str = ""
 
