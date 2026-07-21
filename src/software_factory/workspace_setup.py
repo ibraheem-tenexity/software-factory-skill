@@ -36,7 +36,12 @@ BUILD_SKILL_NAMES = ("tenexity-design",)
 # (RAILWAY_TOKEN, SUPABASE_ACCESS_TOKEN) — verified headless: `railway mcp` exposes project-scoped
 # tools (create_service/deploy/generate_domain/get_logs/set_variables) with a project token, and the
 # supabase server reads SUPABASE_ACCESS_TOKEN from env. ruflo/claude-flow is gone.
-_PLAYWRIGHT = {"command": "npx", "args": ["-y", "@playwright/mcp@latest", "--headless", "--browser", "chromium"]}
+# SOF-209: pinned to match the Dockerfile's globally pre-installed version (SOF-207) — `@latest`
+# floats (a future release could silently change stdio startup/protocol under us) and forces a
+# registry round-trip on every stage-launch. This dict is the FALLBACK ONLY (mcp_config() below
+# reads the `tools` DB table first, which 0030_pin_playwright_mcp_version.py pins the same way);
+# this only matters if that table read itself fails.
+_PLAYWRIGHT = {"command": "npx", "args": ["-y", "@playwright/mcp@0.0.78", "--headless", "--browser", "chromium"]}
 _RAILWAY = {"command": "railway", "args": ["mcp"]}
 # Exa web-search — a REMOTE (HTTP) MCP, not a local command server. Wired into EVERY stage so any
 # stage agent can search the web when useful. The key is env-var'd (${EXA_API_KEY}, resolved at MCP
