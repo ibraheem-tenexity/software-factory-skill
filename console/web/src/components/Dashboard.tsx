@@ -277,10 +277,19 @@ export function Dashboard({ onOpen, onNew, onOrg }: { onOpen: (id: string) => vo
   useEffect(() => {
     setLoading(true);
     loadProjects().finally(() => setLoading(false));
-    api.getOrg().then((d) => setOrg(d.org)).catch(() => setOrg(null));
-    // counts for the org-preview card (Knowledge base · Team) — real org endpoints, degrade to —
-    api.orgDocs().then((d) => setDocCount(d.docs?.length ?? 0)).catch(() => setDocCount(null));
-    api.orgMembers().then((d) => setMemberCount(d.members?.length ?? 0)).catch(() => setMemberCount(null));
+    api.getOrg().then((d) => {
+      setOrg(d.org);
+      // SOF-214: org/docs and org/members are org-scoped (404 with no org on file) — only
+      // fetch the org-preview card's counts once an org actually exists, instead of firing
+      // them unconditionally and hitting a 404 on every load for a user with no org yet.
+      if (d.org) {
+        api.orgDocs().then((dd) => setDocCount(dd.docs?.length ?? 0)).catch(() => setDocCount(null));
+        api.orgMembers().then((dd) => setMemberCount(dd.members?.length ?? 0)).catch(() => setMemberCount(null));
+      } else {
+        setDocCount(null);
+        setMemberCount(null);
+      }
+    }).catch(() => setOrg(null));
   }, []);
 
   // Project CRUD — refetch on success.
