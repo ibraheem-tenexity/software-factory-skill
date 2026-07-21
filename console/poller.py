@@ -31,7 +31,20 @@ _log_offsets: dict = {}  # pid -> bytes uploaded on last log flush
 # not an in-process dict — a console restart (redeploy/OOM) must not hand out a fresh set of "free"
 # resumes, or a run can retry forever across restarts without ever reaching mark_stage_crashed
 # (the only path that notifies the operator).
-_AUTO_RESUME_MAX = int(os.environ.get("SF_AUTO_RESUME_MAX", "2") or 2)
+#
+# SOF-217: read FRESH every tick (a function, not a module-level constant frozen at import) —
+# console.py's own auto_resume_dead_stage() reads this SAME env var fresh on every call. A frozen
+# import-time constant here assumed "a Railway env change always restarts the process" (see the
+# _SILENCE_* comment below) — if that assumption is ever wrong for a given deploy/runtime, poller
+# and console would silently disagree on the cap: e.g. poller still thinks resumes_so_far < a
+# STALE higher max (so it keeps calling auto_resume_dead_stage — which internally refuses via its
+# own FRESH, lower cap) and the `elif resumes_so_far >= _AUTO_RESUME_MAX` branch that calls
+# mark_stage_crashed() is never reached at all — a silent, permanent wedge, never a crash, never a
+# resume, matching exactly what was observed live (project-414784ebacee4dca sat in phase=research
+# with auto_resume_count pinned at the cap for 45+ minutes, no crash-park, no blocker). Reading
+# fresh here closes that whole risk class regardless of whether it was the exact trigger.
+def _auto_resume_max() -> int:
+    return int(os.environ.get("SF_AUTO_RESUME_MAX", "2") or 2)
 _health_bad_since = [None]  # [-]: None = healthy; float = first failure ts (alert once)
 # SOF-164: output-silence classification bands (seconds), env-tunable. Coherent with the existing
 # scales — 300s = stage_finished's opencode idle grace (past normal streaming-quiet); 900s sits
@@ -319,17 +332,18 @@ def _poll_transitions():
                     # SOF-116: read the PERSISTED count (state.auto_resume_count via status()),
                     # not an in-process dict — survives console restarts.
                     resumes_so_far = st.get("auto_resume_count", 0)
-                    if not st.get("done") and resumes_so_far < _AUTO_RESUME_MAX:
+                    auto_resume_max = _auto_resume_max()  # SOF-217: fresh, matches console.py
+                    if not st.get("done") and resumes_so_far < auto_resume_max:
                         if console.auto_resume_dead_stage(pid):
                             n = console.status(pid).get("auto_resume_count", resumes_so_far + 1)
                             _narrate(pid, "resume-%d" % n,
                                      "⚠️ Stage process died mid-flight — auto-resumed "
-                                     f"(attempt {n}/{_AUTO_RESUME_MAX}).")
-                    elif not st.get("done") and resumes_so_far >= _AUTO_RESUME_MAX:
+                                     f"(attempt {n}/{auto_resume_max}).")
+                    elif not st.get("done") and resumes_so_far >= auto_resume_max:
                         # Auto-resume cap exhausted — land in 'crashed' for Recovery-bar resume.
                         if console.mark_stage_crashed(pid):
                             _narrate(pid, "crashed-final",
-                                     f"⛔ Stage crashed after {_AUTO_RESUME_MAX} auto-resume "
+                                     f"⛔ Stage crashed after {auto_resume_max} auto-resume "
                                      "attempts — paused for operator (use Resume to continue).")
                     # SOF-163: catches a single ticket orphaned WHILE the stage is still alive —
                     # distinct from the whole-stage recovery above, which only fires once the
