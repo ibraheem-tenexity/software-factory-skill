@@ -262,6 +262,14 @@ digraph SchemaERD {
       <tr><td align="left">by_stage, detail, scored_at</td></tr>
     </table>>];
 
+  recipes [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#fef9c3" port="t"><b>recipes</b></td></tr>
+      <tr><td align="left"><b>PK</b> id; <b>UQ</b> name</td></tr>
+      <tr><td align="left">tagline, category, capabilities, body_md</td></tr>
+      <tr><td align="left">repo_url, images, status, timestamps</td></tr>
+    </table>>];
+
   // ---- relationships ------------------------------------------------------------------
   // every per-project table references the project (projectstate.project_id)
   projectstate:t -> phases:t;

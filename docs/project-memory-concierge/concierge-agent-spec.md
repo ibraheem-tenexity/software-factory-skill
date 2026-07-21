@@ -23,7 +23,7 @@ The current `chat_agent.py` is built on the **OpenAI Agents SDK** (`Agent(...)` 
 Concierge = System Prompt  +  LangChain agent  +  Tools
 ```
 
-1. **System prompt** — one editable prompt (kept in `agent_prompts` under the `CONCIERGE` key, with the existing 60s-TTL operator-override cache so a Tenexity OS edit drives the next session). It carries the identity/voice (spec Principle 2), the "one question per turn" style, and a **context** framing (`intake` | `overview` | `build` | `docs` | `ingesting`) passed in per session so the *same* agent changes focus without changing identity.
+1. **System prompt** — one editable prompt (as shipped, kept in `system_agents` under the `callsign='CONCIERGE'` row — `prompt`/`model_id` columns — with the 60s-TTL operator-override cache so a Tenexity OS edit drives the next session). It carries the identity/voice (spec Principle 2), the "one question per turn" style, and a **context** framing (`intake` | `overview` | `build` | `docs` | `ingesting`) passed in per session so the *same* agent changes focus without changing identity.
 2. **LangChain agent** — a single tool-calling agent (LangGraph `create_react_agent`-style loop, or `AgentExecutor`): bind the model (via OpenRouter/OpenAI, using the project's chosen engine), bind the tools, run the reason→act→observe loop until it produces a final answer. No multi-agent graphs, no chains-of-chains, no memory abstractions — the loop and nothing more.
 3. **Tools** — plain functions the agent may call. Empty is a valid starting state. Every tool must hit a real, working backend or it doesn't get bound.
 

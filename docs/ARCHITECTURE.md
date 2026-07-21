@@ -7,8 +7,8 @@ deployed, browser-verified demo app — research → design → build → deploy
 drive and watch it.
 
 **Sources and diagrams:** [`src/software_factory/models.py`](../src/software_factory/models.py) is the
-schema source of truth. [`schema-erd.dot`](schema-erd.dot), [`schema-erd.svg`](schema-erd.svg), and
-[`schema-erd.md`](schema-erd.md) are synchronized schema references. [`service-architecture.svg`](service-architecture.svg)
+schema source of truth. [`schema-erd.svg`](schema-erd.svg) is the authoritative schema diagram
+(generated from [`schema-erd.dot`](schema-erd.dot) via `dot -Tsvg`). [`service-architecture.svg`](service-architecture.svg)
 is the manually maintained service/storage topology. [`STRUCTURE.md`](STRUCTURE.md) is the canonical
 target for backend package organization and the behavior-preserving refactor program.
 
@@ -153,7 +153,7 @@ runtime-agnostic.
 
 **Project STATE → Postgres** — **one flat `public` schema** (Supabase **`software-factory-as-a-skill`**,
 Tenexity org — cut over from the old personal-org `software-factory-state`; full detail in
-[`schema-erd.md`](schema-erd.md)). Schema-per-run is gone; every per-project table carries a
+[`schema-erd.svg`](schema-erd.svg)). Schema-per-run is gone; every per-project table carries a
 `project_id` column. SQLAlchemy `models.py` is the current table definition; production upgrades use
 the frozen Alembic DDL chain, while test databases use `metadata.create_all`. Changes require an explicit
 parity review because those two schema construction paths can drift.
@@ -236,7 +236,7 @@ parity review because those two schema construction paths can drift.
   material artifacts, but `is_pipeline_project` excludes it solely by phase until `promote_draft` launches Stage 1.
 - **Multi-deliverable:** a project ships **1..N deliverables**; per-app deploy/verify state lives in the
   `deployments` table (no scalar project-level `deploy_url`). Source-of-truth ERD:
-  [`schema-erd.svg`](schema-erd.svg) (detail in [`schema-erd.md`](schema-erd.md)).
+  [`schema-erd.svg`](schema-erd.svg).
 
 **Persistent and file surfaces:**
 - **Postgres:** project state/canvas/tickets/agent telemetry, conversation turns, artifact Markdown in

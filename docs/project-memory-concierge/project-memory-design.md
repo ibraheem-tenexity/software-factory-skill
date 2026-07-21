@@ -4,7 +4,16 @@
 **Scope:** The per-project knowledge layer that ingests user-uploaded documents and project context, then exposes it to Software Factory agents through hybrid search and a hierarchical summary tree. Backed by Supabase Postgres + pgvector.
 
 
-> **Scope note (read first):** this is the *target* conceptual design. What P0 actually ships uses the sparse slot as Postgres `tsvector` (dense + keyword, fused with RRF); `sparsevec`/SPLADE learned-sparse is a **deferred** upgrade. For the shipping stack see `project-memory-stack-2026.md` and `software-factory-build-plan.md`.
+> **Scope note (read first):** this is the *target* conceptual design and is kept as the historical
+> north star — **the §3 schema below is NOT what shipped.** For the authoritative shipped schema see
+> `src/software_factory/models.py`. Key deltas as built: memory rides the existing `blobs` table
+> (no standalone `document`/`project_brief`/`memory_note` tables — the brief lives in
+> `projectstate.data`, notes become `chunk` rows); embedding columns are `halfvec(3072)` (not
+> `vector(1024)`); the summary field is `assumptions` (not `key_facts`); the sparse channel is
+> Postgres `tsvector` only (no `sparsevec`/SPLADE column — a **deferred** upgrade); and the MCP
+> exposes 7 tools (adds `search_document_summaries`, SOF-60). Only §7/§8 (tool surface + app-layer
+> isolation) remain accurate to the code. For the shipping stack see `project-memory-stack-2026.md`,
+> `project-memory-integration.md`, and `software-factory-build-plan.md`.
 
 ---
 
