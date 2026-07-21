@@ -390,6 +390,22 @@ sow = Table(
     ),
 )
 
+recipes = Table(
+    "recipes", metadata,
+    Column("id", _UUID, primary_key=True, server_default=text("gen_random_uuid()")),
+    Column("name", Text, nullable=False, unique=True),
+    Column("tagline", Text),
+    Column("category", Text),
+    Column("capabilities", JSONB, server_default=text("'[]'::jsonb")),  # customer-facing bullets
+    Column("body_md", Text),          # recipe text — concierge/brief input
+    Column("repo_url", Text),         # build-seed repo (nullable until connected)
+    Column("images", JSONB, server_default=text("'[]'::jsonb")),  # [{url, public: bool}]
+    Column("status", Text, nullable=False, server_default=text("'draft'")),
+    Column("created_at", DateTime(timezone=True), server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()),
+    CheckConstraint("status IN ('draft','published','archived')", name="recipes_status_check"),
+)
+
 checkpoint = Table(
     "checkpoint", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
@@ -492,7 +508,7 @@ eval_scores = Table(
 PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
 FLAT_TABLES = PROJECTDB + (tickets, runtime_agents, checkpoint)
 GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
-                 system_agents, tools, sow,
+                 system_agents, tools, sow, recipes,
                  doc_summary, chunk, conversation, org_secrets,
                  autopsy_processed_runs, autopsy_signatures, eval_scores, recovery_actions)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES
