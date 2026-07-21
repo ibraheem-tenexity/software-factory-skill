@@ -3,6 +3,15 @@
 **Date:** 2026-06-30 · **Owner:** Ibraheem · **Source of truth for status:** Linear project *Software Factory* (team SOF).
 **Grounds:** `docs/product-spec-software-factory.md`, `docs/ARCHITECTURE.md`, repo `main` @ `ded31ad`, and the design set (`project-memory-design.md`, `project-memory-stack-2026.md`, `project-memory-integration.md`, `concierge-conversation-store.md`).
 
+> **Status: fully executed — kept as a record of intent.** This is a point-in-time milestone plan;
+> its internal `T*.*` ids predate the Linear SOF-xx numbers now in the code. The phase structure,
+> acceptance criteria, and every "Locked decision" shipped. Read the plan's file/schema targets
+> against the code, not literally — deltas as built: `agent_prompts.py` → `system_agents` +
+> `default_prompt.py`; `key_facts` → `assumptions`; `Vector(1024)` → `halfvec(3072)` (via a later
+> `0014_memory_halfvec3072` migration not in this plan); `SF_CONVERSATION_DB` is retired
+> (`DbConversation` is now unconditional). Authoritative current state: `src/software_factory/models.py`,
+> `src/software_factory/memory/`, `console/chat_persistence.py`.
+
 ---
 
 ## 1. What we're building now (one paragraph)
@@ -143,7 +152,7 @@ The two tracks (Conversation/Concierge and Memory/ingestion) parallelize after P
 
 ## 5. Cross-cutting requirements (apply to every ticket)
 
-- **No drift:** `models.py` is the only table definition; every schema change is an Alembic revision *and* builds under `create_all` in tests; touching schema means updating `docs/ARCHITECTURE.md` + `docs/schema-erd.{md,svg}` (CLAUDE.md §6).
+- **No drift:** `models.py` is the only table definition; every schema change is an Alembic revision *and* builds under `create_all` in tests; touching schema means updating `docs/ARCHITECTURE.md` + `docs/schema-erd.svg` (regenerated from `docs/schema-erd.dot`) (CLAUDE.md §6).
 - **Feature-flagged rollout:** `SF_MEMORY` and `SF_CONVERSATION_DB` gate the new paths (mirror `notify`/`storage` env-gating) so `main` stays shippable and tests stay hermetic.
 - **Cost & telemetry:** assistant/ingestion turns record `model`/`provider`/tokens/`cost_usd`; reconcile with the `agents` ledger and Langfuse traces.
 - **Security invariants:** agents hold no DB credential; memory reached only via the scope-scoped MCP; app-layer `authorize_project` on every route.

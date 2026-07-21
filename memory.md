@@ -316,3 +316,39 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/components/factory/{FactoryConsole,Concierge,Artifacts,NodeMap,StageRail,WaitForDeps,BuildBoard}.tsx, factory/pipeline.ts, onboarding/design.tsx, App.tsx, api.ts (Ticket.confidence optional). Branch sof-68-console-design.
 3. All data stays real (graph/tickets/events/status props; synthesized concierge bubbles derive from them); no backend changes; tokens from T except design-specified constants kept verbatim (KIND_BADGE repo/fig pairs, nodemap orchestrator ink + artifact purple).
 4. Summary: tsc -b and vite build clean; FE-only; PR to main opened from sof-68-console-design.
+
+# Codex Update at Time: 14:07:2026:23:48:49.927
+1. Implemented SOF-180 graph artifact previews: selecting a graph artifact now opens a compact rendered preview with an explicit route to the existing full artifact viewer.
+2. console/web/src/components/factory/{NodeMap,FactoryConsole,Artifacts}.tsx on branch agent/sof-180-artifact-preview.
+3. This preserves the established full-viewer behavior while allowing operators to inspect an artifact without leaving the map.
+4. Summary: artifact-node taps resolve the same artifact reference as before; local artifacts load their content in the preview; external artifacts retain an open-source control.
+
+# Codex Update at Time: 15:07:2026:01:20:40.540
+1. Started SOF-179 and SOF-181: added independent Kanban column scrolling plus intake drag-and-drop and material removal with downstream cleanup.
+2. console/web/src/components/{factory/BuildBoard,onboarding/{OnboardingScreen,design},project/DocumentsTab}.tsx; console/routers/projects.py; src/software_factory/{storage,blobs,db,memory/store,repositories/{blobs,canvas}}.py.
+3. Removal must erase durable bytes, blob metadata, document chunks/summaries, and the agent-readable markdown artifact; drag/drop reuses the existing attach pipeline.
+4. Summary: both Linear tickets set In Progress; Python compile and Vite production build pass; staging browser verification is pending deployment after the benchmark hold.
+
+# Codex Update at Time: 16:07:2026:00:00:00.000
+1. Synced the canonical architecture narrative and schema/service diagrams with current staging code.
+2. docs/ARCHITECTURE.md, docs/schema-erd.{dot,md,svg}, docs/service-architecture.svg.
+3. Corrected stale runtime, stage-gate, persistence, auth, schema, and deployment claims from a source-backed audit.
+4. Summary: DOT render and model-table coverage pass; documentation diff is clean.
+
+# Claude Update at Time: 20:07:2026:14:30:40.000
+1. SOF-194: credential check no longer treats a transient GitHub/Railway 5xx as a permanently-dead credential (which SOF-148 makes non-resumable → hard-wedged a valid-token run).
+2. src/software_factory/creds.py (retry + transient/terminal classify, capture stderr); skills/stage-1-research/SKILL.md + SKILL.opencode.md (record check.blocks category, not hardcoded 'credential').
+3. check_gh/check_railway retry a non-definitive failure (3 attempts, 1s/2s backoff); a surviving 5xx/network signal → resumable 'transient' blocker (auto-resume relaunches), only a real auth reject (401/403/Bad credentials) → non-resumable 'credential' (SOF-148 preserved).
+4. Summary: creds.py compiles; verified via injected-runner driver (10 cases incl. simulated 5xx + auth-reject + the exact incident) — all pass; poller credential_stopped is category-keyed so 'transient' correctly auto-resumes.
+
+# Codex Update at Time: 20:07:2026:20:03:35.000
+1. Recorded the approved backend structure direction: bounded-context modular monolith.
+2. CLAUDE.md and docs/{ARCHITECTURE,STRUCTURE}.md on agent/structure-direction-20260720.
+3. The policy applies to parallel work: feature ownership over generic layers, no pass-through files, preserve behavior, and keep migrations/vendor tooling isolated.
+4. Summary: source-backed audit covered 153 non-test Python files; refactor plan follows this decision record.
+
+# CBT Wave 1 shipped (2026-07-21)
+1. Four lanes merged to staging 019ba9b: repo-backed recipes (recipes/ context, migration 0029, fork-and-extend build seed), company-enrich wow prefill (research router + enrich_company tool + found-card), codebase discovery (ingestion/ context, org KB), Kimi K3 bump.
+2. Spec/plan: docs/superpowers/{specs,plans}/2026-07-21-cbt-wave1-*. Gate record: 1 Critical (PAT leak) + 8 Important caught pre-merge; final whole-branch review READY; follow-ups SOF-210.
+3. Recipes rule: recipe body replaces SOW in concierge context; repo seeds stage-3; NO fork-verification code (prompt-delivered, outcome gates only). Sources-only product-wide (no confidence tiers) — operator ruling.
+4. Staging ACs (K3/A6/B4/C4) pending SOF-207 green; codex adapter = SOF-200 (separate agent).

@@ -22,7 +22,7 @@ import { KanbanCardSkel, MessageSkel } from "../skeleton";
 
 type Status = ProjectSummary & Record<string, any>;
 type View = "kanban" | "tree" | "map";
-type Doc = { label: string; path?: string; content?: string; id?: number; agent?: string; kind?: string } | null;
+type Doc = { label: string; path?: string; content?: string; id?: number; url?: string | null; agent?: string; kind?: string } | null;
 
 // SOF-100: the click-through ticket panel used to dump raw `description` — the goal/acceptance/
 // dod/design_refs/dependencies/scope_genre/implementation_notes fields never rendered anywhere.
@@ -105,6 +105,7 @@ export function FactoryConsole({ projectId, onBack, onSwitchTab }:
     return (["tree", "map"].includes(v || "") ? v : "kanban") as View;
   });
   const [doc, setDoc] = useState<Doc>(null);
+  const [previewDoc, setPreviewDoc] = useState<Doc>(null);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => { setParam("fview", view === "kanban" ? null : view); }, [view]);
@@ -144,6 +145,8 @@ export function FactoryConsole({ projectId, onBack, onSwitchTab }:
   // producing agent + kind so the viewer header can render its badge + "produced by" line).
   const openDocFromRef = (a: ArtifactRef) =>
     a.id ? openArtifact(a.id) : setDoc({ label: a.label, path: a.path, agent: a.agent, kind: a.kind });
+  const previewDocFromRef = (a: ArtifactRef) =>
+    setPreviewDoc({ label: a.label, path: a.path, url: a.url, id: a.id, agent: a.agent, kind: a.kind });
 
   // Recovery: paused/crashed runs show the RecoveryBar + halted rail state
   const halted = status.phase === "paused" || status.phase === "crashed";
@@ -278,7 +281,7 @@ export function FactoryConsole({ projectId, onBack, onSwitchTab }:
               content: ticketDetailMarkdown(t, projectId) })} />}
           {view === "tree" && <TreeView graph={graph} onOpenArtifact={openDocFromRef}
             ticketsDone={doneTickets} ticketsTotal={tickets.length} onViewBoard={() => setView("kanban")} />}
-          {view === "map" && <MapView graph={graph} onOpenArtifact={openDocFromRef} />}
+          {view === "map" && <MapView graph={graph} onPreviewArtifact={previewDocFromRef} />}
 
           {/* ── delivery footer ── (design: delivered ⇒ green repo+live; otherwise the QA loop note) */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
@@ -307,6 +310,7 @@ export function FactoryConsole({ projectId, onBack, onSwitchTab }:
       </div>
 
       <DocViewer projectId={projectId} doc={doc} onClose={() => setDoc(null)} />
+      <DocViewer projectId={projectId} doc={previewDoc} preview onClose={() => setPreviewDoc(null)} />
     </div>
   );
 }

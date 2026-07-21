@@ -13,14 +13,24 @@
 // defined inside render gets a new identity each keystroke → React remounts the <input> → focus
 // lost). Keep it that way — do NOT move Card/CheckRow/GroupHead back inside the component.
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { api, Org, OrgInput } from "../../api";
+import { api, Org, OrgInput, RecipeLight, CompanyProfile } from "../../api";
 import {
   T, Icon, Sparkle, Wordmark, Avatar, StatusPill, CategoryLabel, SectionDivider, Btn, TextInput, TextArea,
   Field, Chip, Chips, IndustryTile, IntegrationRow, Dropzone, Message, Composer, Segmented,
   OrgImportPicker, SuggestedResponseList, SuggestedResponseOption, INDUSTRIES, SIZES, REVENUE, ROLES, INTEGRATIONS,
 } from "./design";
+import { EnrichFromWeb } from "./EnrichFromWeb";
 import { ProcessingScreen } from "./ProcessingScreen";
 import { InterviewView } from "./InterviewView";
+import { useMe } from "../MeContext";
+
+// CBT-3: prefill "Start with your website" from the signup email domain — but only when it isn't
+// a public webmail provider (looking up "gmail.com" itself would be nonsense).
+const _PUBLIC_EMAIL_DOMAINS = new Set(["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "icloud.com", "aol.com", "protonmail.com"]);
+function domainFromEmail(email?: string): string {
+  const domain = (email || "").split("@")[1]?.toLowerCase() || "";
+  return domain && !_PUBLIC_EMAIL_DOMAINS.has(domain) ? domain : "";
+}
 
 type Check = { id: string; label: string; done: boolean; optional?: boolean; nudge?: string };
 // T2.2: suggestedResponses replaces choices — {response,type} drives single/multi-select render.
@@ -218,6 +228,70 @@ function EnginePicker({ value, onChange }:
   );
 }
 
+// ── Recipe picker (CBT-9). Customer sees only PUBLISHED recipes' light fields (name/tagline/
+//    category/capabilities) — never body_md/repo_url. "No recipe" is always available and is
+//    the honest default (value ""), matching a draft's unset recipe_id — sources only, no
+//    confidence pills anywhere. MODULE-SCOPE (props only, no state closure). ──
+function RecipeCardSkeleton() {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 11 }}>
+      {[0, 1, 2].map((i) => (
+        <div key={i} style={{ display: "flex", flexDirection: "column", gap: 9, padding: "15px 16px", borderRadius: T.rLg, border: `1.5px solid ${T.borderSubtle}`, background: T.raised }}>
+          <span style={{ width: 70, height: 9, borderRadius: 4, background: T.sunken, animation: "sfPulse 1.4s ease-in-out infinite" }} />
+          <span style={{ width: "70%", height: 15, borderRadius: 5, background: T.sunken, animation: "sfPulse 1.4s ease-in-out infinite" }} />
+          <span style={{ width: "90%", height: 11, borderRadius: 5, background: T.sunken, animation: "sfPulse 1.4s ease-in-out infinite" }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RecipeCard({ selected, category, name, tagline, capabilities, onClick, noneVariant }:
+  { selected: boolean; category: string; name: string; tagline?: string; capabilities?: string[]; onClick: () => void; noneVariant?: boolean }) {
+  return (
+    <button onClick={onClick} style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 9, padding: "15px 16px", borderRadius: T.rLg, cursor: "pointer",
+      border: `1.5px solid ${selected ? T.brand : T.borderSubtle}`, background: selected ? T.brandSoft : T.raised, position: "relative" }}>
+      {selected && <span style={{ position: "absolute", top: 12, right: 12, width: 20, height: 20, borderRadius: "50%", background: T.brand, display: "grid", placeItems: "center" }}><Icon name="check" size={12} color="#fff" /></span>}
+      <CategoryLabel tone={selected ? "brand" : "tertiary"}>{category}</CategoryLabel>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, paddingRight: 24 }}>
+        <span style={{ width: 26, height: 26, flexShrink: 0, borderRadius: 7, display: "grid", placeItems: "center", background: selected ? T.brand : T.sunken }}>
+          <Icon name={noneVariant ? "x" : "flask"} size={14} color={selected ? "#fff" : T.tertiary} />
+        </span>
+        <span style={{ font: `700 15px/1.2 ${T.display}`, letterSpacing: "-0.01em", color: T.fg }}>{name}</span>
+      </div>
+      {tagline && <span style={{ font: `400 12.5px/1.5 ${T.sans}`, color: T.secondary }}>{tagline}</span>}
+      {capabilities && capabilities.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 2 }}>
+          {capabilities.slice(0, 3).map((c) => (
+            <span key={c} style={{ font: `500 10.5px/1 ${T.sans}`, color: T.secondary, background: selected ? "#fff" : T.sunken, border: `1px solid ${T.borderSubtle}`, padding: "4px 7px", borderRadius: 9999 }}>{c}</span>
+          ))}
+          {capabilities.length > 3 && <span style={{ font: `500 10.5px/1 ${T.mono}`, color: T.tertiary, padding: "4px 3px" }}>+{capabilities.length - 3}</span>}
+        </div>
+      )}
+    </button>
+  );
+}
+
+// value/onChange: "" = no recipe (the default — a draft's unset recipe_id). Selecting a card
+// PATCHes recipe_id onto the draft immediately (see selectRecipe in the screen below) — it's a
+// draft-enrichment write, not a silent side effect, and the card's own selected state is the
+// confirmation, so there's no separate "saved" toast.
+function RecipePicker({ recipes, loading, value, onChange }:
+  { recipes: RecipeLight[]; loading: boolean; value: string; onChange: (id: string) => void }) {
+  if (loading) return <RecipeCardSkeleton />;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 11 }}>
+      {recipes.map((r) => (
+        <RecipeCard key={r.id} selected={value === r.id} category={r.category || "Recipe"} name={r.name}
+          tagline={r.tagline || undefined} capabilities={r.capabilities} onClick={() => onChange(r.id)} />
+      ))}
+      <RecipeCard selected={value === ""} category="No template" name="No recipe"
+        tagline="Start from a blank build — the factory works only from your brief and materials."
+        onClick={() => onChange("")} noneVariant />
+    </div>
+  );
+}
+
 const fileToB64 = (file: File): Promise<string> => new Promise((resolve) => {
   const r = new FileReader();
   r.onload = () => resolve(String(r.result || "").split(",")[1] || "");
@@ -273,6 +347,7 @@ function BudgetPicker({ value, onChange }: { value: number | null; onChange: (v:
 }
 
 export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onComplete: (projectId: string) => void; onBack?: () => void; resumeProjectId?: string | null }) {
+  const me = useMe();
   const [mode, setMode] = useState<"loading" | "fresh" | "returning">("loading");
   // Intake → Processing → Interview state machine (PRD §2.4a). Handoff itself only ever fires
   // from the Interview step, not directly off the intake screen — intake's CTA just advances.
@@ -281,6 +356,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const [editOrg, setEditOrg] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [orgError, setOrgError] = useState("");  // SOF-196: company-name-taken (409), shown inline
 
   // the one draft the form + rail share — created explicitly when the user saves Project basics
   const [draftId, setDraftId] = useState<string | null>(null);
@@ -305,6 +381,12 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const [f, setF] = useState<{ industry: string; sub: string[]; name: string; size: string; revenue: string; role: string; site: string; ints: string[] }>(
     { industry: "", sub: [], name: "", size: "", revenue: "", role: "", site: "", ints: [] });
   const setFresh = (k: string, v: any) => setF((x) => ({ ...x, [k]: v }));
+  // CBT-3 accept: only name/website map cleanly onto this tile-based form (industry/size/revenue
+  // are constrained chip values, not free text — quick-mode research also doesn't populate them
+  // today) — fill what's honest, leave the rest for the user to pick via the tiles below.
+  const acceptEnrichedCompany = (profile: CompanyProfile) => {
+    setF((x) => ({ ...x, name: profile.name || x.name, site: profile.website || x.site }));
+  };
 
   // project answers (shared)
   const [p, setP] = useState<{ name: string; goal: string; scope: string[]; video: boolean; docs: boolean }>(
@@ -316,6 +398,28 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   const [budget, setBudget] = useState<number | null>(null);
   const budgetRef = useRef<number | null>(null);
   useEffect(() => { budgetRef.current = budget; }, [budget]);
+  // CBT-9: recipe picker. "" = no recipe (the honest default — matches a draft's unset recipe_id).
+  const [recipes, setRecipes] = useState<RecipeLight[]>([]);
+  const [recipesLoading, setRecipesLoading] = useState(true);
+  const [recipeId, setRecipeId] = useState("");
+  useEffect(() => {
+    api.listRecipes().then((r) => setRecipes(r.recipes || [])).catch(() => undefined)
+      .finally(() => setRecipesLoading(false));
+  }, []);
+  // Selecting a card PATCHes the draft immediately (not debounced — this is a deliberate choice,
+  // not a keystroke). Optimistic: the card's selected state updates right away; a refusal (e.g. a
+  // stale/unpublished id) reverts and surfaces the server's real reason.
+  const selectRecipe = async (id: string) => {
+    if (!draftId || id === recipeId) return;
+    const prev = recipeId;
+    setRecipeId(id);
+    try {
+      await api.patchDraft(draftId, { recipe_id: id });
+    } catch (e: any) {
+      setRecipeId(prev);
+      setError(typeof e?.detail === "string" ? e.detail : "Couldn’t select that recipe — try again.");
+    }
+  };
   // Real uploaded filenames per material slot (drives the Dropzone list — no dummy data).
   // SOF-49: blobId/ingestStage/ingestPct/ingestStatus are populated once ingestion starts
   // (see the ingest-progress SSE subscription below) — absent (SF_MEMORY off, or the file's
@@ -354,11 +458,12 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
         // SOF-137: budget is now a required intake field (scope became optional) — a resumed
         // draft must rehydrate it, or Continue can never be satisfied again after leaving the page.
         if (d.budget != null) setBudget(d.budget);
+        if (d.recipe_id) setRecipeId(d.recipe_id);
       }).catch(() => {});
       api.documents(resumeProjectId).then((docs) => {
         const ups = docs.uploaded || [];
-        const vids = ups.filter((m) => m.kind === "video").map((m) => ({ name: m.name, size: fmtBytes(m.size_bytes || 0) }));
-        const others = ups.filter((m) => m.kind !== "video").map((m) => ({ name: m.name, size: fmtBytes(m.size_bytes || 0) }));
+        const vids = ups.filter((m) => m.kind === "video").map((m) => ({ name: m.name, size: fmtBytes(m.size_bytes || 0), blobId: Number(m.id) }));
+        const others = ups.filter((m) => m.kind !== "video").map((m) => ({ name: m.name, size: fmtBytes(m.size_bytes || 0), blobId: Number(m.id) }));
         setMats({ video: vids, docs: others });
         setP((x) => ({ ...x, video: vids.length > 0, docs: others.length > 0 }));
       }).catch(() => {});
@@ -429,7 +534,13 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     try {
       if (!orgSavedRef.current) { await api.createOrg(body as OrgInput); orgSavedRef.current = true; }
       else { await api.patchOrg(body); }
-    } catch { /* transient — retried on next debounce / flushed at handoff */ }
+      setOrgError("");
+    } catch (e: any) {
+      // SOF-196: a 409 means this company name already belongs to another active org. Self-serve must
+      // NOT silently join a stranger's org, so surface it honestly and let the user pick another name.
+      // Everything else stays transient (retried on next debounce / flushed at hand-off).
+      if (e?.status === 409) setOrgError(typeof e.detail === "string" ? e.detail : "That organization name is already taken.");
+    }
     orgBusyRef.current = false;
   }, [f]);
 
@@ -478,7 +589,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     setEditOrg(true);
   };
   const doneManage = async () => {
-    setEditOrg(false);
     const list = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
     // map connected-system LABELS back to their ids where known (custom values pass through)
     const sysIds = list(orgEdit.systems).map((x) => INTEGRATIONS.find((i) => i.label === x)?.id || x);
@@ -488,7 +598,13 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
         connected_systems: sysIds, sub_focus: list(orgEdit.subFocus), website: orgEdit.website || undefined,
       });
       setOnFile(updated);
-    } catch (e: any) { setError(String(e?.message || e)); }
+      setEditOrg(false);
+      setError("");
+    } catch (e: any) {
+      // SOF-198: surface the honest 409 (e.g. renaming to a name another org already holds) and keep
+      // the editor open so the user can fix it, rather than showing the raw "/api/org → 409" string.
+      setError(typeof e?.detail === "string" ? e.detail : String(e?.message || e));
+    }
   };
   const addScopeOption = (o: string) => setScopeOptions((s) => (s.includes(o) ? s : [...s, o]));
 
@@ -548,6 +664,18 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       // Remove only this batch’s optimistic tokens on failure.
       setMats((m) => ({ ...m, [kind]: m[kind].filter((f) => !(f.uploading && inFlight.has(f.name))) }));
       setError(`Couldn’t attach files: ${String(e?.message || e)}`);
+    }
+  };
+
+  const removeFile = async (kind: "video" | "docs", file: MatFile) => {
+    if (!draftId || file.blobId == null) return;
+    setError("");
+    try {
+      await api.deleteMaterial(draftId, file.blobId);
+      setMats((m) => ({ ...m, [kind]: m[kind].filter((f) => f.blobId !== file.blobId) }));
+      setProj(kind, mats[kind].some((f) => f.blobId !== file.blobId));
+    } catch (e: any) {
+      setError(`Couldn’t remove ${file.name}: ${String(e?.message || e)}`);
     }
   };
 
@@ -667,6 +795,10 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                     </p>
                   </div>
 
+                  <Card cat="Your company" title="Start with your website" desc="We'll pull what we can find — the fields below stay yours to fill in either way.">
+                    <EnrichFromWeb initialWebsite={domainFromEmail(me?.email)} onAccept={acceptEnrichedCompany} />
+                  </Card>
+
                   <SectionDivider label="Your organization" sub="set up once · reused on every project" icon="building" />
 
                   <Card cat="Your company" title="What kind of operation is this?" desc="Tuned for industrial & IT distribution.">
@@ -678,7 +810,10 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
 
                   <Card cat="Your company" title="Company profile">
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                      <Field label="Company name" style={{ gridColumn: "1 / -1" }}><TextInput value={f.name} onChange={(v) => setFresh("name", v)} placeholder="e.g. Acme Industrial Supply" /></Field>
+                      <Field label="Company name" style={{ gridColumn: "1 / -1" }}>
+                        <TextInput value={f.name} onChange={(v) => { setFresh("name", v); if (orgError) setOrgError(""); }} placeholder="e.g. Acme Industrial Supply" />
+                        {orgError && <div style={{ marginTop: 6, font: `400 12px/1.4 ${T.sans}`, color: T.danger }}>{orgError}</div>}
+                      </Field>
                       <Field label="Headcount"><Chips options={SIZES} value={f.size} onChange={(v) => setFresh("size", v)} /></Field>
                       <Field label="Annual revenue"><Chips options={REVENUE} value={f.revenue} onChange={(v) => setFresh("revenue", v)} /></Field>
                       <Field label="Your role"><Chips options={ROLES} value={f.role} onChange={(v) => setFresh("role", v)} /></Field>
@@ -727,6 +862,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                     <div aria-hidden={!draftId} style={draftId
                       ? { display: "flex", flexDirection: "column", gap: 16 }
                       : { display: "flex", flexDirection: "column", gap: 16, opacity: 0.4, filter: "grayscale(0.5)", pointerEvents: "none", userSelect: "none" }}>
+                  <Card cat="Your first project" title="Starting point" desc="Fork a proven recipe, or start from a blank build.">
+                    <RecipePicker recipes={recipes} loading={recipesLoading} value={recipeId} onChange={selectRecipe} />
+                  </Card>
                   <Card cat="Your first project" title="Scope of work" desc="Which parts of the business does this project touch?">
                     <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
                   </Card>
@@ -736,8 +874,8 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                   <Card cat="Your first project" title="Project materials" desc="A walkthrough recording is the highest-signal input you can give.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                       <OrgImportPicker />
-                      <Field label="Walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} /></Field>
-                      <Field label="Supporting documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
+                      <Field label="Walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} onDropFiles={(files) => attachFiles(files, "video")} onRemove={(file) => removeFile("video", file)} /></Field>
+                      <Field label="Supporting documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} onDropFiles={(files) => attachFiles(files, "docs")} onRemove={(file) => removeFile("docs", file)} /></Field>
                       <ProcessingBanner files={mats.video.concat(mats.docs)} />
                     </div>
                   </Card>
@@ -827,6 +965,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                     <div aria-hidden={!draftId} style={draftId
                       ? { display: "flex", flexDirection: "column", gap: 16 }
                       : { display: "flex", flexDirection: "column", gap: 16, opacity: 0.4, filter: "grayscale(0.5)", pointerEvents: "none", userSelect: "none" }}>
+                  <Card cat="This project" title="Starting point" desc="Fork a proven recipe, or start from a blank build.">
+                    <RecipePicker recipes={recipes} loading={recipesLoading} value={recipeId} onChange={selectRecipe} />
+                  </Card>
                   <Card cat="This project" title="Scope of work" desc="Which parts of the business does this project touch?">
                     <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
                   </Card>
@@ -836,8 +977,8 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                   <Card cat="This project" title="Project materials" desc="We already have your line card & pricing on file — only add what's specific to this project.">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                       <OrgImportPicker />
-                      <Field label="Project walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} /></Field>
-                      <Field label="Extra documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} /></Field>
+                      <Field label="Project walkthrough video" optional><Dropzone kind="video" files={mats.video} onToggle={() => videoInputRef.current?.click()} onDropFiles={(files) => attachFiles(files, "video")} onRemove={(file) => removeFile("video", file)} /></Field>
+                      <Field label="Extra documents" optional><Dropzone kind="docs" compact files={mats.docs} onToggle={() => docsInputRef.current?.click()} onDropFiles={(files) => attachFiles(files, "docs")} onRemove={(file) => removeFile("docs", file)} /></Field>
                       <ProcessingBanner files={mats.video.concat(mats.docs)} />
                     </div>
                   </Card>

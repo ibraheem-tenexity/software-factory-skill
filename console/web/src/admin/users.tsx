@@ -184,6 +184,10 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [password, setPassword] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [createdLink, setCreatedLink] = React.useState<string | null>(null);
+  // SOF-195: mirror OrgAdminScreen's SOF-140 pattern — the user row is the success signal
+  // regardless of email; only speak up when invite_email_sent comes back false.
+  const [emailFailed, setEmailFailed] = React.useState(false);
+  const [invitedNoLink, setInvitedNoLink] = React.useState(false);
   const { clients } = useUsersAndClients();
   const valid = /^\S+@\S+\.\S+$/.test(email);
   const isTenexity = audience === "tenexity";
@@ -208,7 +212,8 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         ...(method === "password" ? { password } : {}),
         ...(isTenexity ? {} : { role: role.toLowerCase() as "admin" | "member" }),
       };
-      await api.adminInvite(body);
+      const d = await api.adminInvite(body);
+      setEmailFailed(d.invite_email_sent === false);
       if (method === "password") {
         try {
           const r = await api.adminResendInvite(email);
@@ -216,11 +221,16 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         } catch {
           onCreated();
         }
+      } else if (d.invite_email_sent === false) {
+        // Don't silently close on a failed email — the admin needs to know to tell the
+        // invitee out-of-band, same as OrgAdminScreen's inviteMember notice.
+        setInvitedNoLink(true);
       } else {
         onCreated();
       }
-    } catch {
-      alert("Failed to invite user.");
+    } catch (e: any) {
+      // Surface the server's honest reason (e.g. a guarded-invariant 409) instead of a generic line.
+      alert(typeof e?.detail === "string" ? e.detail : "Failed to invite user.");
     } finally {
       setLoading(false);
     }
@@ -421,6 +431,11 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         {createdLink && (
           <div style={{ padding: "14px 20px", borderTop: `1px solid ${T.borderSubtle}`, background: T.sunken }}>
             <ColHead style={{ display: "block", marginBottom: 8 }}>User created — share this sign-in link</ColHead>
+            {emailFailed && (
+              <Mono style={{ display: "block", marginBottom: 8, color: T.danger }}>
+                The invite email couldn't be sent — share this link with them directly.
+              </Mono>
+            )}
             <div style={{ display: "flex", gap: 8 }}>
               <div
                 style={{
@@ -442,7 +457,18 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
             </div>
           </div>
         )}
-        {!createdLink && (
+        {invitedNoLink && (
+          <div style={{ padding: "14px 20px", borderTop: `1px solid ${T.borderSubtle}`, background: T.sunken }}>
+            <Mono style={{ display: "block", marginBottom: 10, color: T.danger }}>
+              User invited, but the invite email couldn't be sent — tell them to sign in with this
+              email address at the console.
+            </Mono>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <AdminBtn primary onClick={() => { onCreated(); }}>Done</AdminBtn>
+            </div>
+          </div>
+        )}
+        {!createdLink && !invitedNoLink && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 9, padding: "13px 20px", borderTop: `1px solid ${T.borderSubtle}`, background: T.sunken }}>
             <AdminBtn onClick={onClose}>Cancel</AdminBtn>
             <AdminBtn

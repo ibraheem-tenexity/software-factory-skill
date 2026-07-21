@@ -1,186 +1,70 @@
-# Langfuse telemetry — emission map + healthy baseline (SOF-25)
+# Langfuse telemetry — current surfaces + re-verification (SOF-25)
 
 **Purpose:** a cheap, repeatable way to confirm the console's Langfuse telemetry is actually
-landing, not just configured. Re-run the "cheap canary" recipe below after any deploy or change
-touching the areas listed in "when to re-verify" — telemetry can break silently (a dependency bump,
-a refactor, a key rotation, a deploy-path change) and nothing else will tell you.
+landing, not just configured. Telemetry can break silently (a dependency bump, a refactor, a key
+rotation, a deploy-path change) and nothing else will tell you.
 
-There are **two independent tracing surfaces**. They have different code, different gates, and
-very different re-verification cost. Don't conflate them.
+> **2026-07 — this doc was rewritten.** The original baseline documented a "Surface 1" concierge
+> live-agent canary built on the OpenAI Agents SDK (`OpenAIAgentsInstrumentor`, `Runner.run`, a
+> "Factory Concierge" trace). **That surface no longer exists.** `setup_langfuse()` and the
+> `ChatAgentRunner` it instrumented were removed in SOF-35 when the concierge was rebuilt on
+> LangChain (`chat_agent.py`). The LangChain concierge has **no Langfuse tracing wired yet** — that
+> would be new work (e.g. an OpenInference LangChain instrumentor), not a port. Do not go looking
+> for a "Factory Concierge" trace; its absence is expected, not a regression. The stale historical
+> canary logs (specific 2026-07-01 project ids / dashboard pulls) were dropped.
 
-## Surface 1 — Concierge live-agent tracing (the cheap canary)
+`src/software_factory/langfuse_tracing.py` is now just `enabled()` — `bool(LANGFUSE_PUBLIC_KEY and
+LANGFUSE_SECRET_KEY)` — the single gate every surviving surface shares.
 
-**Code:** `src/software_factory/langfuse_tracing.py` (`enabled()`, `setup_langfuse()`), wired in
-`src/software_factory/chat_agent.py` → `ChatAgentRunner.__init__` (`self._langfuse =
-langfuse_tracing.setup_langfuse()`).
+## Surface A — Stage-run transcript tracing
 
-**Mechanism:** `OpenAIAgentsInstrumentor().instrument()` installs itself as the OpenAI Agents SDK's
-**exclusive** trace processor (per-process, idempotent), replacing the SDK's default OpenAI-backed
-exporter. Every `Runner.run` / `Runner.run_streamed` call — i.e. every turn through `POST
-/api/chat` — is exported via OpenTelemetry to Langfuse.
-
-**Gate:** `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` present. No-op (not an error) if absent.
-**Confirmed live (2026-07-01):** both keys present on `factory-console` /
-`software-factory-as-skill`; boot log shows
-`[langfuse] concierge tracing instrumented → https://us.cloud.langfuse.com` — instrumentation
-activated successfully (no "tracing packages are missing" warning, which would fire on an
-`ImportError` from `langfuse`/`openinference-instrumentation-openai-agents`).
-
-**Not this surface:** `POST /api/projects/{pid}/converse` (the TEN-154 onboarding conversation) —
-that's a separate, framework-free **mock** service (`services/conversation.py`), no LLM call, no
-tracing. Don't confuse the two `/api/chat`-adjacent endpoints when re-verifying.
-
-**Expected trace shape:** one trace/agent-run per `Runner.run(...)` call, agent name **"Factory
-Concierge"**. Nested spans per tool call the model makes (one of the 14 tools in `make_tools()` —
-e.g. `set_project_basics`, `get_intake_state`, `hand_off_to_factory`) and per model generation
-(`gpt-5.4` by default, or Kimi K2.7 via OpenRouter when `SF_CHAT_MODEL=kimi` or no
-`OPENAI_API_KEY`), with token usage on the generation span when the SDK returns it. **The exact
-span/attribute naming is OpenInference's own convention, not something this codebase controls** —
-confirm it once against a real dashboard trace and lock in the specifics as an addendum to this doc
-rather than trusting this description alone.
-
-**Fixed in SOF-43 (2026-07-01):** traces are now tagged with a `session_id` (the conversation key)
-and `project_id` metadata via `langfuse.propagate_attributes(...)`, entered in
-`ChatAgentRunner._langfuse_trace_context()` and wrapped around the full `Runner.run` /
-`Runner.run_streamed` + stream-consumption lifetime (not just the initial call — spans are created
-incrementally as stream events are iterated, and `propagate_attributes` only tags spans created
-while it's still open). A trace is now findable by project, not only by timestamp+content.
-
-**Fixed in SOF-43 (2026-07-01):** an explicit flush now happens at both boundaries where a loss
-window existed: the **turn boundary** (`ChatAgentRunner._flush_langfuse()`, called after every
-`handle_message`/`handle_message_streamed` run) and the **process boundary** (`console/poller.py`'s
-`lifespan`, flushed in a `finally` around `yield` on graceful shutdown). Both are best-effort — a
-flush failure never fails a chat turn or blocks shutdown.
-
-**Fixed in SOF-43 (2026-07-01) — zero token usage.** Every "Factory Concierge" generation span
-used to report `usage = {input:0, output:0, total:0}`. Confirmed fixed via a fresh canary pulled
-from the Langfuse API post-deploy: real per-generation usage now lands (e.g. `{input:1328,
-output:15, total:1343}`).
-
-Ruled out before landing on the real cause: bumping `openinference-instrumentation-openai-agents`
-(`1.6.1` is already latest, no pre-release ceiling); a hypothesized Chat-Completions/Kimi dict-key
-mismatch (`prompt_tokens` vs `input_tokens` — verified via source that the SDK always normalizes to
-`input_tokens`/`output_tokens`/`total_tokens` regardless of backend, not a real bug);
-`ModelSettings.include_usage` (Chat-Completions-only per its own docstring, irrelevant to the
-canary's Responses-API path); a Langfuse-side OTel-ingestion/semantic-convention mismatch (local
-repros using the real Agents SDK + real OpenInference instrumentor, with only the network call
-mocked, proved the client-side chain emits correct non-zero `llm.token_count.*` attributes given a
-populated response — both for `Runner.run()` and for the exact prod streaming path). A temporary
-`[langfuse-diag]` log (now removed) confirmed the SDK/API itself always saw real usage
-(`context_wrapper.usage`/`raw_responses[*].usage` non-zero on every canary, streaming included) —
-the streaming-opt-in theory was refuted too.
-
-**Actual fix:** the explicit flush added for gap #3 below. Without it, spans were reaching Langfuse
-with zero usage even though the SDK held the real numbers the whole time; with the flush, the same
-numbers land intact. The precise export-timing mechanism wasn't fully pinned down at the OTel layer
-(span attributes are set on `span_data` synchronously before the span's `with`-block exits, i.e.
-before `on_span_end`/export can run for that span) — but the fix is empirically verified via a live
-Langfuse API pull on a fresh canary, which is the bar that matters here.
-
-### Cheap re-verification recipe — run this after every console deploy
-
-1. `POST /api/chat` with any short message (needs auth — `X-SF-Service-Token` header, or an authed
-   session cookie) and note the returned `project_id` + the UTC timestamp.
-2. In the Langfuse dashboard (**`us.cloud.langfuse.com`** — note the `us.` subdomain, not the
-   global default), search traces around that timestamp for an agent run under **"Factory
-   Concierge"** containing the sent message text.
-3. Confirm: the trace exists, has at least one nested generation span with token usage populated,
-   and total latency looks plausible (low single-digit seconds for a short turn).
-4. If nothing appears within ~1 minute: check `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` presence
-   on `factory-console` (Railway variables), check the deploy log for
-   `[langfuse] concierge tracing instrumented` (confirms `setup_langfuse()` ran and both packages
-   imported cleanly) vs. `keys set but tracing packages are missing` (confirms a dependency gap —
-   check `langfuse`/`openinference-instrumentation-openai-agents` are still in `pyproject.toml` and
-   actually made it into the deployed image), and confirm `LANGFUSE_BASE_URL` still points at the
-   host you're checking (a silent host mismatch would look identical to "nothing landed").
-
-**Live canary already fired for this audit** — use it as the first data point rather than waiting
-to trigger a fresh one:
-- **UTC timestamp:** `2026-07-01T07:14:24Z`
-- **project_id:** `project-68c0f566b814421f`
-- **Sent message:** `"SOF-25 Langfuse telemetry canary — please ignore, no action needed."`
-- **Agent's reply (confirmed received):** `"Understood — no action needed."`
-- Search the dashboard around that timestamp for a "Factory Concierge" trace containing that text.
-
-**Post-SOF-43 canary (session/project tagging + non-zero usage confirmed):**
-- **UTC timestamp:** `2026-07-01T07:49:28Z`
-- **project_id:** `project-06c8e063f4ae4677`
-- Verified via Langfuse API pull: generation spans show real `usage` (`{input:1328, output:15,
-  total:1343}` and `{input:1360, output:13, total:1373}` across the turn's two model calls).
-- `project_id` tagging is always populated for real traffic: `POST /api/chat` (`console/routers/chat.py`)
-  auto-creates a draft project **before** calling `handle_message`/`handle_message_streamed` when the
-  request doesn't already carry one (`if not project_id: project_id = console.create_draft(...)`), so
-  the `project_id` argument `_langfuse_trace_context` tags the trace with is never empty for a real
-  request — confirmed by this canary itself, which sent no `project_id` and still got one back.
-
-## Surface 2 — Stage-run transcript tracing (spot-check only, not the canary)
-
-**Code:** `src/software_factory/workspace_setup.py` (`_write_langfuse_hook`, gated on
-`TRACE_TO_LANGFUSE == "true"` at workspace-setup time) installs the vendored, official Langfuse
-Claude Code integration script (`resources/langfuse_hook.py`, from
+**Code:** `src/software_factory/workspace_setup.py` (`_write_langfuse_hook`) installs the vendored,
+official Langfuse Claude Code integration script (`resources/langfuse_hook.py`, from
 `langfuse.com/integrations/developer-tools/claude-code`) into each stage workspace's
 `.claude/hooks/`, registered as a Claude Code **Stop** hook via `.claude/settings.json`.
-`src/software_factory/env.py`'s `_STAGE_ESSENTIAL` forwards `LANGFUSE_PUBLIC_KEY`,
-`LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`, and `TRACE_TO_LANGFUSE` from the console process into
-every stage subprocess's env — this is a *completely separate* mechanism from Surface 1 (hand-rolled
-Langfuse + raw OTel spans in the hook script, not OpenInference).
 
-**Gate:** `TRACE_TO_LANGFUSE` must be the **exact string** `"true"` (case-sensitive, not a general
-boolean parse) AND the Langfuse keys present. **Confirmed live (2026-07-01):** `TRACE_TO_LANGFUSE=true`
-exactly, keys present — this surface is armed.
+**Gate:** `langfuse_tracing.enabled()` — i.e. both Langfuse keys present. Tracing is **default-on
+when keys exist**; there is no longer a `TRACE_TO_LANGFUSE` toggle (removed). `env.py`'s
+`_STAGE_ESSENTIAL` forwards `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_BASE_URL`
+from the console process into every stage subprocess's env; the hook itself re-checks the keys at
+runtime and silently skips if absent. `.claude/` is gitignored in the workspace so the hook and any
+env-injected secrets never reach the customer's app repo.
 
-**Fires on:** the Claude Code CLI's "Stop" hook at the end of a stage's session — i.e. requires an
+**Fires on:** the Claude Code CLI's Stop hook at the end of a stage's session — i.e. it requires an
 actual Stage 1/2/3 build to run (or resume) and finish a session. It reads the stage's transcript
-JSONL incrementally (state-tracked in `~/.claude/state/langfuse_state.json`, so re-runs pick up only
-new lines), and only emits for genuinely new turns.
+JSONL incrementally (state-tracked in `~/.claude/state/langfuse_state.json`), emitting only new
+turns.
 
-**Expected trace shape (read directly from `emit_turn` in the hook — this one IS precisely
-verifiable from source, unlike Surface 1):**
-- Top span/trace name: **`"Claude Code - Turn {N}"`**, tagged `["claude-code"]`, grouped by the
-  Claude Code session's own `session_id` (a session id, **not** the SF `project_id`).
-- Metadata on that span: `source="claude-code"`, `session_id`, `turn_number`, `transcript_path`,
-  `assistant_message_count`.
-- Nested per assistant message: **`"Claude Generation {idx+1}"`** — `model`, `input` (user text or
-  the prior tool-result batch), `output` (assistant text + any `tool_calls`), and `usage_details`
-  (token counts) when the transcript line has them.
-- The hook explicitly `flush()`s and `shutdown()`s the Langfuse client on exit (capped at 5s so a
-  slow/unreachable Langfuse can't stall the stage) — more robust than Surface 1 in this respect;
-  no reliance on background auto-flush.
+**Expected trace shape** (defined entirely by `resources/langfuse_hook.py`'s `emit_turn` — verify
+from that source, it is not something the console controls):
+- Top span/trace name **`"Claude Code - Turn {N}"`**, tagged `["claude-code"]`, grouped by the
+  Claude Code session's own `session_id` (**not** the SF `project_id`).
+- Nested per assistant message: **`"Claude Generation {idx+1}"`** — `model`, `input`, `output`
+  (assistant text + any `tool_calls`), and `usage_details` when the transcript line carries them.
+- The hook `flush()`s + `shutdown()`s the Langfuse client on exit (capped at 5s so a slow/unreachable
+  Langfuse can't stall the stage).
 
-**Why this is NOT the recurring canary:** triggering it for real costs real LLM spend (it only fires
-from an actual factory build stage). Don't spin up a stage purely to test telemetry. Instead: spot-
-check it opportunistically the next time a real stage run happens for its own reasons — search
-Langfuse for a `"Claude Code - Turn"` trace around when that stage's session Stopped.
+**Why this is NOT a cheap canary:** triggering it for real costs real LLM spend (it only fires from
+an actual factory build stage). Spot-check it opportunistically the next time a real stage run
+happens — search Langfuse for a `"Claude Code - Turn"` trace around when that session Stopped.
 
-## When to re-verify (standing requirement — not one-and-done)
+## Surface B — Ingestion-cost spans
 
-Re-run the **Surface 1 cheap canary** after any of:
-- A deploy of `factory-console` (any change — this is genuinely cheap, so default to checking).
-- Any dependency bump touching `langfuse`, `openinference-instrumentation-openai-agents`, or
-  `opentelemetry-*` in `pyproject.toml`.
-- Any refactor of `ChatAgentRunner.__init__` / `chat_agent.py`'s model selection.
-- A Langfuse key rotation (Railway variable change) — this is exactly the class of change most
-  likely to silently break emission without any code changing at all.
-- A deploy-path change (e.g. SOF-16's native-git-source auto-deploy switch) — this class of change
-  can silently drop env-var forwarding in ways a code review won't catch; SOF-24 (this same audit
-  session) found exactly this failure mode in a different env var.
+**Code:** `src/software_factory/memory/cost.py` (`_emit_langfuse_span`) records a Langfuse span per
+document-ingestion embedding batch (raw `openai` SDK calls to OpenRouter, not the Agents SDK), gated
+on the same `langfuse_tracing.enabled()`. This is the cost-accounting channel for Project Memory
+ingestion, independent of any agent tracing.
 
-Spot-check **Surface 2** whenever a real stage run happens anyway, and always after touching
-`workspace_setup.py`, `resources/langfuse_hook.py`, or `env.py`'s `_STAGE_ESSENTIAL` set.
+## When to re-verify (standing requirement — SOF-25)
 
-## What's confirmed vs. what needs the operator
+- After any deploy of the console (Surface A env forwarding can silently break).
+- After any dependency bump touching `langfuse` / `opentelemetry-*` in `pyproject.toml`.
+- After touching `workspace_setup.py`, `resources/langfuse_hook.py`, `env.py`'s `_STAGE_ESSENTIAL`,
+  or `memory/cost.py`.
+- After a Langfuse key rotation (Railway variable change) — the class of change most likely to
+  silently break emission with no code change.
+- After a deploy-path change (e.g. a native-git-source auto-deploy switch) — can silently drop
+  env-var forwarding in ways code review won't catch.
 
-**Confirmed from code + live server state (this audit, no Langfuse dashboard access needed):**
-- Both surfaces are wired correctly in code and armed live (all four gating vars present/correct).
-- Concierge instrumentation activated successfully at boot (log evidence).
-- A real, authenticated concierge turn was fired against production and returned the expected
-  agent reply (proves the request path works end-to-end up to the point tracing would capture it).
-
-**Confirmed via the operator's Langfuse API access (SOF-43, 2026-07-01):** the post-fix canary
-trace appears with the expected shape (Factory Concierge run, nested generation spans, real
-non-zero token usage on each) — all three SOF-25 follow-up gaps (session/project tagging, explicit
-flush, zero token usage) are closed.
-
-**Still open (low priority, no urgency):**
-- Lock in the exact OpenInference trace/span naming observed (Surface 1's naming isn't fully
-  determined by this codebase — see "Expected trace shape" above) as an addendum to this doc.
+Dashboard verification needs the operator's Langfuse access (keys live in Railway); the console
+audits only that the surfaces are wired and the gate vars are present.

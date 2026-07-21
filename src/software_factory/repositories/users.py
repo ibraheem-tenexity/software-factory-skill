@@ -146,6 +146,14 @@ class UserRepository:
     def org_by_id(self, org_id: str) -> list:
         return self._x.fetchall(select(*_ORG_COLS).where(organizations.c.id == org_id))
 
+    def org_by_name(self, name: str) -> list:
+        """Active org(s) matching `name` case-insensitively + trim-insensitively — the dedupe lookup
+        for SOF-196. Normalization (lower(btrim(...))) mirrors the PR-B unique index so the guard and
+        the lookup agree on what "same name" means."""
+        norm = (name or "").strip().lower()
+        return self._x.fetchall(select(*_ORG_COLS).where(
+            func.lower(func.btrim(organizations.c.name)) == norm))
+
     def all_orgs(self) -> list:
         return self._x.fetchall(select(*_ORG_COLS).order_by(organizations.c.name))
 

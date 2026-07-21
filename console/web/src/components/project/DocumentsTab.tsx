@@ -28,8 +28,9 @@ function fmtBytes(n?: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function FileTile({ label, kind, sub, used, tag, onOpen, scope, onScope, summary, summaryStatus, summarizing, onSummarize }:
+function FileTile({ label, kind, sub, used, tag, onOpen, onRemove, scope, onScope, summary, summaryStatus, summarizing, onSummarize }:
   { label: string; kind?: string; sub?: string; used?: string; tag?: string; onOpen?: () => void;
+    onRemove?: () => void;
     scope?: "project" | "org"; onScope?: (s: "project" | "org") => void;
     summary?: string; summaryStatus?: "pending" | "ready" | "failed"; summarizing?: boolean; onSummarize?: () => void }) {
   const k = FILE_KIND[kind || "doc"] || FILE_KIND.doc;
@@ -57,7 +58,10 @@ function FileTile({ label, kind, sub, used, tag, onOpen, scope, onScope, summary
         width: "100%", font: "inherit" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span style={{ font: `700 9px/1 ${T.mono}`, letterSpacing: "0.05em", color: k[2], background: k[1], padding: "4px 6px", borderRadius: 4 }}>{k[0]}</span>
-        {tag && <CategoryLabel style={{ fontSize: 9.5 }}>{tag}</CategoryLabel>}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          {tag && <CategoryLabel style={{ fontSize: 9.5 }}>{tag}</CategoryLabel>}
+          {onRemove && <button onClick={(e) => { stop(e); onRemove(); }} title={`Remove ${label}`} style={{ width: 24, height: 24, display: "grid", placeItems: "center", border: "none", borderRadius: T.rMd, background: "transparent", cursor: "pointer", color: T.tertiary }}><Icon name="x" size={14} /></button>}
+        </span>
       </div>
       <span style={{ font: `600 13px/1.3 ${T.sans}`, color: T.fg, wordBreak: "break-word" }}>{label}</span>
       {onSummarize && (
@@ -142,10 +146,18 @@ export function DocumentsTab({ projectId }: { projectId: string }) {
       await loadDocs();
     } catch { setErr("Upload isn’t available yet."); }
   };
+  const removeMaterial = async (materialId: string) => {
+    setErr("");
+    try { setDocs(await api.deleteMaterial(projectId, materialId)); }
+    catch { setErr("Couldn’t remove this material."); }
+  };
 
   const uploaded: ProjectMaterial[] = docs?.uploaded || [];
   const produced: ProjectArtifact[] = docs?.produced || [];
-  const total = uploaded.length + produced.length;
+  // Org knowledge base surfaced on this tab (design #32 / PRD §2.5b) — where a doc toggled
+  // project→org lands, with a toggle back to project so it never disappears.
+  const org: ProjectMaterial[] = docs?.org || [];
+  const total = uploaded.length + produced.length + org.length;
 
   return (
     <div style={{ flex: 1, overflow: "auto", padding: "22px 24px 36px" }}>
@@ -163,6 +175,10 @@ export function DocumentsTab({ projectId }: { projectId: string }) {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 22 }}>
               {Array.from({ length: 4 }, (_, i) => <FileTileSkel key={i} />)}
             </div>
+            <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>From your organization</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 22 }}>
+              {Array.from({ length: 4 }, (_, i) => <FileTileSkel key={i} />)}
+            </div>
             <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Produced by the factory</h3>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
               {Array.from({ length: 4 }, (_, i) => <FileTileSkel key={i} />)}
@@ -174,9 +190,19 @@ export function DocumentsTab({ projectId }: { projectId: string }) {
           <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Uploaded by you</h3>
           {uploaded.length ? (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 22 }}>
-              {uploaded.map((d, i) => <FileTile key={(d.id || d.name) + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} scope={d.scope} onScope={d.id ? (s) => setScope(d.id!, s) : undefined} summary={d.summary} summaryStatus={d.summary_status} summarizing={!!d.id && summarizingId === d.id} onSummarize={d.id ? () => summarize(d.id!) : undefined} />)}
+              {uploaded.map((d, i) => <FileTile key={(d.id || d.name) + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} onRemove={d.id ? () => removeMaterial(d.id!) : undefined} scope={d.scope} onScope={d.id ? (s) => setScope(d.id!, s) : undefined} summary={d.summary} summaryStatus={d.summary_status} summarizing={!!d.id && summarizingId === d.id} onSummarize={d.id ? () => summarize(d.id!) : undefined} />)}
             </div>
           ) : <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "20px", textAlign: "center", font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary, marginBottom: 22 }}>Nothing uploaded for this project.</div>}
+
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "0 0 10px" }}>
+            <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: 0 }}>From your organization</h3>
+            <span style={{ font: `400 11.5px/1 ${T.sans}`, color: T.tertiary }}>· knowledge base · reused across projects</span>
+          </div>
+          {org.length ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 22 }}>
+              {org.map((d, i) => <FileTile key={(d.id || d.name) + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} tag={d.tag} used={d.used_count ? `${d.used_count} project${d.used_count > 1 ? "s" : ""}` : undefined} scope="org" onScope={d.id ? (s) => setScope(d.id!, s) : undefined} />)}
+            </div>
+          ) : <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "20px", textAlign: "center", font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary, marginBottom: 22 }}>Your organization’s knowledge base is empty. Toggle a document to “Org-wide” to share it across every project.</div>}
 
           <h3 style={{ font: `600 13px/1 ${T.sans}`, color: T.secondary, margin: "0 0 10px" }}>Produced by the factory</h3>
           {produced.length ? (

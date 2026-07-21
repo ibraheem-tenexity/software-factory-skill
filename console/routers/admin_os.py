@@ -3,12 +3,13 @@
 Thin HTTP layer: each handler runs the require_staff gate, extracts the caller email, and delegates
 to `state.admin_service`. Cross-tenant aggregation, the invite orchestration, and the staff-admin
 lockout guards live there (raising domain errors mapped to HTTP by console/app.py)."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 import console.state as state
 from console.deps import require_staff
 from console.schemas import (DemoIn, PromptIn, InviteIn, AccessPatchIn, AgentIn, AgentPatchIn,
-                             ToolIn, ToolPatchIn, ToolKeyIn, OrgIn, OrgPatchIn, SowIn, SowPatchIn)
+                             ToolIn, ToolPatchIn, ToolKeyIn, OrgIn, OrgPatchIn, SowIn, SowPatchIn,
+                             RecipeIn, RecipePatchIn)
 
 router = APIRouter()
 
@@ -167,6 +168,32 @@ def admin_sow_create(body: SowIn, v: tuple = Depends(require_staff)):
 @router.patch("/api/admin/sow/{sow_id}")
 def admin_sow_update(sow_id: int, body: SowPatchIn, v: tuple = Depends(require_staff)):
     return state.admin_service.sow_update(sow_id, body)
+
+
+# ── Recipes (CBT-9) — repo-backed recipes, staff-authored ───────────────────────────────────────
+@router.get("/api/admin/recipes")
+def admin_recipes_list(v: tuple = Depends(require_staff)):
+    return {"recipes": state.recipes.list_all()}
+
+
+@router.get("/api/admin/recipes/{recipe_id}")
+def admin_recipe_get(recipe_id: str, v: tuple = Depends(require_staff)):
+    row = state.recipes.get(recipe_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="recipe not found")
+    return row
+
+
+@router.post("/api/admin/recipes")
+def admin_recipe_create(body: RecipeIn, v: tuple = Depends(require_staff)):
+    return state.recipes.create(body.name, **body.model_dump(exclude={"name"}))
+
+
+@router.patch("/api/admin/recipes/{recipe_id}")
+def admin_recipe_update(recipe_id: str, body: RecipePatchIn, v: tuple = Depends(require_staff)):
+    if not state.recipes.get(recipe_id):
+        raise HTTPException(status_code=404, detail="recipe not found")
+    return state.recipes.update(recipe_id, body.model_dump(exclude_none=True))
 
 
 # ── conversation history (SOF-34, T1.5) — cross-tenant, staff-only ──────────────────────────────

@@ -10,7 +10,7 @@ the original raw SQL, which used the passed argument, not the store's own scopin
 """
 from __future__ import annotations
 
-from sqlalchemy import select, insert, update, func
+from sqlalchemy import select, insert, update, delete, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from ..models import projectstate, phases, artifacts, blockers, gates, verifications, deployments
@@ -97,6 +97,11 @@ class ArtifactRepository:
                                     & (artifacts.c.path == path))
             .order_by(artifacts.c.id.desc()))
 
+    def delete_paths(self, paths: list[str]) -> None:
+        if paths:
+            self._x.execute(delete(artifacts).where(artifacts.c.project_id == self._pid(),
+                                                    artifacts.c.path.in_(paths)))
+
     @staticmethod
     def batch_for_projects(exec_, project_ids: list) -> list:
         """Artifacts across many projects in one round-trip (console.py's repo-url lookup)."""
@@ -172,6 +177,23 @@ class DeploymentRepository:
         self._x.execute(insert(deployments).values(project_id=self._pid(), app=app,
                                                    service_name=service_name, url=url, status=status,
                                                    verified=verified, ts=ts))
+
+    def update_existing(self, app, url, service_name, status, verified, ts) -> None:
+        """Update the existing (project_id, app, url) row in place — the verify step re-recording
+        the same deliverable it already deployed should correct that row's `verified`/`status`,
+        not insert a sibling (SOF-219)."""
+        self._x.execute(update(deployments).where(
+            deployments.c.project_id == self._pid(),
+            deployments.c.app == app,
+            deployments.c.url == url,
+        ).values(service_name=service_name, status=status, verified=verified, ts=ts))
+
+    def find(self, app, url):
+        return self._x.fetchone(select(deployments).where(
+            deployments.c.project_id == self._pid(),
+            deployments.c.app == app,
+            deployments.c.url == url,
+        ))
 
     def all_for_project(self) -> list:
         return self._x.fetchall(select(deployments).where(deployments.c.project_id == self._pid())

@@ -11,6 +11,16 @@ import os
 # Ticket statuses that count as delivered for the % complete bar.
 _DONE_TICKET_STATES = {"done", "deployed", "approved"}
 
+# SOF-199: artifact `kind`s that are INPUT material (read by a stage), not factory OUTPUT — never
+# surfaced as a produced deliverable. 'context' = Stage-1's own reading material (SOF-70).
+# 'product_brief' = the concierge's pre-handoff onboarding doc (SOF-137) — content-wise it's the
+# precursor Stage 1 synthesizes the real PRD from, not the PRD itself; showing it as a peer of the
+# real `kind=prd` artifact is exactly the "two pointers to the same spec" duplication SOF-182 found
+# (the brief has no DB-inlined content and no source_blob_id, so it renders as a bare external link
+# while the real PRD renders natively — same conceptual role, two different broken-feeling
+# experiences). It stays reachable via the Overview tab's own dedicated brief link either way.
+INPUT_ONLY_KINDS = {"context", "product_brief"}
+
 _EXT_KIND = {"pdf": "pdf", "xlsx": "xlsx", "xls": "xlsx", "csv": "csv", "doc": "doc", "docx": "doc",
              "mp4": "video", "mov": "video", "png": "img", "jpg": "img", "jpeg": "img"}
 
@@ -69,33 +79,55 @@ def agents_projection(agents: list, tickets: list) -> list:
             for a in (agents or [])]
 
 
-def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None) -> dict:
-    """Documents tab: user uploads (run blobs; display name = storage-key basename) + factory
-    artifacts. `doc_summaries` (SOF-36) is MemoryStore.list_doc_summaries's blob_id -> row map —
-    optional so this stays callable/testable with no memory data at all (no doc_summary rows yet,
-    e.g. ingestion still running or not yet started); a blob with no entry just gets
-    summary=None/summary_status=None."""
+def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None,
+              org_docs: list | None = None) -> dict:
+    """Documents tab: user uploads (run blobs; display name = stored blob name, key-basename
+    fallback — SOF-181) + factory
+    artifacts + the org knowledge base. `doc_summaries` (SOF-36) is MemoryStore.list_doc_summaries's
+    blob_id -> row map — optional so this stays callable/testable with no memory data at all (no
+    doc_summary rows yet, e.g. ingestion still running or not yet started); a blob with no entry
+    just gets summary=None/summary_status=None. `org_docs` (design change #32 / PRD §2.5b) is
+    BlobStore.list_org_docs's rows for the project owner's org — surfaced here so a document toggled
+    project→org still appears ON this page (in the "From your organization" group) with a path back
+    to project scope, instead of vanishing; optional so callers that only need the counts (Overview)
+    can omit it."""
     doc_summaries = doc_summaries or {}
     uploaded = []
     for b in blobs or []:
         key = b.get("storage_key") or ""
-        name = os.path.basename(key) or key
+        # SOF-181: prefer the blob's stored (original) name; the storage key is uuid-prefixed
+        # ("materials/<uuid>-<name>"), so its basename carries that prefix. Returning the prefixed
+        # name here (a) showed the ugly "<uuid>-name" label and (b) broke the onboarding remove
+        # control — attachFiles backfills blob_id by matching this name against the ORIGINAL
+        # filename, so a prefixed name never matched → blob_id stayed null → the remove button
+        # (gated on blob_id) never rendered on the fresh-upload path. Mirror the `org` branch below.
+        name = b.get("name") or os.path.basename(key) or key
         ds = doc_summaries.get(b.get("id")) or {}
         uploaded.append({"id": b.get("id"), "name": name, "kind": _kind_for(name),
                          "size_bytes": b.get("size_bytes"), "content_type": b.get("content_type"),
-                         "storage_key": key, "created_at": b.get("created_at"),
+                         "storage_key": key, "created_at": b.get("created_at"), "scope": "project",
                          "summary": ds.get("summary_md"), "summary_status": ds.get("status")})
     # SOF-60: origin='user' artifact rows are user-deposited document markdown (agent reading
     # material), not factory output — they'd double-list next to their own upload here.
-    # SOF-70: kind='context' rows (Console._provision_and_launch's "input" artifacts, e.g.
+    # SOF-70/SOF-199: kind='context' rows (Console._provision_and_launch's "input" artifacts, e.g.
     # input/interview.md, input/context.md) are Stage-1's OWN reading material — composed by the
     # console from the intake, not something the factory produced — so they default origin='agent'
     # (unlike SOF-60's user-deposited markdown) and slipped past the origin-only filter above.
+    # kind='product_brief' is the same category (SOF-199) — see INPUT_ONLY_KINDS.
     produced = [{"id": a.get("id"), "title": a.get("title", ""), "path": a.get("path", ""),
                  "kind": a.get("kind", ""), "agent": a.get("agent", ""), "ts": a.get("ts")}
                 for a in (artifacts or [])
-                if a.get("origin") != "user" and a.get("kind") != "context"]
-    return {"uploaded": uploaded, "produced": produced}
+                if a.get("origin") != "user" and a.get("kind") not in INPUT_ONLY_KINDS]
+    # Org knowledge base surfaced on the project Documents tab (design #32 / PRD §2.5b). Each row
+    # keeps scope="org" so the tile renders the toggle with "Org-wide" active — flipping it to
+    # "Project" moves the doc back into this project (the reverse of the vanish-on-toggle bug).
+    org = []
+    for b in org_docs or []:
+        name = b.get("name") or os.path.basename(b.get("storage_key") or "") or ""
+        org.append({"id": b.get("id"), "name": name, "kind": _kind_for(name),
+                    "size_bytes": b.get("size_bytes"), "content_type": b.get("content_type"),
+                    "tag": b.get("tag"), "scope": "org", "used_count": b.get("used_count") or 0})
+    return {"uploaded": uploaded, "produced": produced, "org": org}
 
 
 def brief_block(project: dict, status: dict, created) -> dict:

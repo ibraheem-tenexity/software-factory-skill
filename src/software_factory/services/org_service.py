@@ -10,17 +10,11 @@ in the router as a FastAPI dependency — that's a transport concern, not busine
 from __future__ import annotations
 
 import base64
-import logging
-import os
 
 from software_factory import notify, storage
 from ..memory.ingest import maybe_ingest_async
-from .errors import Invalid, NotFound
+from .errors import Invalid, NotFound, Conflict
 from .files import doc_kind
-
-# Env-driven so an invite sent from staging links the invitee to staging, not prod; the default
-# covers prod (staging sets SF_CONSOLE_URL).
-CONSOLE_URL = os.environ.get("SF_CONSOLE_URL", "https://softwarefactory-console.up.railway.app")
 
 def summarize(org: dict | None, runs: list[dict]) -> dict:
     """Roll the org's runs into the Usage & billing payload.
@@ -63,6 +57,12 @@ class OrgService:
     def create_org(self, body, by: str) -> dict:
         if not (body.name or "").strip():
             raise Invalid("name required")
+        # SOF-196: reject a name that already belongs to an active org. Unlike the admin invite path,
+        # this is UNTRUSTED self-serve onboarding — silently attaching the caller to a stranger's
+        # same-named org (find-or-create) would leak that org's data to them. So we do NOT attach;
+        # we surface an honest 409 the onboarding UI shows as "name already exists".
+        if self.users.get_org_by_name(body.name):
+            raise Conflict(f"An organization named “{body.name.strip()}” already exists")
         oid = self.users.create_org(
             body.name, industry=body.industry, sub_focus=body.sub_focus,
             headcount=body.headcount, revenue=body.revenue, location=body.location,
@@ -75,6 +75,14 @@ class OrgService:
     def patch_org(self, email: str, body) -> dict:
         org = self._require_org(email)
         fields = {k: val for k, val in body.model_dump().items() if val is not None}
+        # SOF-198: same rename guard as update_client — renaming to a name another active org holds
+        # would duplicate (and 500 once the SOF-196 0028 index is live). Exclude this org's own row
+        # so a self-rename / case-only change passes.
+        new_name = fields.get("name")
+        if new_name:
+            existing = self.users.get_org_by_name(new_name)
+            if existing and existing["id"] != org["id"]:
+                raise Conflict(f"An organization named “{new_name.strip()}” already exists")
         self.users.update_org(org["id"], **fields)
         return self.users.get_org(org["id"])
 
@@ -152,28 +160,14 @@ class OrgService:
             raise Invalid("email required")
         self.users.invite_member(invitee, org["id"], role=body.role or "member",
                                  designation=body.designation, by=by or "")
-        # SOF-140: tell the invitee they were invited. Fire-and-forget — send_to never raises, and
-        # an email failure must NOT fail the invite (the member row is already created). The UI
-        # reads invite_email_sent and says so honestly rather than pretending. No invite token /
+        # SOF-140: tell the invitee they were invited. Fire-and-forget — send_invite never raises,
+        # and an email failure must NOT fail the invite (the member row is already created). The
+        # UI reads invite_email_sent and says so honestly rather than pretending. No invite token /
         # link: auth is Google/password on the invited email, so signing in with it IS acceptance.
         payload = self._members_payload(org["id"], me)
-        payload["invite_email_sent"] = self._send_invite_email(invitee, org, by or me)
+        payload["invite_email_sent"] = notify.send_invite(
+            invitee, org_name=org.get("name") or "Software Factory", inviter=by or me)
         return payload
-
-    def _send_invite_email(self, invitee: str, org: dict, inviter: str) -> bool:
-        org_name = org.get("name") or "Software Factory"
-        subject = f"You've been invited to {org_name} on Software Factory"
-        body = (
-            f"{inviter or 'A teammate'} invited you to join {org_name} on Software Factory.\n\n"
-            f"Sign in with this email address ({invitee}) to get started — no invite link needed:\n"
-            f"{CONSOLE_URL}\n"
-        )
-        sent = notify.send_to(invitee, subject, body)
-        if not sent:
-            logging.getLogger(__name__).warning(
-                "invite email to %s not sent (Resend disabled or rejected — check RESEND_API_KEY / "
-                "SF_NOTIFY_FROM verified sender); invite still succeeded", invitee)
-        return sent
 
     def update_member(self, email: str, target: str, body, me: str, by: str) -> dict:
         org = self._require_org(email)

@@ -267,6 +267,9 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
         push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "parsing", "pct": 100, "status": "failed"})
         return {"blob_id": blob_id, "status": "failed", "error": str(exc)}
 
+    if blobs_store.get_blob(blob_id) is None:
+        return {"blob_id": blob_id, "status": "deleted"}
+
     # SOF-60: persist the full converted markdown (chunking loses whole-document order) as an
     # origin='user' artifact so agents can read the document exactly as written.
     if project_id:
@@ -284,6 +287,8 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
         memory_store.upsert_doc_summary(blob_id, scope, scope_id, status="failed")
         push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "embedding", "pct": 100, "status": "failed"})
         return {"blob_id": blob_id, "status": "failed", "error": str(exc)}
+    if blobs_store.get_blob(blob_id) is None:
+        return {"blob_id": blob_id, "status": "deleted"}
     memory_store.replace_chunks(blob_id, chunks, scope=scope, scope_id=scope_id, dense=vectors)
 
     embed_chars = sum(len(text) for _o, _p, text in chunks)
@@ -316,6 +321,9 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
             record_ingestion_cost(console, project_id, model=SUMMARIZE_MODEL, provider="openrouter",
                                   input_tokens=usage.get("prompt_tokens", 0),
                                   output_tokens=usage.get("completion_tokens", 0), usd=summarize_cost)
+
+    if blobs_store.get_blob(blob_id) is None:
+        return {"blob_id": blob_id, "status": "deleted"}
 
     memory_store.upsert_doc_summary(
         blob_id, scope, scope_id, summary_md=summary_md, assumptions=assumptions, outline=outline,

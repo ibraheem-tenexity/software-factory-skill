@@ -104,7 +104,7 @@ export type Artifact = { path: string; content?: string; error?: string };
 
 // Project view (§2.5) — Overview rollup + Documents, per tjyb5gmy's LOCKED shapes (PR #13).
 // Callers degrade to empty until live.
-export type ProjectMaterial = { id?: string; name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number; scope?: "project" | "org"; summary?: string; summary_status?: "pending" | "ready" | "failed" };
+export type ProjectMaterial = { id?: string; name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number; scope?: "project" | "org"; tag?: string; used_count?: number; summary?: string; summary_status?: "pending" | "ready" | "failed" };
 export type ProjectArtifact = { id?: number; title: string; path?: string; kind?: string; agent?: string; ts?: number };
 export type ProjectOverview = {
   brief?: { name?: string; description?: string; goal?: string; scope?: string[]; owner?: string; phase?: string; stage?: number; created?: number | string; runtime?: string; created_by?: string };
@@ -119,7 +119,7 @@ export type ProjectOverview = {
   materials_count?: number;
   produced_count?: number;
 };
-export type ProjectDocuments = { uploaded: ProjectMaterial[]; produced: ProjectArtifact[] };
+export type ProjectDocuments = { uploaded: ProjectMaterial[]; produced: ProjectArtifact[]; org?: ProjectMaterial[] };
 
 // Org-admin (§2.3) — org-scoped, per the locked contract in docs/plans/org-admin-api.md.
 export type Member = { email: string; role: string; designation?: string; you?: boolean };
@@ -131,6 +131,28 @@ export type OrgUsage = {
 };
 
 export type OrgSecret = { name: string; kind: string; last4: string; used_by: number; updated_at: string };
+
+// CBT-9: a published recipe's customer-facing fields — the intake picker's RecipePicker card grid.
+// No body_md/repo_url (internal-only); images already filtered to public: true by the store.
+export type RecipeLight = {
+  id: string; name: string; tagline?: string | null; category?: string | null;
+  capabilities: string[]; images: { url: string; public: boolean }[];
+};
+
+// CBT-9 (admin): the full recipe row — the Tenexity OS Recipes library editor's shape. `repo_url`
+// is validated server-side (store.py's one AGENTS.md/CLAUDE.md fact gate) — a save can 400 with
+// the exact reason, which the editor must render verbatim (never a generic "save failed").
+export type RecipeImage = { url: string; public: boolean; caption?: string | null };
+export type AdminRecipe = {
+  id: string; name: string; tagline?: string | null; category?: string | null;
+  capabilities: string[]; body_md?: string | null; repo_url?: string | null;
+  images: RecipeImage[]; status: string;
+  created_at?: number | string | null; updated_at?: number | string | null;
+};
+
+// Codebase discovery (CBT-6/7) — status is a projection of the live run, not stored state.
+export type DiscoveryArtifact = { name: string; blob_id: number; updated: number };
+export type DiscoveryStatus = { running: boolean; log_tail: string; artifacts: DiscoveryArtifact[]; spent_usd: number };
 
 // Public boot config the SPA reads to decide whether to gate on login (auth on) or open
 // straight to the console (auth off, dev/test). client_id feeds the Google sign-in button.
@@ -157,6 +179,25 @@ export type OrgInput = Partial<Omit<Org, "id" | "created_at" | "created_by">> & 
   name: string;
   designation?: string;
   role_description?: string;
+};
+
+// Company-enrich wow prefill (CBT-1) — POST /api/research/company response. Sources only, no
+// confidence field: `sources` is the overall list of URLs consulted (quick mode, the UI's only
+// caller); `field_sources` is deep-mode-only per-field attribution and is always absent here.
+export type CompanyProfile = {
+  name: string;
+  website: string | null;
+  industry: string | null;
+  size_hint: string | null;
+  sub_focus: string | null;
+  connected_systems: string[];
+  description: string;
+  products: string[];
+  competitors: { name: string; url?: string; description?: string }[];
+  recent_news: string[];
+  sources: string[];
+  mode: string;
+  field_sources: Record<string, string> | null;
 };
 
 // ── Tenexity OS admin portal (§3) — staff-gated, cross-tenant. Degrade to empty until live.
@@ -447,6 +488,9 @@ export const api = {
   getOrg: () => get<{ org: Org | null }>("/api/org"),
   createOrg: (body: OrgInput) => send<{ org: Org }>("/api/org", "POST", body),
   patchOrg: (body: Partial<Org>) => send<{ org: Org }>("/api/org", "PATCH", body),
+  // CBT-1 wow prefill: always depth=quick (deep is a concierge-only ~165-180s call, SOF-79).
+  enrichCompany: (body: { name?: string; website?: string; email_domain?: string }) =>
+    send<CompanyProfile>("/api/research/company?depth=quick", "POST", body),
   // Org-admin §2.3 — org-scoped (resolve org from session). Backend in progress (tjyb5gmy);
   // callers degrade to empty/null until live. NOT /api/users (that's the global cross-org dir).
   orgMembers: () => get<{ members: Member[] }>("/api/org/members"),
@@ -454,6 +498,9 @@ export const api = {
   updateMember: (email: string, body: { role?: string; designation?: string }) => send<{ members?: Member[] }>(`/api/org/members/${encodeURIComponent(email)}`, "PATCH", body),
   removeMember: (email: string) => send<{ ok?: boolean }>(`/api/org/members/${encodeURIComponent(email)}`, "DELETE"),
   orgDocs: () => get<{ docs: OrgDoc[] }>("/api/org/docs"),
+  orgDocContent: (id: number) => get<{ content: string | null }>(`/api/org/docs/${id}/content`),
+  startDiscovery: (body: { repo_url: string; pat_secret?: string }) => send<DiscoveryStatus>("/api/org/discovery", "POST", body),
+  discoveryStatus: () => get<DiscoveryStatus>("/api/org/discovery"),
   orgUsage: () => get<OrgUsage>("/api/org/usage"),
   patchBilling: (body: { plan?: string; monthly_budget_cap?: number }) => send<OrgUsage>("/api/org/billing", "PATCH", body),
   listSecrets: () => get<{ secrets: OrgSecret[] }>("/api/org/secrets"),
@@ -491,15 +538,22 @@ export const api = {
     method?: "google" | "microsoft" | "password" | "sso";
     password?: string;
     role?: "admin" | "member";
-  }) => send<{ users: AdminAccessUser[] }>("/api/admin/access", "POST", body),
+  }) => send<{ users: AdminAccessUser[]; invite_email_sent?: boolean }>("/api/admin/access", "POST", body),
   adminUpdateAccess: (email: string, body: { role?: string; status?: "active" | "invited" | "disabled"; is_internal?: boolean }) =>
     send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "PATCH", body),
   adminDeleteAccess: (email: string) => send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "DELETE"),
   adminResendInvite: (email: string) => send<{ email: string; status: string; link: string }>(`/api/admin/access/${encodeURIComponent(email)}/resend`, "POST"),
-  adminSowList: () => get<{ sows: AdminSow[] }>("/api/admin/sow"),
+  // adminSowGet is the last surviving SOW fetcher — the admin SOW editor (sow.tsx) was removed
+  // (operator scope change), but ArtifactViewer.tsx's `?sow=<id>` mode still reads a SOW row.
   adminSowGet: (id: number) => get<AdminSow>(`/api/admin/sow/${id}`),
-  adminSowCreate: (body: { title: string; org?: string; project?: string; value?: string; file?: string; version?: number; status?: string; body?: string }) => send<AdminSow>("/api/admin/sow", "POST", body),
-  adminSowUpdate: (id: number, body: { title?: string; org?: string; project?: string; value?: string; file?: string; version?: number; status?: string; body?: string }) => send<AdminSow>(`/api/admin/sow/${id}`, "PATCH", body),
+  // CBT-9 (admin): Recipes library CRUD. Create/patch may reject with a 400 whose `.detail` is
+  // the store's verbatim reason (e.g. a repo missing AGENTS.md/CLAUDE.md) — callers must surface it.
+  adminListRecipes: () => get<{ recipes: AdminRecipe[] }>("/api/admin/recipes"),
+  adminGetRecipe: (id: string) => get<AdminRecipe>(`/api/admin/recipes/${id}`),
+  adminCreateRecipe: (body: { name: string; tagline?: string; category?: string; capabilities?: string[]; body_md?: string; repo_url?: string; images?: RecipeImage[]; status?: string }) =>
+    send<AdminRecipe>("/api/admin/recipes", "POST", body),
+  adminPatchRecipe: (id: string, body: { name?: string; tagline?: string; category?: string; capabilities?: string[]; body_md?: string; repo_url?: string; images?: RecipeImage[]; status?: string }) =>
+    send<AdminRecipe>(`/api/admin/recipes/${id}`, "PATCH", body),
   // SOF-34/T1.5 — cross-tenant conversation history.
   adminConversations: (filter: AdminConversationsFilter = {}) => {
     const params = new URLSearchParams();
@@ -519,13 +573,16 @@ export const api = {
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),
   // SOF-108: DB-backed scope chips — genre recipes authored on the SOW screen (status='Template').
   scopeGenres: () => get<{ genres: { name: string; description: string }[] }>("/api/scope-genres"),
-  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number }) =>
-    send<{ name: string; goal: string; scope: string[]; description: string }>(`/api/projects/${id}/draft`, "PATCH", body),
+  // CBT-9: published recipes — the intake picker source (light fields only; body_md/repo_url stay
+  // internal-only, per the store's published() projection).
+  listRecipes: () => get<{ recipes: RecipeLight[] }>("/api/recipes"),
+  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number; recipe_id?: string }) =>
+    send<{ name: string; goal: string; scope: string[]; description: string; recipe_id?: string }>(`/api/projects/${id}/draft`, "PATCH", body),
   // Read counterpart to PATCH /draft (qsvigmth's run-control PR #48) — rehydrates the intake form
   // when RESUMING an existing draft instead of minting a new one. budget (SOF-137) is included
   // since it's now one of the three required intake fields (name+goal+budget, scope optional).
   getDraft: (id: string) =>
-    get<{ name: string; goal: string; scope: string[]; description: string; budget: number | null }>(`/api/projects/${id}/draft`),
+    get<{ name: string; goal: string; scope: string[]; description: string; budget: number | null; recipe_id?: string }>(`/api/projects/${id}/draft`),
   // BYOK key submission (qsvigmth's draft-BYOK PR). Vault-stores each credential; records UUIDs in
   // state.creds_vault_ids; promote threads them into the runner env. Returns names only, never values.
   submitCreds: (id: string, credentials: Record<string, string>) =>
@@ -554,6 +611,8 @@ export const api = {
   rewindTo: (id: string, node: string) => send<Record<string, any>>(`/api/projects/${id}/rewind`, "POST", { node }),
   uploadMaterial: (id: string, file: { name: string; tag?: string; content_type?: string; data_b64: string }) =>
     send<{ ok?: boolean }>(`/api/projects/${id}/materials`, "POST", file),
+  deleteMaterial: (id: string, materialId: string | number) =>
+    send<ProjectDocuments>(`/api/projects/${id}/materials/${materialId}`, "DELETE"),
   // Auto-summarize / Regenerate (SOF-36/T3.3) — synchronous, blocks until the fresh summary is
   // persisted; 404s if project memory (SF_MEMORY) isn't enabled.
   summarizeDocument: (id: string, blobId: string) =>
@@ -582,4 +641,3 @@ export function phaseIsStale(phase: string | undefined, stage: number | undefine
   if (!_ALL_STAGE_PHASES.has(phase)) return false; // non-pipeline (draft/paused/crashed): never stale
   return !(_STAGE_PHASES[stage] || []).includes(phase);
 }
-

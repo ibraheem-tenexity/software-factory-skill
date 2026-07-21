@@ -42,7 +42,7 @@ class BlobRepository:
     def list_org_docs(self, org_id) -> list:
         j = blobs.outerjoin(blob_uses, blob_uses.c.blob_id == blobs.c.id)
         stmt = (select(blobs.c.id, blobs.c.name, blobs.c.tag, blobs.c.kind, blobs.c.content_type,
-                      blobs.c.size_bytes,
+                      blobs.c.size_bytes, blobs.c.storage_key,
                       epoch_cast(blobs.c.created_at).label("updated"),
                       func.count(distinct(blob_uses.c.project_id)).label("used_count"))
                .select_from(j)
@@ -52,6 +52,10 @@ class BlobRepository:
 
     def by_id(self, blob_id):
         return self._x.fetchone(select(*_BLOB_COLS).where(blobs.c.id == blob_id))
+
+    def children_of(self, blob_id) -> list:
+        return self._x.fetchall(select(*_BLOB_COLS).where(blobs.c.source_blob_id == blob_id)
+                                .order_by(blobs.c.id))
 
     def record_use(self, blob_id, project_id) -> None:
         self._x.execute(insert(blob_uses).values(blob_id=blob_id, project_id=project_id))

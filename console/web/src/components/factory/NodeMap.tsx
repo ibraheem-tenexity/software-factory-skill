@@ -10,7 +10,8 @@
 // Map  = Cytoscape restyled per nodemap.jsx: dotted-grid background, curved edges with the active
 //        path in brand blue, rounded-rect colour-coded process nodes with mono labels, a pulsing
 //        ring on the active node, teal gate diamonds, green agent / purple artifact satellites
-//        (artifact nodes are clickable → DocViewer), and the 6-entry legend.
+//        (artifact nodes open a quick preview with a path to the full viewer), and the 6-entry
+//        legend.
 import React, { useEffect, useRef } from "react";
 import cytoscape, { Core } from "cytoscape";
 import { T, Icon, Sparkle, Avatar, StatusPill, ArtifactChip } from "../onboarding/design";
@@ -219,15 +220,15 @@ export function TreeView({ graph, onOpenArtifact, ticketsDone = 0, ticketsTotal 
 }
 
 // ── Map view: Cytoscape restyled to the design's node map (nodemap.jsx:62-140) ──────────────
-export function MapView({ graph, onOpenArtifact }:
-  { graph: Graph; onOpenArtifact?: (a: ArtifactRef) => void }) {
+export function MapView({ graph, onPreviewArtifact }:
+  { graph: Graph; onPreviewArtifact?: (a: ArtifactRef) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const laidOut = useRef(false);
   const graphRef = useRef(graph);
-  const openRef = useRef(onOpenArtifact);
+  const previewRef = useRef(onPreviewArtifact);
   graphRef.current = graph;
-  openRef.current = onOpenArtifact;
+  previewRef.current = onPreviewArtifact;
 
   useEffect(() => {
     if (!ref.current) return;
@@ -292,16 +293,16 @@ export function MapView({ graph, onOpenArtifact }:
     cyRef.current = cy;
     laidOut.current = false;
 
-    // artifact nodes are clickable → open the DocViewer (or the external url)
+    // Artifact nodes open a quick preview. The preview retains an explicit route to the full
+    // viewer, so operators can inspect the artifact without losing graph context.
     cy.on("tap", "node[kind = 'artifact']", (ev) => {
       const d = ev.target.data();
-      if (d.url) { window.open(d.url, "_blank"); return; }
-      if (!openRef.current) return;
+      if (!previewRef.current) return;
       // resolve the producing agent via the hierarchy edge, like artifactsFromGraph
       const g = graphRef.current;
       const owner = g.edges.find((e) => e.data.etype === "hierarchy" && e.data.target === d.id);
       const agentNode = owner && g.nodes.find((n) => n.data.id === owner.data.source && n.data.kind === "agent");
-      openRef.current({ label: d.label, path: d.path || "", url: d.url || null, status: d.status,
+      previewRef.current({ label: d.label, path: d.path || "", url: d.url || null, status: d.status,
         id: d.artifact_id, agent: agentNode?.data.label });
     });
     cy.on("mouseover", "node[kind = 'artifact']", () => { container.style.cursor = "pointer"; });
