@@ -115,7 +115,11 @@ export function DocViewer({ projectId, doc, onClose, preview = false }:
   useEffect(() => {
     if (!doc) return;
     setContent(doc.content ?? null);
-    if (doc.content != null || !doc.path) return;
+    // SOF-199: a URL-backed doc (doc.url set — e.g. Product Brief, GitHub Repo) has no repo-
+    // relative path to resolve server-side; fetching by path there always 404s ("Could not load:
+    // not found") even though the SAME node's full-viewer button opens it fine via doc.id/doc.url.
+    // Render it as a link instead (below) — never attempt the by-path fetch for it.
+    if (doc.content != null || !doc.path || doc.url) return;
     setLoading(true);
     api.artifact(projectId, doc.path)
       .then((r) => setContent(r.content ?? (r.error ? `Could not load: ${r.error}` : "")))
@@ -161,6 +165,16 @@ export function DocViewer({ projectId, doc, onClose, preview = false }:
             : isSvg && content ? <div style={{ display: "grid", placeItems: "center" }} dangerouslySetInnerHTML={{ __html: content }} />
             : isMd && content ? <MarkdownBody content={content} />
             : content ? <pre style={{ margin: 0, font: `400 12.5px/1.6 ${T.mono}`, color: T.fg, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{content}</pre>
+            : doc.url ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "20px 0" }}>
+                <span style={{ font: `400 13px/1.5 ${T.sans}`, color: T.tertiary, textAlign: "center" }}>This artifact is an external link.</span>
+                <a href={doc.url} target="_blank" rel="noreferrer"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: T.rMd,
+                    border: `1px solid ${T.borderDefault}`, background: T.raised, font: `500 13px/1 ${T.sans}`, color: T.fg, textDecoration: "none" }}>
+                  <Icon name="external" size={14} color={T.secondary} /> Open link
+                </a>
+              </div>
+            )
             : <span style={{ font: `400 13px/1.5 ${T.sans}`, color: T.tertiary }}>No inline preview is available for this artifact.</span>}
         </div>
       </div>
