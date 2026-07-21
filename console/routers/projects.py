@@ -38,6 +38,12 @@ def scope_genres(v: tuple = Depends(require_authed)):
     ]}
 
 
+# ── Recipes (CBT-9): the intake picker source — published recipes' light fields only ────────────
+@router.get("/api/recipes")
+def list_recipes(v: tuple = Depends(require_authed)):
+    return {"recipes": state.recipes.published()}
+
+
 # ── Runs: list + create ───────────────────────────────────────────────────────────────────────
 @router.get("/api/projects")
 def projects_list(include_archived: bool = False, v: tuple = Depends(require_authed)):

@@ -260,6 +260,28 @@ class SowPatchIn(BaseModel):
     body: str | None = None
 
 
+class RecipeIn(BaseModel):
+    name: str
+    tagline: str | None = None
+    category: str | None = None
+    capabilities: list | None = None
+    body_md: str | None = None
+    repo_url: str | None = None
+    images: list | None = None
+    status: str = "draft"
+
+
+class RecipePatchIn(BaseModel):
+    name: str | None = None
+    tagline: str | None = None
+    category: str | None = None
+    capabilities: list | None = None
+    body_md: str | None = None
+    repo_url: str | None = None
+    images: list | None = None
+    status: str | None = None
+
+
 # ── Org Secrets vault (§2.3) ────────────────────────────────────────────────────────────────────
 from pydantic import Field  # noqa: E402
 
