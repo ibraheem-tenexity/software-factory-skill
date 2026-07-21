@@ -52,7 +52,19 @@ Every claim in your three files must trace back to a file you actually read — 
 invent. If something is genuinely unclear from the repo, say so plainly instead of making it up."""
 
 _ARTIFACTS = ("AGENTS.md", "CLAUDE.md", "integrations.md")
-_SCRATCH_ROOT = os.environ.get("SF_DISCOVERY_DIR", "/data/org")  # override for local dev, mirrors SF_PROJECTS_DIR
+# Org scratch lives under the SAME writable root the project runs use (SF_PROJECTS_DIR — a Railway
+# volume in prod): the volume only grants the server user write access to that pre-existing path,
+# not a fresh top-level sibling — a bare "/data/org" 403s (staging incident, CBT-6 C4). `_org` is a
+# reserved, non-project top-level entry under it, alongside the janitor's own `_quarantine`
+# directory — see console/poller.py's boot janitor, which explicitly exempts both by name so
+# neither gets swept as debris; `PROJECT_ID_RE.fullmatch("_org")` is false, so every place that
+# scans PROJECTS_DIR for real project ids (console.py's `list_projects`/`reap_deploy_dbs`/repo-scan
+# helpers, all filtered by that same regex) already ignores it naturally. SF_DISCOVERY_DIR remains
+# a full override (used by local verification), taking precedence over the derived default.
+_SCRATCH_ROOT = os.environ.get(
+    "SF_DISCOVERY_DIR",
+    os.path.join(os.environ.get("SF_PROJECTS_DIR", ".projects"), "_org"),
+)
 _CHECK_INTERVAL_S = 15.0
 _SENTINEL = "cloning"  # reserves an org's slot in _procs while the (possibly slow) clone is in
                         # flight, so the lock only needs to be held for the check-and-reserve, not
