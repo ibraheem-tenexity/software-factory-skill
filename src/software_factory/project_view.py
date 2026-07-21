@@ -81,7 +81,8 @@ def agents_projection(agents: list, tickets: list) -> list:
 
 def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None,
               org_docs: list | None = None) -> dict:
-    """Documents tab: user uploads (run blobs; display name = storage-key basename) + factory
+    """Documents tab: user uploads (run blobs; display name = stored blob name, key-basename
+    fallback — SOF-181) + factory
     artifacts + the org knowledge base. `doc_summaries` (SOF-36) is MemoryStore.list_doc_summaries's
     blob_id -> row map — optional so this stays callable/testable with no memory data at all (no
     doc_summary rows yet, e.g. ingestion still running or not yet started); a blob with no entry
@@ -94,7 +95,13 @@ def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None,
     uploaded = []
     for b in blobs or []:
         key = b.get("storage_key") or ""
-        name = os.path.basename(key) or key
+        # SOF-181: prefer the blob's stored (original) name; the storage key is uuid-prefixed
+        # ("materials/<uuid>-<name>"), so its basename carries that prefix. Returning the prefixed
+        # name here (a) showed the ugly "<uuid>-name" label and (b) broke the onboarding remove
+        # control — attachFiles backfills blob_id by matching this name against the ORIGINAL
+        # filename, so a prefixed name never matched → blob_id stayed null → the remove button
+        # (gated on blob_id) never rendered on the fresh-upload path. Mirror the `org` branch below.
+        name = b.get("name") or os.path.basename(key) or key
         ds = doc_summaries.get(b.get("id")) or {}
         uploaded.append({"id": b.get("id"), "name": name, "kind": _kind_for(name),
                          "size_bytes": b.get("size_bytes"), "content_type": b.get("content_type"),
