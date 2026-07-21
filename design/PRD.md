@@ -452,6 +452,23 @@ Every tool/MCP server/connector. Metric cards (registered / connected / MCP
 servers / available). Table: tool, type (MCP/API/native/HTTP), provider, scope,
 auth, used-by count, status (live / connect). Register-tool + sync actions.
 
+**Tool editor (click a row → right drawer)** — the per-tool settings surface.
+**Logical separation:** a tool's config and secrets live **on the tool's row here**,
+never in platform Settings (§3.8); platform knobs never appear here.
+- **Config fields** — per-tool JSON config (the existing DB-editable pattern: e.g.
+  `fusion`'s `analysis_models` / `judge_model`). Editable inline, validated, audited.
+- **Secret fields** (e.g. Exa's API key) — **write-only**: a paste input that stores
+  masked (`••••••` + last4 shown), **Rotate** replaces, and the raw value is never
+  readable back by anyone — the same contract as the org secret vault (§2.3).
+- **`env_key`** — shown as a mono badge: "injected as `EXA_API_KEY` at console
+  startup" (see §3.8 Startup hydration). This is how DB-stored secrets reach the
+  code that reads env today.
+- **Attached to** — the agent call-signs this tool is wired to.
+- **Status, honest** — `live` only after a real call with the stored key succeeded;
+  otherwise the actual state: `missing key`, or `failing — <real error>` (e.g.
+  "Exa returned 401 — rotate the key"). Never a plausible-looking mock status —
+  agents read this too, and act on it.
+
 ### 3.7 Provide access (invite)  (`InviteModal`)
 Triggered from the top-bar **Provide access** button. Form:
 - **Email** address.
@@ -460,6 +477,40 @@ Triggered from the top-bar **Provide access** button. Form:
   - **Tenexity** → internal operator with full cross-tenant access.
 - On send → email is **added to the sign-in allow-list** (status `invited` → `active` after first sign-in). Login (§2.1) only admits allow-listed emails.
 **Allowed sign-ins** list shown in the modal: email, org, role, status.
+
+---
+
+### 3.8 System settings — the console's own settings  (`admin.jsx` → `AdminSettings`)
+
+**Purpose:** every operational setting of the **factory console software itself** is
+editable in one place — no operational setting lives only in deploy env. **Logical
+separation:** this page owns the console platform; a tool's own config/secrets live on
+that tool's row (§3.6), never here.
+
+#### Storage & precedence (implement exactly)
+
+- **Table** `system_settings(key text primary key, value text, secret bool not null default false, updated_by text, updated_at timestamptz)`. Secrets in this table follow the §2.3 vault contract (write-only, masked `••••••<last4>`, never readable back).
+- **Read path:** one accessor — `settings.get(key)` is **DB-first, env fallback**. A real env var is a disaster-recovery override, not the norm.
+- **Startup hydration:** at console boot, every stored tool secret (§3.6) is injected into the process env under its `env_key` via `os.environ.setdefault(env_key, value)` — existing env readers keep working untouched, and stage children still inherit through the `_STAGE_ESSENTIAL` allowlist in `env.py` (the stage scrub is unchanged; the key simply arrives from the DB now instead of the deploy env).
+- **Apply semantics:** settings marked **hot** apply in-process on save; others are persisted and the row shows an honest **"applies on restart"** badge until the next boot. Never claim a setting is live when it isn't.
+- **Audit & validation:** every row shows `updated_by` + `updated_at`; values are validated client- and server-side; a refusal states the actual reason (repo rule: honest errors).
+
+#### Layout (one page, OS shell; left-aligned groups)
+
+1. **Runtime** — the lifecycle knobs (money/lifecycle machinery — hard invariants live here):
+   - **Max retries** (`SF_AUTO_RESUME_MAX`, default 6, int 0–25) — retries beyond the cap pause the run for input.
+   - **Stage reserve** (`SF_STAGE_RESERVE`, default 5, int 0–50) — stage slots held back from general use.
+   - **Reaper interval** (`SF_REAPER_INTERVAL_TICKS`, default 7200, seconds, floor 300).
+   - **GitHub reaper interval** (`SF_GITHUB_REAPER_INTERVAL_TICKS`, default 7200, seconds, floor 300).
+2. **Deployment — default run-app targets** — where apps get deployed by default:
+   - **Railway project IDs** (`SF_RUNAPP_RAILWAY_PROJECT_IDS`, comma list, each validated as a UUID).
+   - **Railway environment IDs** (`SF_RUNAPP_RAILWAY_ENVIRONMENT_IDS`, comma list of UUIDs).
+   - **Guard:** if any entered ID matches the console's own project (`SF_CONSOLE_RAILWAY_PROJECT_IDS` — **env-only, shown read-only here**), saving requires an explicit typed confirmation: pointing credentialed run-apps at the console project is a trust-boundary break (see `env.py`).
+3. **Notifications** —
+   - **Notify-from** (`SF_NOTIFY_FROM`) — validated `Name <email>` format.
+   - **Notify recipient** (`SF_NOTIFY_EMAIL`) — where platform alerts go.
+
+Save is per-section with an inline ✓; failed saves surface the server's actual error text.
 
 ---
 
@@ -485,7 +536,7 @@ success rate, and an editable system prompt (see §3.4).
 ## 5. Build notes / non-goals for the prototype
 - All data is mock but representative; wire to real services when implementing.
 - Concierge replies are scripted in the prototype; connect to the live model.
-- `Factories`, `Settings` (OS) are placeholders.
+- `Factories` (OS) is a placeholder. `Settings` (OS) is specced — §3.8.
 - The canvas (`Software Factory Onboarding.html`) is a presentation shell only;
   the real app should route these screens with a router and real auth/state.
 
@@ -679,6 +730,22 @@ continue** (locks the look, green "Design locked" state, re-openable) or **itera
 (re-generates only affected screens). Copy ties the screens to the org's brand theme (entry 35).
 File: `buildprogress.jsx` (`DesignReviewBar`).
 
+**39 · OS System settings — the console's own settings leave the env** (§3.8) — new OS **Settings**
+page: **Runtime** (max retries, stage reserve, reaper + GitHub-reaper intervals, with floors),
+**Deployment** (default run-app Railway project/environment IDs, UUID-validated, typed-confirm guard
+when an ID matches the console project), **Notifications** (notify-from, notify recipient). Storage is
+`system_settings` (DB-first, env fallback); hot settings apply on save, others get an honest "applies
+on restart" badge; every row is audited. Bootstrap floor stays env (DATABASE_URL, crypto roots,
+deployment identity); the console-project allowlist is env-only by design (trust boundary).
+
+**40 · Tool editor: per-tool config + write-only secrets, injected into env at startup** (§3.6) —
+clicking a tool row opens its editor: per-tool JSON config (the existing `fusion` pattern), **secret
+fields** (e.g. Exa's API key) with the write-only/masked/rotate vault contract, an **`env_key`** mono
+badge ("injected as `EXA_API_KEY` at console startup" — startup hydration, §3.8), **Attached to**
+agent list, and **honest status** (`live` only after a real call succeeded; otherwise `missing key` /
+`failing — <real error>`). Logical separation: tool settings live on the tool, platform settings live
+in §3.8 — never mixed.
+
 ---
 
 ## 7. File map for this iteration (quick reference)
@@ -706,6 +773,15 @@ File: `buildprogress.jsx` (`DesignReviewBar`).
 - **`shared.jsx`** — three new icons: `globe`, `palette`, `compass`.
 - **`Software Factory Onboarding.html`** — loads `discovery.jsx`; new **Explore** artboard in the
   product-flow section.
+
+**Settings work (entries 39–40) — design files + the real-code targets for implementers:**
+- **`admin.jsx`** — `AdminSettings` page (§3.8) + the tool editor drawer on the Tools registry (§3.6);
+  the OS **Settings** nav item is no longer a placeholder.
+- Real-code targets (for the implementing agent — do not guess paths): `ToolStore` +
+  `src/software_factory/services/admin_service.py` (existing DB-config + OS routes — extend with
+  `system_settings` + secret rows), `src/software_factory/env.py` (startup hydration hook; keep
+  `_STAGE_ESSENTIAL` semantics), `console/routers/*` (OS endpoints), `console/web/src/admin/*`
+  (the real Settings/Tools screens).
 
 **Tokens used by the new screens** (all from the `T` object in `shared.jsx`): `T.brand`
 `#1A7BFF`, `T.brandSoft` `#E8F1FF`, `T.brandDeep` `#0958C9`, `T.success` `#059669`,
