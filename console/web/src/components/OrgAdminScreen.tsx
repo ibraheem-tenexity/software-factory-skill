@@ -5,9 +5,10 @@
 // Usage & billing via /api/org/usage (+ PATCH /api/org/billing). Every section degrades to an empty
 // state until its backend lands, so the screen ships independently.
 import { useEffect, useRef, useState } from "react";
-import { api, Org, Member, OrgDoc, OrgUsage, OrgSecret } from "../api";
+import { api, Org, Member, OrgDoc, OrgUsage, OrgSecret, CompanyProfile } from "../api";
 import { useMe } from "./MeContext";
 import { T, Icon, Sparkle, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, Field, TextInput } from "./onboarding/design";
+import { EnrichFromWeb } from "./onboarding/EnrichFromWeb";
 import { AccountMenu } from "./AccountMenu";
 import { ListRowSkel, FileTileSkel, MetricCardSkel } from "./skeleton";
 
@@ -124,6 +125,7 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Partial<Org>>({});
   const [saving, setSaving] = useState(false);
+  const [enriching, setEnriching] = useState(false);  // CBT-3 "Enrich from web" panel toggle
 
   // invite
   const [inviting, setInviting] = useState(false);
@@ -216,6 +218,22 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
       setOrg(d.org); setEditing(false);
     } catch { setNotice("Couldn’t save — try again."); }
     setSaving(false);
+  };
+
+  // CBT-3: "Use these details" is the only write from a web lookup — a real PATCH /api/org,
+  // mapping only the fields the profile actually returned (never overwriting with a blank).
+  const acceptEnrichedCompany = async (profile: CompanyProfile) => {
+    const patch: Partial<Org> = {};
+    if (profile.name) patch.name = profile.name;
+    if (profile.industry) patch.industry = profile.industry;
+    if (profile.sub_focus) patch.sub_focus = [profile.sub_focus];
+    if (profile.website) patch.website = profile.website;
+    if (profile.connected_systems?.length) patch.connected_systems = profile.connected_systems;
+    try {
+      const d = await api.patchOrg(patch);
+      setOrg(d.org);
+      setEnriching(false);
+    } catch { setNotice("Couldn’t save — try again."); }
   };
 
   const toggleSystem = async (id: string, connect: boolean) => {
@@ -312,7 +330,15 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
                 <SecHead title="Company profile" desc="The canonical context every project inherits — set once, reused everywhere."
                   action={editing
                     ? <div style={{ display: "flex", gap: 8 }}><Btn variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Btn><Btn variant="primary" size="sm" onClick={saveProfile} disabled={saving}>{saving ? "Saving…" : "Save"}</Btn></div>
-                    : <Btn variant="secondary" size="sm" onClick={startEdit}>Edit profile</Btn>} />
+                    : <div style={{ display: "flex", gap: 8 }}>
+                        <Btn variant="ghost" size="sm" onClick={() => setEnriching((x) => !x)}><Icon name="search" size={13} /> {enriching ? "Close" : "Enrich from web"}</Btn>
+                        <Btn variant="secondary" size="sm" onClick={startEdit}>Edit profile</Btn>
+                      </div>} />
+                {enriching && !editing && (
+                  <div style={{ marginBottom: 16, padding: "16px 18px", border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised, boxShadow: T.shadowXs }}>
+                    <EnrichFromWeb initialWebsite={org?.website || ""} onAccept={acceptEnrichedCompany} />
+                  </div>
+                )}
                 {!editing ? (
                   <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden", background: T.raised, boxShadow: T.shadowXs }}>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1px", background: T.borderSubtle }}>
