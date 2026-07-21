@@ -63,21 +63,27 @@ CONCIERGE_SAFE_FALLBACK = "Sorry, I didn't quite catch that — could you say th
 
 
 # USD per token. Reasoning tokens bill at the output rate. Cached (cache-read) is cheaper
-# than fresh input. Numbers reflect Claude list pricing.
+# than fresh input; a cache WRITE (populating the cache) costs 1.25x fresh input at Anthropic's
+# standard 5-minute TTL (SOF-218) — the only TTL stage agents use, none of this repo's `claude -p`
+# invocations set the extended 1h-cache beta header (confirmed: no `cache_control`/`1h` config
+# anywhere in software_factory/*.py), so a single flat multiplier is exact, not an approximation.
 PRICES: dict[str, dict[str, float]] = {
     "claude-opus-4-8": {
         "input": 15.0 / 1_000_000,
         "cached": 1.5 / 1_000_000,
+        "cache_write": 15.0 / 1_000_000 * 1.25,
         "output": 75.0 / 1_000_000,
     },
     "claude-sonnet-4-6": {
         "input": 3.0 / 1_000_000,
         "cached": 0.3 / 1_000_000,
+        "cache_write": 3.0 / 1_000_000 * 1.25,
         "output": 15.0 / 1_000_000,
     },
     "claude-haiku-4-5": {
         "input": 1.0 / 1_000_000,
         "cached": 0.1 / 1_000_000,
+        "cache_write": 1.0 / 1_000_000 * 1.25,
         "output": 5.0 / 1_000_000,
     },
     # OpenRouter list pricing, confirmed 2026-06-09 via /api/v1/models. OpenCode's stream
