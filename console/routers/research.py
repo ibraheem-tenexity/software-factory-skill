@@ -24,9 +24,10 @@ router = APIRouter()
 
 
 def _domain_stem(website: str) -> str:
-    """The bare domain name (no scheme/path/TLD) as a fallback company name — e.g.
-    'https://acme-industrial.com/about' -> 'acme-industrial'."""
+    """The bare domain name (no scheme/path/TLD/leading "www.") as a fallback company name — e.g.
+    'https://acme-industrial.com/about' -> 'acme-industrial'; 'www.cbtcompany.com' -> 'cbtcompany'."""
     host = re.sub(r"^https?://", "", website).split("/")[0]
+    host = re.sub(r"^www\.", "", host)
     return host.split(".")[0]
 
 
