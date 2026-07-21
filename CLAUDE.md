@@ -61,6 +61,16 @@ structural change.
   to a generic service. Update `docs/ARCHITECTURE.md` and `docs/STRUCTURE.md` when a structural
   move lands.
 
+
+# Log full traceback for every caught exception — NEVER swallow silently or with basic message
+Every `except` block MUST log the full traceback — `logger.exception(...)` or
+`logger.error("...: %s", traceback.format_exc())` — *including* fire-and-forget paths that 
+return a fallback (`None`/`False`/a default): log the traceback FIRST, then fall back. A bare 
+`except: pass`, `except: return False`, or `except: return None` that logs nothing or a custom message is forbidden — it destroys the only evidence of what actually failed and 
+makes remote debugging impossible. 
+Honest errors reach the LOGS, not just the user and the agent.
+Full traceback should be logged for errors
+
 ## Verification (NO unit/integration tests — operator directive, 2026-07-08)
 
 Do not write, run, or wait on unit/integration tests; they must not block or delay anything.
