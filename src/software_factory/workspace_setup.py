@@ -11,6 +11,8 @@ import json
 import logging
 import os
 import shutil
+import subprocess
+import tempfile
 
 from . import workspace
 
@@ -242,6 +244,18 @@ def write_agent_file(ws: str, callsign: str, row: dict) -> None:
         f.write(frontmatter + (row.get("prompt") or ""))
 
 
+class RecipeSeedError(Exception):
+    """Raised with the real git error when a recipe's seed repo can't be cloned at launch time."""
+
+
+def _clone_recipe_seed(repo_url: str, dest: str) -> None:
+    r = subprocess.run(["git", "clone", "--depth", "1", repo_url, dest],
+                       capture_output=True, text=True, timeout=180)
+    if r.returncode != 0:
+        raise RecipeSeedError(
+            f"could not clone recipe seed {repo_url}: {(r.stderr or r.stdout).strip()[-500:]}")
+
+
 def prepare_workspace(
     projects_dir: str,
     project_id: str,
@@ -250,6 +264,7 @@ def prepare_workspace(
     phase_dir: str | None = None,
     runtime: str = "claude",
     skill_override: str | None = None,
+    recipe: dict | None = None,
 ) -> str:
     ws = workspace.create(projects_dir, project_id)
 
@@ -282,6 +297,42 @@ def prepare_workspace(
                 src_skill = oc_skill
         if os.path.isfile(src_skill):
             shutil.copy2(src_skill, os.path.join(ws, "SKILL.md"))
+
+    # CBT-9: fork-and-extend. Prompt-delivered judgment, deliberately unverified by code — there
+    # is no "did it really fork" checker; the existing deploy/happy-flow/QA gates are the only
+    # proof a recipe build worked. Never scaffold from scratch when a recipe is selected.
+    if recipe and recipe.get("repo_url"):
+        repo_url = recipe["repo_url"]
+        if stage == 3:
+            note = "Its working tree is already in this workspace."
+        else:
+            note = ("Its AGENTS.md is included as context (context/recipe-AGENTS.md) — read it "
+                    "before framing the plan so tickets target real extension points.")
+        block = (f"\n\n## RECIPE BUILD — {recipe['name']}\n"
+                f"This app is FORKED from the recipe repository ({repo_url}). {note} "
+                f"Read its AGENTS.md first; keep its architecture and conventions; implement the "
+                f"tickets as extensions and modifications of this codebase. Never scaffold a new "
+                f"app from scratch.\n")
+        with open(os.path.join(ws, "SKILL.md"), "a") as f:
+            f.write(block)
+
+        if stage == 3:
+            if not os.path.exists(os.path.join(ws, "AGENTS.md")):
+                seed_dir = os.path.join(ws, "seed")
+                _clone_recipe_seed(repo_url, seed_dir)
+                for name in os.listdir(seed_dir):
+                    if name == ".git":
+                        continue
+                    shutil.move(os.path.join(seed_dir, name), os.path.join(ws, name))
+                shutil.rmtree(seed_dir, ignore_errors=True)  # drop seed history; the factory pushes its own repo
+        else:
+            with tempfile.TemporaryDirectory() as tmp:
+                _clone_recipe_seed(repo_url, tmp)
+                agents_src = os.path.join(tmp, "AGENTS.md")
+                if os.path.isfile(agents_src):
+                    ctx_dir = os.path.join(ws, "context")
+                    os.makedirs(ctx_dir, exist_ok=True)
+                    shutil.copy2(agents_src, os.path.join(ctx_dir, "recipe-AGENTS.md"))
 
     src_phases = phase_dir or PHASE_DIR
     if os.path.isdir(src_phases):

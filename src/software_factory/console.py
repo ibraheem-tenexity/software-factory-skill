@@ -41,7 +41,7 @@ from .repositories._exec import PathExec
 from .repositories.canvas import ProjectStateRepository, PhaseRepository, BlockerRepository, ArtifactRepository
 from .repositories.runtime_agents import AgentRepository
 from .tickets import TicketStore
-from .workspace_setup import prepare_workspace, tool_env_overrides, write_agent_file
+from .workspace_setup import prepare_workspace, tool_env_overrides, write_agent_file, RecipeSeedError
 from .log import get_logger
 
 logger = get_logger(__name__)
@@ -1234,9 +1234,20 @@ class Console:
             logger.debug("[launch] %s prompt-override lookup failed — using on-disk default",
                          project_id, exc_info=True)
             override = None
-        ws = prepare_workspace(
-            self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
-        )
+        # CBT-9: a picked recipe seeds the workspace (build tree at stage 3, AGENTS.md context at
+        # stages 1-2) + the fork-and-extend SKILL block. A seed clone failure is an honest launch
+        # refusal (the git error recorded as a blocker), same shape as the hard-gated MCP check below.
+        recipe = RecipeStore().get(state.recipe_id) if state.recipe_id else None
+        try:
+            ws = prepare_workspace(
+                self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
+                recipe=recipe,
+            )
+        except RecipeSeedError as e:
+            logger.warning("[launch] %s stage %s refused — recipe seed clone failed: %s",
+                           project_id, stage, e)
+            ProjectStore(paths["db"]).add_blocker(f"Recipe seed: {e}", blocks="recipe")
+            return None
         for callsign, row in agent_rows:
             try:
                 write_agent_file(ws, callsign, row)
