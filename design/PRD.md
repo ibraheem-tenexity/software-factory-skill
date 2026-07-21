@@ -83,10 +83,10 @@ allow-list managed in Tenexity OS (§3.6).
 **Purpose:** the org's context + org-scoped documents, reused by every project.
 **Layout:** left sub-nav + content. Sections:
 - **Company profile** — canonical org context (name, industry, sub-focus, HQ, founded, headcount, revenue, website, footprint). Editable. Note: Concierge reuses this to skip questions on new projects. Header action **Enrich from web** opens the same web-prefill flow as first-time intake (§2.4, `EnrichFromWeb`): look the company up → confirm the ai-tint found-card → profile fields update. Nothing writes until the user accepts.
-- **Brand & theme** (`ThemeSection`, `discovery.jsx`) — the org's look as a token pack. **Process theme from my website**: domain → `MiniLog` of the crawl (palette/type/logo) → found pack: color rows (swatch + role + hex + ConfidencePill + source), type stack, logo tile, and a **live preview** strip rendering a generated app shell in the found theme. Copy states the pack is applied to every Kimi K3 mockup (§2.6 design review) and every app the factory builds for the org; an existing `brand-guidelines.pdf` in the knowledge base is named as the fallback source.
+- **Brand & theme** (`ThemeSection`, `discovery.jsx`) — the org's look as a token pack. **Process theme from my website**: domain → `MiniLog` of the crawl (palette/type/logo) → found pack: color rows (swatch + role + hex + source label), type stack, logo tile, and a **live preview** strip rendering a generated app shell in the found theme. Copy states the pack is applied to every Kimi K3 mockup (§2.6 design review) and every app the factory builds for the org; an existing `brand-guidelines.pdf` in the knowledge base is named as the fallback source.
 - **Knowledge base** — org-scoped documents (price book, line card, policies, brand, SOPs) as file tiles; each shows reuse count. Upload action.
 - **Connected systems** — org-level integrations (Epicor connected as primary; others linkable). Reused across projects.
-- **Codebase discovery** (`DiscoverySection`, `discovery.jsx`) — the on-ramp for companies already doing custom dev. Input a GitHub repo (access tokens live in Secrets; agents are **read-only**) → **Run discovery** → `MiniLog` crawl (clone → file map → manifests/CI → integrations detected → drafts written) → generated **AGENTS.md**, **CLAUDE.md**, **integrations.md** rows (ai-tint + ConfidencePill) saved into the knowledge base and reused on every project. Re-run / add-another actions.
+- **Codebase discovery** (`DiscoverySection`, `discovery.jsx`) — the on-ramp for companies already doing custom dev. Input a GitHub repo (access tokens live in Secrets; agents are **read-only**) → **Run discovery** → `MiniLog` crawl (clone → file map → manifests/CI → integrations detected → drafts written) → generated **AGENTS.md**, **CLAUDE.md**, **integrations.md** rows (ai-tint + source label) saved into the knowledge base and reused on every project. Re-run / add-another actions.
 - **Dev conventions** (`ConventionsSection`, `discovery.jsx`) — for technical users: primary repo, framework & runtime, install/test commands, coding standards (or a standards doc in the knowledge base). A live **"What every build agent receives"** preview (ai-tint, mono) shows the compiled org AGENTS.md; Save flashes confirmation. Injected into every build agent's context so the factory builds to the org's conventions.
 - **Secrets** — the organization **secret vault** (`ORG_SECRETS`): API keys, tokens, endpoints stored once at the org level. Each row shows the secret **name** (mono, e.g. `EPICOR_API_KEY`), a masked value (`••••••<last4>`), **used-by** project count, last-updated, and a **Rotate** action; **Add secret** in the header. Values are **encrypted and write-only** — once saved the raw value can't be read back (by anyone), projects reference secrets **by name**, and rotating/revoking here propagates to every project that imported the secret. Projects pull from this vault during the build's wait-for-deps step (§2.6).
 - **Team & access** — members with roles; invite.
@@ -99,7 +99,7 @@ allow-list managed in Tenexity OS (§3.6).
   signup email domain when it isn't a public provider) and **Find my company**. The lookup
   runs as a visible `MiniLog` ("Reading acme-industrial.com… checking the careers page for
   systems…"), then reveals the **found-company card**: ai-tint rows (company, industry, HQ,
-  headcount, systems-in-use, brand palette) each with a **ConfidencePill and a source label**,
+  headcount, systems-in-use, brand palette) each with a **source label** (url; never an asserted confidence level),
   and **Use these details** / "Not right — look again". Accepting fills the industry tiles,
   sub-focus chips, profile fields, and connected systems below; the card collapses to a green
   confirmation ("Pulled from the web — review and adjust anything"). **Nothing writes until
@@ -111,6 +111,7 @@ allow-list managed in Tenexity OS (§3.6).
 data from **this-project** data.
 **Project inputs:** project name, "what are you building" (goal), **project budget cap**, **recipe** (optional blueprint), scope-of-work chips, build engine, materials.
 - **Recipe** (`RecipePicker`, from `recipes.jsx`) is an **optional** starting blueprint the customer picks from the Published entries of the OS recipe library (§3.4b). The picker shows only the light customer-facing fields (category, name, tagline, a few capabilities); the recipe's GitHub repos, image artifacts, and internal notes are **not** shown. A **No template** card is always present — the customer can build purely from their brief. Lives in the "This project" section (inside `LockedGroup`, so it unlocks after the project is created); the value is a recipe id or `null`. Arriving from the **Explore** gallery (§2.8) preselects the recipe (`initialRecipe` prop).
+  - **Recipe at runtime (how a recipe drives the build):** the recipe's text (name, tagline, capabilities, description) **replaces the SOW as the Concierge's intake input** — the interview starts from what the recipe already knows instead of a blank brief. The pipeline receives the recipe's **linked GitHub repo as the build seed**: the factory's skills **fork-and-extend** it — never greenfield when a recipe is selected — and the repo's `AGENTS.md`/`CLAUDE.md` teaches the build agents its architecture and conventions. A recipe without a valid repo/AGENTS.md is refused at load time (§3.4b).
   - **Concierge recipe suggestion:** when the goal text matches a Published recipe and none is picked, the intake Concierge rail shows an inline **"Recipe match"** card (ai-tint; name, tagline, builds count, **Use this recipe** / **No thanks**, dismissible ×). Accepting sets the picker's value and the card flips to a green "Building from the `<name>` recipe" confirmation; dismissing suppresses it for the session (no nagging). The prototype matcher is `suggestRecipe(goal)` (keyword overlap); the live version is a concierge tool over recipe taglines (see `TICKETS.md` CBT-11).
 - **Create the project first (gate).** The **very first action** in intake is naming the
   **project** and clicking **Create project** (`SaveBasics`, in `optionC.jsx`). This is a real
@@ -683,7 +684,7 @@ your organization"** group (the org knowledge-base docs, `ORG_DOCS`, reused acro
 **33 · Web prefill — "we already know you"** (§2.4, §2.3) — **the wow feature.** First-time intake now
 leads with **Start with your website**: type a domain → **Find my company** → a `MiniLog` of the
 lookup runs visibly → the **found-company card** appears: ai-tint rows for company / industry / HQ /
-headcount / systems-in-use / brand palette, each with a **ConfidencePill + source label**. **Use these
+headcount / systems-in-use / brand palette, each with a **source label**. **Use these
 details** fills the whole setup form (industry tiles, sub-focus, profile, Epicor connection); the card
 collapses to a green confirmation. Nothing writes until the user accepts — the confidence-cascade
 contract. Same flow lives in Org admin → Company profile as **Enrich from web**. Files: `discovery.jsx`
@@ -693,14 +694,14 @@ contract. Same flow lives in Org admin → Company profile as **Enrich from web*
 **34 · Codebase discovery + Development conventions** (§2.3) — the on-ramp for companies that already
 ship software (CBT's case). Org admin gains two sections. **Codebase discovery**: point discovery
 agents at a GitHub repo → crawl log → generated **AGENTS.md / CLAUDE.md / integrations.md** (ai-tint
-rows + ConfidencePills) saved into the knowledge base; read-only agents, tokens live in Secrets.
+rows + source labels) saved into the knowledge base; read-only agents, tokens live in Secrets.
 **Dev conventions**: primary repo, framework, install/test commands, and coding standards with a live
 **"What every build agent receives"** compiled-AGENTS.md preview — injected into every build agent's
 context. Files: `discovery.jsx` (`DiscoverySection`, `ConventionsSection`), `orgproject.jsx` (sub-nav
 + sections).
 
 **35 · Brand & theme** (§2.3, §2.6) — Org admin → **Brand & theme**: **Process theme from my website**
-→ crawl log → token pack (palette rows with hex + ConfidencePill + source, type stack, logo tile) and
+→ crawl log → token pack (palette rows with hex + source label, type stack, logo tile) and
 a **live preview** of a generated app shell rendered in the found theme. The pack is what the design
 node's Kimi K3 mockups (§2.6 design review) and every generated app are themed by; the knowledge-base
 `brand-guidelines.pdf` is the named fallback. Files: `discovery.jsx` (`ThemeSection`), `orgproject.jsx`.
@@ -757,7 +758,7 @@ in §3.8 — never mixed.
   — `MiniLog` (compact streaming agent log), `EnrichFromWeb` + `FoundCompanyCard` (web prefill),
   `DiscoverySection` (repo crawl → agent files), `ConventionsSection` (org AGENTS.md compiler),
   `ThemeSection` (brand token pack + preview). One interaction contract everywhere: visible agent
-  work → ai-tint findings with ConfidencePills + sources → user confirms.
+  work → ai-tint findings with a source label per field → user confirms.
 - **`optionC.jsx`** — fresh-mode **Start with your website** card (`applyEnrich`), `suggestRecipe` +
   the concierge-rail **Recipe match** card, engine **trio** (`ENGINES`/`engineLabel`/`EnginePicker`
   restructured to `{ provider, keySource, key }`), `initialRecipe` prop (Explore preselect).

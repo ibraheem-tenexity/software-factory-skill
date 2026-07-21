@@ -1,8 +1,9 @@
 // discovery.jsx — "the factory comes to you": web enrichment, codebase
 // discovery, org development conventions, and brand theme. All four reuse the
 // same interaction contract: the agent does VISIBLE work (MiniLog), then
-// presents ai-tint findings with per-field ConfidencePills + sources — the
-// user confirms before anything is saved. Nothing writes silently.
+// presents ai-tint findings with a SOURCE LABEL per field (never an asserted
+// confidence level — we have no evidence-derived backing for one) — the user
+// confirms before anything is saved. Nothing writes silently.
 //
 //   • MiniLog            — compact streaming agent log (dark panel, mono).
 //   • EnrichFromWeb      — the "We already know you" lookup: website → log →
@@ -50,9 +51,9 @@ function MiniLog({ lines, label = 'Agent log', speed = 560, maxHeight = 148, onD
 }
 
 // ---- "We already know you" — company prefill from web search -----------------
-// One source label per field + a ConfidencePill — unconfirmed values keep the
-// ai-tint treatment until the user accepts. The demo data stands in for the
-// live enrich endpoint (Exa quick / Fusion deep — see design/TICKETS.md CBT-1).
+// One source label per field — unconfirmed values keep the ai-tint treatment
+// until the user accepts. The demo data stands in for the live enrich endpoint
+// (Exa quick / Fusion deep — see design/TICKETS.md CBT-1).
 const LOOKUP_LINES = (domain) => [
   `Reading ${domain}…`,
   'About page parsed — company profile found.',
@@ -62,11 +63,11 @@ const LOOKUP_LINES = (domain) => [
   'Pulling brand assets (logo, palette)…',
 ];
 const FOUND_ROWS = [
-  { key: 'name', label: 'Company', value: 'Acme Industrial Supply', band: 'exact', src: 'acme-industrial.com' },
-  { key: 'industry', label: 'Industry', value: 'Industrial Distribution · MRO / maintenance', band: 'high', src: 'acme-industrial.com/about' },
-  { key: 'hq', label: 'Headquarters', value: 'Cleveland, OH · 6 branches', band: 'high', src: 'linkedin.com' },
-  { key: 'size', label: 'Headcount', value: '51–200 people', band: 'medium', src: 'linkedin.com' },
-  { key: 'systems', label: 'Systems in use', value: 'Epicor (ERP) — referenced in 2 job posts', band: 'medium', src: 'acme-industrial.com/careers' },
+  { key: 'name', label: 'Company', value: 'Acme Industrial Supply', src: 'acme-industrial.com' },
+  { key: 'industry', label: 'Industry', value: 'Industrial Distribution · MRO / maintenance', src: 'acme-industrial.com/about' },
+  { key: 'hq', label: 'Headquarters', value: 'Cleveland, OH · 6 branches', src: 'linkedin.com' },
+  { key: 'size', label: 'Headcount', value: '51–200 people', src: 'linkedin.com' },
+  { key: 'systems', label: 'Systems in use', value: 'Epicor (ERP) — referenced in 2 job posts', src: 'acme-industrial.com/careers' },
 ];
 const FOUND_COLORS = ['#1447A8', '#E8A13D', '#1C1E21'];
 // Values the parent form applies on accept (optionC fresh-mode shape).
@@ -85,9 +86,8 @@ function FoundCompanyCard({ onAccept, onRetry }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <CategoryLabel style={{ display: 'block', marginBottom: 3, fontSize: 9.5 }}>{r.label}</CategoryLabel>
               <span style={{ font: `500 13px/1.35 ${T.sans}`, color: T.fg }}>{r.value}</span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 8, font: `400 10.5px/1 ${T.mono}`, color: T.tertiary }}><Icon name="link" size={10} color={T.tertiary} />{r.src}</span>
             </div>
-            <ConfidencePill band={r.band} />
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, font: `400 10.5px/1 ${T.mono}`, color: T.tertiary }}><Icon name="link" size={10} color={T.tertiary} />{r.src}</span>
           </div>
         ))}
         <div className="ai-tint" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: T.rMd }}>
@@ -98,7 +98,7 @@ function FoundCompanyCard({ onAccept, onRetry }) {
               <span style={{ font: `400 11px/1.3 ${T.sans}`, color: T.tertiary, marginLeft: 4 }}>pulled too — applied under Brand &amp; theme</span>
             </span>
           </div>
-          <ConfidencePill band="high" />
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, font: `400 10.5px/1 ${T.mono}`, color: T.tertiary }}><Icon name="link" size={10} color={T.tertiary} />site css</span>
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
@@ -152,9 +152,9 @@ const CRAWL_LINES = (repo) => [
   'Wrote integrations.md — 3 external systems documented.',
 ];
 const DISCOVERY_DOCS = [
-  { name: 'AGENTS.md', desc: 'Repo architecture, conventions & extension points — how agents should extend this codebase.', band: 'high' },
-  { name: 'CLAUDE.md', desc: 'Build / test / deploy commands for coding agents, read from CI.', band: 'high' },
-  { name: 'integrations.md', desc: 'Epicor REST, Stripe, SendGrid — endpoints, auth & environments.', band: 'medium' },
+  { name: 'AGENTS.md', desc: 'Repo architecture, conventions & extension points — how agents should extend this codebase.', src: 'repo tree + manifests' },
+  { name: 'CLAUDE.md', desc: 'Build / test / deploy commands for coding agents, read from CI.', src: 'CI workflows' },
+  { name: 'integrations.md', desc: 'Epicor REST, Stripe, SendGrid — endpoints, auth & environments.', src: 'import graph' },
 ];
 
 function DiscoverySection() {
@@ -192,7 +192,7 @@ function DiscoverySection() {
                   <span style={{ font: `600 12.5px/1.2 ${T.mono}`, color: T.fg }}>{d.name}</span>
                   <span style={{ display: 'block', font: `400 11.5px/1.4 ${T.sans}`, color: T.secondary, marginTop: 2 }}>{d.desc}</span>
                 </div>
-                <ConfidencePill band={d.band} />
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, font: `400 10.5px/1 ${T.mono}`, color: T.tertiary }}><Icon name="link" size={10} color={T.tertiary} />{d.src}</span>
               </div>
             ))}
           </div>
@@ -266,14 +266,14 @@ const THEME_LINES = (domain) => [
   'Cross-checked brand-guidelines.pdf in your knowledge base…',
 ];
 const THEME_COLORS = [
-  { role: 'Primary', hex: '#1447A8', band: 'high', src: 'site css' },
-  { role: 'Accent', hex: '#E8A13D', band: 'medium', src: 'site css' },
-  { role: 'Background', hex: '#FAFAF8', band: 'high', src: 'site css' },
-  { role: 'Ink', hex: '#1C1E21', band: 'exact', src: 'site css' },
+  { role: 'Primary', hex: '#1447A8', src: 'site css' },
+  { role: 'Accent', hex: '#E8A13D', src: 'site css' },
+  { role: 'Background', hex: '#FAFAF8', src: 'site css' },
+  { role: 'Ink', hex: '#1C1E21', src: 'site css' },
 ];
 const THEME_FONTS = [
-  { role: 'Headings', name: 'Barlow Semi Condensed', band: 'high' },
-  { role: 'Body', name: 'Inter', band: 'high' },
+  { role: 'Headings', name: 'Barlow Semi Condensed', src: 'site css' },
+  { role: 'Body', name: 'Inter', src: 'site css' },
 ];
 
 function ThemeSection() {
@@ -304,8 +304,8 @@ function ThemeSection() {
                   <div key={c.role} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ width: 22, height: 22, borderRadius: 6, background: c.hex, border: `1px solid ${T.borderSubtle}`, flexShrink: 0 }} />
                     <span style={{ width: 74, font: `500 12px/1 ${T.sans}`, color: T.fg }}>{c.role}</span>
-                    <span style={{ flex: 1, font: `400 11px/1 ${T.mono}`, color: T.tertiary }}>{c.hex} · {c.src}</span>
-                    <ConfidencePill band={c.band} />
+                    <span style={{ flex: 1, font: `400 11px/1 ${T.mono}`, color: T.tertiary }}>{c.hex}</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, font: `400 10.5px/1 ${T.mono}`, color: T.tertiary }}><Icon name="link" size={10} color={T.tertiary} />{c.src}</span>
                   </div>
                 ))}
               </div>
@@ -318,14 +318,14 @@ function ThemeSection() {
                   <div key={f.role} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 7 }}>
                     <span style={{ width: 74, font: `500 12px/1 ${T.sans}`, color: T.fg }}>{f.role}</span>
                     <span style={{ flex: 1, font: `500 12.5px/1 ${T.sans}`, color: T.secondary }}>{f.name}</span>
-                    <ConfidencePill band={f.band} />
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, font: `400 10.5px/1 ${T.mono}`, color: T.tertiary }}><Icon name="link" size={10} color={T.tertiary} />{f.src}</span>
                   </div>
                 ))}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised, padding: '10px 14px' }}>
                 <span style={{ width: 34, height: 34, borderRadius: 8, display: 'grid', placeItems: 'center', background: `repeating-linear-gradient(45deg, ${T.sunken}, ${T.sunken} 6px, ${T.bg} 6px, ${T.bg} 12px)` }}><Icon name="image" size={15} color={T.tertiary} /></span>
-                <span style={{ flex: 1, font: `400 11.5px/1.4 ${T.sans}`, color: T.secondary }}><b style={{ color: T.fg }}>logo.svg</b> · from the site header</span>
-                <ConfidencePill band="high" />
+                <span style={{ flex: 1, font: `400 11.5px/1.4 ${T.sans}`, color: T.secondary }}><b style={{ color: T.fg }}>logo.svg</b></span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, font: `400 10.5px/1 ${T.mono}`, color: T.tertiary }}><Icon name="link" size={10} color={T.tertiary} />site header</span>
               </div>
             </div>
           </div>
