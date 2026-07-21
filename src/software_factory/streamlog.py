@@ -35,7 +35,14 @@ def _events(text: str):
 OPENCODE_FALLBACK_MODEL = "openrouter/moonshotai/kimi-k3"
 
 
-def cost_usd(text: str, prices: dict | None = None) -> float:
+def cost_components(text: str, prices: dict | None = None) -> tuple[float, float]:
+    """(authoritative, estimate) — split the same accumulation `cost_usd()` sums, so a caller that
+    needs to tell "a session's real, final cost" apart from "a still-in-flight session's token
+    guess" can (SOF-215). `authoritative` is `finished[sid]` summed (each session's own max-of-
+    results, i.e. real billing); `estimate` is `tail[sid]` summed (token-priced guess for a
+    session that hasn't emitted a terminal result yet — killed, or simply still running).
+    See `cost_usd`'s docstring for the full per-runtime accounting rules; this is the same pass,
+    just returning both halves instead of their sum."""
     # project.log APPENDS every stage's session, keyed per session; the log may be claude
     # stream-json or opencode --format json (one runtime per run — ProjectState.runtime pins it —
     # but one parser handles both vocabularies; the schemas are disjoint).
@@ -86,7 +93,18 @@ def cost_usd(text: str, prices: dict | None = None) -> float:
                 + usage.get("cache_read_input_tokens", 0) * rate["cached"]
                 + usage.get("output_tokens", 0) * rate["output"]
             )
-    return round(sum(finished.values()) + sum(tail.values()), 6)
+    return round(sum(finished.values()), 6), round(sum(tail.values()), 6)
+
+
+def cost_usd(text: str, prices: dict | None = None) -> float:
+    """Authoritative + estimate combined — the whole-run number the dashboard/budget-enforcement
+    checks want. See `cost_components` for the split (SOF-215: the persisted monotonic spend floor
+    must only ever be raised by the authoritative half, never the estimate — an in-flight guess
+    can substantially overshoot what a session's eventual real total turns out to be, and once
+    that got locked in as "spend can only go up," every later real stage's spend became invisible
+    until it organically exceeded the false ceiling)."""
+    authoritative, estimate = cost_components(text, prices)
+    return round(authoritative + estimate, 6)
 
 
 def agents(text: str) -> list[dict]:
