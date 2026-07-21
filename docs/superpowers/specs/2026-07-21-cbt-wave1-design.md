@@ -62,8 +62,9 @@ latency-bounded (single Exa pass).
 
 **CBT-4 concierge tool.** `enrich_company` in `concierge_tools.py`, calling the **same function**
 the route calls and surfacing the **same errors** (philosophy §4: tool and button mirror one
-function). The concierge offers lookup conversationally and must state which fields came back
-without a source rather than asserting them.
+function). How the concierge uses it — when to offer lookup, and stating plainly which fields
+came back without a source instead of asserting them — is a **`CONCIERGE_INSTRUCTIONS` prompt
+addition, not code validation**.
 
 **CBT-3 UI.** Fresh-mode intake leads with "Start with your website" (prefilled from the signup
 email domain when not a public provider): lookup mini-log → found-company card (per-field value +
@@ -100,8 +101,13 @@ STRUCTURE.md protocol #3 with the smallest coherent owner module: `src/software_
 - Re-run: allowed anytime; new artifacts version over the old (newest-wins, same as `product_brief`).
 
 **Routes:** `POST /api/org/discovery` (start), `GET /api/org/discovery` (status + log tail,
-plain polling — no new SSE surface). Transport stays thin; policy lives in
-`ingestion/discovery.py`.
+plain polling — no new SSE surface). The status is a **projection of real state** (is the
+process alive + what the log says) — no stored run-state machine, no `discovery_status` column.
+Transport stays thin; policy lives in `ingestion/discovery.py`.
+
+**What the agent looks for** (framework, manifests, CI, integrations, conventions, extension
+points) **lives entirely in the discovery SKILL prompt** — code never parses a `package.json` or
+infers a framework. Improving discovery quality means editing the prompt, not adding parsers.
 
 **CBT-7 UI.** Org-admin "Codebase discovery" section per design: repo connect form, live crawl
 log, generated-docs list (source labels, no pills), each opening in the Artifact Viewer; re-run
@@ -125,11 +131,14 @@ recipes(id uuid PK, name text UNIQUE, tagline text, category text,
         capabilities jsonb,          -- customer-facing bullet list
         body_md text,                -- the recipe text (concierge/brief input)
         repo_url text,               -- the build-seed repo (nullable until connected)
-        repo_tree jsonb,             -- indexed listing captured at validation
         images jsonb,                -- [{url, public: bool}]
         status text CHECK (draft|published|archived) DEFAULT 'draft',
         created_at, updated_at)
 ```
+
+No `repo_tree`/index column: nothing consumes a stored listing — the build clones the repo fresh
+at workspace-prep time, and the validation clone is discarded after its one fact-check. Storing
+an index would be speculative machinery (philosophy §5).
 
 `sow` table and `SowStore` are **left untouched** (legacy; the OS panel swap + retirement is the
 restructure's cleanup, flagged not smuggled). The scope-genre fallback (`_genre_recipes`)
@@ -138,8 +147,9 @@ continues to work unchanged for projects with **no** selected recipe.
 **Authoring (Tenexity OS, staff-gated).** Recipes panel per design entry 31: edit customer-facing
 fields + internal `repo_url`/images/body; status cycle draft→published→archived. **On save with a
 `repo_url`: shallow-clone and require `AGENTS.md` or `CLAUDE.md` at the repo root — refuse the
-save with exactly that reason if absent** (gate checks a fact, not judgment); capture `repo_tree`.
-Customers only ever see the light fields of `published` recipes.
+save with exactly that reason if absent** (a file-EXISTS fact check, the one sanctioned gate
+shape). Customers only ever see the light fields of `published` recipes — a `status='published'`
+WHERE clause, not a judgment.
 
 **Intake.** The picker sets `recipe_id` on the draft (`ProjectState.recipe_id`, JSON-blob field —
 no schema change). From then on the **concierge context carries that recipe's `body_md` in place
@@ -157,8 +167,15 @@ parameter: (a) clone `repo_url` into the stage-3 workspace as the **starting tre
 the fork-and-extend block to the stage SKILL contract: *"this app is forked from the recipe repo —
 read its AGENTS.md, keep its architecture, implement tickets as extensions/modifications; never
 scaffold from scratch."* Stages 1–2 receive the recipe's `AGENTS.md` as context so tickets target
-real extension points. Everything downstream (deploy, QA loop, done-gates, budget, SOF-186
-accounting) is untouched — a recipe build is an ordinary build with a non-empty starting tree.
+real extension points.
+
+Fork-and-extend is **prompt-delivered judgment, deliberately unverified by code**: there is no
+"did it really fork" checker, no diff-against-seed gate, no new done-gate. The existing
+mechanical gates (deploy + passing happy-flow + all tickets QA-approved) remain the only proof
+the build worked — if the agent ignores the seed and the app still passes, the outcome gates
+caught what matters; if it fails, the QA loop bounces it. Everything downstream (deploy, QA
+loop, done-gates, budget, SOF-186 accounting) is untouched — a recipe build is an ordinary
+build with a non-empty starting tree.
 
 **Honesty invariants:** no recipe selected → exactly today's behavior; draft/archived recipes are
 never offered; a repo that fails validation can never become published, so a published recipe's
@@ -216,6 +233,33 @@ staging merges. Within each: backend PR → live-verify → UI PR. **Recipes bac
 (concierge input + workspace prep + skills = widest shared surface; longest soak before the
 27th). Engines UI merges last-in-lane (gated on a proven adapter run). Deploys avoid in-flight
 runs (SOF-116).
+
+## Philosophy audit (minimum machinery — second pass, operator-requested)
+
+**Delivered as PROMPT (never materialize these into code):**
+- Fork-and-extend behavior — the SKILL block; no fork-verification code, no diff-against-seed gate.
+- What discovery looks for and how it writes AGENTS.md/CLAUDE.md/integrations.md — the discovery
+  SKILL; code never parses manifests or infers frameworks.
+- Concierge enrichment behavior (when to offer lookup, stating unsourced fields plainly) —
+  `CONCIERGE_INSTRUCTIONS` lines.
+- The recipe framing of the interview/brief/PRD — the recipe body in context; no "brief matches
+  recipe" validator.
+
+**Sanctioned machinery (money, lifecycle, fact-gates only):**
+- Discovery budget cap + kill at ceiling (money).
+- Recipe-save refusal when `AGENTS.md`/`CLAUDE.md` is absent at the repo root (file-EXISTS fact
+  check — the `product_brief`-EXISTS gate shape).
+- Codex cost accounting through `streamlog` + `PRICES` (money); SOF-186 accumulator unchanged.
+- `status='published'` WHERE clause on the customer picker (data filter).
+
+**Explicitly NOT built:**
+- No new done-gates, readiness flags, approval queues, or state machines anywhere in Wave 1.
+- No stored discovery run-state — status is a projection of the live process + log.
+- No `repo_tree` cache or recipe indexing — the build clones fresh; the validation clone is
+  discarded after its one check.
+- No confidence computation of any kind (sources only, product-wide ruling).
+- No "did the agent comply" checkers — outcome gates (deploy, happy-flow, QA approval) remain
+  the only proof.
 
 ## Verification policy
 
