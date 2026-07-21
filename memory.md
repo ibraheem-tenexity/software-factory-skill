@@ -352,3 +352,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. Spec/plan: docs/superpowers/{specs,plans}/2026-07-21-cbt-wave1-*. Gate record: 1 Critical (PAT leak) + 8 Important caught pre-merge; final whole-branch review READY; follow-ups SOF-210.
 3. Recipes rule: recipe body replaces SOW in concierge context; repo seeds stage-3; NO fork-verification code (prompt-delivered, outcome gates only). Sources-only product-wide (no confidence tiers) — operator ruling.
 4. Staging ACs (K3/A6/B4/C4) pending SOF-207 green; codex adapter = SOF-200 (separate agent).
+
+# Codex Update at Time: 21:07:2026:15:55:00.000
+1. Fixed the admin Users invite feedback: successful delivery, failed delivery, and an unavailable delivery status now remain visible after the modal closes.
+2. console/web/src/admin/users.tsx on branch agent/fix-user-invite.
+3. Production Resend sender was malformed (display name only); corrected it to the verified factory.tenexity.ai sender and Railway redeployed successfully.
+4. Summary: Vite build plus browser checks for accepted, failed, and missing delivery status pass; real staging and production Resend calls were accepted.
