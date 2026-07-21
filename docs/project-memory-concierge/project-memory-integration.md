@@ -32,9 +32,9 @@ doc_summary = Table(                     # the "2,000-ft view" per document (des
     Column("scope", Text, nullable=False),          # 'project' | 'org'  (mirrors blobs)
     Column("scope_id", Text, nullable=False),
     Column("summary_md", Text),                     # map-reduce summary  → PRD "AI auto-summarize"
-    Column("key_facts", JSONB, server_default=text("'{}'::jsonb")),  # → PRD "What I learned" (§2.4a)
+    Column("assumptions", JSONB, server_default=text("'{}'::jsonb")),  # → PRD "What I learned" (§2.4a)  [shipped name; was drafted as key_facts]
     Column("outline", JSONB, server_default=text("'[]'::jsonb")),    # section gists
-    Column("embedding", Vector(1024)),
+    Column("embedding", HALFVEC(3072)),                              # shipped as halfvec(3072); was drafted Vector(1024)
     Column("token_count", Integer),
     Column("content_sha256", Text),                 # staleness vs blobs.sha256
     Column("status", Text, nullable=False, server_default="pending"),  # pending|ready|failed
@@ -50,7 +50,7 @@ chunk = Table(                            # the leaf level (design §3)
     Column("ordinal", Integer, nullable=False),
     Column("section_path", Text),                   # "2 / 2.3 Auth" — hierarchical nav
     Column("content", Text, nullable=False),
-    Column("dense", Vector(1024)),                  # OpenRouter embedding (Gemini/Qwen3)
+    Column("dense", HALFVEC(3072)),                 # OpenRouter embedding (google/gemini-embedding-2); shipped halfvec(3072)
     Column("fts", TSVECTOR),                         # generated from content — the sparse channel
     # Column("sparse", SparseVector(...)) RESERVED — add only if we move to learned-sparse later
     Column("token_count", Integer),
@@ -118,7 +118,7 @@ ORDER BY rrf DESC LIMIT %(k)s;
 
 - **Console-side, not agent-side** — ingestion holds the embedding key and DB creds; stage agents never do. This preserves ARCHITECTURE's "agents have no Supabase access."
 - **Run it async** so the UI doesn't block. This is exactly what PRD §2.4a's `ProcessingScreen` + "Continue in background" already model — **replace the mock `INGEST_STEPS` with real per-blob ingest progress** streamed over the existing SSE channel. The ingest log rows become real ("Embedding chunks 12/40…", "Summarized price-book.xlsx ✓").
-- **`doc_summary.summary_md`** is the PRD's per-file **"Auto-summarize" / "Regenerate"** action (§2.4 Materials — see the file tiles with the AI summary buttons): generated on upload, pre-fills the description, re-runnable. A **first-class P0 feature**, not just agent fuel. **`key_facts`** populates the interview's **"What I learned from your materials"** rows (§2.4a `LEARNED`) — each fact carries a **source reference** (`document_blob_id` + `section_path`/`page`), **no confidence score** (per the corrected spec).
+- **`doc_summary.summary_md`** is the PRD's per-file **"Auto-summarize" / "Regenerate"** action (§2.4 Materials — see the file tiles with the AI summary buttons): generated on upload, pre-fills the description, re-runnable. A **first-class P0 feature**, not just agent fuel. **`assumptions`** (the shipped column name; drafted here as `key_facts`) populates the interview's **"What I learned from your materials"** rows (§2.4a `LEARNED`) — each fact carries a **source reference** (`document_blob_id` + `section_path`/`page`), **no confidence score** (per the corrected spec).
 
 **Reuse, don't rebuild:** parsing uses the existing `pdf_extract`/`docx_extract` (the latter already pulls wireframe images out of Word tables). Chunking is the only genuinely new step.
 
@@ -138,7 +138,7 @@ _MEMORY = {"type": "http", "url": "${SF_MEMORY_MCP_URL}",
 - It's an **HTTP MCP** like `exa`/`openrouter`, so the existing opencode translation (`_opencode_server`) handles it for both runtimes for free.
 - The server runs **inside `factory-console`** (mounted under `console/app.py`, reusing auth + `dbshim` + the embedding client). The stage agent connects over HTTP with a **project-scoped token** → the MCP resolves `scope_id` from the token, so an agent can only ever read **its own** project's memory (+ inherited org docs via `blob_uses`). Secrets (embedding key, DB URL) stay console-side.
 
-**Tools exposed** (design doc §7, unchanged): `get_project_overview`, `list_documents`, `get_document_summary`, `search_memory`, `get_chunk`, `add_memory_note`. Only `add_memory_note` writes; the rest are read-only → structurally prevents "DB pollution."
+**Tools exposed** (design doc §7): `get_project_overview`, `list_documents`, `get_document_summary`, `search_memory`, `get_chunk`, `add_memory_note`, plus `search_document_summaries` (SOF-60) — **7 as shipped** (the design doc listed 6). Only `add_memory_note` writes; the rest are read-only → structurally prevents "DB pollution."
 
 **Register it in the product too:** insert a row in `public.mcp_tools` (PRD §3.6 Tools & MCP registry) so "Project Memory" shows in Tenexity OS as a first-class connected tool.
 
@@ -151,7 +151,7 @@ _MEMORY = {"type": "http", "url": "${SF_MEMORY_MCP_URL}",
 | PRD surface | Today (prototype) | With Project Memory |
 |---|---|---|
 | §2.4a `ProcessingScreen` ingest log | mock `INGEST_STEPS` array | real per-blob ingest progress over SSE |
-| §2.4a interview "What I learned" (`LEARNED`) | hardcoded facts | `doc_summary.key_facts`, each with a **source reference** (`document_blob_id` + `section_path`/`page`) — no confidence |
+| §2.4a interview "What I learned" (`LEARNED`) | hardcoded facts | `doc_summary.assumptions` (shipped name; drafted `key_facts`), each with a **source reference** (`document_blob_id` + `section_path`/`page`) — no confidence |
 | §2.4 Materials **"Auto-summarize" / "Regenerate"** | button, no backend | `doc_summary.summary_md`, generated on upload, pre-fills the description, re-runnable — **first-class P0 feature** |
 | §2.4b docs Concierge Q&A **with citations** ("later feature") | scripted match on `window.PROJ_MATERIALS` | `search_memory` → answers with `document` + `section_path` citations |
 | §2.5a "Inherited org context" | static summary | org-scope rollup (`scope='org'` doc_summaries) |

@@ -673,5 +673,22 @@
 <polygon fill="none" stroke="black" points="25,-1444 25,-1469 297,-1469 297,-1444 25,-1444"/>
 <text text-anchor="start" x="30" y="-1452.8" font-family="Arial" font-size="14.00">classification, Linear link, occurrence ledger</text>
 </g>
+<!-- recipes -->
+<g id="node27" class="node">
+<title>recipes</title>
+<polygon fill="white" stroke="transparent" points="37.5,-1546 37.5,-1646 284.5,-1646 284.5,-1546 37.5,-1546"/>
+<polygon fill="#fef9c3" stroke="transparent" points="38,-1621 38,-1646 285,-1646 285,-1621 38,-1621"/>
+<polygon fill="none" stroke="black" points="38,-1621 38,-1646 285,-1646 285,-1621 38,-1621"/>
+<text text-anchor="start" x="137.5" y="-1630.8" font-family="Arial" font-weight="bold" font-size="14.00">recipes</text>
+<polygon fill="none" stroke="black" points="38,-1596 38,-1621 285,-1621 285,-1596 38,-1596"/>
+<text text-anchor="start" x="43" y="-1605.8" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
+<text text-anchor="start" x="62" y="-1605.8" font-family="Arial" font-size="14.00"> id; </text>
+<text text-anchor="start" x="84" y="-1605.8" font-family="Arial" font-weight="bold" font-size="14.00">UQ</text>
+<text text-anchor="start" x="106" y="-1605.8" font-family="Arial" font-size="14.00"> name</text>
+<polygon fill="none" stroke="black" points="38,-1571 38,-1596 285,-1596 285,-1571 38,-1571"/>
+<text text-anchor="start" x="43" y="-1579.8" font-family="Arial" font-size="14.00">tagline, category, capabilities, body_md</text>
+<polygon fill="none" stroke="black" points="38,-1546 38,-1571 285,-1571 285,-1546 38,-1546"/>
+<text text-anchor="start" x="43" y="-1554.8" font-family="Arial" font-size="14.00">repo_url, images, status, timestamps</text>
+</g>
 </g>
 </svg>

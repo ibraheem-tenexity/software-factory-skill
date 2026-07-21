@@ -45,7 +45,8 @@ conversation = Table(
     Column("tool_result", JSONB),                         # convenience mirror of the result block (query/telemetry)
 
     # --- references & provenance ---
-    Column("referenced_artifact", Integer, ForeignKey("blobs.id")),  # artifact/doc this turn points at
+    # NOTE (as shipped): this single referenced_artifact FK was deliberately NOT built — one prompt
+    # can cite many artifacts, so artifact refs live as blocks inside json_blob, not a scalar column.
 
     # --- model attribution (assistant/tool turns) ---
     Column("model", Text),
@@ -153,7 +154,7 @@ def to_provider(rows, provider):        # rows: canonical messages (json_blob pe
 
 - `services/conversation.py` → `Conversation` keeps its `turn(project_id, message)` and `history(project_id)` signatures, now reading/writing `conversation` via a `ConversationStore` over `dbshim`. Its output shape moves to the new `ConverseOut` (`{response, suggested_responses}`) per `concierge-agent-spec.md` — storage swap in T1.3 (route + FE untouched), output-shape swap in T2.2 (FE updates then). `state.reset()` builds it exactly where `conversation_svc` is built today.
 - `/api/chat` (`chat_agent.py`) stops writing `chat.jsonl`; it appends the same rows to `conversation` (role `user`/`agent`, `model`/`provider`/tokens filled from the run). `chat_history` reads from the table. `chat.jsonl` can stay as a debug mirror during migration, then retire.
-- **Cost telemetry** already exists per-agent (`agents` table); assistant turns write `model`/`provider`/tokens/`cost_usd` so conversation cost reconciles with the run's ledger.
+- **Cost telemetry** already exists per-agent (`runtime_agents` table); assistant turns write `model`/`provider`/tokens/`cost_usd` so conversation cost reconciles with the run's ledger.
 
 ---
 
