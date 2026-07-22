@@ -3,6 +3,17 @@
 > Source of truth for build agents. Describes every screen in the prototype
 > (`Software Factory Onboarding.html`), what it does, its components, data, and
 > interactions. Visual system = Tenexity design system (see §1).
+>
+> **Authority (SOF-224):** this document is the **single product-requirements
+> authority** for the Software Factory. Every requirement change updates this
+> file in the same change. When sources disagree, the order is: 1) operator
+> directives in `CLAUDE.md`, 2) dated operator-approved decisions, 3) **this
+> file**, 4) architecture/implementation docs, 5) visual artboards (future
+> concepts explicitly labeled). Documents that once carried requirements —
+> `docs/product-spec-software-factory.md` (deleted; folded in here), the CBT
+> Wave-1 design doc, the project-memory build plan (both kept as records) —
+> are consolidated below (§8 metrics/priorities/risks, §9 adjudication log)
+> and no longer define requirements.
 
 ---
 
@@ -20,6 +31,33 @@ internal operator portal over all tenants, projects, agents, and tools.
 There are two audiences / two app surfaces:
 - **Customer product** — login, projects dashboard, org admin, project onboarding, project dashboard, factory console.
 - **Tenexity OS** — internal operator portal (platform staff).
+
+### 0.1 Product principles (the test every feature is checked against)
+
+1. **Never a blank, silent screen.** Loading shows a shaped placeholder; long
+   work shows visible, specific progress — never a spinner for an unknown wait.
+2. **One assistant, one identity, everywhere.** The Concierge is the same
+   character with the same voice on every project screen; only its focus changes.
+3. **Nothing is created by accident.** State-changing actions (create project,
+   start build) are explicit, named, confirmed actions — never a side effect of
+   navigation or of sending the Concierge a message.
+4. **Show sources, don't invent a score.** Every inferred fact is traceable to
+   exactly where it came from (file, upload, answer, url) — the system never
+   asserts a confidence level it has no real way to compute.
+5. **Progress is resumable, never fragile.** Everything produced is saved as
+   it's produced; a failure or pause never means starting over.
+6. **Momentum beats completeness.** The job is a *good* brief fast, not a
+   perfect interrogation — the customer's own "that's enough, build it" decides
+   readiness.
+
+### 0.2 Personas
+
+| Persona | Who | What they need |
+|---|---|---|
+| **Operator / Owner** | Runs a piece of the business (ops, sales, IT); not a developer | Describe a problem in their own words and trust it was understood |
+| **Org Admin** | Sets up the company once — profile, systems, team, billing | A one-time setup, never repeated, visibly reused |
+| **Returning user** | Has shipped projects | Zero repetition of anything already known; a 90-second path to the next project |
+| **Internal Operator** | Tenexity staff | Fleet-wide visibility; unblock/support any customer directly; control over agents and tools |
 
 ---
 
@@ -56,12 +94,16 @@ Shared primitives (in `shared.jsx`): `Btn`, `TextInput`, `TextArea`, `Field`,
 ### 2.1 Login  (`login.jsx` → `Login`, gated by `AppRoot`)
 **Purpose:** authenticate and enter the product.
 **Layout:** two-pane. Left = dark brand panel (wordmark, value prop, decorative
-process-node graph, SOC-2 trust line). Right = auth form.
-**Auth options (all required):**
-1. Continue with **Google** (official multicolor mark).
-2. Continue with **Microsoft** (4-square mark).
-3. **Email + password** (show/hide toggle, forgot-password link).
-4. **Organization SSO** — toggles to a work-domain entry (SAML/OIDC), with a back link.
+process-node graph). Right = auth form.
+**Auth options — current vs future (SOF-15 adjudication):**
+- **Current (shipping):** **Google** (official mark) and **email + password**
+  (show/hide toggle). These are the only paths that are real and verified today.
+- **Future — do NOT build until a real provider verifies them:** **Microsoft**,
+  **organization SSO** (SAML/OIDC work-domain entry), the **forgot-password**
+  link, and the **SOC-2 trust line**. Per operator directive (SOF-15): never
+  render provider-replica sign-in buttons, mock SSO/credential affordances, or
+  unverifiable trust badges — a dead affordance is a dishonest one (Principle:
+  honest errors, everywhere).
 **Footer:** "Request access" for users not yet on the allow-list.
 **Behavior:** any successful auth → projects dashboard — **except an invited user's first sign-in**, which routes to first-time onboarding (§3.7 chain, §2.4 fresh mode, website prefilled from the email domain). Sign-in is gated by the
 allow-list managed in Tenexity OS (§3.7).
@@ -83,18 +125,18 @@ allow-list managed in Tenexity OS (§3.7).
 **Purpose:** the org's context + org-scoped documents, reused by every project.
 **Layout:** left sub-nav + content. Sections:
 - **Company profile** — canonical org context (name, industry, sub-focus, HQ, founded, headcount, revenue, website, footprint). Editable. Note: Concierge reuses this to skip questions on new projects. Header action **Enrich from web** opens the same web-prefill flow as first-time intake (§2.4, `EnrichFromWeb`): look the company up → confirm the ai-tint found-card → profile fields update. Nothing writes until the user accepts.
-- **Brand & theme** (`ThemeSection`, `discovery.jsx`) — the org's look as a token pack. **Process theme from my website**: domain → `MiniLog` of the crawl (palette/type/logo) → found pack: color rows (swatch + role + hex + source label), type stack, logo tile, and a **live preview** strip rendering a generated app shell in the found theme. Copy states the pack is applied to every Kimi K3 mockup (§2.6 design review) and every app the factory builds for the org; an existing `brand-guidelines.pdf` in the knowledge base is named as the fallback source.
+- **Brand & theme** (`ThemeSection`, `discovery.jsx`) · **WAVE 2 — designed, not yet shipping** — the org's look as a token pack. **Process theme from my website**: domain → `MiniLog` of the crawl (palette/type/logo) → found pack: color rows (swatch + role + hex + source label), type stack, logo tile, and a **live preview** strip rendering a generated app shell in the found theme. Copy states the pack is applied to every Kimi K3 mockup (§2.6 design review) and every app the factory builds for the org; an existing `brand-guidelines.pdf` in the knowledge base is named as the fallback source.
 - **Knowledge base** — org-scoped documents (price book, line card, policies, brand, SOPs) as file tiles; each shows reuse count. Upload action.
 - **Connected systems** — org-level integrations (Epicor connected as primary; others linkable). Reused across projects.
-- **Codebase discovery** (`DiscoverySection`, `discovery.jsx`) — the on-ramp for companies already doing custom dev. Input a GitHub repo (access tokens live in Secrets; agents are **read-only**) → **Run discovery** → `MiniLog` crawl (clone → file map → manifests/CI → integrations detected → drafts written) → generated **AGENTS.md**, **CLAUDE.md**, **integrations.md** rows (ai-tint + source label) saved into the knowledge base and reused on every project. Re-run / add-another actions.
-- **Dev conventions** (`ConventionsSection`, `discovery.jsx`) — for technical users: primary repo, framework & runtime, install/test commands, coding standards (or a standards doc in the knowledge base). A live **"What every build agent receives"** preview (ai-tint, mono) shows the compiled org AGENTS.md; Save flashes confirmation. Injected into every build agent's context so the factory builds to the org's conventions.
+- **Codebase discovery** (`DiscoverySection`, `discovery.jsx`) · **WAVE 1 — shipping** — the on-ramp for companies already doing custom dev. Input a GitHub repo (access tokens live in Secrets; agents are **read-only**) → **Run discovery** → `MiniLog` crawl (clone → file map → manifests/CI → integrations detected → drafts written) → generated **AGENTS.md**, **CLAUDE.md**, **integrations.md** rows (ai-tint + source label) saved into the knowledge base and reused on every project. Re-run / add-another actions.
+- **Dev conventions** (`ConventionsSection`, `discovery.jsx`) · **WAVE 2 — designed, not yet shipping** — for technical users: primary repo, framework & runtime, install/test commands, coding standards (or a standards doc in the knowledge base). A live **"What every build agent receives"** preview (ai-tint, mono) shows the compiled org AGENTS.md; Save flashes confirmation. Injected into every build agent's context so the factory builds to the org's conventions.
 - **Secrets** — the organization **secret vault** (`ORG_SECRETS`): API keys, tokens, endpoints stored once at the org level. Each row shows the secret **name** (mono, e.g. `EPICOR_API_KEY`), a masked value (`••••••<last4>`), **used-by** project count, last-updated, and a **Rotate** action; **Add secret** in the header. Values are **encrypted and write-only** — once saved the raw value can't be read back (by anyone), projects reference secrets **by name**, and rotating/revoking here propagates to every project that imported the secret. Projects pull from this vault during the build's wait-for-deps step (§2.6).
 - **Team & access** — members with roles; invite.
 - **Usage & billing** — plan, spend, per-project spend breakdown.
 
 ### 2.4 Project onboarding  (`optionC.jsx` → `OptionC`)
 **Purpose:** collect project context with a docked **Concierge**. This is the single, finalized intake design — the earlier alternate option studies (A · Guided Stepper, B · Context Workspace) have been **removed** to eliminate duplication; only this Concierge-led flow remains. Two modes via header toggle:
-- **First-time** (fresh org, nothing on file): **Start with your website** — the first card is
+- **First-time** (fresh org, nothing on file): **Start with your website** · **WAVE 1 — shipping** — the first card is
   the **web prefill** (`EnrichFromWeb`, `discovery.jsx`): a domain input (pre-fill from the
   signup email domain when it isn't a public provider) and **Find my company**. The lookup
   runs as a visible `MiniLog` ("Reading acme-industrial.com… checking the careers page for
@@ -112,7 +154,7 @@ data from **this-project** data.
 **Project inputs:** project name, "what are you building" (goal), **project budget cap**, **recipe** (optional blueprint), scope-of-work chips, build engine, materials.
 - **Recipe** (`RecipePicker`, from `recipes.jsx`) is an **optional** starting blueprint the customer picks from the Published entries of the OS recipe library (§3.4b). The picker shows only the light customer-facing fields (category, name, tagline, a few capabilities); the recipe's GitHub repos, image artifacts, and internal notes are **not** shown. A **No template** card is always present — the customer can build purely from their brief. Lives in the "This project" section (inside `LockedGroup`, so it unlocks after the project is created); the value is a recipe id or `null`. Arriving from the **Explore** gallery (§2.8) preselects the recipe (`initialRecipe` prop).
   - **Recipe at runtime (how a recipe drives the build):** the recipe's text (name, tagline, capabilities, description) **replaces the SOW as the Concierge's intake input** — delivered via the existing conversation-context seam, and `recipe.md` becomes the **stage-1 (research) input** — the interview starts from what the recipe already knows instead of a blank brief. The pipeline receives the recipe's **linked GitHub repo as the build seed**: cloned into the **stage-3 (build) workspace**, the factory's skills **fork-and-extend** it (a dedicated SKILL block) — never greenfield when a recipe is selected — and the repo's `AGENTS.md`/`CLAUDE.md` teaches the build agents its architecture and conventions. A recipe without a valid repo/AGENTS.md is refused at load time (§3.4b).
-  - **Concierge recipe suggestion:** when the goal text matches a Published recipe and none is picked, the intake Concierge rail shows an inline **"Recipe match"** card (ai-tint; name, tagline, builds count, **Use this recipe** / **No thanks**, dismissible ×). Accepting sets the picker's value and the card flips to a green "Building from the `<name>` recipe" confirmation; dismissing suppresses it for the session (no nagging). The prototype matcher is `suggestRecipe(goal)` (keyword overlap); the live version is a concierge tool over recipe taglines (see `TICKETS.md` CBT-11).
+  - **Concierge recipe suggestion:** · **WAVE 2 — designed, not yet shipping** · when the goal text matches a Published recipe and none is picked, the intake Concierge rail shows an inline **"Recipe match"** card (ai-tint; name, tagline, builds count, **Use this recipe** / **No thanks**, dismissible ×). Accepting sets the picker's value and the card flips to a green "Building from the `<name>` recipe" confirmation; dismissing suppresses it for the session (no nagging). The prototype matcher is `suggestRecipe(goal)` (keyword overlap); the live version is a concierge tool over recipe taglines (see `TICKETS.md` CBT-11).
 - **Create the project first (gate).** The **very first action** in intake is naming the
   **project** and clicking **Create project** (`SaveBasics`, in `optionC.jsx`). This is a real
   creation event: it fires a **`POST` that writes the project to the database in `draft`
@@ -125,9 +167,13 @@ data from **this-project** data.
   pill). The button is disabled until a name is entered (`canSaveDraft`). On success the button
   is replaced by a green “Project created” confirmation. This is distinct from **Save & finish
   later** (footer), which persists the whole in-progress intake and leaves.
-- **Project budget cap** (`BudgetPicker`) is the **absolute total spend ceiling for the whole project** (not a monthly figure) — presets ($30 / $60 / $120 / $250) plus a custom amount. The build pauses for approval when cumulative spend reaches the cap. The chosen value flows into the project Overview and the factory-console header (`spent <x> / $<cap> cap`).
+  **Chat never creates a project.** Sending the Concierge a message before
+  creation collects information conversationally only — it must never insert a
+  row (no silent `Untitled project` drafts, Principle 3). The only creation
+  path is the named **Create project** action above.
+- **Project budget cap** (`BudgetPicker`) is the **absolute total spend ceiling for the whole project** (not a monthly figure) — presets ($30 / $60 / $120 / $250) plus a custom amount. The build pauses for approval when cumulative spend reaches the cap. **The cap is REQUIRED — the money-safety promise: there is no "optional" / uncapped option anywhere in copy or behavior; Continue cannot enable without one.** The chosen value flows into the project Overview and the factory-console header (`spent <x> / $<cap> cap`).
 - **Scope of work** chips are multi-select with a **"+ Add"** affordance — the operator/customer can type a **custom scope or type of software** not in the preset list; it's added as a selected chip.
-- **Build engine** (`EnginePicker`): choose the coding agent that builds the project — **Claude Code** (Anthropic, default), **Codex 5.6** (OpenAI), or **Kimi K3** (Moonshot AI; also the design-generation model, §2.6). Three provider cards (name, vendor, description); the downstream factory + console look identical either way — providers plug in, nothing downstream keys on a specific one. An **API key** segment: **Use Tenexity's key** (billed through the plan) or **Bring your own key** (key input). The chosen engine surfaces in the factory console header badge (`engine · <name> · TENEXITY KEY / BYO KEY`) and the process-tree orchestrator label. Value shape: `{ provider: 'claude'|'codex'|'kimi', keySource, key }` (the earlier `claude|opencode` + model-subpick shape was replaced).
+- **Build engine** (`EnginePicker`) · **WAVE 1 — shipping** — choose the coding agent that builds the project — **Claude Code** (Anthropic, default), **Codex 5.6** (OpenAI), or **Kimi K3** (Moonshot AI; also the design-generation model, §2.6). Three provider cards (name, vendor, description); the downstream factory + console look identical either way — providers plug in, nothing downstream keys on a specific one. An **API key** segment: **Use Tenexity's key** (billed through the plan) or **Bring your own key** (key input). The chosen engine surfaces in the factory console header badge (`engine · <name> · TENEXITY KEY / BYO KEY`) and the process-tree orchestrator label. Value shape: `{ provider: 'claude'|'codex'|'kimi', keySource, key }` (the earlier `claude|opencode` + model-subpick shape was replaced).
 **Materials (`Dropzone` with `describe`):** walkthrough video + documents. Each uploaded file has:
   - a **description input** (free text) with **AI auto-summarize** button;
   - a **scope toggle**: **Project** or **Org-wide** (org-wide → saved to knowledge base, reused everywhere).
@@ -165,6 +211,18 @@ There is also `const [interviewDone, setInterviewDone] = React.useState(false)` 
 button is disabled while it is false. This is the gate that stops people from skipping the
 interview.
 
+> **Handoff gate — adjudicated (SOF-224 #2, shipped reconciliation):** readiness to
+> build is the **agent's judgment** (Principle 6 — the customer can also call "that's
+> enough"); the only mechanical gate is the factual one: a `product_brief` artifact
+> **exists** (`SELECT … WHERE kind='product_brief'` — the brief-refactor behavior now
+> shipping). The question-counter gate described above is the *prototype* model. What is
+> NOT negotiable in either model: the **source-backed reflection is shown and explicitly
+> confirmed** before handoff — the "What I learned" review (Step 3 below) where every
+> fact links to its real source, and any fact without a source appears as a question,
+> never as a stated fact (build-plan T3.4 trust test). An implementation that shows a
+> bare chat box with an always-available handoff button is **wrong** and must be fixed,
+> not specced around.
+
 **The transitions, in order — wire them exactly like this:**
 
 1. **`intake` → `processing`** — the green **Continue** button calls `setView('processing')`.
@@ -185,6 +243,11 @@ interview.
 **Why it exists:** uploaded materials can be heavy (a long screen-recording video, a big
 price spreadsheet). We must never silently freeze on a blank screen while parsing — the
 user sees exactly what is being read.
+
+**Failure honesty (SOF-224 #4):** a failed ingest **never advances the flow**. A document
+list or parse that fails surfaces the **actual error and a retry** — an empty or failed
+load is never treated as "nothing to process," and `onDone` never fires on a failure
+path (honest-errors principle; evidence ingestion cannot be bypassed by an error).
 
 **Props:** `projectName` (string, shown in the top bar), `onDone()` (called when ingest
 completes, ~900 ms after 100 %), `onBackground()` (optional; if present, renders the
@@ -369,7 +432,7 @@ in the same spot — right side — on the overview, console, and documents scre
 - **Pipeline stage-rail** — the full pipeline as chips with Stage gates (diamonds): `extract → provision → research → [Stage 1] → architect → design(NEW) → tickets → [Stage 2] → wait-for-deps → build → test → deploy`. Done = checked, active = pulsing, deps = amber.
 - **Crash / pause recovery** — each completed node writes **immutable checkpoint artifacts** (the files in the Artifact Viewer); the run's durable state is the set of completed checkpoints, not in-memory progress. When a run **crashes** (node failure) or is **paused**, the stage-rail marks the halt node (red / amber) and downstream nodes fade to `queued`, and a **Recovery bar** appears: **Resume from `<node>`** (re-runs the halt node onward, reusing every upstream checkpoint — no re-research/re-architecting), **Retry `<node>`** (re-run just the halt node, e.g. after a transient failure or a now-provided key), or **Rewind to…** an earlier checkpoint (click any completed node, or pick from the dropdown — that node + downstream are invalidated and recomputed, upstream reused). The build Kanban is idempotent per-ticket, so a resumed build picks up only the not-done tickets. Header shows `run crashed` / `run paused`; the **Pause** control drives the paused state in the demo (a crash sets the same recovery flow at runtime).
 - **Wait-for-deps bar** — **stage-triggered**: appears *only after* the build reaches the wait-for-deps stage (not shown the rest of the run), marked with a `STAGE-TRIGGERED` badge and copy explaining why it surfaced now. The dependency set is **derived from the project's architecture**, so the **count varies per project** (factory + app design); the layout is an auto-wrapping grid that **scales to any number** of dependencies. Header tracks `resolved / total` and flips to "Dependencies resolved — build unblocked" when complete. Each dependency offers **3 resolution options**: **Get from MCP**, **Mock it**, or **Input key**. Build is gated until all are resolved. **Input key** additionally offers **Import from org secrets** (§2.3): a picker of the organization vault (`ORG_SECRETS`) with the best name/kind match badged `MATCH`; choosing one wires the dependency to that secret **by reference** (`org:<NAME>`) — the raw value is never shown — or the operator can still paste a key manually.
-- **Design review bar** (`DesignReviewBar`, `buildprogress.jsx`) — **stage-triggered** like the deps bar: surfaces only once the **design** node has completed. The design node (Kimi K3) generates high-fidelity screens from the PRD + the org's brand theme (§2.3 Brand & theme), then waits for the customer. The bar shows the generated screens as clickable mockup tiles (each opens the `screens` fig artifact in the Artifact Viewer), header `design · Kimi K3 · on your brand theme`, and copy explaining the two paths: **Approve & continue** locks the look (bar flips to a green "Design locked — tickets and the build proceed from these N screens", with **Re-open review**) — or **iterate via the Concierge** ("denser quote table", "approvals first"), which re-generates only the affected screens. Rendered between the stage-rail/Recovery bar and the wait-for-deps bar (design precedes deps in the pipeline).
+- **Design review bar** (`DesignReviewBar`, `buildprogress.jsx`) · **WAVE 2 — designed, not yet shipping** — **stage-triggered** like the deps bar: surfaces only once the **design** node has completed. The design node (Kimi K3) generates high-fidelity screens from the PRD + the org's brand theme (§2.3 Brand & theme), then waits for the customer. The bar shows the generated screens as clickable mockup tiles (each opens the `screens` fig artifact in the Artifact Viewer), header `design · Kimi K3 · on your brand theme`, and copy explaining the two paths: **Approve & continue** locks the look (bar flips to a green "Design locked — tickets and the build proceed from these N screens", with **Re-open review**) — or **iterate via the Concierge** ("denser quote table", "approvals first"), which re-generates only the affected screens. Rendered between the stage-rail/Recovery bar and the wait-for-deps bar (design precedes deps in the pipeline).
 - **View toggle: Kanban · Tree · Map**
   - **Kanban**: columns Backlog → Claimed → Building (WIP cap) → Testing → Done; ticket cards show id, title, assigned agent (avatar), tags (bug / needs-key / e2e). "Run agents" advances the live sim; bugs in Testing loop back to Building.
   - **Tree**: process tree — orchestrator root → each pipeline node → its spawned sub-agent → the artifacts it produced (clickable).
@@ -383,12 +446,17 @@ The Concierge surfaces them as an "Artifacts produced" list with open-links.
 ### 2.7 Artifact Viewer  (`ArtifactViewer.html` → `ArtifactViewer`; `artifactviewer.jsx`)
 **Purpose:** a standalone, full-page file viewer for everything the factory produces or operators author. Opened in a **new browser tab** from anywhere a file is clickable (project docs, console tree/map/concierge, OS Artifacts index, recipe editor) via `openArtifact(id)` → `ArtifactViewer.html?doc=<id>`.
 **Layout:** left **file rail** (all artifacts, grouped by project, searchable) + topbar (breadcrumb project ▸ node, file name, type badge, updated, Copy / Download) + typed body.
-**Supported types** (`ART` registry): **md** → real markdown renderer (`Markdown`) in a reading column with an **"On this page" TOC** (recipe descriptions register as `md`); **svg** → architecture diagram; **code** → line-numbered source (sql/bash/etc.); **json**; **csv** → table; **repo** → file tree; **fig** → frame grid; **image**. Selecting a file in the rail updates the URL so it's linkable.
+**Supported types** (`ART` registry): **md** → real markdown renderer (`Markdown`) in a reading column with an **"On this page" TOC** (recipe descriptions register as `md`); **svg** → architecture diagram; **code** → line-numbered source (sql/bash/etc.); **fig** → frame grid; **image**. **Current vs future (SOF-224):** the shipping app's viewer renders **json / csv / repo** through the generic `<pre>` — the typed **json** tree, **csv** table, and **repo** file-tree views below are the *designed* target, labeled future until implemented. Selecting a file in the rail updates the URL so it's linkable.
 **Markdown renderer** (`Markdown`, exported): headings, lists (ordered/unordered), tables, fenced code, blockquotes, rules, inline bold/italic/code/links. Reused by the recipe editor's live preview.
 
 ---
 
-## 2.8 Explore — recipe inspiration gallery  (`recipes.jsx` → `ExploreRecipes`)
+## 2.8 Explore — recipe inspiration gallery  (`recipes.jsx` → `ExploreRecipes`)  ·  **WAVE 2 — designed, not yet shipping**
+
+> **Status label (SOF-224):** this destination is **Wave 2 / future** per the
+> operator-approved Wave-1 scope (2026-07-21). The recipe surface shipping today
+> is the intake `RecipePicker` (§2.4). Everything in this section is the design
+> target; do not treat the gallery as current product.
 
 **Purpose:** let customers browse what the factory can build **without starting a
 project** — inspiration first, commitment second. Reached from the Projects dashboard
@@ -436,6 +504,16 @@ REAL/DEMO toggle. The **user filter** ("All users") narrows the table to a singl
 **Purpose:** the master list of reusable **build blueprints** the internal Tenexity team curates. Each recipe carries a **customer-facing summary** (name, tagline, category, systems, "what the customer gets") plus **internal-only build assets** — linked **GitHub repos** and **image artifacts** — and an internal markdown description. Customers pick from these during intake (§2.4) and see only the light summary fields; the repos, images, and notes stay OS-side.
 **Layout:** left master list (name, status pill, category, build count) + right **editor**: editable name + tagline, a status toggle, **Classification** (category chips + a systems tag editor), **What the customer gets** (capability tag editor), **Linked GitHub repos** (name / url / description rows, add/unlink — internal), **Image artifacts** (named striped-placeholder tiles, add/remove — internal), and a **Description** markdown body with **Write · Split · Preview** live preview (shared `Markdown`). **Save** + **Open in viewer ↗** (opens the description in the Artifact Viewer, new tab). **+ New recipe** seeds a blank Draft.
 **Status cascade:** Draft / Published / Archived — **only Published recipes appear in the customer picker.** Data lives in `recipedata.jsx` (`RECIPES`, `RECIPE_STATUS`, `RECIPE_CATEGORIES`); each recipe's description registers into the artifact registry (type `md`, project "Recipes").
+
+> **SOW → Recipes — the one current-state statement (SOF-224):** **Recipes are the
+> library.** The legacy `sow` table / `SowStore` and the scope-genre fallback
+> (`_genre_recipes`) still exist in the codebase and keep working for projects with
+> **no** selected recipe — a deliberate, temporary coexistence (operator-approved
+> Wave-1 decision, 2026-07-21) until the restructure's cleanup retires them. The old
+> product spec's "Statements of Work" library (its §5.3) is **historical** — recipes
+> replaced it (entry 31); do not build SOW features. Storage: a **fresh `recipes`
+> table** (not an extension of `sow`); no `repo_tree`/index column — the build clones
+> the repo fresh and the validation clone is discarded after its `AGENTS.md` check.
 **Customer picker** (`RecipePicker`, exported from `recipes.jsx`, used in `optionC.jsx` intake): a grid of Published-recipe cards (category, name, tagline, first few capabilities) plus an always-present **No template** card (build purely from the brief). Selection is optional and toggleable; value is a recipe id or `null`.
 
 ### 3.4c Artifacts index  (`admin.jsx` → `AdminArtifacts`)
@@ -587,7 +665,7 @@ success rate, and an editable system prompt (see §3.4).
 
 **13 · Edit org fields in place** (§2.4) — Option C (returning mode) → on-file org card → **Manage** turns every cell into an inline input.
 
-**14 · Concierge artifact display + working indicator** (§2.6) — open the **Factory console** artboard → left **Concierge** rail: switch artifact view **Feed · Tray · Latest**; type in the composer and **Send** to see the **typing/working** indicator; header shows a live **Working** chip while the build runs.
+**14 · Concierge artifact display + working indicator** (§2.6) — open the **Factory console** artboard → left **Concierge** rail: switch artifact view **Feed · Tray · Latest**; type in the composer and **Send** to see the **typing/working** indicator; header shows a live **Working** chip while the build runs. **(Superseded by entry 21 — the Concierge moved to a right-hand dock on every Project Console surface. The left rail no longer exists; the one-Concierge rule and its placement are §2.4b.)**
 
 **15 · Crash / pause recovery** (§2.6) — Factory console → header **Pause** → the stage-rail flags the halt node and the **Recovery bar** appears: **Resume from `<node>`**, **Retry `<node>`**, or **Rewind to…** (also click any completed stage chip to rewind).
 
@@ -826,3 +904,90 @@ text ramp, radii `T.rMd`/`T.rLg`/`T.rXl`, `T.shadowXs`, fonts `T.sans` (Hanken G
 `T.display` (Georgia) / `T.mono` (JetBrains Mono). Animations: `sfRise` (log/message entrance),
 `sfPulse` (live status dot), `.sf-spin` / `sfSpin` (processing spinner) — all defined in the
 `<style>` block of `Software Factory Onboarding.html`.
+
+---
+
+## 8. Success metrics, priorities & risks (folded in from the retired product spec)
+
+> Consolidated here during SOF-224 from `docs/product-spec-software-factory.md`
+> (since deleted) so its content survives without a second requirements document.
+
+### 8.1 Success metrics
+
+- **Activation:** % of new organizations completing first-project intake (create →
+  confirm interview → hand off) without abandoning; time from account creation to
+  first hand-off; second-project intake time vs. first (proves org-context reuse).
+- **Trust & comprehension:** accept-vs-correct rate on system-inferred facts (healthy
+  = trends toward accept because extraction improved, not because customers stopped
+  checking); Concierge-escalation rate during builds.
+- **Delivery reliability:** % of builds reaching 100% without customer-visible
+  manual recovery; of stalled builds, % resumed vs. restarted; % of projects inside
+  their spend cap, and how often approval pauses are granted (a very low grant rate
+  means the cap UX is miscalibrated).
+- **Business outcomes:** deployed-project rate (created → Deployed); cap-vs-actual
+  spend variance; operator leverage (orgs per Tenexity operator, tracked alongside
+  manual-rescue rate so it can't be gamed).
+
+### 8.2 Prioritization
+
+- **P0 (nothing works without these):** sign-in & access control; explicit
+  create-gate (§2.4); processing & interview before any build (§2.4a); the build
+  board with stage progress, crash recovery, dependency resolution (§2.6); the
+  persistent Concierge (§2.4b); basic cross-tenant visibility + sign-in management
+  (§3.2/§3.4a).
+- **P1 (complete, not just functional):** org shared context & knowledge base (§2.3);
+  projects dashboard w/ archive/delete (§2.2); project overview (§2.5a); Artifact
+  Viewer (§2.7); extra build-board views; agent roster (§3.5); tools registry (§3.6).
+- **P2 (high value, can trail):** the full produced-files index (§3.4c); markdown
+  polish in the goal field.
+- **Deferred by design (not deprioritized):** inline document-citation Q&A in the
+  Concierge (§2.4b groundwork only) — never smuggle it early.
+- **Background processing during ingest is CURRENT** (§2.4a) — the retired spec's
+  P2 label for it was its own internal contradiction; the §2.4a capability spec
+  (background banner + resume) is the rule.
+
+### 8.3 Risks & open questions (kept visible on purpose)
+
+1. **Reflection-step trust risk.** A wrong uncaught "what I learned" fact poisons the
+   whole build. Correction must stay cheap and obvious (§2.4a) — it is the single
+   biggest trust risk in the product.
+2. **Question fatigue vs. brief quality.** Who/what decides "enough" — and is the
+   threshold the same for a 5-minute and a 5-week project? (Principle 6 is the
+   current answer: the customer decides.)
+3. **Budget-cap trust runs both directions.** Too aggressive pauses feel naggy; too
+   permissive erodes the promise. Should the default adapt to project size?
+4. **Single-voice intake.** Is there real demand for a second stakeholder on one
+   brief — and would that live inside or outside the Concierge conversation?
+5. **Internal rescue as a crutch.** If staff can too easily save stuck projects, the
+   platform never learns whether self-serve works. Guardrail = track unassisted
+   build rate and operator leverage together (§8.1).
+
+---
+
+## 9. Adjudication log — SOF-224 consolidation
+
+> Every conflict the consolidation review found, the ruling, and where it now
+> stands. "WEB" = implementation fix owned by the console-frontend lane (filed in
+> Linear, not this PR); "DONE" = already correct in this file before SOF-224.
+
+| # | Conflict | Ruling | Status |
+|---|---|---|---|
+| 1 | Concierge chat could silently create an `Untitled project` draft | Chat collects locally; creation is ONLY the named **Create project** action (Principle 3) | Spec'd §2.4; app bug → WEB |
+| 2 | App's interview = bare chat box, handoff always available | Source-backed "What I learned" review + explicit confirmation required; readiness = agent judgment + `product_brief EXISTS` gate; question-counter is prototype-only | Spec'd §2.4a; app → WEB |
+| 3 | Budget labeled "optional" yet required by readiness | Cap is **required** — money-safety; no uncapped copy anywhere | Spec'd §2.4; app copy → WEB |
+| 4 | Failed doc-list load auto-advanced as "nothing to process" | A failed ingest never advances; real error + retry; `onDone` never fires on failure | Spec'd §2.4a; app → WEB |
+| 5 | Confidence pills both required (old §1) and forbidden (operator ruling) | **Sources only, product-wide** — the dated ruling wins; pills stripped from archive (entry 41) | DONE here; residual app rendering (ticket confidence) → WEB |
+| 6 | Concierge placement: left on console, right elsewhere; entry 14 vs 21 | **Right-hand dock everywhere**, context-specific copy (§2.4b); entry 14 marked superseded | DONE here; app console placement/contexts → WEB |
+| 7 | Engine design one generation behind (Claude/OpenCode+subpick) | **Trio:** Claude Code / Codex 5.6 / Kimi K3 (entry 36) | DONE here; app picker → WEB (shipped w/ Wave 1) |
+| 8 | Auth spec promised Microsoft/SSO/recovery/SOC-2 the app deliberately omits (SOF-15) | Current = Google + email/password; the rest marked **future — never render unverified affordances** | Spec'd §2.1 |
+| 9 | Recipes vs SOW: replaced here, still a library in the old spec | Recipes are the library; `sow` legacy coexists temporarily (Wave-1 decision); old spec §5.3 historical | Spec'd §3.4b |
+| 10 | Artifact Viewer promised typed json/csv/repo; app uses generic `<pre>` | Typed views = designed/future; current = generic renderer | Spec'd §2.7 |
+| 11 | Future artboards (Explore, Brand & theme, Dev conventions) looked current | Labeled **WAVE 2 — designed, not yet shipping** (§2.3, §2.8, canvas labels); prefill/discovery/engines labeled **WAVE 1 — shipping** | DONE here |
+| 12 | This archive was missing `TICKETS.md`, §2.8, entries 33–41 referenced by the Wave-1 doc | Landed via PR #379 (design archive now tracked in git) | DONE |
+
+**Docs disposition:** `docs/product-spec-software-factory.md` — consolidated in
+(§0.1/§0.2 principles & personas, §8) and **deleted**. `docs/superpowers/specs/
+2026-07-21-cbt-wave1-design.md` — kept as a **decision record** (dated, operator-
+approved; not a requirements source). `docs/project-memory-concierge/
+software-factory-build-plan.md` — already self-marked "fully executed — kept as a
+record of intent"; pointer to this file added.
