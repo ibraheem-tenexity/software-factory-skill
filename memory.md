@@ -370,6 +370,11 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 3. Production Resend sender was malformed (display name only); corrected it to the verified factory.tenexity.ai sender and Railway redeployed successfully.
 4. Summary: Vite build plus browser checks for accepted, failed, and missing delivery status pass; real staging and production Resend calls were accepted.
 
+# Codex Update at Time: 22:07:2026:00:00:00.000
+1. Project repositories now invite the saved owner GitHub handle from host-side `provision-repo`; the `repo-shared` artifact remains the success proof and GitHub's exact failure is visible/retryable.
+2. `src/software_factory/{db,repo,console,projectstate}.py`, `console/{schemas,routers/projects}.py`, and onboarding/project-overview UI on branch agent/project-repo-invites.
+3. A handle can be supplied during project setup or later through `POST /api/projects/{pid}/repo-access`; Stage-1 agent prompts no longer issue GitHub invites themselves.
+4. Summary: Python compilation and the Vite production build pass; staging GitHub-token and browser acceptance remain pending deployment.
 # ProcessingScreen SSE-race fix + markitdown .env landmine (2026-07-22)
 1. SOF-226: ProcessingScreen seeded every doc as running and learned completion ONLY from no-replay SSE — a doc ingested before mount = infinite spinner (operator hit it live). Fix: seed rows from summary_status + reconcile via a documents re-fetch when the stall watchdog fires. Browser-verified: pre-ingested doc -> instant advance to interview.
 2. LOCAL DEV LANDMINE (SOF-228): `import markitdown` autoloads dotenv, find_dotenv walks UP from a worktree to the MAIN repo's live .env -> injects SF_GOOGLE_CLIENT_ID/SF_SESSION_SECRET mid-process at first doc parse -> local console flips auth-on mid-run. Immunize: launch worktree consoles with SF_GOOGLE_CLIENT_ID="" (override=False respects it).

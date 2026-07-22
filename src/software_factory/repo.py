@@ -16,11 +16,12 @@ from typing import Callable
 class RunResult:
     stdout: str
     returncode: int
+    stderr: str = ""
 
 
 def _real_runner(args: list[str]) -> RunResult:
     proc = subprocess.run(["gh", *args], capture_output=True, text=True)
-    return RunResult(stdout=proc.stdout, returncode=proc.returncode)
+    return RunResult(stdout=proc.stdout, returncode=proc.returncode, stderr=proc.stderr or "")
 
 
 class GitHub:
@@ -44,18 +45,19 @@ class GitHub:
         already created via create_repo's own --clone doesn't get that clone for free)."""
         self._run(["repo", "clone", url])
 
-    def add_collaborator(self, repo: str, username: str, permission: str = "pull") -> bool:
+    def invite_collaborator(self, repo: str, username: str, permission: str = "pull") -> RunResult:
         """Invite `username` as a collaborator on `repo` ('owner/repo'). GitHub's collaborator
         API is username-only (no email-invite path exists for personal-account-owned repos,
-        confirmed against the REST docs) — `username` must be a real GitHub handle. Returns
-        True on success (invite created or already a collaborator); False on any failure
-        (unknown username, no permission, etc.) — never raises, so a failed invite can be
-        turned into a visible blocker instead of crashing the run."""
-        result = self._run(
+        confirmed against the REST docs) — `username` must be a real GitHub handle. Returns the
+        real `gh` result so the caller can surface GitHub's reason instead of inventing one."""
+        return self._run(
             ["api", "-X", "PUT", f"repos/{repo}/collaborators/{username}",
              "-f", f"permission={permission}"]
         )
-        return result.returncode == 0
+
+    def add_collaborator(self, repo: str, username: str, permission: str = "pull") -> bool:
+        """Compatibility wrapper for callers that only need success/failure."""
+        return self.invite_collaborator(repo, username, permission).returncode == 0
 
     def open_pr(self, branch: str, title: str, body: str) -> int:
         out = self._run(

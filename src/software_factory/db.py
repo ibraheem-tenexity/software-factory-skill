@@ -327,8 +327,62 @@ def _provision_repo(projects_dir: str, project_id: str, slug: str) -> int:
     state.repo_url = url
     state.save()
     db.record_artifact("GitHub Repo", url, kind="repo")
+    _invite_repo_owner(db, state)
     print(url)
     return 0
+
+
+def _clear_repo_access_blockers(db: ProjectStore) -> None:
+    for blocker in db.blockers():
+        if blocker.get("blocks") == "github-access" and not blocker.get("cleared"):
+            db.clear_blocker(blocker["what"])
+
+
+def _invite_repo_owner(db: ProjectStore, state) -> dict:
+    """Invite the saved owner handle and record only facts GitHub has confirmed.
+
+    A repository is still usable by the factory when this fails, so `github-access` is visible
+    without becoming a lifecycle stop. `repo-shared` remains the reaper's durable proof that the
+    owner received access.
+    """
+    username = (state.owner_github_username or "").strip().lstrip("@")
+    if not username:
+        return {"status": "not_requested", "detail": "No GitHub username has been provided."}
+    if not state.repo_url:
+        return {"status": "waiting_for_repo", "detail": "The invitation will be sent when the repository is created."}
+
+    from .repo import GitHub
+    parts = state.repo_url.rstrip("/").rsplit("/", 2)
+    if len(parts) < 3:
+        detail = f"Repository URL is not valid: {state.repo_url}"
+        _clear_repo_access_blockers(db)
+        db.add_blocker(f"GitHub Access: invite to @{username} failed: {detail}", "github-access")
+        return {"status": "failed", "detail": detail, "repo_url": state.repo_url,
+                "github_username": username}
+    repo = "/".join(parts[-2:])
+    result = GitHub().invite_collaborator(repo, username)
+    if result.returncode == 0:
+        _clear_repo_access_blockers(db)
+        if not any((a.get("kind") or "").lower() == "repo-shared" for a in db.artifacts()):
+            db.record_artifact("Owner Repo Access", state.repo_url, kind="repo-shared")
+        return {"status": "invited", "detail": f"GitHub invited @{username} to this repository.",
+                "repo_url": state.repo_url, "github_username": username}
+
+    detail = (result.stderr or result.stdout or f"gh exited with status {result.returncode}").strip()
+    _clear_repo_access_blockers(db)
+    db.add_blocker(f"GitHub Access: invite to @{username} failed: {detail}", "github-access")
+    return {"status": "failed", "detail": detail, "repo_url": state.repo_url,
+            "github_username": username}
+
+
+def request_repo_access(projects_dir: str, project_id: str, github_username: str) -> dict:
+    """Save an owner's GitHub handle and issue its invite now when a repository exists."""
+    from .projectstate import ProjectState
+    db = ProjectStore(db_path(projects_dir, project_id))
+    state = ProjectState.load(project_id, db)
+    state.owner_github_username = (github_username or "").strip().lstrip("@")
+    state.save()
+    return _invite_repo_owner(db, state)
 
 
 def main(argv: list[str]) -> int:

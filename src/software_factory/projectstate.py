@@ -151,7 +151,8 @@ class ProjectState:
     owner: str = ""  # email of the creating user; members see only their own runs (admins see all)
     # SOF-3: the owner's GitHub handle — self-declared, unverified (GitHub's own collaborator-invite
     # accept, via the owner's real GitHub login, is the verification). Populated upstream of this
-    # ticket's scope; empty means "no username on file" (Stage 1 records a blocker, does not skip).
+    # ticket's scope; empty means no invitation requested yet. The user can provide it before
+    # provisioning or request access later from the project overview.
     # Whether the invite succeeded is NOT mirrored here — like demo-creds, it's a recorded
     # 'repo-shared' artifact (see console.repo_shared_with_owner), the single source of truth.
     owner_github_username: str = ""

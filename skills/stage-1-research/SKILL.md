@@ -61,13 +61,9 @@ Turn it into usable scope. Do NOT re-record an input artifact — the console al
   "GitHub Repo"` yourself; Stage 3 calls this SAME verb and must reuse your repo, not create a
   second one). Pick `<slug>` as you would have picked the repo name before (short, human-readable,
   derived from the project name).
-- **Owner repo access (SOF-3):** your prompt states whether an owner GitHub username is on file for
-  this run. If YES — invite them: `GitHub.add_collaborator(repo, username)` (i.e. `gh api -X PUT
-  repos/<org>/<repo>/collaborators/<username> -f permission=pull`); on success `record-artifact
-  "Owner Repo Access" <same-repo-url> repo-shared` (this is what keeps the repo-reaper from ever
-  deleting it); on failure `add-blocker "GitHub Access: invite to <username> failed"`. If NO username
-  is on file — `add-blocker "GitHub Access: no owner GitHub username on file"`. Never silently skip
-  either way.
+- **Owner repo access:** `provision-repo` owns the GitHub invitation. It sends the saved owner
+  handle an invite, records `repo-shared` only after GitHub confirms it, and records any exact
+  failure for the owner to retry in the console. Do not call GitHub or record access artifacts here.
 
 ## Phase 3: research  (`set-phase research`)
 

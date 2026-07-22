@@ -162,6 +162,7 @@ class DraftCreateIn(BaseModel):
     impl_model: str = ""
     model: str = ""   # opencode model alias: "kimi"|"glm"
     budget: float | None = None  # per-project spend ceiling ($); None → SF_COST_CEILING default
+    github_username: str = ""
 
 
 class DraftPatchIn(BaseModel):
@@ -172,6 +173,11 @@ class DraftPatchIn(BaseModel):
     model: str | None = None     # opencode model alias: "kimi"|"glm"
     budget: float | None = None  # update the spend ceiling
     recipe_id: str | None = None  # CBT-9: the picked recipe id (must name a published recipe), or "" to clear
+    github_username: str | None = None
+
+
+class RepoAccessIn(BaseModel):
+    github_username: str = ""
 
 
 class CredsIn(BaseModel):

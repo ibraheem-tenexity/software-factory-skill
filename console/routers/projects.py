@@ -23,7 +23,7 @@ from console.deps import require_authed, authorize_project, _can_see, project_vi
 logger = get_logger(__name__)
 from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, MaintenanceToggleIn,
                              OrgDocIn, DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
-                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn)
+                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, RepoAccessIn)
 
 router = APIRouter()
 
@@ -75,7 +75,7 @@ def create_draft(body: DraftCreateIn, v: tuple = Depends(require_authed)):
     project_id = state.console.create_draft(owner=v[0] or "", name=body.project_name,
                                   runtime=body.runtime, planning_model=body.planning_model,
                                   impl_model=body.impl_model, model=body.model,
-                                  budget=body.budget)
+                                  budget=body.budget, github_username=body.github_username)
     return {"project_id": project_id}
 
 
@@ -217,6 +217,22 @@ def project_overview(pid: str, v: tuple = Depends(authorize_project)):
         "materials_count": len(docs["uploaded"]),
         "produced_count": len(docs["produced"]),
     }
+
+
+@router.get("/api/projects/{pid}/repo-access")
+def project_repo_access(pid: str, v: tuple = Depends(authorize_project)):
+    return state.console.repo_access(pid)
+
+
+@router.post("/api/projects/{pid}/repo-access")
+def request_project_repo_access(pid: str, body: RepoAccessIn, v: tuple = Depends(authorize_project)):
+    username = (body.github_username or "").strip().lstrip("@")
+    if not username:
+        raise HTTPException(status_code=400, detail="github_username is required")
+    owner = state.console.project_owner(pid)
+    if v[0] and v[0].lower() != owner:
+        raise HTTPException(status_code=403, detail="only the project owner can request repository access")
+    return state.console.request_repo_access(pid, username)
 
 
 def _project_documents(pid: str) -> dict:
@@ -532,7 +548,7 @@ def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_proje
                                 detail=f"recipe_id {body.recipe_id!r} does not name a published recipe")
     result = state.console.set_draft_project(pid, name=body.name, goal=body.goal, scope=body.scope,
                                              runtime=body.runtime, model=body.model,
-                                             recipe_id=body.recipe_id)
+                                             recipe_id=body.recipe_id, github_username=body.github_username)
     if body.budget is not None:
         state.console.raise_budget(pid, body.budget)
         result["budget_ceiling"] = body.budget

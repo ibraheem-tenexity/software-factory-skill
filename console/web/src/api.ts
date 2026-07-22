@@ -119,6 +119,7 @@ export type ProjectOverview = {
   materials_count?: number;
   produced_count?: number;
 };
+export type RepoAccess = { status: "not_requested" | "waiting_for_repo" | "ready" | "invited" | "failed"; detail: string; repo_url?: string; github_username?: string };
 export type ProjectDocuments = { uploaded: ProjectMaterial[]; produced: ProjectArtifact[]; org?: ProjectMaterial[] };
 
 // Org-admin (§2.3) — org-scoped, per the locked contract in docs/plans/org-admin-api.md.
@@ -569,20 +570,23 @@ export const api = {
   // and records creds_vault_ids on the draft; promote threads those into the runner env (BYOK wins
   // over the platform key). keySource/key on createDraft/patchDraft are passthrough (ignored by
   // Pydantic); the real BYOK path is submitCreds.
-  createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number }) =>
+  createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number; github_username?: string }) =>
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),
   // SOF-108: DB-backed scope chips — genre recipes authored on the SOW screen (status='Template').
   scopeGenres: () => get<{ genres: { name: string; description: string }[] }>("/api/scope-genres"),
   // CBT-9: published recipes — the intake picker source (light fields only; body_md/repo_url stay
   // internal-only, per the store's published() projection).
   listRecipes: () => get<{ recipes: RecipeLight[] }>("/api/recipes"),
-  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number; recipe_id?: string }) =>
+  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number; recipe_id?: string; github_username?: string }) =>
     send<{ name: string; goal: string; scope: string[]; description: string; recipe_id?: string }>(`/api/projects/${id}/draft`, "PATCH", body),
   // Read counterpart to PATCH /draft (qsvigmth's run-control PR #48) — rehydrates the intake form
   // when RESUMING an existing draft instead of minting a new one. budget (SOF-137) is included
   // since it's now one of the three required intake fields (name+goal+budget, scope optional).
   getDraft: (id: string) =>
-    get<{ name: string; goal: string; scope: string[]; description: string; budget: number | null; runtime: string; model: string; recipe_id?: string }>(`/api/projects/${id}/draft`),
+    get<{ name: string; goal: string; scope: string[]; description: string; budget: number | null; runtime: string; model: string; recipe_id?: string; github_username?: string }>(`/api/projects/${id}/draft`),
+  repoAccess: (id: string) => get<RepoAccess>(`/api/projects/${id}/repo-access`),
+  requestRepoAccess: (id: string, github_username: string) =>
+    send<RepoAccess>(`/api/projects/${id}/repo-access`, "POST", { github_username }),
   // BYOK key submission (qsvigmth's draft-BYOK PR). Vault-stores each credential; records UUIDs in
   // state.creds_vault_ids; promote threads them into the runner env. Returns names only, never values.
   submitCreds: (id: string, credentials: Record<string, string>) =>

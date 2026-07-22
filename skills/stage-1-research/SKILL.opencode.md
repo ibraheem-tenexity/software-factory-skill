@@ -58,6 +58,9 @@ into usable scope. Do NOT re-record an input artifact — the console already di
   "GitHub Repo"` yourself; Stage 3 calls this SAME verb and must reuse your repo, not create a
   second one). Pick `<slug>` as you would have picked the repo name before (short, human-readable,
   derived from the project name).
+- **Owner repo access:** `provision-repo` owns the GitHub invitation. It sends the saved owner
+  handle an invite, records `repo-shared` only after GitHub confirms it, and records any exact
+  failure for the owner to retry in the console. Do not call GitHub or record access artifacts here.
 
 ## Phase 3: research  (`set-phase research`)
 
