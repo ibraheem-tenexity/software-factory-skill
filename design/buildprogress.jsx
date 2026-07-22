@@ -245,7 +245,7 @@ function ConciergeRail({ done, total, allDone, onOpen }) {  const seed = allDone
 
 function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Industrial · Quote-to-ERP', peerTabs, engine, budget = 30, conciergeCollapsed, onConciergeCollapsedChange, consoleView, onConsoleViewChange }) {
   const sim = useBuildSim();
-  const [localView, setLocalView] = React.useState('activity');
+  const [localView, setLocalView] = React.useState('kanban');
   const view = consoleView || localView;
   const setView = (next) => { setLocalView(next); onConsoleViewChange && onConsoleViewChange(next); };
   const [doc, setDoc] = React.useState(null);
@@ -299,8 +299,6 @@ function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Indus
         <div style={{ flex: 1, minWidth: 0, padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 15 }}>
           <StageRail runState={run} onRewind={(id) => resumeRun(id)} />
           <RecoveryBar runState={run} onResume={() => resumeRun()} onRetry={() => resumeRun()} onRewind={(id) => resumeRun(id)} />
-          <DesignReviewBar />
-          <DepsBar />
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -323,7 +321,7 @@ function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Indus
 
           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
             {view === 'activity'
-              ? <FactoryActivity onOpen={(a) => openArtifact(a)} />
+              ? <FactoryActivity onOpen={(a) => openArtifact(a)} actions={<React.Fragment><DesignReviewBar /><DepsBar /></React.Fragment>} />
               : view === 'kanban'
               ? <div style={{ height: '100%', overflow: 'auto', paddingRight: 2 }}><Kanban tickets={sim.tickets} justMoved={sim.justMoved} /></div>
               : view === 'tree'

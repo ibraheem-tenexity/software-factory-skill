@@ -295,9 +295,10 @@ function SystemEvent({ event, compact = false, onOpen }) {
   </div>;
 }
 
-function FactoryActivity({ onOpen }) {
+function FactoryActivity({ onOpen, actions }) {
   const attention = FACTORY_ACTIVITY.filter((event) => event.tone === 'warning' || event.tone === 'danger').length;
   return <section style={{ height: '100%', overflow: 'auto', border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised }}>
+    {actions && <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12, borderBottom: `1px solid ${T.borderSubtle}`, background: T.bg }}><CategoryLabel>Current action items</CategoryLabel>{actions}</div>}
     <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: `1px solid ${T.borderSubtle}` }}><div><b style={{ display: 'block', font: `700 14px/1.2 ${T.display}`, color: T.fg }}>Run activity</b><span style={{ font: `400 11px/1.4 ${T.sans}`, color: T.tertiary }}>Every stage, retry, intervention, and output in occurrence order.</span></div><StatusPill tone="warning">{attention} need attention</StatusPill></header>
     <div style={{ position: 'relative', maxWidth: 760, padding: '16px 18px 24px 42px' }}><span style={{ position: 'absolute', left: 26, top: 24, bottom: 30, width: 1, background: T.borderDefault }} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{FACTORY_ACTIVITY.map((event) => <div key={event.id} style={{ position: 'relative' }}><span style={{ position: 'absolute', left: -20, top: 16, width: 9, height: 9, borderRadius: '50%', background: event.tone === 'danger' ? T.danger : event.tone === 'warning' ? T.warning : event.tone === 'success' ? T.success : T.tertiary, boxShadow: `0 0 0 4px ${T.raised}` }} /><SystemEvent event={event} onOpen={onOpen} /></div>)}</div>

@@ -648,7 +648,7 @@ function ProjectViewStandalone({ ingesting = false, onResumeInterview, onBack, i
   const project = (typeof PROJECTS !== 'undefined' && PROJECTS[0]) || { name: 'Quote-to-Epicor automation', goal: '', status: 'building', phase: 'Build · stage 3', pct: 58, spend: '$4.20' };
   const [budget, setBudget] = React.useState(project.budget || 30);
   const [conciergeCollapsed, setConciergeCollapsed] = React.useState(false);
-  const [consoleView, setConsoleView] = React.useState('activity');
+  const [consoleView, setConsoleView] = React.useState('kanban');
   if (tab === 'build') {
     return <BuildProgress projectName={`Acme Industrial · ${project.name}`} budget={budget}
       peerTabs={{ onSwitch: (id) => setTab(id === 'build' ? 'build' : id === 'exit' ? 'overview' : id) }} conciergeCollapsed={conciergeCollapsed} onConciergeCollapsedChange={setConciergeCollapsed} consoleView={consoleView} onConsoleViewChange={setConsoleView} />;
@@ -675,7 +675,7 @@ function AdminProjectView({ project, onBack }) {
   const p = React.useMemo(() => adminToProject(project), [project]);
   const [budget, setBudget] = React.useState(p.budget || 30);
   const [conciergeCollapsed, setConciergeCollapsed] = React.useState(false);
-  const [consoleView, setConsoleView] = React.useState('activity');
+  const [consoleView, setConsoleView] = React.useState('kanban');
   if (tab === 'build') {
     return <BuildProgress projectName={`${p.org} · ${p.name}`} onBack={() => setTab('overview')} backLabel="Project" budget={budget}
       peerTabs={{ onSwitch: (id) => setTab(id === 'build' ? 'build' : id === 'exit' ? 'overview' : id) }} conciergeCollapsed={conciergeCollapsed} onConciergeCollapsedChange={setConciergeCollapsed} consoleView={consoleView} onConsoleViewChange={setConsoleView} />;
