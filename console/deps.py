@@ -50,7 +50,7 @@ def _can_see(v: tuple, project_id: str) -> bool:
     scope = project_visibility(v)
     if scope is None:                      # internal staff / service token = cross-tenant god view
         return True
-    owner = (state.console.project_owner(project_id) or "").lower() if project_id else ""
+    owner = (state.console.records.project_owner(project_id) or "").lower() if project_id else ""
     return bool(owner) and owner in scope
 
 

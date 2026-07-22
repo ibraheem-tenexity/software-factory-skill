@@ -53,7 +53,7 @@ def _build_first_turn_context(console, project_id: str, users=None) -> str:
     """SOF-62: the server-assembled project-context block for the Concierge's first turn — the
     owning company's profile, the user's own project input, the selected recipe, every document
     summary, and existing per-document assumptions. Pushed into the system prompt (see
-    default_prompt.build_system_prompt), never a fake user message, so the first reply already
+    conversation.concierge_prompt.build_system_prompt), never a fake user message, so the first reply already
     accounts for everything on file with no tool call required. Missing pieces (no company profile,
     no selected recipe, no documents yet) are stated as such, never silently omitted, so the agent
     doesn't have to guess whether a section was skipped or is genuinely empty."""
@@ -235,7 +235,7 @@ class DbConversation:
         )
         return {"response": turn.response, "suggested_responses": suggested,
                 "message_id": message_id, "session_id": session_id,
-                "handed_off": bool(self._console and not self._console.is_draft(project_id))}
+                "handed_off": bool(self._console and not self._console.intake.is_draft(project_id))}
 
     async def turn(self, project_id: str, message: str) -> dict:
         """One Concierge turn. Non-empty message = the user's turn (recorded, agent replies).

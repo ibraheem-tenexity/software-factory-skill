@@ -6,7 +6,7 @@ to the system prompt, never represented as a fake user message.
 """
 import pytest
 
-from software_factory.default_prompt import build_system_prompt
+from software_factory.conversation.concierge_prompt import build_system_prompt
 
 
 def test_no_first_turn_context_is_unchanged_from_before_sof62():

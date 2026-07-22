@@ -1,18 +1,18 @@
 """The Concierge's tool belt — every tool hits a real backend.
 
-`build_project_tools(console, project_id)` binds the current project's Console + memory store into
+`build_project_tools(console, project_id)` binds the current project's execution service + memory store into
 the tools the agent may call:
   · project memory — write_to_project_memory / get_from_project_memory / create_project_summary
   · pipeline       — check_project_status (returns live state so the agent reasons about progress)
   · company research — exa_search (quick) / fusion_search (deep), from research.py; enrich_company
     (CBT-4) is the CBT-1 wow-prefill lookup specifically — same quick-mode call, name-or-website
-    input, "sources only" result the concierge is instructed to present honestly (default_prompt.py)
+    input, "sources only" result the concierge is instructed to present honestly (concierge prompt)
   · document reading (SOF-62) — search_document_summaries (coarse, pick 2-3 relevant documents) /
     fetch_document_markdown (read one in full)
   · product brief (SOF-137, Minimum Machinery) — finalize_product_brief (writes the brief MD to
     storage, the single kind='product_brief' artifact Stage 1 builds from) / read_product_brief
     (read it back to self-check against the system prompt's criteria) / hand_off_to_factory (calls
-    the SAME Console.promote_draft the UI button calls — no separate agent-side approval machinery;
+    the SAME execution-service `promote_draft` the UI button calls — no separate agent-side approval machinery;
     doubt is expressed in chat, the user (or the agent) can always hand off once a brief exists)
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ import json
 from dataclasses import asdict
 
 from software_factory import storage
-from software_factory.console import Console
+from software_factory.execution.service import ExecutionService
 from software_factory.db import ProjectStore
 from software_factory.memory import search as memory_search
 from software_factory.memory.ingest import _recompute_project_rollup, estimate_tokens
@@ -38,7 +38,7 @@ _MAX_FULL_DOCUMENT_TOKENS = 500_000
 from langchain_core.tools import tool
 
 
-def build_project_tools(console: Console, project_id: str) -> list:
+def build_project_tools(console: ExecutionService, project_id: str) -> list:
     """Return the Concierge tools bound to this project."""
     store = MemoryStore()
 
@@ -148,7 +148,7 @@ def build_project_tools(console: Console, project_id: str) -> list:
         (supersedes the raw intake composition). Call once you're genuinely confident in the
         scope, pain points, business problem, and audience (your own system-prompt criteria —
         use read_product_brief to check your latest save against them before hand-off). A later
-        call supersedes an earlier one (read_product_brief/Console.product_brief always read the
+        call supersedes an earlier one (read_product_brief/ExecutionService.intake.product_brief always reads the
         newest). Writes the MD to the project's durable storage, not just the database."""
         md = (markdown or "").strip()
         if not md:
@@ -164,13 +164,13 @@ def build_project_tools(console: Console, project_id: str) -> list:
         """Read back your own finalized product brief in full, so you can check it against your
         system prompt's criteria (scope, pain points, business problem, audience) before hand-off.
         Returns a message saying none exists yet if finalize_product_brief hasn't been called."""
-        brief = console.product_brief(project_id)
+        brief = console.intake.product_brief(project_id)
         return brief if brief else "no product brief exists yet — call finalize_product_brief first"
 
     @tool
     def hand_off_to_factory() -> str:
         """Promote this project into the factory and launch Stage 1 — the SAME action the user's
-        "Hand off to the factory" button performs (calls the identical Console.promote_draft).
+        "Hand off to the factory" button performs (calls the identical ExecutionService.promote_draft).
         Call this yourself once you and the user agree you're ready, instead of only ever offering
         the button. Refuses with the real reason (identical to what the button shows) if there is
         no finalized product brief yet — call finalize_product_brief first."""

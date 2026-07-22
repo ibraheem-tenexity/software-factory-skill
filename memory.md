@@ -410,3 +410,17 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 1. Removed the obsolete `seed_genre_recipes.py` executable and SOW-only test coverage left behind by the retirement.
 2. Updated retained admin/conversation/input-pipeline test code to the SOW-free interfaces and terminology.
 3. The retired modules/routes/table no longer have executable references outside preserved historical planning documents.
+
+# Backend structure refactor: project intake (2026-07-22)
+1. `projects/{intake,materials,records}.py` own onboarding, materials, and durable read projections; `Console` retains execution and lifecycle policy.
+2. Production callers use `Console.intake` and `Console.records`; the router only owns HTTP transport and error mapping.
+3. `projects/materials.py` owns upload, document projection, ingestion, scope changes, and deletion across storage, blobs, memory, input files, and artifacts.
+4. `docs/ARCHITECTURE.md` and `docs/STRUCTURE.md` record each boundary and temporary composition point.
+
+# Backend structure refactor: concierge prompts (2026-07-22)
+1. Removed `default_prompt.py`: it was not a default prompt and only cached the editable `system_agents.CONCIERGE` row plus context framing.
+2. `conversation/concierge_prompt.py` now owns that retrieval, cache, and framing; `chat_agent.py` imports it directly.
+3. Historic migrations and planning documents retain old-name references as historical records; production code has none.
+# backend-structure-refactor Update at Time: 22:07:2026:00:00:00.000
+1. PR #430 now extends beyond the initial `projects`/prompt extraction: `execution/{prompts,process,service}.py` owns the former Console implementation, `workers/supervisor.py` owns the poller, and `conversation/{dock,persistence}.py` owns project chat runtime/history. `software_factory.console` and the old `console/chat_*`/`console/poller` paths are documented compatibility exports only.
+2. The canonical structure map records this as an intermediate execution consolidation: move remaining project projections/mutations to `projects/` and teardown policy to `cleanup/`; do not add new behavior to `ExecutionService` outside stage execution.

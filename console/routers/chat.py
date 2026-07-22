@@ -9,7 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from software_factory.data_transfer_objects.chat_agent import ChatMessage
-from console.chat_persistence import chat_history as _chat_history, persist_chat_turn as _persist_chat_turn
+from software_factory.conversation.persistence import (
+    chat_history as _chat_history,
+    persist_chat_turn as _persist_chat_turn,
+)
 from software_factory.deps import extract_env_creds
 from software_factory.transcription import transcribe_audio, TranscriptionError
 
@@ -25,7 +28,7 @@ router = APIRouter()
 _CHAT_TIMEOUT = 120
 
 
-# /api/chat persistence + history now live on the `conversation` table via console.chat_persistence
+# /api/chat persistence + history now live on the `conversation` table via conversation.persistence
 # (imported above as _persist_chat_turn / _chat_history). The legacy chat.jsonl/ChatStore and its
 # SF_CHAT_JSONL_MIRROR / SF_CONVERSATION_DB flags are retired — the table is the single store.
 
@@ -51,6 +54,7 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
         raise HTTPException(status_code=503,
                             detail="no OPENAI_API_KEY or OPENROUTER_API_KEY — chat unavailable")
     console = state.console
+    intake = console.intake
     project_id = body.project_id
     # Messaging an EXISTING run requires ownership; a new conversation mints a durable DRAFT
     # (canonical run-<8hex>) up front so the interview persists from turn one and survives a
@@ -58,16 +62,16 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
     if project_id and not _can_see(v, project_id):
         raise HTTPException(status_code=403, detail="forbidden")
     if not project_id:
-        project_id = console.create_draft(owner=v[0] or "", name=body.project_name or "",
-                                      runtime=body.runtime, planning_model=body.planning_model,
-                                      impl_model=body.impl_model, model=body.model)
+        project_id = intake.create_draft(owner=v[0] or "", name=body.project_name or "",
+                                         runtime=body.runtime, planning_model=body.planning_model,
+                                         impl_model=body.impl_model, model=body.model)
     # Files/images attached during the interview persist into the draft now (wireframes survive),
     # so they're in input/ for Stage 1 regardless of which turn they arrived on. Drafts only.
-    if (body.files or body.images) and console.is_draft(project_id):
+    if (body.files or body.images) and intake.is_draft(project_id):
         try:
-            console.attach_to_draft(project_id, (body.files or []) + (body.images or []))
+            intake.attach_to_draft(project_id, (body.files or []) + (body.images or []))
         except Exception:
-            pass  # a bad attachment must not 500 the chat turn
+            logger.exception("[chat] failed to attach interview materials for %s", project_id)
 
     pid = project_id  # capture for closure
 
