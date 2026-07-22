@@ -7,6 +7,10 @@ import re
 import httpx
 from dataclasses import dataclass, asdict
 
+from .log import get_logger
+
+logger = get_logger(__name__)
+
 # SOF-79: real measured end-to-end latency for a Fusion call is ~165-181s (two live runs);
 # the original 60s timeout killed every successful call before it could complete.
 # SOF-185: the ONLY limit on a fusion call is TIME — output is unbounded (no max_tokens, ever), so
@@ -296,7 +300,9 @@ def _fusion_post(payload: dict, api_key: str, timeout: float) -> tuple[str, floa
     intermittent, so we retry ONCE on an unparseable body, then degrade: a broken tool must
     degrade the answer (ResearchError → the console route's clean 502 → the in-stage proxy
     re-wraps it), never crash the stage with an unhandled JSONDecodeError/KeyError (CLAUDE.md).
-    A transport error / timeout is NOT retried — a 30-min timeout must not silently become 60."""
+    A transport error / timeout is NOT retried — a 30-min timeout must not silently become 60.
+    Every parsed response logs its finish_reason + size, so a future clipped answer self-diagnoses
+    as cap (finish_reason="length") vs body cutoff (unparseable JSON) from the logs alone."""
     last_err: ResearchError | None = None
     for _attempt in range(2):  # 1 try + 1 retry, parse-failure only
         try:
@@ -312,6 +318,13 @@ def _fusion_post(payload: dict, api_key: str, timeout: float) -> tuple[str, floa
         try:
             body = resp.json()
             raw = body["choices"][0]["message"]["content"]
+            finish = (body.get("choices") or [{}])[0].get("finish_reason")
+            logger.info("[research] fusion response: finish_reason=%s content_chars=%s cost=%s",
+                        finish, len(raw or ""), (body.get("usage") or {}).get("cost"))
+            if finish == "length":
+                logger.warning("[research] fusion response CLIPPED by a token cap "
+                               "(finish_reason=length) — SOF-185 says this must never happen; "
+                               "no max_tokens is set, so the cap is the provider's")
             return raw, (body.get("usage") or {}).get("cost")
         except (ValueError, KeyError, IndexError, TypeError) as exc:
             last_err = ResearchError(
