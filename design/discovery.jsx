@@ -160,16 +160,20 @@ const DISCOVERY_DOCS = [
 function DiscoverySection() {
   const [stage, setStage] = React.useState('idle'); // idle | running | done
   const [repo, setRepo] = React.useState('github.com/acme-industrial/order-desk');
+  const [pat, setPat] = React.useState('');
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {stage === 'idle' && (
         <React.Fragment>
-          <div style={{ display: 'flex', gap: 9, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 240 }}>
-              <Field label="Repository" hint="Access tokens live in Secrets — discovery agents read only, never write.">
-                <TextInput mono value={repo} onChange={setRepo} placeholder="github.com/your-org/your-repo" />
-              </Field>
-            </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <Field label="Repository" hint="Shallow clone, read-only.">
+              <TextInput mono value={repo} onChange={setRepo} placeholder="github.com/your-org/your-repo" />
+            </Field>
+            <Field label="GitHub access token (PAT)" hint="Write-only — stored in your org vault as GITHUB_PAT; never readable back.">
+              <TextInput mono type={pat ? 'password' : 'text'} value={pat} onChange={setPat} placeholder="github_pat_…" />
+            </Field>
+          </div>
+          <div>
             <Btn variant="primary" onClick={() => setStage('running')} disabled={repo.trim().length < 8}><Icon name="github" size={14} color="#fff" /> Run discovery</Btn>
           </div>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '11px 13px', borderRadius: T.rLg, border: `1px solid ${T.borderSubtle}`, background: T.sunken }}>

@@ -140,6 +140,54 @@ function suggestRecipe(goal) {
   }) || null;
 }
 
+// Technical setup (optional, first-time intake) — for teams already shipping
+// code: bring your own repo (link + PAT, write-only into the org vault) and
+// your development conventions (framework, commands, standards). Saved to the
+// ORGANIZATION — the same data as Org admin → Codebase discovery / Dev
+// conventions — and reused on every project. Collapsed by default: a
+// non-technical user should never feel this is required of them.
+function TechSetupCard() {
+  const [open, setOpen] = React.useState(false);
+  const [v, setV] = React.useState({ repo: '', pat: '', stack: '', commands: '', standards: '' });
+  const set = (k) => (x) => setV((p) => ({ ...p, [k]: x }));
+  const filled = v.repo || v.stack || v.commands || v.standards;
+  return (
+    <div style={{ border: `1px solid ${open || filled ? T.brand + '55' : T.borderSubtle}`, borderRadius: T.rLg, background: open ? T.brandSoft + '33' : T.raised, overflow: 'hidden' }}>
+      <button onClick={() => setOpen((o) => !o)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+        <span style={{ width: 28, height: 28, borderRadius: 7, display: 'grid', placeItems: 'center', background: T.ink, flexShrink: 0 }}><Icon name="github" size={14} color="#fff" /></span>
+        <span style={{ flex: 1 }}>
+          <span style={{ display: 'block', font: `600 13px/1.2 ${T.sans}`, color: T.fg }}>I’m a technical user — bring my own repo &amp; conventions</span>
+          <span style={{ display: 'block', font: `400 11.5px/1.3 ${T.sans}`, color: T.tertiary, marginTop: 2 }}>{filled ? 'Provided — saved to your organization' : 'Optional · for teams already shipping code'}</span>
+        </span>
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={15} color={T.tertiary} />
+      </button>
+      {open && (
+        <div style={{ borderTop: `1px solid ${T.borderSubtle}`, padding: '14px', display: 'flex', flexDirection: 'column', gap: 13, background: T.raised }}>
+          <Field label="GitHub repository" hint="The factory builds on YOUR codebase — cloned as the build seed.">
+            <TextInput mono value={v.repo} onChange={set('repo')} placeholder="github.com/your-org/your-repo" />
+          </Field>
+          <Field label="GitHub access token (PAT)" hint="Write-only — stored in your org vault as GITHUB_PAT; never readable back. Read access is enough.">
+            <TextInput mono type={v.pat ? 'password' : 'text'} value={v.pat} onChange={set('pat')} placeholder="github_pat_…" />
+          </Field>
+          <Field label="Framework & runtime" hint="What to build with — the factory follows it, not its own defaults.">
+            <TextInput value={v.stack} onChange={set('stack')} placeholder="e.g. Next.js 14 · FastAPI · Postgres" />
+          </Field>
+          <Field label="Install / test commands" optional>
+            <TextInput mono value={v.commands} onChange={set('commands')} placeholder="pnpm i · pnpm test · pytest -q" />
+          </Field>
+          <Field label="Coding standards" optional>
+            <TextArea rows={2} value={v.standards} onChange={set('standards')} placeholder="Lint rules, commit style, review expectations…" />
+          </Field>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px', borderRadius: T.rMd, border: `1px solid ${T.borderSubtle}`, background: T.sunken }}>
+            <Icon name="bot" size={13} color={T.tertiary} style={{ marginTop: 1, flexShrink: 0 }} />
+            <span style={{ font: `400 11.5px/1.5 ${T.sans}`, color: T.secondary }}>Saved to your organization and reused on every project. After setup, discovery agents can read the repo and write the agent files (<b style={{ color: T.fg }}>AGENTS.md</b>, <b style={{ color: T.fg }}>CLAUDE.md</b>, <b style={{ color: T.fg }}>integrations.md</b>) for you — editable anytime under Organization → Codebase discovery / Dev conventions.</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Pull existing org knowledge-base documents into this project.
 function OrgImportPicker() {  const [open, setOpen] = React.useState(false);
   const [picked, setPicked] = React.useState([]);
@@ -199,7 +247,7 @@ function BudgetPicker({ value, onChange }) {
   );
 }
 
-function OptionC({ onExit, onBackground, initialRecipe }) {
+function OptionC({ onExit, onBackground, initialRecipe, onExplore }) {
   const [mode, setMode] = React.useState('returning'); // 'fresh' | 'returning'
   const [view, setView] = React.useState('intake'); // intake | processing | interview | build
   const [interviewDone, setInterviewDone] = React.useState(false);
@@ -366,6 +414,7 @@ function OptionC({ onExit, onBackground, initialRecipe }) {
                       {INTEGRATIONS.map((it) => <IntegrationRow key={it.id} item={it} connected={f.ints.includes(it.id)}
                         onToggle={() => setFresh('ints', f.ints.includes(it.id) ? f.ints.filter((x) => x !== it.id) : [...f.ints, it.id])} />)}
                     </div>
+                    <div style={{ marginTop: 14 }}><TechSetupCard /></div>
                   </Card>
 
                   <SectionDivider label="This project" sub="specific to what you're building now" icon="layers" />
@@ -382,6 +431,7 @@ function OptionC({ onExit, onBackground, initialRecipe }) {
                   </Card>
                   <LockedGroup>
                   <Card cat="Your first project" title="Recipe" desc="Start from a proven blueprint the Tenexity team maintains, or choose No template to build purely from your brief.">
+                    {onExplore && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}><button onClick={onExplore} style={{ font: `500 12px/1 ${T.sans}`, color: T.brandDeep, background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="compass" size={13} color={T.brandDeep} /> Browse the gallery</button></div>}
                     <RecipePicker value={p.recipe} onChange={(v) => setProj('recipe', v)} />
                   </Card>
                   <Card cat="Your first project" title="Scope of work" desc="Which parts of the business does this project touch?">
@@ -452,6 +502,7 @@ function OptionC({ onExit, onBackground, initialRecipe }) {
                   </Card>
                   <LockedGroup>
                   <Card cat="This project" title="Recipe" desc="Start from a proven blueprint the Tenexity team maintains, or choose No template to build purely from your brief.">
+                    {onExplore && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}><button onClick={onExplore} style={{ font: `500 12px/1 ${T.sans}`, color: T.brandDeep, background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}><Icon name="compass" size={13} color={T.brandDeep} /> Browse the gallery</button></div>}
                     <RecipePicker value={p.recipe} onChange={(v) => setProj('recipe', v)} />
                   </Card>
                   <Card cat="This project" title="Scope of work" desc="Which parts of the business does this project touch?">
