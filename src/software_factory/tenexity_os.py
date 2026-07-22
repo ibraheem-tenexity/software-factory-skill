@@ -224,15 +224,14 @@ def owner_to_org(orgs: list, members_by_org: dict) -> dict:
 
 
 def agent_roster(system_agents: list, rollups: list) -> list:
-    """Merge the system_agents identity rows (callsign/name/prompt/model_id/version) with live
-    per-role rollups from the runtime_agents table. system_agents is the SOLE source of roster
-    membership (migration-seeded, operator-editable — "the frontend shows only DB rows"); the
-    rollups only DECORATE a defined agent with its run stats. Run-specific sub-agent roles that a
-    build spawns (e.g. per-ticket agents recorded in runtime_agents) are telemetry, not
-    definitions, and are deliberately NOT surfaced as roster cards. Roles are matched to rollups by
-    callsign, since the old per-role registry `role` column no longer exists on system_agents."""
+    """Build one roster card per supplied `system_agents` row, decorated with its matching per-role
+    rollup from the runtime_agents table (runs/success/active/model). Unmatched telemetry roles —
+    the run-specific sub-agents a build spawns per ticket — are deliberately ignored, never turned
+    into their own cards. Roles are matched to rollups by callsign, since the old per-role registry
+    `role` column no longer exists on system_agents. Membership here is scoped to the rows passed
+    in; the OS Agents endpoint composes this with `live_agent_cards()` separately (see
+    `AdminService.agents()`)."""
     by_role = {(r.get("role") or "").lower(): r for r in rollups}
-    used = set()
     out = []
 
     def card(name, callsign, role, model, version, desc, roll):
@@ -244,12 +243,9 @@ def agent_roster(system_agents: list, rollups: list) -> list:
                 "prompt_version": version}
 
     for e in system_agents:
-        roll = None
         # system_agents has no `role` column; match a rollup by the callsign lowercased.
         key = (e.get("callsign") or "").lower()
-        if key and key in by_role and key not in used:
-            roll = by_role[key]
-            used.add(key)
+        roll = by_role.get(key) if key else None
         out.append(card(e["name"], e["callsign"], e.get("callsign"), e.get("model_id"),
                         e.get("version") or 0, e.get("prompt"), roll))
     return out
