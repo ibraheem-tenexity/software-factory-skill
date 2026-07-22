@@ -369,3 +369,9 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console/web/src/admin/users.tsx on branch agent/fix-user-invite.
 3. Production Resend sender was malformed (display name only); corrected it to the verified factory.tenexity.ai sender and Railway redeployed successfully.
 4. Summary: Vite build plus browser checks for accepted, failed, and missing delivery status pass; real staging and production Resend calls were accepted.
+
+# Ingestion logging fix (2026-07-22, operator-ordered)
+1. memory/ingest.py now narrates the FULL lifecycle server-side: START(name/scope/size) -> parsed -> chunked -> embedded(model) -> summarized(real tokens) -> DONE(wall time, chunks, assumptions), + SKIPPED(dedup) + deleted-mid-ingest lines.
+2. Every failure path uses logger.exception (full traceback) per the new CLAUDE.md rule — parse/embed/summarize failures, pandoc fallbacks in pdf/docx_extract, embed rate-limit retries, input_pipeline docx ImportError fallback.
+3. Upload entry points log too: project material + draft attach ([ingest] queued) and org KB (lazy note).
+4. Verified by REAL runs: happy path (real OpenRouter embed + Haiku summary, 7.4s, all lines observed) and failure path (bogus key -> ERROR + traceback + status=failed). App-wide logging pass is the follow-up.

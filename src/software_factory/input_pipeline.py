@@ -104,6 +104,8 @@ def persist_and_compose(
             md, images = docx_extract.extract_with_images(src_path, input_dir)
         except ImportError:
             # original already written; _convert will keep it too
+            logger.exception("[input_pipeline] %s: image-aware docx extraction unavailable — "
+                             "falling back to text-only conversion", name)
             _convert(raw, name, extract_docx or docx_extract.extract_to_markdown)
             return
         # keep original alongside the extraction (caller records it as a blob)
