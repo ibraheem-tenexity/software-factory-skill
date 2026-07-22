@@ -329,6 +329,11 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 3. Removal must erase durable bytes, blob metadata, document chunks/summaries, and the agent-readable markdown artifact; drag/drop reuses the existing attach pipeline.
 4. Summary: both Linear tickets set In Progress; Python compile and Vite production build pass; staging browser verification is pending deployment after the benchmark hold.
 
+# Design agent (CBT design-partner sprint) Update at Time: 20:07:2026:22:10:00.000
+1. Mapped Nick's 2026-07-20 email (CBT intro 27th) onto the product journey and built it into the design archive: web prefill "we already know you" (EnrichFromWeb: lookup log -> ai-tint found-card w/ ConfidencePill+source per field, accept-to-fill), Org sections for Codebase discovery (repo crawl -> AGENTS.md/CLAUDE.md/integrations.md) + Dev conventions + Brand & theme (process-from-website token pack w/ live preview), concierge Recipe-match suggestion card, Explore inspiration gallery, engine trio (Claude Code/Codex 5.6/Kimi K3), design-review stage-gate at the pipeline design node (Kimi K3 mockups, approve/iterate).
+2. design/{TICKETS.md (new, CBT-1..30 sprint breakdown in DSN/WEB/PIPE/OPS lanes), discovery.jsx (new), PRD.md, optionC.jsx, orgproject.jsx, recipes.jsx, recipedata.jsx, dashboard.jsx, buildprogress.jsx, shared.jsx, Software Factory Onboarding.html} on branch agent/design-cbt-journey. NOTE: the design archive was previously UNTRACKED; first commit on this branch imports it verbatim so design work is diffable in PRs from now on.
+3. Key recon finding for the sprint: research.py already enriches companies via Exa/Fusion but is unwired to any UI route (CBT-1 is mostly a wiring job); codex has zero occurrences in the codebase (fully new); MaintenanceTab is a placeholder; recipes exist as text blueprints, not repo-backed.
+4. Summary: all six new flows browser-verified live against the canvas (lookup->accept, discovery run, theme process, recipe suggest->accept, Codex select, gate approve); PR targets staging.
 # Codex Update at Time: 16:07:2026:00:00:00.000
 1. Synced the canonical architecture narrative and schema/service diagrams with current staging code.
 2. docs/ARCHITECTURE.md, docs/schema-erd.{dot,md,svg}, docs/service-architecture.svg.

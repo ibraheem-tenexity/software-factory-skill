@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Software Factory — Product flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --brand: 214 100% 55%;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    background: #18181b;
+  }
+  button { font-family: inherit; }
+  textarea, input { font-family: inherit; }
+
+  /* focus ring — the most important visual in the Tenexity system */
+  :where(button, [role="button"], a, input, select, textarea, [tabindex]):focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px #FAFAFA, 0 0 0 4px hsl(var(--brand));
+    border-radius: 8px;
+  }
+  ::selection { background: hsl(var(--brand) / 0.25); }
+
+  /* signature: faint brand tint + inset brand bar for unconfirmed AI-derived values */
+  .ai-tint {
+    background: hsl(var(--brand) / 0.07);
+    box-shadow: inset 2px 0 0 0 hsl(var(--brand) / 0.45);
+  }
+
+  @keyframes sfRise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes sfDot { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+  @keyframes sfPulse { 0%, 100% { box-shadow: 0 0 0 0 hsl(var(--brand) / 0.45); } 50% { box-shadow: 0 0 0 5px hsl(var(--brand) / 0); } }
+  @keyframes nmPulse { 0%, 100% { opacity: 0.18; } 50% { opacity: 0.5; } }
+
+  /* loading system — single shimmer treatment under every skeleton */
+  .sf-skel { position: relative; overflow: hidden; background: #E7E7EA; }
+  .sf-skel.on-dark { background: #26262b; }
+  .sf-skel::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent); animation: sfShimmer 1.5s ease-in-out infinite; }
+  .sf-skel.on-dark::after { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent); }
+  @keyframes sfShimmer { 100% { transform: translateX(100%); } }
+  .sf-spin svg { animation: sfSpin 0.8s linear infinite; transform-origin: center; }
+  @keyframes sfSpin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .sf-skel { animation: sfSkelPulse 1.6s ease-in-out infinite; }
+    @keyframes sfSkelPulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 0.85; } }
+  }
+
+  /* node-map hover + active pulse */
+  svg .nm-node[data-art] { transition: opacity .12s; }
+  svg .nm-node[data-art]:hover circle { stroke: #1A7BFF; stroke-width: 2.2; }
+  svg .nm-pulse { animation: nmPulse 1.6s ease-in-out infinite; }
+
+  /* artifact chip hover (tree + concierge) */
+  .sf-artchip { transition: border-color .12s, transform .12s, box-shadow .12s; }
+  .sf-artchip:hover { border-color: #1A7BFF !important; transform: translateY(-1px); box-shadow: 0 2px 6px -2px rgba(20,30,50,.14); }
+
+  /* tidy scrollbars inside app frames */
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 6px; border: 3px solid transparent; background-clip: content-box; }
+  *::-webkit-scrollbar-thumb:hover { background: #b6b6bd; background-clip: content-box; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" fill="#1A7BFF" />
+    <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M50 28 L30 38 L50 48 L70 38 Z" />
+      <path d="M30 50 L50 60 L70 50" />
+      <path d="M30 62 L50 72 L70 62" />
+    </g>
+  </svg>
+</template>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="shared.jsx"></script>
+<script type="text/babel" src="skeletons.jsx"></script>
+<script type="text/babel" src="artifactviewer.jsx"></script>
+<script type="text/babel" src="recipedata.jsx"></script>
+<script type="text/babel" src="recipes.jsx"></script>
+<script type="text/babel" src="buildboard.jsx"></script>
+<script type="text/babel" src="artifacts.jsx"></script>
+<script type="text/babel" src="concierge.jsx"></script>
+<script type="text/babel" src="discovery.jsx"></script>
+<script type="text/babel" src="nodemap.jsx"></script>
+<script type="text/babel" src="buildprogress.jsx"></script>
+<script type="text/babel" src="optionC.jsx"></script>
+<script type="text/babel" src="orgproject.jsx"></script>
+<script type="text/babel" src="dashboard.jsx"></script>
+<script type="text/babel" src="login.jsx"></script>
+<script type="text/babel" src="admin.jsx"></script>
+<script type="text/babel" src="users.jsx"></script>
+<script type="text/babel" src="loadingshowcase.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+  const W = 1280, H = 820;
+  function App() {
+    return (
+      <DesignCanvas>
+        <DCSection id="product" title="Software Factory · Product flow"
+          subtitle="The connected experience: sign in → projects dashboard → open a project's factory, or start a new one (Option C onboarding).">
+          <DCArtboard id="login" label="Login · entry (connected)" width={W} height={H}><AppRoot /></DCArtboard>
+          <DCArtboard id="dash" label="Dashboard · login landing" width={W} height={H}><FactoryApp /></DCArtboard>
+          <DCArtboard id="console" label="Factory console · build board (the core screen)" width={1440} height={H}><ProjectViewStandalone initialTab="build" /></DCArtboard>
+          <DCArtboard id="projdash" label="Project dashboard ⇄ factory console" width={W} height={H}><ProjectViewStandalone /></DCArtboard>
+          <DCArtboard id="orgadmin" label="Organization admin · context & documents" width={W} height={H}><OrgAdmin /></DCArtboard>
+          <DCArtboard id="explore" label="Explore · recipe inspiration gallery" width={W} height={H}><ExploreRecipes /></DCArtboard>
+        </DCSection>
+        <DCSection id="operator" title="Tenexity OS · internal operator portal"
+          subtitle="Platform-side admin: every tenant, every project, every agent prompt, and the tool / MCP registry.">
+          <DCArtboard id="admin" label="Tenexity OS · admin portal" width={1440} height={H}><AdminPortal /></DCArtboard>
+        </DCSection>
+        <DCSection id="onboarding" title="New-project intake"
+          subtitle="The Concierge-led intake: known org context is reused, gaps are filled through a short interview, then work hands off to the build board.">
+          <DCArtboard id="c" label="Concierge intake · reuses known context" width={W} height={H}><OnboardingStandalone /></DCArtboard>
+        </DCSection>
+        <DCSection id="loading" title="Loading &amp; fetch states"
+          subtitle="The skeleton system every screen uses while data is fetched from the database. The kit shows each type; the live demos replay a real fetch — use the Reload chip (top-right) to watch the loading→loaded swap.">
+          <DCArtboard id="loadkit" label="Loading kit · every field, list, table &amp; card type" width={W} height={1180}><LoadingShowcase /></DCArtboard>
+          <DCArtboard id="load-dash" label="Live · projects dashboard fetch" width={W} height={H}>
+            <FetchDemo>{(loading) => <Dashboard loading={loading} onNew={() => {}} onOpen={() => {}} onOrg={() => {}} />}</FetchDemo>
+          </DCArtboard>
+          <DCArtboard id="load-proj" label="Live · project overview fetch" width={W} height={H}>
+            <FetchDemo>{(loading) => <ProjectDashboard project={PROJECTS[0]} tab="overview" onTab={() => {}} onOpenBuild={() => {}} budget={30} loading={loading} />}</FetchDemo>
+          </DCArtboard>
+          <DCArtboard id="load-org" label="Live · organization admin fetch" width={W} height={H}>
+            <FetchDemo>{(loading) => <OrgAdmin loading={loading} />}</FetchDemo>
+          </DCArtboard>
+          <DCArtboard id="load-users" label="Live · users table fetch (Tenexity OS)" width={1440} height={H}>
+            <FetchDemo>{(loading) => <div style={{ height: '100%', overflow: 'auto', background: '#fff', padding: '26px 30px' }}><UsersManagement loading={loading} /></div>}</FetchDemo>
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
