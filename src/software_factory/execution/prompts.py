@@ -13,18 +13,21 @@ class ProjectRequest:
     target: str = "railway"
     credentials: dict = field(default_factory=dict)
     context_files: list = field(default_factory=list)
-    runtime: str = ""
-    planning_model: str = ""
-    impl_model: str = ""
-    model: str = ""
-    name: str = ""
-    owner: str = ""
-    owner_github_username: str = ""
+    runtime: str = ""  # claude | opencode | codex; empty -> SF_RUNTIME env (default claude)
+    planning_model: str = ""  # S1/S2 orchestrator model (claude runtime); empty -> stage default
+    impl_model: str = ""      # S3 model (claude runtime); empty -> stage default
+    model: str = ""           # opencode model alias: "kimi"|"glm"; empty -> _OPENCODE_DEFAULT_ALIAS
+    name: str = ""            # operator-chosen project name (display label)
+    owner: str = ""           # email of the creating user (multi-tenant: members see only their own)
+    owner_github_username: str = ""  # SOF-3: owner's GitHub handle, if on file — invites them onto the repo
 
 
 def _orchestration_preamble(stage_title: str, project_id: str, projects_dir: str, budget: float,
                             runtime: str = "claude") -> str:
-    """Build the run-specific data block; stage instructions stay in SKILL.md."""
+    """The per-run VARIABLE context block. ALL instructions live in the stage's SKILL.md (the
+    agent's contract, loaded from its cwd); this supplies ONLY the run-specific data SKILL.md
+    references — no instructions. Kept per-runtime signature for callers; runtime doesn't change
+    the variables (the claude/opencode work-model is stated in the SKILL.md variant)."""
     return (
         f"software-factory {stage_title}. Run this fully autonomously per SKILL.md (your cwd).\n"
         f"THIS RUN:\n"
@@ -39,6 +42,9 @@ def _orchestration_preamble(stage_title: str, project_id: str, projects_dir: str
 def make_prompt_stage1(req: ProjectRequest, project_id: str, projects_dir: str, runtime: str = "claude",
                        brief_block: str = "") -> str:
     ctx = f"\n\nContext / detailed input:\n{req.context}" if req.context else ""
+    # The concierge-authored product brief is the richest context — inject it directly so the
+    # council seats plan from it; the full markdown is also at input/brief.md and the transcript
+    # at input/interview.md.
     brief = (f"\n\nThe user was interviewed; the product brief follows (also at input/brief.md; "
              f"full transcript at input/interview.md). Treat it as authoritative project context:\n"
              f"{brief_block.strip()}") if brief_block.strip() else ""
@@ -56,8 +62,12 @@ def make_prompt_stage2(req: ProjectRequest, project_id: str, projects_dir: str, 
 
 
 def _disposition_guidance(dispositions: dict | None) -> str:
-    """Render this run's dependency disposition names, without adding instructions."""
+    """The per-run VARIABLE lists of which tokens fall in each disposition. What MOCK/DEPLOY-DB/MCP
+    MEAN (and how to satisfy each) is instruction — it lives in SKILL.md Phase 1. This supplies only
+    the token names for THIS run."""
     disp = dispositions or {}
+    # Legacy 'env' (pre-removal runs) degrades to mock: a built app NEVER inherits the
+    # runner's own keys (operator security rule).
     mock = sorted(name for name, disposition in disp.items() if disposition in ("mock", "env"))
     mcp = sorted(name for name, disposition in disp.items() if disposition == "mcp")
     dbtok = sorted(name for name, disposition in disp.items() if disposition == "deploy-db")
