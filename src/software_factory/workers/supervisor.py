@@ -15,9 +15,12 @@ from software_factory.data_transfer_objects.chat_agent import ChatMessage
 from software_factory import notify
 from software_factory import env as _env
 from software_factory import recovery
+from software_factory.log import get_logger
 
 import console.state as state
 from software_factory.conversation import persistence as chat_persistence
+
+logger = get_logger(__name__)
 
 _stage2_launched: set = set()
 _stage3_launched: set = set()
@@ -77,7 +80,7 @@ def _auto_advance(pid: str):
                     _stage3_launched.add(pid)
         console.detect_stage3_done(pid)  # marks done ONLY with a recorded passing Playwright verification
     except Exception:
-        pass
+        logger.exception("[poller] auto-advance failed for %s — retrying next tick", pid)
 
 
 def _narrate(pid: str, key: str, text: str):
@@ -90,7 +93,7 @@ def _narrate(pid: str, key: str, text: str):
         if any(m.get("content") == text for m in chat_persistence.chat_history(pid)):
             return  # already narrated in a previous server life
     except Exception:
-        pass
+        logger.exception("[poller] narration dedup-check failed for %s — proceeding to persist", pid)
     msg = ChatMessage(role="assistant", content=text)
     chat_persistence.persist_chat_turn(pid, msg)
     # Operator email on the four operator-relevant events (done / depswait / budget / crash) —
@@ -126,6 +129,7 @@ def _narrate_project(pid: str, st: dict):
         try:
             creds = console.demo_credentials(pid)
         except Exception:
+            logger.exception("[poller] demo-credentials lookup failed for %s", pid)
             creds = None
         if creds:
             # The seeded throwaway demo login (SPEC §6) — without it an auth'd app can't be demoed.
@@ -179,7 +183,8 @@ def _recovery_action_seam(pid: str, console, idle: float) -> None:
             recovery.open_recovery_action(pid, kind="silent_run", cause=cause,
                                           evidence={"idle_seconds": int(idle)})
     except Exception:
-        pass  # best-effort — a recovery-bookkeeping hiccup must never wedge the poll loop
+        # best-effort — a recovery-bookkeeping hiccup must never wedge the poll loop
+        logger.exception("[recovery] silent-run action-open failed for %s (non-fatal)", pid)
 
 
 def _health() -> dict:
@@ -190,10 +195,12 @@ def _health() -> dict:
         dbshim.registry_projects()
         pg = True
     except Exception:
+        logger.exception("[health] pg reachability check failed — reporting unhealthy")
         pg = False
     try:
         free_mb = int(_sh.disk_usage(state.PROJECTS_DIR).free / 1048576)
     except OSError:
+        logger.exception("[health] disk_usage(%s) failed — reporting unhealthy", state.PROJECTS_DIR)
         free_mb = -1
     ok = pg and free_mb > 200
     return {"ok": ok, "pg": pg, "disk_free_mb": free_mb}
@@ -246,6 +253,7 @@ def _ticket_reclaim_tick(tick: int, interval: int, pid: str, console) -> list:
     try:
         return console.reclaim_orphaned_tickets(pid)
     except Exception:
+        logger.exception("[reclaim] orphaned-ticket reclaim failed for %s (non-fatal)", pid)
         return []
 
 
@@ -261,8 +269,8 @@ def _log_flush_tick(pid: str, log_path: str) -> None:
     try:
         storage.put(pid, "logs/project.log", log_path)
         _log_offsets[pid] = size
-    except Exception as e:
-        print(f"[log-flush] {pid}: {e}", flush=True)
+    except Exception:
+        logger.exception("[log-flush] project.log upload failed for %s", pid)
 
 
 def _poll_transitions():
@@ -288,15 +296,15 @@ def _poll_transitions():
                 elif h["ok"]:
                     _health_bad_since[0] = None
             except Exception:
-                pass
+                logger.exception("[poller] health tick failed")
         try:
             _reaper_tick(tick, _reaper_interval, console)
         except Exception:
-            pass
+            logger.exception("[reaper] deploy-DB sweep tick failed")
         try:
             _github_reaper_tick(tick, _gh_reaper_interval, console)
         except Exception:
-            pass
+            logger.exception("[github-reaper] sweep tick failed")
         try:
             for project_info in console.list_projects():
                 pid = project_info.get("id") or project_info.get("project_id", "")
@@ -315,14 +323,14 @@ def _poll_transitions():
                                  f"♻️ Stage process {_reaped} finished its work but hung at "
                                  "teardown — reaped so the run can continue.")
                 except Exception:
-                    pass
+                    logger.exception("[poller] completed-zombie reap failed for %s", pid)
                 _auto_advance(pid)
                 st = console.status(pid)
                 if tick % _log_flush_interval == 0:
                     try:
                         _log_flush_tick(pid, os.path.join(state.PROJECTS_DIR, pid, "project.log"))
                     except Exception:
-                        pass
+                        logger.exception("[log-flush] tick failed for %s", pid)
                 try:
                     if not st.get("done") and console.enforce_budget(pid):
                         _narrate(pid, "budget-%d" % int(console._budget_ceiling(pid)),
@@ -356,7 +364,7 @@ def _poll_transitions():
                                      "for re-dispatch.")
                     _narrate_project(pid, st)
                 except Exception:
-                    pass
+                    logger.exception("[poller] budget/resume/narrate tick failed for %s", pid)
                 # SOF-164: graded silent-run classification — a PARALLEL noticing channel run AFTER
                 # (and independent of) all the acting logic above. It never advances/kills/resumes;
                 # it only narrates suspicious/critical and taps the SOF-165 recovery seam (a no-op
@@ -374,7 +382,7 @@ def _poll_transitions():
                                      f"🔴 Stage {detail} — flagged for review.")
                             _recovery_action_seam(pid, console, idle)   # SOF-165: acts iff alive
                 except Exception:
-                    pass
+                    logger.exception("[poller] silence-classification tick failed for %s", pid)
                 # SOF-165: a run that reaches done RESOLVES its open recovery action(s) — a
                 # self-recovered silent_run (transient silence that then completed) must not leave a
                 # zombie-open row. Once per pid per server life; idempotent no-op if none open.
@@ -390,7 +398,7 @@ def _poll_transitions():
                 if st.get("done") and prev > 0:
                     state._project_stages.pop(pid, None)
         except Exception:
-            pass
+            logger.exception("[poller] poll tick failed — continuing to next tick")
 
 
 def _boot():
@@ -416,8 +424,8 @@ def _boot():
                 os.makedirs(qdir, exist_ok=True)
                 os.rename(p, os.path.join(qdir, f"{name}.{int(time.time())}"))
                 print(f"[janitor] quarantined {name}", flush=True)
-    except Exception as e:
-        print(f"[janitor] FAILED: {e}", flush=True)
+    except Exception:
+        logger.exception("[janitor] quarantine sweep failed")
     # SOF-208: a console restart mid-discovery-run kills the in-process budget watcher thread
     # while the `claude -p` child keeps running uncapped. start()/status() reap this lazily on the
     # org's next interaction (SOF-205/#391); this boot-time sweep catches the org that never has one.
@@ -426,16 +434,16 @@ def _boot():
         reaped = sweep_orphaned_discovery_runs()
         if reaped:
             print(f"[discovery-sweep] reaped orphaned agents for org(s): {reaped}", flush=True)
-    except Exception as e:
-        print(f"[discovery-sweep] FAILED: {e}", flush=True)
+    except Exception:
+        logger.exception("[discovery-sweep] orphaned-run sweep failed")
     if _env.sf_environment() == "prod":
         # Apply migrations (Alembic upgrade head) so every table exists. Defensive backstop to
         # entrypoint.sh (idempotent).
         try:
             from software_factory import migrate as _migrate
             _migrate.run()
-        except Exception as e:
-            print(f"[migrate] boot FAILED: {e}", flush=True)
+        except Exception:
+            logger.exception("[migrate] boot upgrade failed")
     # Backfill ownership on pre-multitenancy runs → the bootstrap admin (idempotent).
     _boot_admin = os.environ.get("SF_BOOTSTRAP_ADMIN_EMAIL", "").strip().lower()
     if _boot_admin:
@@ -443,16 +451,16 @@ def _boot():
             n = console.assign_unowned(_boot_admin)
             if n:
                 print(f"[owners] assigned {n} unowned run(s) to {_boot_admin}", flush=True)
-        except Exception as e:
-            print(f"[owners] backfill FAILED: {e}", flush=True)
+        except Exception:
+            logger.exception("[owners] unowned-run ownership backfill failed")
 
     # Backfill the immutable created_by from the current owner for pre-existing projects (idempotent).
     try:
         n = console.backfill_created_by()
         if n:
             print(f"[created_by] backfilled {n} project(s) from owner", flush=True)
-    except Exception as e:
-        print(f"[created_by] backfill FAILED: {e}", flush=True)
+    except Exception:
+        logger.exception("[created_by] created_by backfill failed")
 
 
 @contextlib.asynccontextmanager
@@ -476,4 +484,4 @@ async def lifespan(app: FastAPI):
             try:
                 client.flush()
             except Exception:
-                pass
+                logger.exception("[shutdown] langfuse flush failed (non-fatal)")

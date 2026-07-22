@@ -273,6 +273,8 @@ def _watch(org_id: str, proc: subprocess.Popen) -> None:
             with open(log_path, "r", errors="replace") as f:
                 spent = cost_usd(f.read())
         except OSError:
+            logger.exception("[discovery] %s: could not read log to compute spend — treating as "
+                             "$0 this tick (budget watcher blind until the log is readable)", org_id)
             spent = 0.0
         if spent >= ceiling:
             proc.terminate()
@@ -396,6 +398,7 @@ def status(org_id: str) -> dict:
         try:
             spent = cost_usd(text)
         except Exception:
+            logger.exception("[discovery] %s: failed to compute spend from log — reporting $0", org_id)
             spent = 0.0
     docs = BlobStore().list_org_docs(org_id)  # newest-first (id desc) — a re-run's docs sort above
     seen: set = set()

@@ -14,6 +14,10 @@ from __future__ import annotations
 
 import httpx
 
+from ..log import get_logger
+
+logger = get_logger(__name__)
+
 _MODELS_URL = "https://openrouter.ai/api/v1/models"
 _EMBEDDING_MODELS_URL = "https://openrouter.ai/api/v1/embeddings/models"
 
@@ -39,6 +43,8 @@ def openrouter_price(model: str, kind: str = "chat") -> dict | None:
     try:
         catalog = _fetch_catalog(url)
     except Exception:
+        logger.exception("[pricing] OpenRouter %s catalog fetch failed for model %s — "
+                         "pricing unavailable, caller falls back", kind, model)
         return None
     for entry in catalog:
         if entry.get("id") == model:
@@ -47,6 +53,8 @@ def openrouter_price(model: str, kind: str = "chat") -> dict | None:
                 price = {"input": float(pricing.get("prompt", 0) or 0),
                         "output": float(pricing.get("completion", 0) or 0)}
             except (TypeError, ValueError):
+                logger.exception("[pricing] OpenRouter returned unparseable pricing for model %s "
+                                 "(%s) — pricing unavailable, caller falls back", model, kind)
                 return None
             _cache[cache_key] = price
             return price

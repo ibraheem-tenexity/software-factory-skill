@@ -10,6 +10,9 @@ from __future__ import annotations
 import time
 
 from .. import dbshim
+from ..log import get_logger
+
+logger = get_logger(__name__)
 
 
 class MemoryStore:
@@ -149,6 +152,8 @@ class MemoryStore:
         try:
             return json.loads(row["data"]).get("memory_overview")
         except (ValueError, TypeError):
+            logger.exception("[memory.store] project %s: projectstate.data is not valid JSON — "
+                             "no rollup returned", project_id)
             return None
 
     # ---- assumptions (SOF-37: the "Let's confirm what I learned" surface) -----------------

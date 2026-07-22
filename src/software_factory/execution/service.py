@@ -564,6 +564,8 @@ class ExecutionService:
                 try:
                     p.wait(timeout=5)
                 except Exception:
+                    logger.exception("[stage] %s stage process survived SIGTERM — escalating to SIGKILL",
+                                     project_id)
                     p.kill()
             return True
         return False
@@ -1022,8 +1024,9 @@ class ExecutionService:
                 decrypted = _vault.vault_retrieve_many(vault_ids)
                 env = {**decrypted, **env}  # vault base; caller env (extra_creds) wins
             except Exception:
-                logger.debug("[launch] %s vault retrieve failed — caller env used as-is",
-                             project_id, exc_info=True)  # Vault unavailable — best-effort
+                # Vault unavailable — best-effort; caller env is used as-is.
+                logger.exception("[launch] %s vault retrieve failed — caller env used as-is",
+                                 project_id)
         # SOF-81: a key an operator attached to a `tools` row (OS Tools tab) for THIS stage
         # overrides the console's own env passthrough for that tool (e.g. a rotated EXA_API_KEY
         # or RAILWAY_TOKEN) — absent key, behavior is unchanged. Lower precedence than the run's
@@ -1113,8 +1116,8 @@ class ExecutionService:
                     if candidate and (candidate.get("prompt") or "").strip():
                         agent_rows.append((callsign, candidate))
         except Exception:
-            logger.debug("[launch] %s prompt-override lookup failed — using on-disk default",
-                         project_id, exc_info=True)
+            logger.exception("[launch] %s prompt-override lookup failed — using on-disk default",
+                             project_id)
             override = None
         # CBT-9: a picked recipe seeds the workspace (build tree at stage 3, AGENTS.md context at
         # stages 1-2) + the fork-and-extend SKILL block. A seed clone failure is an honest launch
@@ -1127,15 +1130,15 @@ class ExecutionService:
             )
         except RecipeSeedError as e:
             logger.warning("[launch] %s stage %s refused — recipe seed clone failed: %s",
-                           project_id, stage, e)
+                           project_id, stage, e, exc_info=True)
             ProjectStore(paths["db"]).add_blocker(f"Recipe seed: {e}", blocks="recipe")
             return None
         for callsign, row in agent_rows:
             try:
                 write_agent_file(ws, callsign, row)
             except Exception:
-                logger.debug("[launch] %s %s agent-file materialization failed",
-                             project_id, callsign, exc_info=True)
+                logger.exception("[launch] %s %s agent-file materialization failed",
+                                 project_id, callsign)
         # Stage 3 with a database dependency provisions its OWN Railway Postgres via the
         # `provision-db` db-CLI verb (which wraps deploy_db.provision and persists the teardown
         # handles to ProjectState) — see skills/stage-3-build. The console no longer provisions;
@@ -2149,7 +2152,8 @@ class ExecutionService:
                     state.creds_vault_ids = {}
                     state.save()
                 except Exception:
-                    pass  # best-effort: archive write must never fail due to Vault hiccup
+                    # best-effort: archive write must never fail due to Vault hiccup
+                    logger.exception("[archive] vault cred cleanup failed for %s (non-fatal)", project_id)
             self._maybe_teardown_deploy_db(project_id, state)
             # SOF-165: archiving/discarding a run resolves its open recovery action(s) as
             # 'cancelled' — a dead project must never leave a zombie-open action accumulating in the
@@ -2179,7 +2183,8 @@ class ExecutionService:
             try:
                 _vault.vault_delete_many(list(vault_ids.values()))
             except Exception:
-                pass
+                # best-effort — a hiccup must never wedge the permanent delete that follows
+                logger.exception("[delete] vault cred cleanup failed for %s (non-fatal)", project_id)
         self._maybe_teardown_deploy_db(project_id, state)
         recovery.resolve_recovery_actions(project_id, resolution="cancelled")  # SOF-165: no zombie-open rows
         # Drop the persisted state (projectstate row → out of the registry) BEFORE the dir, so a

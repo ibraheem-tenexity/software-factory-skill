@@ -69,6 +69,7 @@ def _build_first_turn_context(console, project_id: str, users=None) -> str:
         try:
             org = users.org_for_user(state.owner)
         except Exception:
+            logger.exception("[conversation] org lookup failed for owner of project %s — no company context", project_id)
             org = None
     if org:
         sub_focus = ", ".join(org.get("sub_focus") or []) or "(none listed)"

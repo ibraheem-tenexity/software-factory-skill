@@ -78,6 +78,7 @@ def _graphql_service_delete(service_id: str, token: str) -> dict:
             token,
         )
     except Exception as exc:
+        logger.exception("[deploy-db] serviceDelete GraphQL call failed for service %s", service_id)
         return {"service_id": service_id, "deleted": False, "already_gone": False,
                 "ok": False, "detail": f"graphql error: {exc}"[:200]}
     errors = resp.get("errors") or []
@@ -105,6 +106,7 @@ def _graphql_get_database_url(service_id: str, project_id: str,
             token,
         )
     except Exception:
+        logger.exception("[deploy-db] DATABASE_URL variables query failed for service %s", service_id)
         return None
     data = (resp.get("data") or {}).get("variables") or {}
     url = data.get("DATABASE_URL") or data.get("DATABASE_PUBLIC_URL")
@@ -124,6 +126,8 @@ def _graphql_find_service_by_name(project_id: str, service_name: str, token: str
             token,
         )
     except Exception:
+        logger.exception("[deploy-db] service-by-name lookup failed (project %s, name %s)",
+                         project_id, service_name)
         return None
     edges = (((resp.get("data") or {}).get("project") or {}).get("services") or {}).get("edges") or []
     for e in edges:
@@ -207,6 +211,7 @@ def set_app_variable(project_id: str, name: str, value: str, service_id: str | N
             token,
         )
     except Exception as exc:
+        logger.exception("[deploy-db] variableUpsert failed setting %s on service %s", name, sid)
         return {"ok": False, "detail": f"graphql error: {exc}"[:200]}
     errors = resp.get("errors") or []
     if errors:
@@ -230,6 +235,7 @@ def _parse_added_service(text: str) -> tuple[str | None, str | None]:
         d = json.loads(text)
         return d.get("serviceId"), d.get("serviceName")
     except Exception:
+        logger.exception("[deploy-db] could not parse `railway add --json` output: %r", (text or "")[:200])
         return None, None
 
 
@@ -242,7 +248,9 @@ def _parse_volume_id(text: str, service_name: str) -> str:
             if v.get("serviceName") == service_name and not v.get("deletedAt"):
                 return str(v.get("id", ""))
     except Exception:
-        pass
+        # Returning "" makes teardown skip the volume delete → volume leak; log the traceback so a
+        # malformed `railway volume list --json` isn't invisible behind a silent skip.
+        logger.exception("[deploy-db] could not parse volume list for service %s", service_name)
     return ""
 
 
@@ -253,7 +261,10 @@ def _parse_database_url(text: str) -> str | None:
         if u:
             return u.rstrip("/")
     except Exception:
-        pass
+        # Non-JSON output is expected here — the regex fallback below is a legitimate second
+        # strategy — so WARNING, not ERROR. Not debug: the software_factory logger is pinned at
+        # INFO, so a debug traceback would never emit (once-per-provision, so no spam concern).
+        logger.warning("[deploy-db] variables output not JSON, falling back to regex scan", exc_info=True)
     return _pg_url_from(text)
 
 
@@ -301,9 +312,14 @@ def provision(project_id: str, context_dir: str,
             with open(info_path) as f:
                 info = json.load(f)
         except Exception:
+            # A corrupt/half-written deploy-db.json is reset to {} and re-provisioned; log the
+            # traceback so the corruption isn't silently masked by a fresh provision.
+            logger.exception("[deploy-db] could not read existing %s — re-provisioning", info_path)
             info = {}
     if info.get("DATABASE_URL"):
         return info                              # already provisioned — idempotent no-op
+    logger.info("[deploy-db] provisioning Postgres for project %s (railway project %s)",
+                project_id, railway_project_id)
 
     svc_id, svc_name = info.get("service_id"), info.get("service")
     if not svc_id:
@@ -371,8 +387,12 @@ def provision(project_id: str, context_dir: str,
         if volume_id:
             info["volume_id"] = volume_id
     except Exception:
-        pass
+        # Best-effort volume-id capture: proceeding without it means teardown can't delete the
+        # volume (leak). Log the traceback first, then fall back as before.
+        logger.exception("[deploy-db] could not capture volume_id for service %s (teardown will "
+                         "skip its volume)", svc_id)
     write_file(context_dir, info)
+    logger.info("[deploy-db] provisioned Postgres for project %s (service %s)", project_id, svc_id)
     return info
 
 
@@ -524,6 +544,7 @@ def _parse_detached_volumes(text: str) -> list[str]:
         return [str(v["id"]) for v in (d.get("volumes") or [])
                 if not v.get("serviceName") and not v.get("deletedAt") and v.get("id")]
     except Exception:
+        logger.exception("[deploy-db] could not parse volume list for detached-volume sweep")
         return []
 
 
@@ -538,6 +559,7 @@ def sweep_detached_volumes(run: Callable[[list[str]], RunResult] = _real_runner,
     try:
         vol_out = run(["railway", "volume", "list", "--json"]).stdout or "{}"
     except Exception as e:
+        logger.exception("[deploy-db reaper] detached-volume sweep: `railway volume list` failed")
         log(f"[deploy-db reaper] detached-volume sweep: volume list failed: {e}")
         return report
     orphan_ids = _parse_detached_volumes(vol_out)

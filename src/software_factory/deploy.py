@@ -6,6 +6,7 @@ Runner / HTTP getter / sleeper are injectable so the logic is testable offline.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -15,6 +16,8 @@ from dataclasses import dataclass
 from typing import Callable
 
 from . import env
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -57,9 +60,12 @@ def deploy(target: str, dir: str, run: Callable[[list[str]], RunResult] = _real_
     """
     if target not in _TARGETS:
         raise ValueError(f"unknown deploy target {target!r}; expected one of {list(_TARGETS)}")
+    logger.info("[deploy] starting %s deploy of %s", target, dir)
     if target == "vercel":
         # `vercel deploy --prod` prints the deployment URL on stdout.
-        return _parse_url(run(["vercel", "deploy", "--cwd", dir, "--prod", "--yes"]).stdout)
+        url = _parse_url(run(["vercel", "deploy", "--cwd", dir, "--prod", "--yes"]).stdout)
+        logger.info("[deploy] vercel deploy done: %s", url)
+        return url
     # railway: `up` ships the dir, then `domain` ensures + prints the public domain.
     # Use SF_RUNAPP_RAILWAY_PROJECT_IDS as the authoritative target: RAILWAY_PROJECT_ID is
     # Railway-reserved and forced to the console's own project on prod, so it can't be
@@ -71,7 +77,9 @@ def deploy(target: str, dir: str, run: Callable[[list[str]], RunResult] = _real_
             f"Set SF_RUNAPP_RAILWAY_PROJECT_IDS to the target project UUID."
         )
     run(["railway", "up", "--ci", dir])
-    return _parse_url(run(["railway", "domain"]).stdout)
+    url = _parse_url(run(["railway", "domain"]).stdout)
+    logger.info("[deploy] railway deploy done: %s", url)
+    return url
 
 
 def _http_status(url: str) -> int:
@@ -81,6 +89,11 @@ def _http_status(url: str) -> int:
     except urllib.error.HTTPError as e:
         return e.code
     except Exception:
+        # A connection error during a health poll is expected until the app boots (returns 0 =
+        # not-yet-live). WARNING (not ERROR) so an expected pre-boot probe doesn't cry error, but
+        # the traceback still emits — the software_factory logger is pinned at INFO, so debug would
+        # be swallowed and a genuine failure (DNS/TLS/etc.) behind the False verdict would vanish.
+        logger.warning("[deploy] health probe to %s failed (treating as not-live)", url, exc_info=True)
         return 0
 
 

@@ -20,6 +20,7 @@ Run:  uvicorn console.app:app --host 0.0.0.0 --port 8765   (or python3 console/a
 """
 import contextlib
 import json
+import logging
 import os
 import sys
 import time
@@ -27,6 +28,8 @@ import time
 from fastapi import FastAPI, Request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+logger = logging.getLogger(__name__)
 
 
 def _load_local_env(path: str | None = None) -> None:
@@ -109,7 +112,7 @@ async def _access_log(request: Request, call_next):
                           "path": path, "status": response.status_code, "project_id": pid,
                           "ms": int((time.time() - t0) * 1000)}), flush=True)
     except Exception:
-        pass
+        logger.exception("[access-log] failed to emit access-log line for %s", request.url.path)
     return response
 
 

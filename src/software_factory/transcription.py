@@ -12,6 +12,10 @@ import os
 
 import httpx
 
+from .log import get_logger
+
+logger = get_logger(__name__)
+
 _ENDPOINT = "https://api.openai.com/v1/audio/transcriptions"
 _MODEL = "gpt-4o-transcribe"
 
@@ -30,6 +34,7 @@ def transcribe_audio(data_b64: str, fmt: str, language: str | None = None) -> st
     try:
         audio = base64.b64decode(data_b64)
     except Exception as exc:
+        logger.exception("[transcription] base64 decode failed — audio payload unusable")
         raise TranscriptionError(f"invalid audio data: {exc}") from exc
 
     files = {"file": (f"audio.{fmt}", audio, f"audio/{fmt}")}
@@ -47,6 +52,7 @@ def transcribe_audio(data_b64: str, fmt: str, language: str | None = None) -> st
         )
         resp.raise_for_status()
     except Exception as exc:
+        logger.exception("[transcription] gpt-4o-transcribe call failed — dictation unavailable")
         raise TranscriptionError(f"Transcription failed: {exc}") from exc
 
     text = resp.json().get("text")

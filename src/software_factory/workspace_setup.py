@@ -117,7 +117,9 @@ def tool_env_overrides(stage: int) -> dict:
         from .tools import ToolStore
         return ToolStore().env_overrides(f"STAGE-{stage}")
     except Exception:
-        logger.debug("[tool_env_overrides] lookup failed — env passthrough used", exc_info=True)
+        # WARNING (not debug): the software_factory logger is pinned at INFO, so a debug traceback
+        # never emits — a registry/vault hiccup that silently drops tool env would be invisible.
+        logger.warning("[tool_env_overrides] lookup failed — env passthrough used", exc_info=True)
         return {}
 
 
@@ -174,7 +176,9 @@ def _write_langfuse_hook(ws: str) -> None:
                     f.write("\n")
                 f.write(entry)
     except OSError:
-        pass
+        # If .claude/ can't be gitignored the hook + any env-injected secrets risk reaching the
+        # customer's repo — log the traceback rather than swallow it, then preserve prior behavior.
+        logger.exception("[workspace] could not append .claude/ to %s", gitignore_path)
 
 
 def _to_opencode_envref(value: str) -> str:

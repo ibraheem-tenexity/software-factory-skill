@@ -23,6 +23,7 @@ import subprocess
 import sys
 import time
 
+from .log import get_logger
 from .runtime_agents import AgentRegistry
 from .swarm_adapter import (
     bridge_events,
@@ -33,6 +34,8 @@ from .swarm_adapter import (
     swarm_env,
 )
 from .tickets import TicketStore
+
+logger = get_logger(__name__)
 
 
 def synth_step_finish(ev: dict) -> str | None:
@@ -118,6 +121,7 @@ def run_swarm_waves(base: str, project_id: str, ws: str, model: str, budget_usd:
                 try:
                     proc.wait(timeout=30)
                 except Exception:
+                    logger.exception("[swarm] wave %s process did not exit within grace — SIGKILL", wave)
                     proc.kill()
                 break
         fold_once(events_path, emitted, registry, project_id, model, out=out)

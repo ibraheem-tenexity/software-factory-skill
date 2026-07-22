@@ -18,6 +18,7 @@ the tools the agent may call:
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict
 
 from software_factory import storage
@@ -36,6 +37,8 @@ _MAX_FULL_DOCUMENT_TOKENS = 500_000
 # Deferred at module level intentionally: langchain_core is a heavy import and this module is
 # imported by console-side code paths that don't always need the agent. Kept local to the factory.
 from langchain_core.tools import tool
+
+logger = logging.getLogger(__name__)
 
 
 def build_project_tools(console: ExecutionService, project_id: str) -> list:
@@ -65,6 +68,7 @@ def build_project_tools(console: ExecutionService, project_id: str) -> list:
                 "notes": list(state.concierge_notes or []),
             }, default=str)
         except Exception as exc:  # a broken tool must degrade the answer, never kill the chat
+            logger.exception("[concierge] get_from_project_memory failed for project %s — degrading to string", project_id)
             return f"memory search unavailable ({type(exc).__name__}: {exc}) — answer from the conversation and your context."
 
     @tool
@@ -75,6 +79,7 @@ def build_project_tools(console: ExecutionService, project_id: str) -> list:
             _recompute_project_rollup(console, project_id, store)
             return store.overview("project", project_id).get("rollup") or "(no summary yet)"
         except Exception as exc:  # degrade, never kill the chat
+            logger.exception("[concierge] create_project_summary failed for project %s — degrading to string", project_id)
             return f"summary unavailable ({type(exc).__name__}: {exc})"
 
     @tool
@@ -90,6 +95,7 @@ def build_project_tools(console: ExecutionService, project_id: str) -> list:
         try:
             return json.dumps(asdict(research_company(company_name, website=website, mode="quick")), default=str)
         except ResearchError as exc:
+            logger.exception("[concierge] exa_search failed for %s — degrading to string", company_name)
             return f"research unavailable: {exc}"
 
     @tool
@@ -98,9 +104,13 @@ def build_project_tools(console: ExecutionService, project_id: str) -> list:
         synthesis, richer than exa_search. SOF-79: takes ~3 minutes (real measured latency
         ~165-180s), not a quick call — only reach for this when exa_search's fast pass genuinely
         isn't enough, and tell the user it'll take a few minutes before calling it."""
+        logger.info("[concierge] fusion_search deep research starting for %s", company_name)
         try:
-            return json.dumps(asdict(research_company(company_name, website=website, mode="deep")), default=str)
+            result = json.dumps(asdict(research_company(company_name, website=website, mode="deep")), default=str)
+            logger.info("[concierge] fusion_search deep research done for %s", company_name)
+            return result
         except ResearchError as exc:
+            logger.exception("[concierge] fusion_search failed for %s — degrading to string", company_name)
             return f"research unavailable: {exc}"
 
     @tool
@@ -113,6 +123,7 @@ def build_project_tools(console: ExecutionService, project_id: str) -> list:
             p = research_company(name or website, website=website or None, mode="quick")
             return json.dumps(p.to_dict())
         except ResearchError as exc:
+            logger.exception("[concierge] enrich_company lookup failed for %s — degrading to string", name or website)
             return f"company lookup failed: {exc}"  # truth degrades the answer, never kills the chat
 
     @tool
@@ -123,6 +134,7 @@ def build_project_tools(console: ExecutionService, project_id: str) -> list:
         try:
             hits = memory_search.search_documents("project", project_id, query)
         except Exception as exc:
+            logger.exception("[concierge] search_document_summaries failed for project %s — degrading to string", project_id)
             return f"search failed: {exc}"
         return json.dumps(hits, default=str)
 

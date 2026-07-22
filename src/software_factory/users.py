@@ -36,8 +36,11 @@ import time
 import uuid
 
 from . import auth
+from .log import get_logger
 from .repositories._exec import GlobalExec
 from .repositories.users import UserRepository
+
+logger = get_logger(__name__)
 
 _CACHE_TTL = 20.0
 # Canonical internal organization — every Tenexity staff member links to it (so "Your organization"
@@ -70,8 +73,9 @@ class UserStore:
             self.ensure_bootstrap_admin()       # cold-start: the one env-seeded admin
         except Exception:
             # DB briefly unreachable at boot — the migration already seeded roles in prod, and the
-            # next write will retry. Never block startup on the directory.
-            pass
+            # next write will retry. Never block startup on the directory — but log why it failed.
+            logger.exception("[users] boot seed (roles/tenexity-org/bootstrap-admin) failed — "
+                             "continuing; next write retries")
 
     # -- roles (RBAC) -------------------------------------------------------------------
     def _ensure_roles(self) -> None:
@@ -98,7 +102,10 @@ class UserStore:
         try:
             rows = {r["email"].lower(): r for r in self._repo.all_users()}
         except Exception:
-            # directory briefly unreachable — serve the last snapshot rather than locking everyone out.
+            # directory briefly unreachable — serve the last snapshot rather than locking everyone out,
+            # but log the traceback so a stale-directory incident is diagnosable.
+            logger.exception("[users] directory read failed — serving %s cached rows",
+                             len(self._cache) if self._cache else 0)
             return self._cache or {}
         self._cache, self._cache_ts = rows, now
         return rows

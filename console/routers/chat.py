@@ -90,6 +90,7 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
                 ):
                     yield line
         except asyncio.TimeoutError:
+            logger.exception("[chat] /api/chat turn timed out for %s", pid)
             yield json.dumps({"type": "error", "detail": "chat turn timed out — try again"}) + "\n"
         except Exception as e:
             logger.exception("[chat] /api/chat turn failed for %s", pid)
@@ -120,6 +121,7 @@ async def converse_stream(pid: str, body: ConverseIn, v: tuple = Depends(authori
                 async for ev in state.conversation_svc.turn_stream(pid, body.message):
                     yield json.dumps(ev) + "\n"
         except asyncio.TimeoutError:
+            logger.exception("[chat] /converse/stream turn timed out for %s", pid)
             yield json.dumps({"type": "error", "detail": "chat turn timed out — try again"}) + "\n"
         except Exception as e:
             logger.exception("[chat] /converse/stream turn failed for %s", pid)

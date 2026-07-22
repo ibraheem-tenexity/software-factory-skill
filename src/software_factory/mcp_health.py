@@ -6,12 +6,15 @@ If any required server fails, the stage should not launch.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import subprocess
 import threading
 from dataclasses import dataclass
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -106,6 +109,7 @@ def check_mcp(
         try:
             _rc, stdout, stderr = run(cmd, _INIT_REQUEST + "\n", timeout_s)
         except Exception as exc:
+            logger.exception("[mcp-health] failed to spawn-probe MCP server %s", name)
             results.append(McpCheck(name=name, ok=False, detail=str(exc)))
             continue
         # SOF-207 rider: a bare "bad response: " / "timeout" with no reason cost a real
