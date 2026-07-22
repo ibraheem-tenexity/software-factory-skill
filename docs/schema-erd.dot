@@ -225,14 +225,6 @@ digraph SchemaERD {
       <tr><td align="left">key_vault_id, key_last4, updated_at</td></tr>
     </table>>];
 
-  sow [label=<
-    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
-      <tr><td bgcolor="#fef9c3" port="t"><b>sow</b></td></tr>
-      <tr><td align="left"><b>PK</b> id</td></tr>
-      <tr><td align="left">title, org, project, value, file</td></tr>
-      <tr><td align="left">version, status, body, timestamps</td></tr>
-    </table>>];
-
   org_secrets [label=<
     <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
       <tr><td bgcolor="#fef9c3" port="t"><b>org_secrets</b></td></tr>

@@ -4,9 +4,8 @@ Reuses the `openai` SDK already in the dependency tree (langchain-openai pulls i
 transitively — SOF-46 dropped the openai-agents package that used to; `pip show
 langchain-openai` confirms `openai` is still one of its own dependencies) pointed at
 OpenRouter's OpenAI-compatible embeddings endpoint. Dense only —
-OpenRouter's embeddings API never returns a sparse/learned-sparse vector (see
-docs/project-memory-concierge/project-memory-stack-2026.md); the sparse/keyword channel is
-Postgres tsvector, generated at the DB level (chunk.fts), not here.
+OpenRouter's embeddings API never returns a sparse/learned-sparse vector; the sparse/keyword
+channel is Postgres tsvector, generated at the DB level (chunk.fts), not here.
 """
 from __future__ import annotations
 

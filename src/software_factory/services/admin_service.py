@@ -172,8 +172,9 @@ class AdminService:
         cs = callsign.upper()
         if not tenexity_os.is_editable_orchestrator(cs):
             raise NotFound("no editable override for this agent")
-        # Revert = clear the stored override so the on-disk/code default drives the run again. The
-        # whole system_agents row is the override, so dropping it is the revert.
+        # CURRENT HAZARD: CONCIERGE has no code default. Deleting its DB row leaves it unconfigured
+        # after the last-known-good cache expires. Documented in KNOWN_ISSUES until this endpoint is
+        # replaced with an honest DB-backed reset or removed.
         self.agent_store.delete(cs)
         return {"callsign": cs, "version": 0, "is_default": True}
 
@@ -353,8 +354,8 @@ class AdminService:
 
     def conversations(self, *, org_id=None, project_id=None, user_id=None, session_id=None,
                       role=None, date_from=None, date_to=None, cursor=None, limit=50) -> dict:
-        """Sessions roll-up (§9 concierge-conversation-store.md): one row per session, aggregated
-        via a single grouped query (ConversationRepository.rollup — no N+1). org/project/user
+        """One row per conversation session, aggregated via a single grouped query
+        (ConversationRepository.rollup — no N+1). org/project/user
         names are resolved via the SAME batch context every other cross-tenant dashboard already
         uses (`_context()` + `list_users()`) — one query per lookup table, not per session row."""
         decoded_cursor = _decode_cursor(cursor) if cursor else None

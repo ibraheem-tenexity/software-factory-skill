@@ -69,6 +69,12 @@ tracker). Flagged rather than removed — confirm whether it landed before delet
 
 ## Cross-cutting notes / latent risks
 
+- **Concierge prompt revert is unsafe.** The Concierge base prompt is DB-only. The current
+  `DELETE /api/admin/agents/CONCIERGE/prompt` path deletes the `system_agents` row while its service
+  comment/response still claims a code default will take over. No such default exists: after the
+  60-second last-known-good cache expires (or on a fresh process), constructing a Concierge fails
+  until an operator restores a non-empty `CONCIERGE.prompt`. Do not use **Revert prompt** until the
+  endpoint is changed to an honest DB-backed reset or removed.
 - **Migrations.** Baseline `0001` is frozen inline DDL; every backend schema change needs an
   idempotent incremental migration + a rehearsed prod-upgrade path. No schema change is "free."
 - **Connection budget.** Direct `_pg_connect` callers must route through the pool (SOF/#120); the

@@ -3,11 +3,9 @@ per row; provider-specific rendering happens only at the `to_provider` boundary 
 DB never holds a provider-shaped payload. Framework-free: light structural validation, no schema
 library (matches the "no external markdown/schema deps" convention elsewhere in this codebase).
 
-Exactly four block types are defined here — the ones `concierge-conversation-store.md` §3 gives a
-concrete shape for. `suggested_responses` (mentioned in the design doc as something agent turns
-"also carry... in json_blob") is a T2.2/Concierge-agent concern with no concrete shape yet; it is
-NOT a block type and is deliberately not invented here — json_blob is a plain JSONB array, so
-adding it later needs no migration and no change to this module's contract.
+Exactly four block types are defined here. `suggested_responses` belongs to the Concierge's text
+turn metadata, not the provider-replay block vocabulary; `json_blob` remains a plain JSONB array,
+so that metadata needs neither another block type nor a migration.
 """
 from __future__ import annotations
 

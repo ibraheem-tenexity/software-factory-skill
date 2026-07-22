@@ -1,8 +1,8 @@
-"""SOF-62: build_system_prompt's optional first_turn_context param — the server-assembled
-project-context block appended to the system prompt (never a fake user message). No DB, no
-network — resolve_concierge_instructions() falls back to the code-default CONCIERGE_INSTRUCTIONS
-when SystemAgentStore is unreachable (see _ConciergePromptCache.get()'s except-pass), so this
-needs no mocking at all to stay hermetic.
+"""SOF-62: build_system_prompt's optional first_turn_context parameter.
+
+The Concierge base prompt is database-only. These historical unit cases therefore require a
+configured CONCIERGE row; no code fallback is implied. The first-turn project context is appended
+to the system prompt, never represented as a fake user message.
 """
 import pytest
 

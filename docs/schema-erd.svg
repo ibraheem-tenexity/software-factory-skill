@@ -246,7 +246,7 @@
 <polygon fill="#334155" stroke="#334155" points="1221.31,-1596.18 1229.5,-1594 1221.74,-1590.6 1221.31,-1596.18"/>
 </g>
 <!-- recovery_actions -->
-<g id="node25" class="node">
+<g id="node24" class="node">
 <title>recovery_actions</title>
 <polygon fill="white" stroke="transparent" points="1202.5,-1257.5 1202.5,-1332.5 1420.5,-1332.5 1420.5,-1257.5 1202.5,-1257.5"/>
 <polygon fill="#fef9c3" stroke="transparent" points="1202.5,-1307 1202.5,-1332 1420.5,-1332 1420.5,-1307 1202.5,-1307"/>
@@ -265,7 +265,7 @@
 <polygon fill="#64748b" stroke="#64748b" points="1193.3,-1322.15 1201.5,-1320 1193.75,-1316.57 1193.3,-1322.15"/>
 </g>
 <!-- eval_scores -->
-<g id="node26" class="node">
+<g id="node25" class="node">
 <title>eval_scores</title>
 <polygon fill="white" stroke="transparent" points="1216.5,-1131 1216.5,-1231 1406.5,-1231 1406.5,-1131 1216.5,-1131"/>
 <polygon fill="#fef9c3" stroke="transparent" points="1216.5,-1206 1216.5,-1231 1406.5,-1231 1406.5,-1206 1216.5,-1206"/>
@@ -623,23 +623,8 @@
 <polygon fill="none" stroke="black" points="49,-1192 49,-1217 274,-1217 274,-1192 49,-1192"/>
 <text text-anchor="start" x="54" y="-1200.8" font-family="Arial" font-size="14.00">key_vault_id, key_last4, updated_at</text>
 </g>
-<!-- sow -->
-<g id="node22" class="node">
-<title>sow</title>
-<polygon fill="white" stroke="transparent" points="55,-1318 55,-1418 267,-1418 267,-1318 55,-1318"/>
-<polygon fill="#fef9c3" stroke="transparent" points="55,-1393 55,-1418 267,-1418 267,-1393 55,-1393"/>
-<polygon fill="none" stroke="black" points="55,-1393 55,-1418 267,-1418 267,-1393 55,-1393"/>
-<text text-anchor="start" x="147" y="-1402.8" font-family="Arial" font-weight="bold" font-size="14.00">sow</text>
-<polygon fill="none" stroke="black" points="55,-1368 55,-1393 267,-1393 267,-1368 55,-1368"/>
-<text text-anchor="start" x="60" y="-1377.8" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
-<text text-anchor="start" x="79" y="-1377.8" font-family="Arial" font-size="14.00"> id</text>
-<polygon fill="none" stroke="black" points="55,-1343 55,-1368 267,-1368 267,-1343 55,-1343"/>
-<text text-anchor="start" x="60" y="-1351.8" font-family="Arial" font-size="14.00">title, org, project, value, file</text>
-<polygon fill="none" stroke="black" points="55,-1318 55,-1343 267,-1343 267,-1318 55,-1318"/>
-<text text-anchor="start" x="60" y="-1326.8" font-family="Arial" font-size="14.00">version, status, body, timestamps</text>
-</g>
 <!-- org_secrets -->
-<g id="node23" class="node">
+<g id="node22" class="node">
 <title>org_secrets</title>
 <polygon fill="white" stroke="transparent" points="469.5,-1066.5 469.5,-1141.5 698.5,-1141.5 698.5,-1066.5 469.5,-1066.5"/>
 <polygon fill="#fef9c3" stroke="transparent" points="470,-1116 470,-1141 699,-1141 699,-1116 470,-1116"/>
@@ -661,34 +646,34 @@
 <text text-anchor="start" x="817.5" y="-1099.8" font-family="Times,serif" font-size="9.00">org_id</text>
 </g>
 <!-- autopsy_ledgers -->
-<g id="node24" class="node">
+<g id="node23" class="node">
 <title>autopsy_ledgers</title>
-<polygon fill="white" stroke="transparent" points="25,-1444.5 25,-1519.5 297,-1519.5 297,-1444.5 25,-1444.5"/>
-<polygon fill="#fef9c3" stroke="transparent" points="25,-1494 25,-1519 297,-1519 297,-1494 25,-1494"/>
-<polygon fill="none" stroke="black" points="25,-1494 25,-1519 297,-1519 297,-1494 25,-1494"/>
-<text text-anchor="start" x="39" y="-1503.8" font-family="Arial" font-weight="bold" font-size="14.00">autopsy_processed_runs / signatures</text>
-<polygon fill="none" stroke="black" points="25,-1469 25,-1494 297,-1494 297,-1469 25,-1469"/>
-<text text-anchor="start" x="30" y="-1478.8" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
-<text text-anchor="start" x="49" y="-1478.8" font-family="Arial" font-size="14.00"> project_id / signature</text>
-<polygon fill="none" stroke="black" points="25,-1444 25,-1469 297,-1469 297,-1444 25,-1444"/>
-<text text-anchor="start" x="30" y="-1452.8" font-family="Arial" font-size="14.00">classification, Linear link, occurrence ledger</text>
+<polygon fill="white" stroke="transparent" points="25,-1318.5 25,-1393.5 297,-1393.5 297,-1318.5 25,-1318.5"/>
+<polygon fill="#fef9c3" stroke="transparent" points="25,-1368 25,-1393 297,-1393 297,-1368 25,-1368"/>
+<polygon fill="none" stroke="black" points="25,-1368 25,-1393 297,-1393 297,-1368 25,-1368"/>
+<text text-anchor="start" x="39" y="-1377.8" font-family="Arial" font-weight="bold" font-size="14.00">autopsy_processed_runs / signatures</text>
+<polygon fill="none" stroke="black" points="25,-1343 25,-1368 297,-1368 297,-1343 25,-1343"/>
+<text text-anchor="start" x="30" y="-1352.8" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
+<text text-anchor="start" x="49" y="-1352.8" font-family="Arial" font-size="14.00"> project_id / signature</text>
+<polygon fill="none" stroke="black" points="25,-1318 25,-1343 297,-1343 297,-1318 25,-1318"/>
+<text text-anchor="start" x="30" y="-1326.8" font-family="Arial" font-size="14.00">classification, Linear link, occurrence ledger</text>
 </g>
 <!-- recipes -->
-<g id="node27" class="node">
+<g id="node26" class="node">
 <title>recipes</title>
-<polygon fill="white" stroke="transparent" points="37.5,-1546 37.5,-1646 284.5,-1646 284.5,-1546 37.5,-1546"/>
-<polygon fill="#fef9c3" stroke="transparent" points="38,-1621 38,-1646 285,-1646 285,-1621 38,-1621"/>
-<polygon fill="none" stroke="black" points="38,-1621 38,-1646 285,-1646 285,-1621 38,-1621"/>
-<text text-anchor="start" x="137.5" y="-1630.8" font-family="Arial" font-weight="bold" font-size="14.00">recipes</text>
-<polygon fill="none" stroke="black" points="38,-1596 38,-1621 285,-1621 285,-1596 38,-1596"/>
-<text text-anchor="start" x="43" y="-1605.8" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
-<text text-anchor="start" x="62" y="-1605.8" font-family="Arial" font-size="14.00"> id; </text>
-<text text-anchor="start" x="84" y="-1605.8" font-family="Arial" font-weight="bold" font-size="14.00">UQ</text>
-<text text-anchor="start" x="106" y="-1605.8" font-family="Arial" font-size="14.00"> name</text>
-<polygon fill="none" stroke="black" points="38,-1571 38,-1596 285,-1596 285,-1571 38,-1571"/>
-<text text-anchor="start" x="43" y="-1579.8" font-family="Arial" font-size="14.00">tagline, category, capabilities, body_md</text>
-<polygon fill="none" stroke="black" points="38,-1546 38,-1571 285,-1571 285,-1546 38,-1546"/>
-<text text-anchor="start" x="43" y="-1554.8" font-family="Arial" font-size="14.00">repo_url, images, status, timestamps</text>
+<polygon fill="white" stroke="transparent" points="37.5,-1420 37.5,-1520 284.5,-1520 284.5,-1420 37.5,-1420"/>
+<polygon fill="#fef9c3" stroke="transparent" points="38,-1495 38,-1520 285,-1520 285,-1495 38,-1495"/>
+<polygon fill="none" stroke="black" points="38,-1495 38,-1520 285,-1520 285,-1495 38,-1495"/>
+<text text-anchor="start" x="137.5" y="-1504.8" font-family="Arial" font-weight="bold" font-size="14.00">recipes</text>
+<polygon fill="none" stroke="black" points="38,-1470 38,-1495 285,-1495 285,-1470 38,-1470"/>
+<text text-anchor="start" x="43" y="-1479.8" font-family="Arial" font-weight="bold" font-size="14.00">PK</text>
+<text text-anchor="start" x="62" y="-1479.8" font-family="Arial" font-size="14.00"> id; </text>
+<text text-anchor="start" x="84" y="-1479.8" font-family="Arial" font-weight="bold" font-size="14.00">UQ</text>
+<text text-anchor="start" x="106" y="-1479.8" font-family="Arial" font-size="14.00"> name</text>
+<polygon fill="none" stroke="black" points="38,-1445 38,-1470 285,-1470 285,-1445 38,-1445"/>
+<text text-anchor="start" x="43" y="-1453.8" font-family="Arial" font-size="14.00">tagline, category, capabilities, body_md</text>
+<polygon fill="none" stroke="black" points="38,-1420 38,-1445 285,-1445 285,-1420 38,-1420"/>
+<text text-anchor="start" x="43" y="-1428.8" font-family="Arial" font-size="14.00">repo_url, images, status, timestamps</text>
 </g>
 </g>
 </svg>

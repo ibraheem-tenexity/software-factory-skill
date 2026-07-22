@@ -1,3 +1,4 @@
-"""Project Memory: console-side document ingestion (embed, chunk, store, search) and its
-cost accounting. See docs/project-memory-concierge/ for the design.
+"""Project Memory: document ingestion, summaries, hybrid retrieval, and cost accounting.
+
+The shipping architecture and ownership boundaries are documented in docs/ARCHITECTURE.md.
 """

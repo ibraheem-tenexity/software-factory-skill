@@ -108,7 +108,7 @@ The following are refactor targets, not permission to change behavior:
 | `console/poller.py` | Move run supervision, recovery, reapers, health, and boot coordination into `workers/` and application services; leave lifespan wiring in `api/`. |
 | `console/chat_dock.py`, `console/chat_persistence.py`, `services/conversation.py` | Consolidate shared turn preparation and persistence. Keep wire encoding at the API edge. |
 | `repositories/_exec.py` | Replace `PathExec` and `GlobalExec` with one executor and an explicit connection/transaction strategy. |
-| Store/repository pairs for SOW, system agents, eval scores, and autopsy | Collapse pairs that only delegate. Keep rich repository-plus-policy boundaries such as tickets and runtime agents. |
+| Store/repository pairs for system agents, eval scores, and autopsy | Collapse pairs that only delegate. Keep rich repository-plus-policy boundaries such as recipes, tickets, and runtime agents. |
 | `artifacts.py`, PDF/DOCX extraction, material upload paths | Group artifact policy and extraction by capability; remove duplicate conversion and storage choreography. |
 | `scripts/` | Keep executables as thin operator adapters. Move reusable application behavior into the package; preserve existing script entry points while operators migrate. |
 

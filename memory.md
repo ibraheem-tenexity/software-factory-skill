@@ -354,7 +354,7 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 
 # CBT Wave 1 shipped (2026-07-21)
 1. Four lanes merged to staging 019ba9b: repo-backed recipes (recipes/ context, migration 0029, fork-and-extend build seed), company-enrich wow prefill (research router + enrich_company tool + found-card), codebase discovery (ingestion/ context, org KB), Kimi K3 bump.
-2. Spec/plan: docs/superpowers/{specs,plans}/2026-07-21-cbt-wave1-*. Gate record: 1 Critical (PAT leak) + 8 Important caught pre-merge; final whole-branch review READY; follow-ups SOF-210.
+2. The completed Wave 1 spec/plan was consolidated into the authoritative PRD and architecture on SOF-231, then removed. Gate record: 1 Critical (PAT leak) + 8 Important caught pre-merge; final whole-branch review READY; follow-ups SOF-210.
 3. Recipes rule: recipe body replaces SOW in concierge context; repo seeds stage-3; NO fork-verification code (prompt-delivered, outcome gates only). Sources-only product-wide (no confidence tiers) — operator ruling.
 4. Staging ACs (K3/A6/B4/C4) pending SOF-207 green; codex adapter = SOF-200 (separate agent).
 
@@ -363,6 +363,12 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. console.py, workspace_setup.py, streamlog.py, Dockerfile, and the onboarding engine picker; `docs/ARCHITECTURE.md` records the contract.
 3. Codex gets an isolated `.codex/config.toml`, `AGENTS.md` bridge to the shared SKILL, required Playwright MCP, and token-price fallback metering; it has no native subagent graph events.
 4. Summary: Codex CLI accepted the generated config; frontend production build passed; staging real-draft verification remains required after deployment.
+
+# Codex Update at Time: 22:07:2026:12:53:34.000
+1. SOF-231 reconciled Concierge handoff, prompt ownership, Recipes, memory, and conversation facts in `design/PRD.md` and `docs/ARCHITECTURE.md`.
+2. The Concierge remains a LangChain agent; its base prompt is DB-only, while onboarding and dock use separate context-bound instances.
+3. Eight completed/stale product, Project Memory, Concierge, and Wave-1 design/plan files were consolidated and deleted.
+4. The unsafe Concierge prompt-revert endpoint is recorded in `docs/KNOWN_ISSUES.md`; this documentation-only change does not alter runtime behavior.
 
 # Codex Update at Time: 21:07:2026:15:55:00.000
 1. Fixed the admin Users invite feedback: successful delivery, failed delivery, and an unavailable delivery status now remain visible after the modal closes.

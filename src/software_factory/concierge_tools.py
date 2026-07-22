@@ -1,4 +1,4 @@
-"""The Concierge's tool belt (concierge-agent-spec.md §5) — every tool hits a real backend.
+"""The Concierge's tool belt — every tool hits a real backend.
 
 `build_project_tools(console, project_id)` binds the current project's Console + memory store into
 the tools the agent may call:

@@ -1,4 +1,4 @@
-"""Chat-dock persistence on the `conversation` table (concierge-agent-spec.md §6).
+"""Chat-dock persistence on the canonical `conversation` table.
 
 Retires the legacy chat.jsonl / ChatStore: both /api/chat and the poller's deterministic
 narration persist + read here instead. There is exactly one deterministic session_id per

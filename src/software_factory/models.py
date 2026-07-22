@@ -261,7 +261,7 @@ blobs = Table(
 # Project Memory (SOF-26/T0.1): the per-document "2,000-ft view", keyed 1:1 on the document's
 # `blobs` row. `scope`/`scope_id` mirror `blobs` so project- and org-scoped memory share one
 # app-layer filter shape (this system isolates at the app layer + credential-scoped MCP, not
-# Postgres RLS — ARCHITECTURE §7). See docs/project-memory-concierge/project-memory-integration.md §1.
+# Postgres RLS — see docs/ARCHITECTURE.md §7).
 doc_summary = Table(
     "doc_summary", metadata,
     Column("blob_id", Integer, ForeignKey("blobs.id", ondelete="CASCADE"), primary_key=True),
@@ -280,7 +280,7 @@ doc_summary = Table(
 )
 
 # The leaf level: one row per chunk of a document, hybrid-searchable (dense vector + Postgres
-# native full-text as the sparse/keyword channel -- see project-memory-stack-2026.md). A learned-
+# native full-text as the sparse/keyword channel). A learned-
 # sparse `sparse` column is intentionally NOT added here -- deferred, per SOF-26 scope.
 chunk = Table(
     "chunk", metadata,
@@ -299,8 +299,7 @@ chunk = Table(
     Column("token_count", Integer),
 )
 
-# Durable, provider-agnostic conversation store (SOF-26/T0.1; replaces the in-memory mock and the
-# volume-only chat.jsonl -- see docs/project-memory-concierge/concierge-conversation-store.md).
+# Durable, provider-agnostic conversation store (SOF-26/T0.1).
 # One row per message/turn; `id` is the message_id returned to the FE. `json_blob` is the
 # canonical content-block list (source of truth for provider replay); `input`/`tool_result` are
 # denormalized conveniences for display/query, never the source of truth.
