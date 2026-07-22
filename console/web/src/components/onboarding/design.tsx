@@ -522,7 +522,12 @@ export function DictateButton({ value, onChange, disabled }:
 
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // SOF-230: request RAW audio — Chrome's default autoGainControl ramps up over the first
+      // ~300ms and swallows the opening word (the reported start-truncation); noiseSuppression/
+      // echoCancellation also gate quiet on/offsets. gpt-4o-transcribe handles raw mic well.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { autoGainControl: false, noiseSuppression: false, echoCancellation: false },
+      });
       // SOF-75: pick opus explicitly (better speech quality than the browser's default codec) and
       // pin a real bitrate — MediaRecorder's default can drop to ~24-40kbps, which noticeably
       // degrades Whisper's accuracy on short dictation. 128kbps opus is plenty for speech.
@@ -562,8 +567,12 @@ export function DictateButton({ value, onChange, disabled }:
   };
 
   const stopRecording = () => {
-    recorderRef.current?.stop();
+    // SOF-230: keep capturing ~400ms past the stop click so the final word + the Opus encoder's
+    // flush frame land in the blob — stopping on the last syllable was cutting the tail.
+    const recorder = recorderRef.current;
+    recorderRef.current = null;   // guard against a double-stop / new-start race during the tail
     setRecording(false);
+    if (recorder) window.setTimeout(() => { try { recorder.stop(); } catch { /* already stopped */ } }, 400);
   };
 
   if (transcribing) {
