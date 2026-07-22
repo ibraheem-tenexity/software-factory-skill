@@ -33,6 +33,7 @@ def _events(text: str):
 # rarely fires) and per-event model tracking is machinery a model-alias bump doesn't justify.
 # Revisit only if opencode ever starts emitting a model id per event.
 OPENCODE_FALLBACK_MODEL = "openrouter/moonshotai/kimi-k3"
+CODEX_FALLBACK_MODEL = "gpt-5.6"
 
 
 def cost_components(text: str, prices: dict | None = None) -> tuple[float, float]:
@@ -58,13 +59,20 @@ def cost_components(text: str, prices: dict | None = None) -> tuple[float, float
     # a session's result-event sequence.
     # opencode: each `step_finish` event carries authoritative `part.cost` as a genuine PER-STEP
     # delta (not cumulative) — summing those remains correct.
+    # Codex: `turn.completed.usage` is per turn, not thread-cumulative (Codex source, pinned CLI
+    # tag rust-v0.144.0, codex-rs/exec/src/exec_events.rs: "usage of tokens during a turn"). It
+    # has no dollar amount, so estimate fresh input, cached input, output, and reasoning output
+    # with the pinned Codex model price.
     # A session that NEVER emitted a result (killed/OOM) keeps its token estimate — a later
     # session's result must not discard it (the run-d329e57c under-count scar); unaffected by the
     # sum-vs-max choice above, which only concerns multiple results for the SAME session.
     prices = prices or PRICES
     finished: dict = {}             # session id -> authoritative total (max of results / Σ of opencode steps)
     tail: dict = {}                 # session id -> token estimate since that session's last result
+    codex_thread = "?"
     for ev in _events(text):
+        if ev.get("type") == "thread.started" and ev.get("thread_id"):
+            codex_thread = ev["thread_id"]
         sid = ev.get("session_id") or ev.get("sessionID") or "?"
         if ev.get("type") == "result" and ev.get("total_cost_usd") is not None:
             finished[sid] = max(finished.get(sid, 0.0), ev["total_cost_usd"])
@@ -83,6 +91,15 @@ def cost_components(text: str, prices: dict | None = None) -> tuple[float, float
                     + (tokens.get("output", 0) + tokens.get("reasoning", 0)) * rate["output"]
                 )
             finished[sid] = finished.get(sid, 0.0) + step_cost
+            continue
+        if ev.get("type") == "turn.completed":
+            usage = ev.get("usage") or {}
+            rate = prices.get(CODEX_FALLBACK_MODEL, prices["claude-sonnet-4-6"])
+            tail[codex_thread] = tail.get(codex_thread, 0.0) + (
+                usage.get("input_tokens", 0) * rate["input"]
+                + usage.get("cached_input_tokens", 0) * rate["cached"]
+                + (usage.get("output_tokens", 0) + usage.get("reasoning_output_tokens", 0)) * rate["output"]
+            )
             continue
         msg = ev.get("message") or {}
         usage = msg.get("usage")

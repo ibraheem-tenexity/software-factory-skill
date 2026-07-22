@@ -515,7 +515,7 @@ def get_draft(pid: str, v: tuple = Depends(authorize_project)):
 def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_project)):
     """Structured project write-through: {name?, goal?, scope?, runtime?, recipe_id?}. Server composes
     the canonical description (goal + scope-of-work line). runtime updates the draft's build engine
-    (claude|opencode) after the eager create. recipe_id (CBT-9) must name a published recipe — a bad
+    (claude|opencode|codex) after the eager create. recipe_id (CBT-9) must name a published recipe — a bad
     id is refused with the real reason instead of silently pinning a draft/archived one; "" clears the
     selection. Call debounced/on-blur, NOT per keystroke."""
     if not state.console.is_draft(pid):

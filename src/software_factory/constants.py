@@ -32,6 +32,10 @@ OPENCODE_MODEL_IDS = {
 }
 OPENCODE_DEFAULT_ALIAS = "kimi"
 
+# Codex is a complete third runtime. Keep its model fixed per the runtime contract so the
+# command, spend estimate, and staging verification all describe the same executable behavior.
+CODEX_MODEL = "gpt-5.6"
+
 # Operator-pickable models for the claude runtime.
 # The UI exposes exactly these; anything else is rejected at project-create time.
 PLANNING_MODELS = {"claude-opus-4-8", "claude-fable-5"}
@@ -39,7 +43,11 @@ IMPL_MODELS = {"claude-sonnet-4-6", "claude-opus-4-8"}
 
 # ── Runner keys ───────────────────────────────────────────────────────────────
 # Maps runtime name → environment variable that holds the API key.
-RUNNER_KEYS = {"opencode": "OPENROUTER_API_KEY", "claude": "ANTHROPIC_API_KEY"}
+RUNNER_KEYS = {
+    "claude": "ANTHROPIC_API_KEY",
+    "opencode": "OPENROUTER_API_KEY",
+    "codex": "CODEX_API_KEY",
+}
 
 # ── Caps ──────────────────────────────────────────────────────────────────────
 # Hard cap on deploy-db provision attempts per run — prevents unbounded orphan DB spawns on failure.
@@ -99,5 +107,12 @@ PRICES: dict[str, dict[str, float]] = {
         "input": 3.0 / 1_000_000,
         "cached": 0.3 / 1_000_000,
         "output": 15.0 / 1_000_000,
+    },
+    # OpenAI list pricing for the gpt-5.6 alias (Sol), confirmed 2026-07-20. Codex JSONL reports
+    # tokens but no provider-issued dollar total, so this is the budget-meter fallback.
+    CODEX_MODEL: {
+        "input": 5.0 / 1_000_000,
+        "cached": 0.5 / 1_000_000,
+        "output": 30.0 / 1_000_000,
     },
 }

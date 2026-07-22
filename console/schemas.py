@@ -167,7 +167,7 @@ class DraftPatchIn(BaseModel):
     name: str | None = None
     goal: str | None = None
     scope: list | None = None
-    runtime: str | None = None   # "claude"|"opencode" — lets the Build-engine card update the draft's runtime after the eager create
+    runtime: str | None = None   # "claude"|"opencode"|"codex" — lets the Build-engine card update the draft after eager create
     model: str | None = None     # opencode model alias: "kimi"|"glm"
     budget: float | None = None  # update the spend ceiling
     recipe_id: str | None = None  # CBT-9: the picked recipe id (must name a published recipe), or "" to clear
@@ -306,4 +306,3 @@ class SecretCreateIn(BaseModel):
 
 class SecretRotateIn(BaseModel):
     value: str
-

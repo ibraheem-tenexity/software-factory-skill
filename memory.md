@@ -358,6 +358,12 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 3. Recipes rule: recipe body replaces SOW in concierge context; repo seeds stage-3; NO fork-verification code (prompt-delivered, outcome gates only). Sources-only product-wide (no confidence tiers) — operator ruling.
 4. Staging ACs (K3/A6/B4/C4) pending SOF-207 green; codex adapter = SOF-200 (separate agent).
 
+# Codex Update at Time: 21:07:2026:05:55:00.000
+1. SOF-200 adds Codex as the third stage runtime: `codex exec --json --ephemeral --model gpt-5.6` with `CODEX_API_KEY`.
+2. console.py, workspace_setup.py, streamlog.py, Dockerfile, and the onboarding engine picker; `docs/ARCHITECTURE.md` records the contract.
+3. Codex gets an isolated `.codex/config.toml`, `AGENTS.md` bridge to the shared SKILL, required Playwright MCP, and token-price fallback metering; it has no native subagent graph events.
+4. Summary: Codex CLI accepted the generated config; frontend production build passed; staging real-draft verification remains required after deployment.
+
 # Codex Update at Time: 21:07:2026:15:55:00.000
 1. Fixed the admin Users invite feedback: successful delivery, failed delivery, and an unavailable delivery status now remain visible after the modal closes.
 2. console/web/src/admin/users.tsx on branch agent/fix-user-invite.
