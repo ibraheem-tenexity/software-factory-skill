@@ -158,13 +158,8 @@ def make_prompt_stage1(req: ProjectRequest, project_id: str, projects_dir: str, 
     brief = (f"\n\nThe user was interviewed; the product brief follows (also at input/brief.md; "
              f"full transcript at input/interview.md). Treat it as authoritative project context:\n"
              f"{brief_block.strip()}") if brief_block.strip() else ""
-    if req.owner_github_username:
-        owner_access = f"  owner_github = {req.owner_github_username}  (invite as collaborator per SKILL.md Phase 2)\n"
-    else:
-        owner_access = "  owner_github = <none on file>  (record the no-owner blocker per SKILL.md Phase 2)\n"
     return (
         _orchestration_preamble("Stage 1 — Research", project_id, projects_dir, req.budget, runtime)
-        + owner_access
         + f"  app          = {req.description}{ctx}{brief}"
     )
 
@@ -1537,7 +1532,7 @@ class Console:
     # ---- Durable drafts: an interview before a run exists -------------------------------
     def create_draft(self, owner: str = "", name: str = "", runtime: str = "",
                      planning_model: str = "", impl_model: str = "", model: str = "",
-                     budget: float | None = None) -> str:
+                     budget: float | None = None, github_username: str = "") -> str:
         """Mint a CANONICAL run-<8hex> id at the START of the onboarding interview and persist a
         draft ProjectState (phase='draft', held, NO artifact recorded → is_pipeline_project False, so the
         poller/ghost-resume guard ignore it until promotion). Using a canonical id up front means
@@ -1553,6 +1548,7 @@ class Console:
         state.skill_version = SKILL_VERSION
         state.name = name or ""
         state.owner = (owner or "").lower()
+        state.owner_github_username = (github_username or "").strip().lstrip("@")
         # Immutable creator stamp — set ONCE here (the earliest creation point); never mutated after.
         if not state.created_by:
             state.created_by = (owner or "").lower()
@@ -1642,12 +1638,13 @@ class Console:
             "runtime": state.runtime or "claude",
             "model": state.opencode_model or "kimi",
             "recipe_id": state.recipe_id or "",
+            "github_username": state.owner_github_username or "",
         }
 
     def set_draft_project(self, project_id: str, name: str | None = None,
                           goal: str | None = None, scope: list | None = None,
                           runtime: str | None = None, model: str | None = None,
-                          recipe_id: str | None = None) -> dict:
+                          recipe_id: str | None = None, github_username: str | None = None) -> dict:
         """Structured project setter for the Option C onboarding (draft phase). Writes the project
         name, the plain goal (state.goal), the scope-of-work backing, the build-engine runtime
         (claude|opencode|codex), and the picked recipe (CBT-9; caller has already validated it names a
@@ -1665,6 +1662,8 @@ class Console:
             state.opencode_model = model if model in _OPENCODE_MODEL_IDS else ""
         if recipe_id is not None:
             state.recipe_id = recipe_id
+        if github_username is not None:
+            state.owner_github_username = github_username.strip().lstrip("@")
         if goal is not None:
             state.goal = goal
         if scope is not None:
@@ -1677,7 +1676,35 @@ class Console:
             state.description = _compose_description(eff_goal, eff_scope)
         state.save()
         return {"name": state.name, "goal": state.goal or "", "scope": list(state.scope or []),
-                "description": state.description or "", "recipe_id": state.recipe_id or ""}
+                "description": state.description or "", "recipe_id": state.recipe_id or "",
+                "github_username": state.owner_github_username or ""}
+
+    def request_repo_access(self, project_id: str, github_username: str) -> dict:
+        """Persist a GitHub handle and invite it now, or wait for provisioning to create the repo."""
+        from .db import request_repo_access
+        return request_repo_access(self._projects_dir, project_id, github_username)
+
+    def repo_access(self, project_id: str) -> dict:
+        state = self._load_state(project_id)
+        db = ProjectStore(self._paths(project_id)["db"])
+        username = (state.owner_github_username or "").strip()
+        repo_url = state.repo_url or ""
+        if any((a.get("kind") or "").lower() == "repo-shared" for a in db.artifacts()):
+            return {"status": "invited", "detail": f"GitHub invited @{username} to this repository.",
+                    "repo_url": repo_url, "github_username": username}
+        failure = next((b for b in reversed(db.blockers())
+                        if b.get("blocks") == "github-access" and not b.get("cleared")), None)
+        if failure:
+            return {"status": "failed", "detail": failure["what"].split(" failed: ", 1)[-1],
+                    "repo_url": repo_url, "github_username": username}
+        if not username:
+            return {"status": "not_requested", "detail": "Add your GitHub username to receive repository access.",
+                    "repo_url": repo_url, "github_username": ""}
+        if not repo_url:
+            return {"status": "waiting_for_repo", "detail": "The invitation will be sent when the repository is created.",
+                    "repo_url": "", "github_username": username}
+        return {"status": "ready", "detail": "Request the invitation to join this repository.",
+                "repo_url": repo_url, "github_username": username}
 
     def store_draft_creds(self, project_id: str, credentials: dict) -> dict:
         """Vault-store BYOK credentials against a draft and record the vault UUIDs in state.

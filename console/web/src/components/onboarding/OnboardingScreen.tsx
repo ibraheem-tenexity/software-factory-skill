@@ -395,6 +395,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   // project answers (shared)
   const [p, setP] = useState<{ name: string; goal: string; scope: string[]; video: boolean; docs: boolean }>(
     { name: "", goal: "", scope: [], video: false, docs: false });
+  const [githubUsername, setGithubUsername] = useState("");
   // Build engine (Claude | OpenCode+Kimi/GLM). Default = Claude on Tenexity's key. BYOK is live:
   // a user-entered key POSTs to /creds (Vault-stored); promote threads it into the runner env, BYOK
   // wins over the platform key. The key NAME is runtime-specific (ANTHROPIC_API_KEY / OPENROUTER_API_KEY).
@@ -466,6 +467,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
         // draft must rehydrate it, or Continue can never be satisfied again after leaving the page.
         if (d.budget != null) setBudget(d.budget);
         if (d.recipe_id) setRecipeId(d.recipe_id);
+        setGithubUsername(d.github_username || "");
       }).catch(() => {});
       api.documents(resumeProjectId).then((docs) => {
         const ups = docs.uploaded || [];
@@ -491,6 +493,16 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     }, 700);
     return () => clearTimeout(t);
   }, [draftId, p.name, p.goal, p.scope]);
+
+  // The username is optional: without it the project is still valid, and the Overview offers a
+  // later request path. When present before provisioning, the host sends the invite with the repo.
+  useEffect(() => {
+    if (!draftId) return;
+    const t = setTimeout(() => {
+      api.patchDraft(draftId, { github_username: githubUsername }).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [draftId, githubUsername]);
 
   // DEBOUNCED build-engine write-through: runtime (claude|opencode|codex) + model (kimi|glm) persist on
   // the draft (DraftCreateIn/DraftPatchIn). keySource/key are passthrough (ignored by Pydantic) —
@@ -623,7 +635,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     setSavingBasics(true);
     setError("");
     try {
-      const { project_id } = await api.createDraft({ runtime: engineProviderRef.current, project_name: p.name, budget: budgetRef.current ?? undefined });
+      const { project_id } = await api.createDraft({ runtime: engineProviderRef.current, project_name: p.name, budget: budgetRef.current ?? undefined, github_username: githubUsername });
       setDraftId(project_id);
     } catch (e: any) {
       draftCreatingRef.current = false;
@@ -693,7 +705,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     setError("");
     try {
       if (fresh) await saveCompanyFresh();                                    // flush company
-      await api.patchDraft(draftId, { name: p.name, goal: p.goal, scope: p.scope }).catch(() => {}); // flush project
+      await api.patchDraft(draftId, { name: p.name, goal: p.goal, scope: p.scope, github_username: githubUsername }).catch(() => {}); // flush project
       await api.patchDraft(draftId, { runtime: engine.provider, model: engine.model, keySource: engine.keySource, key: engine.key }).catch(() => {}); // flush engine
       if (budget != null) await api.patchDraft(draftId, { budget }).catch(() => {});  // flush budget cap
       if (engine.keySource === "byok" && engine.key.trim()) {                 // flush BYOK key → Vault
@@ -848,6 +860,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <Field label="Budget cap" optional hint="Stop and notify when spend reaches this amount. Leave unset to run to completion.">
                         <BudgetPicker value={budget} onChange={setBudget} />
                       </Field>
+                      <Field label="GitHub username" optional hint="We'll invite this account to the project repository after it is created.">
+                        <TextInput value={githubUsername} onChange={setGithubUsername} placeholder="e.g. octocat" />
+                      </Field>
                     </div>
                     {/* Create-the-project gate (PRD §2.4/§24): a real POST /api/drafts in `draft` state. */}
                     <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${T.borderSubtle}` }}>
@@ -950,6 +965,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       </Field>
                       <Field label="Budget cap" optional hint="Stop and notify when spend reaches this amount. Leave unset to run to completion.">
                         <BudgetPicker value={budget} onChange={setBudget} />
+                      </Field>
+                      <Field label="GitHub username" optional hint="We'll invite this account to the project repository after it is created.">
+                        <TextInput value={githubUsername} onChange={setGithubUsername} placeholder="e.g. octocat" />
                       </Field>
                     </div>
                     {/* Create-the-project gate (PRD §2.4/§24): a real POST /api/drafts in `draft` state. */}
