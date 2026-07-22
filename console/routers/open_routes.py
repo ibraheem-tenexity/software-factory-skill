@@ -7,6 +7,7 @@ from console.deps import viewer, _staff_session
 from console.poller import _health
 
 router = APIRouter()
+_SPA_HTML_HEADERS = {"Cache-Control": "no-cache, max-age=0, must-revalidate"}
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -15,7 +16,7 @@ def root(v: tuple = Depends(viewer)):
     # The React SPA gates login itself (reads /api/auth/config + /api/me, renders its own
     # LoginScreen on 401), so serve the bundle to everyone — authed or not. (Query strings like
     # /?run=x route here too — FastAPI matches path.)
-    return HTMLResponse(state._index_html())
+    return HTMLResponse(state._index_html(), headers=_SPA_HTML_HEADERS)
 
 
 @router.get("/ArtifactViewer.html", response_class=HTMLResponse)
@@ -25,7 +26,7 @@ def artifact_viewer(v: tuple = Depends(viewer)):
     # Any authed user may open it (ownership is enforced by GET /api/artifacts/{id}).
     if not v[2]:
         return RedirectResponse("/", status_code=303)
-    return HTMLResponse(state._artifact_viewer_html())
+    return HTMLResponse(state._artifact_viewer_html(), headers=_SPA_HTML_HEADERS)
 
 
 @router.get("/admin", response_class=HTMLResponse)
@@ -39,7 +40,7 @@ def admin_portal(v: tuple = Depends(viewer)):
         return RedirectResponse("/", status_code=303)
     if not _staff_session(v):                      # signed in but not platform staff
         raise HTTPException(status_code=403, detail="forbidden")
-    return HTMLResponse(state._admin_html())
+    return HTMLResponse(state._admin_html(), headers=_SPA_HTML_HEADERS)
 
 
 @router.get("/api/health")
