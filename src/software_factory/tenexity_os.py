@@ -8,10 +8,13 @@ Three layers, kept apart for testability:
 """
 from __future__ import annotations
 
+import logging
 import os
 
 from .repositories._exec import GlobalExec
 from .repositories.aggregates import AggregatesRepository
+
+logger = logging.getLogger(__name__)
 
 _aggregates = AggregatesRepository(GlobalExec())
 
@@ -108,23 +111,31 @@ def stage_skill_detail(callsign: str, runtime: str = "claude") -> dict | None:
     }
 
 
-# ── concierge (§3.4): a 4th live card, CODE-backed (not a SKILL.md) ───────────────────────────────
-# The Factory Concierge's live instructions ARE the CONCIERGE_INSTRUCTIONS module constant used as the
-# Agent's prompt (chat_agent.py). Surfaced read-only like the stage skills (prompt_applied:true) but
-# kind:'concierge' + prompt_source:'code'. Lazy-imported so the OS module never pulls the agents/openai
-# SDK unless this card is requested, and degrades gracefully if it can't load.
+# ── concierge (§3.4): a 4th live card, DB-backed (not a SKILL.md) ─────────────────────────────────
+# The Factory Concierge's live instructions ARE the DB `system_agents` CONCIERGE.prompt (the SOLE
+# source — there is no code default). Surfaced read-only like the stage skills but kind:'concierge'
+# + prompt_source:'db' (or 'unset' when no row/blank prompt exists — an honest unconfigured state,
+# never a code constant). Lazy-imported so the OS module never pulls the DB/model layer unless this
+# card is requested, and degrades gracefully (empty prompt) rather than 500ing if it can't load.
 CONCIERGE_CALLSIGN = "CONCIERGE"
 
 
 def _concierge() -> tuple[str, str]:
-    """(live instructions, model label). Graceful: a placeholder + default model if chat_agent can't
-    import (keeps the dashboard from 500ing)."""
+    """(live prompt, model label) sourced from the DB `system_agents` CONCIERGE row. Empty prompt +
+    the default model label when no row/blank prompt exists — an honest unconfigured state, never a
+    code default. Graceful: logs and returns the unconfigured state rather than raising out of the
+    OS card render."""
+    prompt, model = "", "gpt-5.4"
     try:
-        from .default_prompt import CONCIERGE_INSTRUCTIONS
+        from .system_agents import SystemAgentStore
         from .chat_agent import chat_model_label
-        return CONCIERGE_INSTRUCTIONS, chat_model_label()
+        model = chat_model_label()
+        row = SystemAgentStore().get(CONCIERGE_CALLSIGN)
+        if row and (row.get("prompt") or "").strip():
+            prompt = row["prompt"]
     except Exception:
-        return "(concierge instructions unavailable)", "gpt-5.4"
+        logger.exception("[tenexity_os] failed to load CONCIERGE prompt/model from system_agents")
+    return prompt, model
 
 
 def concierge_card() -> dict:
@@ -141,15 +152,17 @@ def concierge_detail(callsign: str) -> dict | None:
     if (callsign or "").upper() != CONCIERGE_CALLSIGN:
         return None
     prompt, model = _concierge()
+    configured = bool(prompt.strip())
     return {
-        **concierge_card(), "model": model, "prompt": prompt, "prompt_source": "code",
-        "prompt_applied": True, "editable": True,
-        "source_ref": "src/software_factory/chat_agent.py:CONCIERGE_INSTRUCTIONS",
+        **concierge_card(), "model": model, "prompt": prompt,
+        "prompt_source": "db" if configured else "unset",
+        "prompt_applied": configured, "editable": True,
+        "source_ref": "system_agents.CONCIERGE.prompt",
     }
 
 
 def live_agent_cards() -> list:
-    """The non-store, real-prompt cards: 3 stage skills (file-backed) + the concierge (code-backed)."""
+    """The real-prompt cards: 3 stage skills (file-backed) + the concierge (DB-backed)."""
     return stage_skill_cards() + [concierge_card()]
 
 

@@ -102,12 +102,13 @@ class SuggestedResponseOut(BaseModel):
 
 
 class ConverseOut(BaseModel):
-    # T2.2: {response, suggested_responses[]} — no `choices`/`done`. Empty suggested_responses
-    # means a plain-text turn; the FE derives single/multi-select purely from each item's `type`.
+    # T2.2: no `choices`/readiness `done`. Empty suggested_responses means a plain-text turn; the
+    # FE derives single/multi-select from each item's `type`. handed_off reports actual project state.
     response: str
     suggested_responses: list[SuggestedResponseOut] = []
     message_id: str = ""
     session_id: str = ""
+    handed_off: bool = False  # factual result of this turn, so the UI follows agent-triggered promotion
 
 
 class TranscribeIn(BaseModel):
@@ -161,16 +162,22 @@ class DraftCreateIn(BaseModel):
     impl_model: str = ""
     model: str = ""   # opencode model alias: "kimi"|"glm"
     budget: float | None = None  # per-project spend ceiling ($); None → SF_COST_CEILING default
+    github_username: str = ""
 
 
 class DraftPatchIn(BaseModel):
     name: str | None = None
     goal: str | None = None
     scope: list | None = None
-    runtime: str | None = None   # "claude"|"opencode" — lets the Build-engine card update the draft's runtime after the eager create
+    runtime: str | None = None   # "claude"|"opencode"|"codex" — lets the Build-engine card update the draft after eager create
     model: str | None = None     # opencode model alias: "kimi"|"glm"
     budget: float | None = None  # update the spend ceiling
     recipe_id: str | None = None  # CBT-9: the picked recipe id (must name a published recipe), or "" to clear
+    github_username: str | None = None
+
+
+class RepoAccessIn(BaseModel):
+    github_username: str = ""
 
 
 class CredsIn(BaseModel):
@@ -250,28 +257,6 @@ class ToolKeyIn(BaseModel):
     value: str = ""
 
 
-class SowIn(BaseModel):
-    title: str
-    org: str | None = None
-    project: str | None = None
-    value: str | None = None
-    file: str | None = None
-    version: int = 1
-    status: str = "Draft"
-    body: str | None = None
-
-
-class SowPatchIn(BaseModel):
-    title: str | None = None
-    org: str | None = None
-    project: str | None = None
-    value: str | None = None
-    file: str | None = None
-    version: int | None = None
-    status: str | None = None
-    body: str | None = None
-
-
 class RecipeIn(BaseModel):
     name: str
     tagline: str | None = None
@@ -306,4 +291,3 @@ class SecretCreateIn(BaseModel):
 
 class SecretRotateIn(BaseModel):
     value: str
-

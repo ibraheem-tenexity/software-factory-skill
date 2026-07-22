@@ -329,6 +329,11 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 3. Removal must erase durable bytes, blob metadata, document chunks/summaries, and the agent-readable markdown artifact; drag/drop reuses the existing attach pipeline.
 4. Summary: both Linear tickets set In Progress; Python compile and Vite production build pass; staging browser verification is pending deployment after the benchmark hold.
 
+# Design agent (CBT design-partner sprint) Update at Time: 20:07:2026:22:10:00.000
+1. Mapped Nick's 2026-07-20 email (CBT intro 27th) onto the product journey and built it into the design archive: web prefill "we already know you" (EnrichFromWeb: lookup log -> ai-tint found-card w/ ConfidencePill+source per field, accept-to-fill), Org sections for Codebase discovery (repo crawl -> AGENTS.md/CLAUDE.md/integrations.md) + Dev conventions + Brand & theme (process-from-website token pack w/ live preview), concierge Recipe-match suggestion card, Explore inspiration gallery, engine trio (Claude Code/Codex 5.6/Kimi K3), design-review stage-gate at the pipeline design node (Kimi K3 mockups, approve/iterate).
+2. design/{TICKETS.md (new, CBT-1..30 sprint breakdown in DSN/WEB/PIPE/OPS lanes), discovery.jsx (new), PRD.md, optionC.jsx, orgproject.jsx, recipes.jsx, recipedata.jsx, dashboard.jsx, buildprogress.jsx, shared.jsx, Software Factory Onboarding.html} on branch agent/design-cbt-journey. NOTE: the design archive was previously UNTRACKED; first commit on this branch imports it verbatim so design work is diffable in PRs from now on.
+3. Key recon finding for the sprint: research.py already enriches companies via Exa/Fusion but is unwired to any UI route (CBT-1 is mostly a wiring job); codex has zero occurrences in the codebase (fully new); MaintenanceTab is a placeholder; recipes exist as text blueprints, not repo-backed.
+4. Summary: all six new flows browser-verified live against the canvas (lookup->accept, discovery run, theme process, recipe suggest->accept, Codex select, gate approve); PR targets staging.
 # Codex Update at Time: 16:07:2026:00:00:00.000
 1. Synced the canonical architecture narrative and schema/service diagrams with current staging code.
 2. docs/ARCHITECTURE.md, docs/schema-erd.{dot,md,svg}, docs/service-architecture.svg.
@@ -353,8 +358,49 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 3. Recipes rule: recipe body replaces SOW in concierge context; repo seeds stage-3; NO fork-verification code (prompt-delivered, outcome gates only). Sources-only product-wide (no confidence tiers) — operator ruling.
 4. Staging ACs (K3/A6/B4/C4) pending SOF-207 green; codex adapter = SOF-200 (separate agent).
 
+# Codex Update at Time: 21:07:2026:05:55:00.000
+1. SOF-200 adds Codex as the third stage runtime: `codex exec --json --ephemeral --model gpt-5.6` with `CODEX_API_KEY`.
+2. console.py, workspace_setup.py, streamlog.py, Dockerfile, and the onboarding engine picker; `docs/ARCHITECTURE.md` records the contract.
+3. Codex gets an isolated `.codex/config.toml`, `AGENTS.md` bridge to the shared SKILL, required Playwright MCP, and token-price fallback metering; it has no native subagent graph events.
+4. Summary: Codex CLI accepted the generated config; frontend production build passed; staging real-draft verification remains required after deployment.
+
 # Codex Update at Time: 21:07:2026:15:55:00.000
 1. Fixed the admin Users invite feedback: successful delivery, failed delivery, and an unavailable delivery status now remain visible after the modal closes.
 2. console/web/src/admin/users.tsx on branch agent/fix-user-invite.
 3. Production Resend sender was malformed (display name only); corrected it to the verified factory.tenexity.ai sender and Railway redeployed successfully.
 4. Summary: Vite build plus browser checks for accepted, failed, and missing delivery status pass; real staging and production Resend calls were accepted.
+
+# SOW retirement (2026-07-22, operator-ordered)
+1. The SOW/genre-recipes concept is GONE: sow table dropped (migration 0031), SowStore + repositories/sow + admin /api/admin/sow routes + /api/scope-genres + SowIn schemas removed; recipes (0029) are the sole framing.
+2. Concierge context + Stage-1 input: recipe body_md only — the "### Statement of Work" and genre-recipes sections and input/genre-recipes.md no longer exist (services/conversation.py, console.py, input_pipeline.py).
+3. UI: the intake "Scope of work" chips card + ScopeOfWork component removed (both modes); p.scope persists backend-only (concierge may set; PRD per-genre gate no-ops on empty scope). ArtifactViewer ?sow= mode + adminSowGet/AdminSow removed.
+4. Destructive on purpose: sow rows not migrated (operator retired the concept). Design archive delta requested from the design agent (PRD + optionC.jsx).
+
+# Codex Update at Time: 22:07:2026:00:00:00.000
+1. Project repositories now invite the saved owner GitHub handle from host-side `provision-repo`; the `repo-shared` artifact remains the success proof and GitHub's exact failure is visible/retryable.
+2. `src/software_factory/{db,repo,console,projectstate}.py`, `console/{schemas,routers/projects}.py`, and onboarding/project-overview UI on branch agent/project-repo-invites.
+3. A handle can be supplied during project setup or later through `POST /api/projects/{pid}/repo-access`; Stage-1 agent prompts no longer issue GitHub invites themselves.
+4. Summary: Python compilation and the Vite production build pass; staging GitHub-token and browser acceptance remain pending deployment.
+
+# ProcessingScreen SSE-race fix + markitdown .env landmine (2026-07-22)
+1. SOF-226: ProcessingScreen seeded every doc as running and learned completion ONLY from no-replay SSE — a doc ingested before mount = infinite spinner. Fix: seed rows from summary_status + reconcile via a documents re-fetch when the stall watchdog fires. Browser-verified: pre-ingested doc -> instant advance to interview.
+2. LOCAL DEV LANDMINE (SOF-228): `import markitdown` autoloads dotenv, find_dotenv walks UP from a worktree to the MAIN repo's live .env -> injects SF_GOOGLE_CLIENT_ID/SF_SESSION_SECRET mid-process at first doc parse -> local console flips auth-on mid-run. Immunize: launch worktree consoles with SF_GOOGLE_CLIENT_ID="" (override=False respects it).
+
+# Ingestion logging fix (2026-07-22, operator-ordered)
+1. memory/ingest.py now narrates the FULL lifecycle server-side: START(name/scope/size) -> parsed -> chunked -> embedded(model) -> summarized(real tokens) -> DONE(wall time, chunks, assumptions), + SKIPPED(dedup) + deleted-mid-ingest lines.
+2. Every failure path uses logger.exception (full traceback) per the new CLAUDE.md rule — parse/embed/summarize failures, pandoc fallbacks in pdf/docx_extract, embed rate-limit retries, input_pipeline docx ImportError fallback.
+3. Upload entry points log too: project material + draft attach ([ingest] queued) and org KB (lazy note).
+4. Verified by REAL runs: happy path (real OpenRouter embed + Haiku summary, 7.4s, all lines observed) and failure path (bogus key -> ERROR + traceback + status=failed). App-wide logging pass is the follow-up.
+
+# Design agent (SOF-224 PRD consolidation) Update at Time: 22:07:2026:10:36:00.000
+1. Consolidated all product requirements into design/PRD.md as the single authority (SOF-224): authority order declared (CLAUDE.md > dated operator decisions > PRD > architecture docs > labeled artboards); folded in the retired product spec's principles, personas, success metrics, prioritization, risks, and adjudication log.
+2. `docs/product-spec-software-factory.md` was deleted after its unique content moved into the canonical PRD; historical plans remain with authority pointers.
+
+# Design agent (technical-user flow + Explore nav) Update at Time: 22:07:2026:11:02:00.000
+1. First-time intake gains a collapsed bring-your-own-repo and conventions card; project setup persists repo link, GitHub PAT, framework/runtime, commands, and coding standards to the organization.
+2. Explore navigation now supports gallery round-trips from intake and projects without losing the originating view.
+
+# SOW retirement repair (2026-07-22)
+1. Removed the obsolete `seed_genre_recipes.py` executable and SOW-only test coverage left behind by the retirement.
+2. Updated retained admin/conversation/input-pipeline test code to the SOW-free interfaces and terminology.
+3. The retired modules/routes/table no longer have executable references outside preserved historical planning documents.

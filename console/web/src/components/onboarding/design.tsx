@@ -755,7 +755,7 @@ export function OrgImportPicker({ docs = [] }:
 // faithful TSX port of the design's shared.jsx `Markdown`, plus an `inline` mode used by the dashboard
 // snippet: it flattens to ONE line (block markers stripped per line, newlines → spaces) inside a
 // <span>, so a parent with nowrap+ellipsis still truncates cleanly and no raw `**`/`- ` ever shows.
-// Distinct from the heavier full-document MarkdownBody/MarkdownPreview (artifact/SOW renderers).
+// Distinct from the heavier full-document MarkdownBody/MarkdownPreview artifact renderers.
 const MD_INLINE_RE = /(\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
 
 export function looksLikeMarkdown(s: unknown): boolean {

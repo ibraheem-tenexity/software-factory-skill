@@ -4,7 +4,7 @@
 // GET /api/projects/{id}/documents (the materials + produced LISTS). Every panel degrades to an
 // empty/"—" state until the data is live.
 import { useEffect, useRef, useState } from "react";
-import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact, DepsResponse } from "../../api";
+import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact, DepsResponse, RepoAccess } from "../../api";
 import { openArtifact } from "../factory/Artifacts";
 import { T, Icon, Sparkle, CategoryLabel, Btn, StatusPill, Avatar, TextInput, TextArea, Markdown, ArtifactChip } from "../onboarding/design";
 import { PanelBodySkel } from "../skeleton";
@@ -200,6 +200,10 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
   const [ov, setOv] = useState<ProjectOverview | null>(null);
   const [docs, setDocs] = useState<ProjectDocuments | null>(null);
   const [deps, setDeps] = useState<DepsResponse | null>(null);
+  const [repoAccess, setRepoAccess] = useState<RepoAccess | null>(null);
+  const [githubUsername, setGithubUsername] = useState("");
+  const [repoSubmitting, setRepoSubmitting] = useState(false);
+  const [repoError, setRepoError] = useState("");
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [goalDraft, setGoalDraft] = useState("");
@@ -214,11 +218,16 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
   const loadDocs = () => api.documents(projectId).then(setDocs).catch(() => setDocs(null));
   const loadOverview = () => api.overview(projectId).then(setOv).catch(() => setOv(null));
   const loadDeps = () => api.deps(projectId).then(setDeps).catch(() => setDeps(null));
+  const loadRepoAccess = () => api.repoAccess(projectId).then((access) => {
+    setRepoAccess(access);
+    setGithubUsername(access.github_username || "");
+  }).catch(() => setRepoAccess(null));
   useEffect(() => {
     setLoading(true);
     Promise.allSettled([
       api.overview(projectId).then(setOv).catch(() => setOv(null)),       // backend pending → graceful empty
       api.documents(projectId).then(setDocs).catch(() => setDocs(null)),  // materials + produced lists
+      loadRepoAccess(),
     ]).finally(() => setLoading(false));
     api.brief(projectId).then((b) => setProductBriefUrl(b.brief_url)).catch(() => setProductBriefUrl(null));
   }, [projectId]);
@@ -236,6 +245,25 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
   // A draft = onboarding intake not yet handed off (factory hasn't started). Drives the whole
   // "finish setup" treatment instead of the build-oriented overview.
   const isDraft = (brief.phase || "").toLowerCase() === "draft";
+  const normalizedGithubUsername = githubUsername.trim().replace(/^@/, "");
+  const storedGithubUsername = repoAccess?.github_username || "";
+  const needsRepoRequest = repoAccess?.status !== "invited"
+    || normalizedGithubUsername !== storedGithubUsername;
+
+  const requestRepoAccess = async () => {
+    if (!normalizedGithubUsername || repoSubmitting) return;
+    setRepoSubmitting(true);
+    setRepoError("");
+    try {
+      const access = await api.requestRepoAccess(projectId, normalizedGithubUsername);
+      setRepoAccess(access);
+      setGithubUsername(access.github_username || normalizedGithubUsername);
+    } catch (e: any) {
+      setRepoError(typeof e?.detail === "string" ? e.detail : "Could not request repository access.");
+    } finally {
+      setRepoSubmitting(false);
+    }
+  };
 
   // "+ Add" on Uploaded materials → attach a real file via POST /api/projects/{id}/materials, refetch.
   const addMaterials = async (list: FileList | null) => {
@@ -373,7 +401,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
                   {([
                     ["Project brief", !!(brief.goal || brief.description)],
                     ["Scope of work", !!(brief.scope && brief.scope.length)],
-                    [`Build engine · ${brief.runtime === "opencode" ? "OpenCode" : "Claude"}`, true],
+                    [`Build engine · ${brief.runtime === "opencode" ? "OpenCode" : brief.runtime === "codex" ? "Codex" : "Claude"}`, true],
                     ["Materials (optional)", materials.length > 0],
                   ] as [string, boolean][]).map(([k, done]) => (
                     <div key={k} style={{ display: "flex", alignItems: "center", gap: 9 }}>
@@ -427,6 +455,34 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
               <Btn variant="primary" size="sm" full onClick={onOpenFactory}>Open factory console <Icon name="arrowRight" size={13} color="#fff" /></Btn>
             </div>
             )}
+          </Panel>
+
+          <Panel title="Repository access">
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {repoAccess?.repo_url && (
+                <a href={repoAccess.repo_url} target="_blank" rel="noopener noreferrer"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, width: "fit-content", font: `500 12px/1.2 ${T.sans}`, color: T.brandDeep, textDecoration: "none" }}>
+                  <Icon name="github" size={14} color={T.brandDeep} /> Open repository <Icon name="external" size={11} color={T.brandDeep} />
+                </a>
+              )}
+              <div>
+                <CategoryLabel style={{ display: "block", marginBottom: 6 }}>GitHub username</CategoryLabel>
+                <TextInput value={githubUsername} onChange={setGithubUsername} placeholder="e.g. octocat" />
+              </div>
+              {repoAccess && (
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
+                  <StatusPill tone={repoAccess.status === "invited" ? "success" : repoAccess.status === "failed" ? "danger" : "neutral"}>
+                    {repoAccess.status === "invited" ? "Invited" : repoAccess.status === "failed" ? "Invite failed" : repoAccess.status === "waiting_for_repo" ? "Waiting for repo" : "Not invited"}
+                  </StatusPill>
+                  <span style={{ flex: 1, font: `400 11.5px/1.4 ${T.sans}`, color: repoAccess.status === "failed" ? T.danger : T.tertiary, overflowWrap: "anywhere" }}>{repoAccess.detail}</span>
+                </div>
+              )}
+              {repoError && <span style={{ font: `500 11.5px/1.3 ${T.sans}`, color: T.danger }}>{repoError}</span>}
+              {needsRepoRequest && <Btn variant="secondary" size="sm" full disabled={!normalizedGithubUsername || repoSubmitting}
+                onClick={requestRepoAccess}>
+                {repoSubmitting ? "Requesting…" : repoAccess?.status === "failed" ? "Retry invitation" : "Request invitation"}
+              </Btn>}
+            </div>
           </Panel>
 
           {/* services at work */}

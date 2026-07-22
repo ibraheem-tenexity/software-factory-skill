@@ -1,10 +1,9 @@
-"""Pure (no-DB) checks for the global-lane repositories: blobs, sow, system_agents, tools.
+"""Pure (no-DB) checks for the global-lane repositories: blobs, system_agents, tools.
 FakeExec mirrors GlobalExec's real contract exactly: fetchall/fetchone return captured rows,
 execute() returns None — this is what caught the .execute(stmt).fetchone() bug (GlobalExec.execute
 discards rows; RETURNING writes must go through fetchone/fetchall directly)."""
 from software_factory.repositories._compile import to_sql
 from software_factory.repositories.blobs import BlobRepository
-from software_factory.repositories.sow import SowRepository
 from software_factory.repositories.system_agents import SystemAgentRepository
 from software_factory.repositories.tools import ToolRepository
 
@@ -61,20 +60,6 @@ def test_blob_delete_removes_uses_then_blob():
     fx = FakeExec()
     BlobRepository(fx).delete(9)
     assert fx.sql.startswith("DELETE FROM blobs")  # last statement captured
-
-
-# -- sow ----------------------------------------------------------------------------------------
-def test_sow_insert_returning_star():
-    fx = FakeExec(fetchone_result={"id": 1, "title": "t"})
-    row = SowRepository(fx).insert(title="t", status="Draft", version=1)
-    assert row == {"id": 1, "title": "t"}
-    assert "RETURNING" in fx.sql and "sow.id" in fx.sql
-
-
-def test_sow_update_sets_updated_at_now():
-    fx = FakeExec(fetchone_result={"id": 1})
-    SowRepository(fx).update_fields(1, status="Sent")
-    assert "sow.updated_at" in fx.sql and "now()" in fx.sql.lower()
 
 
 # -- system_agents --------------------------------------------------------------------------------

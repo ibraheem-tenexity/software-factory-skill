@@ -119,6 +119,7 @@ export type ProjectOverview = {
   materials_count?: number;
   produced_count?: number;
 };
+export type RepoAccess = { status: "not_requested" | "waiting_for_repo" | "ready" | "invited" | "failed"; detail: string; repo_url?: string; github_username?: string };
 export type ProjectDocuments = { uploaded: ProjectMaterial[]; produced: ProjectArtifact[]; org?: ProjectMaterial[] };
 
 // Org-admin (§2.3) — org-scoped, per the locked contract in docs/plans/org-admin-api.md.
@@ -361,19 +362,6 @@ export type AdminConversationsFilter = {
   limit?: number;
 };
 
-export type AdminSow = {
-  id: number;
-  title: string;
-  org?: string | null;
-  project?: string | null;
-  value?: string | null;
-  file?: string | null;
-  version: number;
-  status: string;
-  body?: string | null;
-  created_at?: string | number | null;
-  updated_at?: string | number | null;
-};
 
 function checkAuth(r: Response): void {
   if (r.status === 401) window.dispatchEvent(new CustomEvent("sf:auth-expired"));
@@ -443,7 +431,7 @@ export const api = {
   // drives single/multi-select render. No `choices`/`done`.
   converse: (projectId: string, message: string) =>
     send<{ response: string; suggested_responses: { response: string; type: "single select" | "multi select" }[];
-          message_id?: string; session_id?: string }>(`/api/projects/${projectId}/converse`, "POST", { message }),
+          message_id?: string; session_id?: string; handed_off: boolean }>(`/api/projects/${projectId}/converse`, "POST", { message }),
   // SOF-154: streaming sibling of `converse` — NDJSON over the raw Response body, same shape as
   // `chatStream` below. Caller reads `.body.getReader()` and parses `working`/`token`/`option`/
   // `done`/`error` events itself.
@@ -543,9 +531,6 @@ export const api = {
     send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "PATCH", body),
   adminDeleteAccess: (email: string) => send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "DELETE"),
   adminResendInvite: (email: string) => send<{ email: string; status: string; link: string }>(`/api/admin/access/${encodeURIComponent(email)}/resend`, "POST"),
-  // adminSowGet is the last surviving SOW fetcher — the admin SOW editor (sow.tsx) was removed
-  // (operator scope change), but ArtifactViewer.tsx's `?sow=<id>` mode still reads a SOW row.
-  adminSowGet: (id: number) => get<AdminSow>(`/api/admin/sow/${id}`),
   // CBT-9 (admin): Recipes library CRUD. Create/patch may reject with a 400 whose `.detail` is
   // the store's verbatim reason (e.g. a repo missing AGENTS.md/CLAUDE.md) — callers must surface it.
   adminListRecipes: () => get<{ recipes: AdminRecipe[] }>("/api/admin/recipes"),
@@ -563,26 +548,27 @@ export const api = {
   },
   adminConversationTranscript: (sessionId: string) => get<AdminConversationTranscript>(`/api/admin/conversations/${encodeURIComponent(sessionId)}`),
   // ── Onboarding draft model (docs/plans/concierge-onboarding-api.md) ──
-  // runtime ("claude"|"opencode") + model ("kimi"|"glm") are persisted by the backend (DraftCreateIn
+  // runtime ("claude"|"opencode"|"codex") + model ("kimi"|"glm") are persisted by the backend (DraftCreateIn
   // → projectstate). BYOK keys: when keySource="byok", the FE POSTs the runtime-specific runner key
-  // (ANTHROPIC_API_KEY for claude, OPENROUTER_API_KEY for opencode) to /creds, which Vault-stores it
+  // (ANTHROPIC_API_KEY for Claude, OPENROUTER_API_KEY for OpenCode, CODEX_API_KEY for Codex) to /creds, which Vault-stores it
   // and records creds_vault_ids on the draft; promote threads those into the runner env (BYOK wins
   // over the platform key). keySource/key on createDraft/patchDraft are passthrough (ignored by
   // Pydantic); the real BYOK path is submitCreds.
-  createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number }) =>
+  createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number; github_username?: string }) =>
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),
-  // SOF-108: DB-backed scope chips — genre recipes authored on the SOW screen (status='Template').
-  scopeGenres: () => get<{ genres: { name: string; description: string }[] }>("/api/scope-genres"),
   // CBT-9: published recipes — the intake picker source (light fields only; body_md/repo_url stay
   // internal-only, per the store's published() projection).
   listRecipes: () => get<{ recipes: RecipeLight[] }>("/api/recipes"),
-  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number; recipe_id?: string }) =>
+  patchDraft: (id: string, body: { name?: string; goal?: string; scope?: string[]; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number; recipe_id?: string; github_username?: string }) =>
     send<{ name: string; goal: string; scope: string[]; description: string; recipe_id?: string }>(`/api/projects/${id}/draft`, "PATCH", body),
   // Read counterpart to PATCH /draft (qsvigmth's run-control PR #48) — rehydrates the intake form
   // when RESUMING an existing draft instead of minting a new one. budget (SOF-137) is included
   // since it's now one of the three required intake fields (name+goal+budget, scope optional).
   getDraft: (id: string) =>
-    get<{ name: string; goal: string; scope: string[]; description: string; budget: number | null; recipe_id?: string }>(`/api/projects/${id}/draft`),
+    get<{ name: string; goal: string; scope: string[]; description: string; budget: number | null; runtime: string; model: string; recipe_id?: string; github_username?: string }>(`/api/projects/${id}/draft`),
+  repoAccess: (id: string) => get<RepoAccess>(`/api/projects/${id}/repo-access`),
+  requestRepoAccess: (id: string, github_username: string) =>
+    send<RepoAccess>(`/api/projects/${id}/repo-access`, "POST", { github_username }),
   // BYOK key submission (qsvigmth's draft-BYOK PR). Vault-stores each credential; records UUIDs in
   // state.creds_vault_ids; promote threads them into the runner env. Returns names only, never values.
   submitCreds: (id: string, credentials: Record<string, string>) =>

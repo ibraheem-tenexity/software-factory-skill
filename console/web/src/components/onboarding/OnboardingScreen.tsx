@@ -36,7 +36,6 @@ type Check = { id: string; label: string; done: boolean; optional?: boolean; nud
 // T2.2: suggestedResponses replaces choices — {response,type} drives single/multi-select render.
 type ChatMsg = { role: string; content: string; suggestedResponses?: SuggestedResponseOption[] };
 
-const SCOPE = ["Quoting / RFQ", "Order entry", "Pricing & approvals", "Inventory", "AP / AR", "Customer comms"];
 
 // id↔label helpers (orgs store labels; the fresh form picks tile/integration ids).
 const industryLabel = (idOrLabel: string) => INDUSTRIES.find((i) => i.id === idOrLabel)?.label || idOrLabel;
@@ -108,53 +107,21 @@ function OrgCell({ label, value, editing, onChange }: { label: string; value: st
   );
 }
 
-// Scope-of-work multi-select with a "+ Add" affordance for a custom scope / software type.
-function ScopeOfWork({ options, value, onChange, onAddOption }:
-  { options: string[]; value: string[]; onChange: (v: string[]) => void; onAddOption: (o: string) => void }) {
-  const [adding, setAdding] = useState(false);
-  const [text, setText] = useState("");
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  useEffect(() => { if (adding && inputRef.current) inputRef.current.focus(); }, [adding]);
-  const sel = value || [];
-  const toggle = (o: string) => onChange(sel.includes(o) ? sel.filter((x) => x !== o) : [...sel, o]);
-  const commit = () => {
-    const t = text.trim();
-    if (t) { onAddOption(t); if (!sel.includes(t)) onChange([...sel, t]); }
-    setText(""); setAdding(false);
-  };
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-      {options.map((o) => <Chip key={o} selected={sel.includes(o)} onClick={() => toggle(o)}>{o}</Chip>)}
-      {adding ? (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 4px 3px 11px", borderRadius: 9999, border: `1px solid ${T.brand}`, background: T.brandSoft }}>
-          <input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } else if (e.key === "Escape") { setText(""); setAdding(false); } }}
-            onBlur={commit} placeholder="Custom scope or software…"
-            style={{ width: 168, border: "none", outline: "none", background: "transparent", font: `500 13px/1 ${T.sans}`, color: T.brandDeep }} />
-          <button onMouseDown={(e) => e.preventDefault()} onClick={commit} title="Add" style={{ width: 24, height: 24, flexShrink: 0, display: "grid", placeItems: "center", borderRadius: "50%", border: "none", background: T.brand, color: "#fff", cursor: "pointer" }}><Icon name="check" size={12} color="#fff" /></button>
-        </span>
-      ) : (
-        <button onClick={() => setAdding(true)} style={{ display: "inline-flex", alignItems: "center", gap: 5, font: `500 13px/1 ${T.sans}`, padding: "8px 13px", borderRadius: 9999, cursor: "pointer", border: `1px dashed ${T.borderDefault}`, background: T.raised, color: T.secondary }}>
-          <Icon name="plus" size={13} color={T.tertiary} /> Add
-        </button>
-      )}
-    </div>
-  );
-}
-
 // ── Build engine picker (the "Build engine" card). MODULE-SCOPE — never define inside render
-//    (that remounts inputs on each keystroke → focus loss). provider=claude|opencode;
+//    (that remounts inputs on each keystroke -> focus loss). provider=claude|opencode|codex;
 //    model=kimi|glm; keySource=tenexity|byok. Backend persists `runtime` + maps `model` to the
-//    full id (kimi→moonshot, glm→z-ai/glm-5.2). BYOK key POSTs to /creds (Vault-stored) and the
-//    runtime-specific runner key (ANTHROPIC_API_KEY / OPENROUTER_API_KEY) wins over the platform key. ──
-export type EngineValue = { provider: "claude" | "opencode"; model: "kimi" | "glm"; keySource: "tenexity" | "byok"; key: string };
+//    full id (kimi->K3, glm->z-ai/glm-5.2). BYOK key POSTs to /creds (Vault-stored) and the
+//    runtime-specific runner key wins over the platform key.
+type EngineProvider = "claude" | "opencode" | "codex";
+export type EngineValue = { provider: EngineProvider; model: "kimi" | "glm"; keySource: "tenexity" | "byok"; key: string };
 
 const ENGINES = [
   { id: "claude", name: "Claude", tag: "Default", desc: "Anthropic Claude — the factory's native build agent." },
   { id: "opencode", name: "OpenCode", tag: "", desc: "Open-source agent runtime — pick the model below." },
+  { id: "codex", name: "Codex", tag: "", desc: "OpenAI Codex running GPT-5.6 with the same factory stages." },
 ] as const;
 const OC_MODELS = [
-  { id: "kimi", name: "Kimi K2.7", vendor: "Moonshot AI" },
+  { id: "kimi", name: "Kimi K3", vendor: "Moonshot AI" },
   { id: "glm", name: "GLM 5.2", vendor: "Zhipu AI" },
 ] as const;
 
@@ -180,13 +147,15 @@ function EnginePicker({ value, onChange }:
   const set = (patch: Partial<EngineValue>) => onChange({ ...value, ...patch });
   // Switching provider away from opencode resets model to the default (kimi); switching to opencode
   // keeps whatever model was set (default kimi). key is cleared whenever BYOK is left.
-  const chooseProvider = (p: "claude" | "opencode") => set({ provider: p, key: p === "claude" ? "" : value.key });
+  const chooseProvider = (p: EngineProvider) => set({ provider: p, key: p === "claude" ? "" : value.key });
   const chooseKeySource = (k: string) => set({ keySource: k as "tenexity" | "byok", key: k === "tenexity" ? "" : value.key });
+  const engineName = value.provider === "codex" ? "Codex" : value.provider === "opencode" ? "OpenCode" : "Claude";
+  const keyPlaceholder = value.provider === "claude" ? "sk-ant-..." : value.provider === "codex" ? "sk-..." : "paste provider API key";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", gap: 10 }}>
         {ENGINES.map((it) => (
-          <EngineCardBtn key={it.id} item={it} selected={value.provider === it.id} onClick={() => chooseProvider(it.id as "claude" | "opencode")} />
+          <EngineCardBtn key={it.id} item={it} selected={value.provider === it.id} onClick={() => chooseProvider(it.id as EngineProvider)} />
         ))}
       </div>
 
@@ -217,11 +186,11 @@ function EnginePicker({ value, onChange }:
             ? <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 11px", background: T.brandSoft + "66", border: `1px solid ${T.brand}33`, borderRadius: T.rMd }}>
               <Sparkle size={12} color={T.brandDeep} />
               <span style={{ font: `400 12px/1.4 ${T.sans}`, color: T.secondary }}>
-                {value.provider === "claude" ? "Claude" : "OpenCode"} runs on Tenexity's key — billed through your plan + rolled into the project budget.
+                {engineName} runs on Tenexity's key — billed through your plan + rolled into the project budget.
               </span>
             </div>
             : <TextInput type="password" value={value.key} onChange={(v) => set({ key: v })}
-                placeholder={value.provider === "claude" ? "sk-ant-…" : "paste provider API key"} />}
+                placeholder={keyPlaceholder} />}
         </div>
       </Field>
     </div>
@@ -365,18 +334,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   // returning "on file" org card — inline-edit (Manage) state, seeded from onFile when editing starts.
   const [orgEdit, setOrgEdit] = useState<{ company: string; industry: string; scale: string; systems: string; subFocus: string; website: string }>(
     { company: "", industry: "", scale: "", systems: "", subFocus: "", website: "" });
-  // Scope-of-work options; grows when the user adds a custom scope/software via "+ Add".
-  // SOF-108: seeded from the DB (genre recipes authored on the SOW screen, status='Template');
-  // the SCOPE constant is only the fallback while loading / when no recipes exist yet.
-  const [scopeOptions, setScopeOptions] = useState<string[]>(SCOPE);
-  useEffect(() => {
-    api.scopeGenres().then((r) => {
-      const names = (r.genres || []).map((g) => g.name).filter(Boolean);
-      if (names.length) setScopeOptions((prev) => [...names, ...prev.filter((o) => !names.includes(o) && !SCOPE.includes(o))]);
-    }).catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // fresh-user company setup
   const [f, setF] = useState<{ industry: string; sub: string[]; name: string; size: string; revenue: string; role: string; site: string; ints: string[] }>(
     { industry: "", sub: [], name: "", size: "", revenue: "", role: "", site: "", ints: [] });
@@ -391,6 +348,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   // project answers (shared)
   const [p, setP] = useState<{ name: string; goal: string; scope: string[]; video: boolean; docs: boolean }>(
     { name: "", goal: "", scope: [], video: false, docs: false });
+  const [githubUsername, setGithubUsername] = useState("");
   // Build engine (Claude | OpenCode+Kimi/GLM). Default = Claude on Tenexity's key. BYOK is live:
   // a user-entered key POSTs to /creds (Vault-stored); promote threads it into the runner env, BYOK
   // wins over the platform key. The key NAME is runtime-specific (ANTHROPIC_API_KEY / OPENROUTER_API_KEY).
@@ -454,11 +412,14 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       setDraftId(resumeProjectId);
       api.getDraft(resumeProjectId).then((d) => {
         setP((x) => ({ ...x, name: d.name || "", goal: d.goal || d.description || "", scope: d.scope || [] }));
-        if (d.scope) setScopeOptions((opts) => Array.from(new Set([...opts, ...d.scope])));
+        if (d.runtime === "claude" || d.runtime === "opencode" || d.runtime === "codex") {
+          setEngine((x) => ({ ...x, provider: d.runtime as EngineProvider, model: d.model === "glm" ? "glm" : "kimi" }));
+        }
         // SOF-137: budget is now a required intake field (scope became optional) — a resumed
         // draft must rehydrate it, or Continue can never be satisfied again after leaving the page.
         if (d.budget != null) setBudget(d.budget);
         if (d.recipe_id) setRecipeId(d.recipe_id);
+        setGithubUsername(d.github_username || "");
       }).catch(() => {});
       api.documents(resumeProjectId).then((docs) => {
         const ups = docs.uploaded || [];
@@ -485,7 +446,17 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     return () => clearTimeout(t);
   }, [draftId, p.name, p.goal, p.scope]);
 
-  // DEBOUNCED build-engine write-through: runtime (claude|opencode) + model (kimi|glm) persist on
+  // The username is optional: without it the project is still valid, and the Overview offers a
+  // later request path. When present before provisioning, the host sends the invite with the repo.
+  useEffect(() => {
+    if (!draftId) return;
+    const t = setTimeout(() => {
+      api.patchDraft(draftId, { github_username: githubUsername }).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [draftId, githubUsername]);
+
+  // DEBOUNCED build-engine write-through: runtime (claude|opencode|codex) + model (kimi|glm) persist on
   // the draft (DraftCreateIn/DraftPatchIn). keySource/key are passthrough (ignored by Pydantic) —
   // the real BYOK path is submitCreds below. Without this the eager create's runtime (default
   // claude) is the value used at promote, silently dropping an OpenCode selection.
@@ -505,13 +476,14 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
 
   // BYOK key submission: when the user brings their own key, POST it to /creds (Vault-stored; promote
   // threads creds_vault_ids into the runner env, BYOK wins over the platform key). The key NAME is
-  // runtime-specific (ANTHROPIC_API_KEY for claude, OPENROUTER_API_KEY for opencode) — the runner-key
+  // runtime-specific (ANTHROPIC_API_KEY, OPENROUTER_API_KEY, CODEX_API_KEY) — the runner-key
   // _launch_stage resolves. Debounced so a paste + edit doesn't fire per keystroke; the response is
   // ignored (never surfaces the key back). Only fires when keySource is byok AND a non-empty key exists.
   const byokBusyRef = useRef(false);
   useEffect(() => {
     if (!draftId || engine.keySource !== "byok" || !engine.key.trim()) return;
-    const keyName = engine.provider === "claude" ? "ANTHROPIC_API_KEY" : "OPENROUTER_API_KEY";
+    const keyName = engine.provider === "claude" ? "ANTHROPIC_API_KEY"
+      : engine.provider === "codex" ? "CODEX_API_KEY" : "OPENROUTER_API_KEY";
     const t = setTimeout(() => {
       if (byokBusyRef.current) return;
       byokBusyRef.current = true;
@@ -552,8 +524,8 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
 
   const fresh = mode === "fresh";
 
-  // SOF-137 (Minimum Machinery): scope is optional — the chips stay available (ScopeOfWork below)
-  // for whoever wants to use them, but Continue no longer requires one. name+goal+budget suffice.
+  // Scope card retired (recipes are the external project framing): p.scope persists only as a
+  // backend field the concierge may still set conversationally. name+goal+budget gate Continue.
   const projChecks: Check[] = [
     { id: "name", label: "Project name", done: !!p.name },
     { id: "goal", label: "What you’re building", done: p.goal.length > 20 },
@@ -606,7 +578,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       setError(typeof e?.detail === "string" ? e.detail : String(e?.message || e));
     }
   };
-  const addScopeOption = (o: string) => setScopeOptions((s) => (s.includes(o) ? s : [...s, o]));
 
   // Save Project basics → mint the draft (POST /api/drafts) and unlock the rest of the form.
   const saveBasics = async () => {
@@ -615,7 +586,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     setSavingBasics(true);
     setError("");
     try {
-      const { project_id } = await api.createDraft({ runtime: engineProviderRef.current, project_name: p.name, budget: budgetRef.current ?? undefined });
+      const { project_id } = await api.createDraft({ runtime: engineProviderRef.current, project_name: p.name, budget: budgetRef.current ?? undefined, github_username: githubUsername });
       setDraftId(project_id);
     } catch (e: any) {
       draftCreatingRef.current = false;
@@ -685,11 +656,12 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
     setError("");
     try {
       if (fresh) await saveCompanyFresh();                                    // flush company
-      await api.patchDraft(draftId, { name: p.name, goal: p.goal, scope: p.scope }).catch(() => {}); // flush project
+      await api.patchDraft(draftId, { name: p.name, goal: p.goal, scope: p.scope, github_username: githubUsername }).catch(() => {}); // flush project
       await api.patchDraft(draftId, { runtime: engine.provider, model: engine.model, keySource: engine.keySource, key: engine.key }).catch(() => {}); // flush engine
       if (budget != null) await api.patchDraft(draftId, { budget }).catch(() => {});  // flush budget cap
       if (engine.keySource === "byok" && engine.key.trim()) {                 // flush BYOK key → Vault
-        const keyName = engine.provider === "claude" ? "ANTHROPIC_API_KEY" : "OPENROUTER_API_KEY";
+        const keyName = engine.provider === "claude" ? "ANTHROPIC_API_KEY"
+          : engine.provider === "codex" ? "CODEX_API_KEY" : "OPENROUTER_API_KEY";
         await api.submitCreds(draftId, { [keyName]: engine.key.trim() }).catch(() => {});
       }
       const { project_id } = await api.promote(draftId, { target: "railway" });
@@ -757,7 +729,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   }
 
   if (view === "interview" && draftId) {
-    return <InterviewView draftId={draftId} projectName={p.name} goal={p.goal} onBack={() => setView("intake")} onHandoff={handoff} submitting={submitting} error={error} />;
+    return <InterviewView draftId={draftId} projectName={p.name} goal={p.goal} onBack={() => setView("intake")} onHandoff={handoff} onPromoted={() => onComplete(draftId)} submitting={submitting} error={error} />;
   }
 
   const company = onFile?.name || "";
@@ -839,6 +811,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <Field label="Budget cap" optional hint="Stop and notify when spend reaches this amount. Leave unset to run to completion.">
                         <BudgetPicker value={budget} onChange={setBudget} />
                       </Field>
+                      <Field label="GitHub username" optional hint="We'll invite this account to the project repository after it is created.">
+                        <TextInput value={githubUsername} onChange={setGithubUsername} placeholder="e.g. octocat" />
+                      </Field>
                     </div>
                     {/* Create-the-project gate (PRD §2.4/§24): a real POST /api/drafts in `draft` state. */}
                     <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${T.borderSubtle}` }}>
@@ -864,9 +839,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       : { display: "flex", flexDirection: "column", gap: 16, opacity: 0.4, filter: "grayscale(0.5)", pointerEvents: "none", userSelect: "none" }}>
                   <Card cat="Your first project" title="Starting point" desc="Fork a proven recipe, or start from a blank build.">
                     <RecipePicker recipes={recipes} loading={recipesLoading} value={recipeId} onChange={selectRecipe} />
-                  </Card>
-                  <Card cat="Your first project" title="Scope of work" desc="Which parts of the business does this project touch?">
-                    <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
                   </Card>
                   <Card cat="Your first project" title="Build engine" desc="Choose the coding agent that builds this project. The factory, console, and output look the same either way.">
                     <EnginePicker value={engine} onChange={setEngine} />
@@ -942,6 +914,9 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <Field label="Budget cap" optional hint="Stop and notify when spend reaches this amount. Leave unset to run to completion.">
                         <BudgetPicker value={budget} onChange={setBudget} />
                       </Field>
+                      <Field label="GitHub username" optional hint="We'll invite this account to the project repository after it is created.">
+                        <TextInput value={githubUsername} onChange={setGithubUsername} placeholder="e.g. octocat" />
+                      </Field>
                     </div>
                     {/* Create-the-project gate (PRD §2.4/§24): a real POST /api/drafts in `draft` state. */}
                     <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${T.borderSubtle}` }}>
@@ -967,9 +942,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       : { display: "flex", flexDirection: "column", gap: 16, opacity: 0.4, filter: "grayscale(0.5)", pointerEvents: "none", userSelect: "none" }}>
                   <Card cat="This project" title="Starting point" desc="Fork a proven recipe, or start from a blank build.">
                     <RecipePicker recipes={recipes} loading={recipesLoading} value={recipeId} onChange={selectRecipe} />
-                  </Card>
-                  <Card cat="This project" title="Scope of work" desc="Which parts of the business does this project touch?">
-                    <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
                   </Card>
                   <Card cat="This project" title="Build engine" desc="Choose the coding agent that builds this project. The factory, console, and output look the same either way.">
                     <EnginePicker value={engine} onChange={setEngine} />

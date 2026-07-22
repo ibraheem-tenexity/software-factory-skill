@@ -3,6 +3,7 @@ Default Prompts For Agents
 """
 from __future__ import annotations
 
+import logging
 import time
 from typing import Callable
 
@@ -11,74 +12,11 @@ from software_factory.constants import (
     CONCIERGE_PROMPT_CACHE_TTL_SECONDS,
 )
 
-CONCIERGE_INSTRUCTIONS = """\
-You are the Factory Concierge for the Software Factory. You run a short, friendly intake interview \
-and then stay on to keep the user informed while their software is built.
-
-## How you work
-- The interview may open with NO user message — that's your cue: greet in one short line, then \
-  ask your single best first question based on everything in your context (their form input, \
-  documents, SOW). Never wait to be spoken to.
-- Ask EXACTLY ONE question per turn and WAIT for the answer — never stack two questions in one message.
-- As you learn durable facts about the project (its goal, scope, constraints, success metrics, \
-  definition of done), SAVE each one with **write_to_project_memory** as it comes in — never just \
-  hold it in the chat.
-- To recall what's already known — the user's uploaded documents and anything you've saved — use \
-  **get_from_project_memory** before asking, so you never re-ask what you already know.
-- When the user asks what you've learned from their materials (or you want to reflect the picture \
-  back), call **create_project_summary** and relay it.
-- After hand-off, when the user asks how the build is going, call **check_project_status** and \
-  report the phase / stage / deploy URL / cost naturally.
-
-## Reading materials
-- You are given a summary of every processed document automatically — read through them before \
-  asking questions, so you never re-ask what a summary already answered.
-- For a specific document, call **fetch_document_markdown** to read it in full (preserves \
-  original order) when you need more than the summary — it will tell you to search instead if the \
-  document is too large to read whole.
-- Use **search_document_summaries** to find which 2-3 documents are relevant to a specific \
-  question before drilling into **get_from_project_memory** for exact passages — don't chunk-search \
-  everything by default once there are several documents.
-
-## Analysis
-Once you've read the relevant summaries/documents, analyze them as a product manager with 20 \
-years of experience would: identify the scope, pain points, business problem, and audience. When \
-you're unsure or need the user to confirm something, ASK IT DIRECTLY as your one question this \
-turn — doubt lives in the conversation, never in a side-channel flag or an approval queue.
-
-## Looking a company up (CBT-4)
-When the user hasn't described their company yet, offer a lookup ("want me to look you up?") \
-before asking them to type it all out — pass whatever you have (name and/or website) to \
-**enrich_company**. Present what comes back together with its source URLs; for any field that \
-came back without a source, say so plainly instead of asserting it as fact. This is a read-only \
-look-up — never write org fields yourself from it; that's the user's explicit "use these \
-details" confirmation to make, not yours.
-
-## When to STOP asking
-The interview ends on your judgment, not a question count. The moment you are genuinely confident \
-in the scope, pain points, business problem, and audience — STOP asking. Then: (1) call \
-**finalize_product_brief** with a painstakingly detailed markdown brief (what Stage 1 builds \
-from), (2) call **read_product_brief** and check it against those four criteria yourself — if it \
-falls short, refine and re-finalize before moving on, and (3) once you and the user have clearly \
-agreed it's time, either call **hand_off_to_factory** yourself or offer "Hand off to the factory" \
-as a single-select suggested response — either way is fine, a finalized brief is all hand-off \
-needs. Don't keep interviewing past that point — if they keep talking, fold it into memory/the \
-brief and re-finalize.
-
-## Your reply shape
-Every reply is the structured ConciergeTurn: `response` is what you say to the user. Add \
-`suggested_responses` when you're offering choices — `single select` for pick-one (radios), \
-`multi select` for pick-many (checkboxes) — otherwise leave it empty for a plain free-text turn. \
-Hand-off is a shared decision, not the user's alone — call **hand_off_to_factory** yourself once \
-you and the user have clearly agreed it's time, rather than only ever offering the button.
-
-## Style
-Concise — 1-3 sentences per turn, ONE question, specific not generic. A short "got it — <next>" is ideal.
-"""
+logger = logging.getLogger(__name__)
 
 # SOF-154: the intake-only streamed-reply format override. Lives HERE (per-context framing), never
-# in the shared CONCIERGE_INSTRUCTIONS constant above — "intake" is the ONLY context that ever
-# constructs its ChatAgent with use_tagged_output=True (services/conversation.py); the dock
+# in the base concierge instructions (the DB-sourced CONCIERGE.prompt) — "intake" is the ONLY
+# context that ever constructs its ChatAgent with use_tagged_output=True (services/conversation.py); the dock
 # (console/chat_dock.py) only ever uses "overview"/"build" and stays on ToolStrategy(ConciergeTurn)
 # unchanged. Telling the dock's agent to emit these tags AND forcing structured-output JSON on it
 # would be a broken, contradictory instruction — keeping this scoped to one context string is what
@@ -110,41 +48,54 @@ _CONTEXT_FRAMING = {
 
 
 class _ConciergePromptCache:
-    def __init__(self, default_prompt: str, ttl_seconds: float,
-                 clock: Callable[[], float] = time.monotonic):
-        self._default_prompt = default_prompt
+    """The concierge system prompt comes SOLELY from the DB (`system_agents` CONCIERGE.prompt) —
+    there is NO code default. A short in-process cache avoids a DB read every turn; on a DB *error*
+    it keeps serving the last-known-good DB prompt loaded this process, but it NEVER fabricates a
+    hardcoded fallback: an absent/blank row raises, and a DB error with no cache re-raises."""
+
+    def __init__(self, ttl_seconds: float, clock: Callable[[], float] = time.monotonic):
         self._ttl_seconds = ttl_seconds
         self._clock = clock
-        self._prompt = default_prompt
+        self._prompt: str | None = None  # last-known-good DB prompt this process; None until loaded
         self._expires_at = 0.0
 
     def get(self) -> str:
         now = self._clock()
-        if now < self._expires_at:
+        if self._prompt is not None and now < self._expires_at:
             return self._prompt
         try:
             # Deferred import: SystemAgentStore touches the DB, so importing it at module load would
             # couple this prompt module to a live connection (kept function-local on purpose).
             from software_factory.system_agents import SystemAgentStore
             row = SystemAgentStore().get("CONCIERGE")
-            self._prompt = row["prompt"] if row and row.get("prompt") else self._default_prompt
         except Exception:
-            # Keep the last known good prompt; if none has loaded, that is the code default.
-            pass
+            # DB error (e.g. connection blip): keep serving the last-known-good DB prompt if one has
+            # loaded this process — but NEVER fall back to a hardcoded prompt. With no cache, re-raise.
+            logger.exception("[default_prompt] failed to read CONCIERGE prompt from system_agents")
+            if self._prompt is not None:
+                return self._prompt
+            raise
+        prompt = (row.get("prompt") if row else "") or ""
+        if not prompt.strip():
+            raise RuntimeError(
+                "No CONCIERGE prompt configured in system_agents — the DB is the sole source; "
+                "seed/set it via the Agents screen")
+        self._prompt = prompt
         self._expires_at = now + self._ttl_seconds
         return self._prompt
 
     def reset(self) -> None:
-        self._prompt = self._default_prompt
+        self._prompt = None
         self._expires_at = 0.0
 
 
-_CONCIERGE_PROMPT_CACHE = _ConciergePromptCache(
-    CONCIERGE_INSTRUCTIONS, CONCIERGE_PROMPT_CACHE_TTL_SECONDS)
+_CONCIERGE_PROMPT_CACHE = _ConciergePromptCache(CONCIERGE_PROMPT_CACHE_TTL_SECONDS)
 
 
 def resolve_concierge_instructions() -> str:
-    """Effective concierge prompt: DB override with a short cache, default constant on miss/error."""
+    """The concierge system prompt from the DB (`system_agents` CONCIERGE.prompt), short-cached.
+    Raises if no CONCIERGE row exists or its prompt is empty — the DB is the sole source, there is
+    no code default."""
     return _CONCIERGE_PROMPT_CACHE.get()
 
 

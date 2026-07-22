@@ -1,6 +1,7 @@
 """Concierge chat: /api/chat (send), /api/chat/{pid}/history, /api/chat/{pid}/deps."""
 import asyncio
 import json
+import logging
 import os
 import time
 
@@ -15,6 +16,8 @@ from software_factory.transcription import transcribe_audio, TranscriptionError
 import console.state as state
 from console.deps import require_authed, authorize_project, _can_see
 from console.schemas import ChatIn, ConverseIn, ConverseOut, DepsIn, TranscribeIn
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -85,6 +88,7 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
         except asyncio.TimeoutError:
             yield json.dumps({"type": "error", "detail": "chat turn timed out — try again"}) + "\n"
         except Exception as e:
+            logger.exception("[chat] /api/chat turn failed for %s", pid)
             yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
 
     return StreamingResponse(generate(), media_type="application/x-ndjson",
@@ -113,6 +117,7 @@ async def converse_stream(pid: str, body: ConverseIn, v: tuple = Depends(authori
         except asyncio.TimeoutError:
             yield json.dumps({"type": "error", "detail": "chat turn timed out — try again"}) + "\n"
         except Exception as e:
+            logger.exception("[chat] /converse/stream turn failed for %s", pid)
             yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
 
     return StreamingResponse(generate(), media_type="application/x-ndjson",

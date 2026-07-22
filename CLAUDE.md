@@ -36,6 +36,11 @@ substitutes for an agent's judgment weakens the product and adds code nobody ask
    them; if something is confusing, say what and ask. When code has changed between sessions,
    operator edits are authoritative — surface anything questionable in them, then defer.
 
+## Product requirements
+
+`design/PRD.md` is authoritative. Before enforcing it, consolidate conflicting requirements
+across all PRDs and docs into it; surface unresolved conflicts instead of choosing silently.
+
 ## Code Organization Direction
 
 The target backend shape is a **bounded-context modular monolith**. The detailed package map,

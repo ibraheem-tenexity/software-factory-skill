@@ -51,12 +51,11 @@ def _decode_cursor(cursor: str) -> tuple[datetime.datetime, str]:
 
 
 class AdminService:
-    def __init__(self, console, users, agent_store, tool_store, sow_store, conversation_repo):
+    def __init__(self, console, users, agent_store, tool_store, conversation_repo):
         self.console = console
         self.users = users
         self.agent_store = agent_store   # SystemAgentStore — identity + prompt + model_id in one row
         self.tool_store = tool_store
-        self.sow_store = sow_store
         self.conversation_repo = conversation_repo
 
     # ── cross-tenant context + dashboards ─────────────────────────────────────────────
@@ -352,35 +351,6 @@ class AdminService:
         self.users.disable((email or "").strip().lower())
         return self._access_rows()
 
-    # ── SOW (Statement of Work) CRUD ────────────────────────────────────────────────────
-    def sow_list(self) -> dict:
-        return {"sows": self.sow_store.list_all()}
-
-    def sow_get(self, sow_id: int) -> dict:
-        row = self.sow_store.get(sow_id)
-        if not row:
-            raise NotFound("sow not found")
-        return row
-
-    def sow_create(self, body) -> dict:
-        try:
-            return self.sow_store.create(
-                body.title,
-                org=body.org, project=body.project, value=body.value,
-                file=body.file, version=body.version, status=body.status, body=body.body,
-            )
-        except ValueError as e:
-            raise Unprocessable(str(e))
-
-    def sow_update(self, sow_id: int, body) -> dict:
-        if not self.sow_store.get(sow_id):
-            raise NotFound("sow not found")
-        try:
-            return self.sow_store.update(sow_id, body.model_dump(exclude_none=True))
-        except ValueError as e:
-            raise Unprocessable(str(e))
-
-    # ── conversation history (SOF-34, T1.5) — cross-tenant, staff-only ─────────────────
     def conversations(self, *, org_id=None, project_id=None, user_id=None, session_id=None,
                       role=None, date_from=None, date_to=None, cursor=None, limit=50) -> dict:
         """Sessions roll-up (§9 concierge-conversation-store.md): one row per session, aggregated

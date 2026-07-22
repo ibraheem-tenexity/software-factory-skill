@@ -1,7 +1,7 @@
 """Extract a Word document (.docx) to Markdown.
 
 Primary: pandoc via pypandoc (`pypandoc_binary` bundles the pandoc binary — no system dep).
-Chosen over markitdown/mammoth/docx2txt after benchmarking on the real Singer SOW: pandoc is
+Chosen over markitdown/mammoth/docx2txt after benchmarking on a structured project brief: pandoc is
 the only method that preserves headings + TABLES (milestone pricing) + lists with GFM output.
 Fallback: mammoth (pure-Python; keeps headings/lists, flattens tables) if pandoc can't init.
 
@@ -12,6 +12,10 @@ from __future__ import annotations
 import os
 import re
 from typing import Callable
+
+from .log import get_logger
+
+logger = get_logger(__name__)
 
 
 def extract_with_images(path: str, out_dir: str, img_subdir: str = "images") -> tuple[str, list[str]]:
@@ -81,6 +85,7 @@ def _pandoc_convert(path: str) -> str:
         return pypandoc.convert_file(path, "gfm")
     except Exception:
         # pandoc binary unavailable/failed — degrade to mammoth (no tables, but real text).
+        logger.exception("[ingest] %s: pandoc conversion failed — degrading to mammoth (tables lost)", path)
         import mammoth
         with open(path, "rb") as f:
             return mammoth.convert_to_markdown(f).value

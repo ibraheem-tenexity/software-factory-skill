@@ -34,7 +34,8 @@ target for backend package organization and the behavior-preserving refactor pro
 │   │        │ subprocess.Popen (per stage)                                                 │  │
 │   │        ▼                                                                              │  │
 │   │   stage agent process  ── claude -p  (Opus/Sonnet, native Task subagents)             │  │
-│   │                        └─ opencode run (Kimi K2.7-code, monolithic)  [SF_RUNTIME]     │  │
+│   │                        ├─ opencode run (Kimi K3, monolithic)                           │  │
+│   │                        └─ codex exec (GPT-5.6, JSONL)                   [SF_RUNTIME]   │  │
 │   │        │ writes project.log (stdout)         │ bash: python3 -m software_factory.db …     │  │
 │   │        │ MCP: playwright (+ railway for stage 3) — NO supabase access                 │  │
 │   │        ▼                                  ▼                                           │  │
@@ -120,13 +121,13 @@ granularity instead.
 | `dbshim.py` | The storage seam: `connect(path)` returns a minimal DB-API wrapper over **psycopg3** against the configured Postgres/pooler endpoint (`prepare_threshold=None`); `?`→`%s` + `RETURNING` translation. All per-project stores go through it; `registry_projects()` lists `public.projectstate`. |
 | `env.py` | dev/prod tiering (`SF_ENVIRONMENT`): `stage_env_baseline()` (scrubs console secrets from stage child processes), Railway project allowlist. |
 | `auth.py` + `users.py` | Google-OAuth login (`google-auth` token verify) + HMAC `uid`/`token_version` session cookie + service token; `UserStore` = the allowlist+RBAC directory (`roles`/`role_permissions`, status invited/active/disabled, per-request role resolution) backing membership + per-project ownership. |
-| `chat_agent.py` | The LangChain `ChatOpenAI`-compatible Factory Concierge. It interviews the user over the onboarding draft, calls `hand_off_to_factory` (`promote_draft`) once the brief is finalized, and answers status/dependency questions. Its effective prompt is `CONCIERGE_INSTRUCTIONS` plus an env-safe, 60-second cached `system_agents.CONCIERGE` override. |
+| `chat_agent.py` | The LangChain `ChatOpenAI`-compatible Factory Concierge. It interviews the user over the onboarding draft, calls `hand_off_to_factory` (`promote_draft`) once the brief is finalized, and answers status/dependency questions. A completed turn includes the factual `handed_off` result so onboarding navigates when the tool succeeds. Its effective prompt is `CONCIERGE_INSTRUCTIONS` plus an env-safe, 60-second cached `system_agents.CONCIERGE` override. |
 | `input_pipeline.py`, `pdf_extract.py`, `docx_extract.py` | Ingest: attachments → Markdown, compose the Stage-1 input (`context.md` + `brief.md` + `interview.md`). `docx_extract.extract_with_images` (mammoth + markdownify) keeps **wireframe images inside Word tables** → `input/images/`. |
-| `workspace_setup.py`, `workspace.py` | Per-stage ephemeral workspace: SKILL contract, `.mcp.json`, prior-stage artifacts, vendored design skills. `.mcp.json` (SOF-81) is COMPOSED FROM the `tools` table (`mcp_config(stage)` → `tools.ToolStore`, filtered by `attached_to` containing `STAGE-{n}`, MCP-shaped rows only) — the OS Tools tab is the source of truth for what a stage build gets, by construction. Falls back to a hardcoded dict only if the table read itself fails (boot resilience). `tool_env_overrides(stage)` returns vault-backed env var overrides for any attached tool with a key set, merged into the stage's env by `console.py::_launch_stage`. |
+| `workspace_setup.py`, `workspace.py` | Per-stage ephemeral workspace: SKILL contract, `.mcp.json`, runtime-specific setup (`opencode.json` or Codex `.codex/config.toml` and `AGENTS.md`), prior-stage artifacts, vendored design skills. `.mcp.json` (SOF-81) is COMPOSED FROM the `tools` table (`mcp_config(stage)` → `tools.ToolStore`, filtered by `attached_to` containing `STAGE-{n}`, MCP-shaped rows only) — the OS Tools tab is the source of truth for what a stage build gets, by construction. Falls back to a hardcoded dict only if the table read itself fails (boot resilience). `tool_env_overrides(stage)` returns vault-backed env var overrides for any attached tool with a key set, merged into the stage's env by `console.py::_launch_stage`. |
 | `deploy.py` | Shared command and health-check primitives used by deployment/database helpers; Stage 3 drives app deployment through its Railway MCP/skill contract. |
 | `deploy_db.py` | Provisions a per-project Railway Postgres and writes `context/deploy-db.json` for the build. `railway add --database postgres --json` captures the generated service id, then reads its `DATABASE_URL`. The durable service id/pending marker make retries reuse rather than orphan a database; host logic caps provisioning at two attempts. The Stage-3 `provision-db` db-CLI verb persists the service/volume ids and records the artifact. |
 | `gate.py` | Happy-flow verdict from the Playwright result. |
-| `streamlog.py` | Parses the distinct Claude stream-json and OpenCode event shapes into the common downstream cost and agent-graph projection. |
+| `streamlog.py` | Parses the distinct Claude stream-json, OpenCode, and Codex JSONL event vocabularies into the common downstream cost and agent-graph projection. |
 | `notify.py` | Resend email on the four operator events; env-gated no-op. |
 | `swarm_adapter.py`, `swarm_stage3.py` | `SF_SWARM=1` parallel-ticket stage-3 driver (opencode swarm). |
 | `skills/stage-{1,2,3}-*` | The stage contracts (Claude and OpenCode variants); `skills/tenexity-design/` is the vendored brand canon. The Tenexity OS surfaces the three stage skills and the Concierge as live orchestrator cards. A prompt edit is stored in one `system_agents` row per bare callsign, so a stage override applies to both runtime variants on the next launch; the Concierge override is cached for 60 seconds. Specialist cards remain stored but not applied to runtime prompts. |
@@ -140,12 +141,17 @@ granularity instead.
 A project is pinned at start to one runtime:
 - **claude** (default): `claude -p`, Opus 4.8 for Stage 1/2 orchestration, Sonnet 4.6 for Stage 3,
   native **Task subagents** per ticket. Bills the Anthropic key.
-- **opencode** (`SF_RUNTIME=opencode`): `opencode run`, **Kimi K2.7-code** via OpenRouter,
+- **opencode** (`SF_RUNTIME=opencode`): `opencode run`, **Kimi K3** via OpenRouter,
   monolithic (one session does all the work; "logical agents" recorded for accounting). Optional
   `SF_SWARM=1` runs stage-3 tickets in parallel via the opencode swarm.
+- **codex** (`SF_RUNTIME=codex`): `codex exec --json --ephemeral`, pinned to **GPT-5.6** and
+  authenticated only with `CODEX_API_KEY`. It reads the same stage `SKILL.md`, writes the same
+  `project.log`, and gets the same required Playwright MCP gate. Codex JSONL exposes tool events
+  but not native subagent events, so the graph does not fabricate agent nodes; budget metering uses
+  its reported input/cache/output/reasoning tokens at the pinned model's list price.
 
-Both write the same `project.log` shape and call the same `db` CLI, so everything downstream is
-runtime-agnostic.
+All runtimes append their native JSONL events to the same `project.log` and call the same `db` CLI;
+`streamlog.py` normalizes those vocabularies so downstream state is runtime-agnostic.
 
 ---
 
@@ -216,7 +222,7 @@ parity review because those two schema construction paths can drift.
   `model`/`provider`/token/`cost_usd` attribution. Replaces the in-memory `/converse` mock and the
   volume-only `chat.jsonl` — see `concierge-conversation-store.md`.
 - `system_agents` — one editable prompt/model row per orchestrator callsign; `tools` — the stage-attached
-  MCP/API registry; `sow` — statement-of-work records; `org_secrets` — org-secret metadata with Vault
+  MCP/API registry (the SOW concept is fully retired — `recipes` replaced it, migration 0031 dropped the table); `org_secrets` — org-secret metadata with Vault
   pointers; `autopsy_processed_runs` / `autopsy_signatures`, `recovery_actions`, and `eval_scores` —
   durable benchmark, recovery, and evaluation ledgers.
 - `recipes` (migration 0029) — repo-backed build recipes: customer-facing fields (name/tagline/
@@ -325,7 +331,7 @@ Dockerfile installs directly from it (`pip3 install "/app[postgres]"`, the `post
 for that layer so unrelated `console/`/`docs/` changes don't invalidate it. There is no second,
 hand-maintained dependency list to drift out of sync — that drift (pgvector landed in `pyproject.toml`
 but not a separate Dockerfile `pip3` line) crash-looped prod once (#237). A small number of stage-
-workspace CLI/npm tools (Claude Code, OpenCode, opencode-swarm, Playwright browsers, `gh`) are
+workspace CLI/npm tools (Claude Code, OpenCode, Codex, opencode-swarm, Playwright browsers, `gh`) are
 **not** Python dependencies and stay pinned directly in the Dockerfile as before.
 `scripts/verify_deps.py` runs at build time right after the Python install: it imports every
 `software_factory`/`console` submodule plus a short explicit list of known *lazily* (function-
@@ -341,8 +347,8 @@ alongside its `pyproject.toml` declaration.
 - **Create a project (Option C, the only path):** `POST /api/drafts` mints the canonical id
   (`create_draft`, phase="draft"; attached material may already create artifacts, but the poller ignores
   drafts) → the
-  concierge interview finalizes a product brief → `POST /api/projects/{id}/promote` (or the
-  concierge's `hand_off_to_factory` tool, same call) → `promote_draft` → `_provision_and_launch`
+  concierge interview finalizes a product brief → the user clicks **Hand off to factory** or the
+  Concierge calls `hand_off_to_factory` after agreement → `promote_draft` → `_provision_and_launch`
   writes `input/`, stamps `owner`, persists `ProjectState`, launches Stage 1.
 - **Advance:** poller detects stage done → launches next stage → auto-satisfies deps or pauses for a
   secret → stage 3 builds, deploys to `sf-<project_id>`, drives Playwright, records verification.

@@ -16,6 +16,10 @@ from ..memory.ingest import maybe_ingest_async
 from .errors import Invalid, NotFound, Conflict
 from .files import doc_kind
 
+from ..log import get_logger
+
+logger = get_logger(__name__)
+
 def summarize(org: dict | None, runs: list[dict]) -> dict:
     """Roll the org's runs into the Usage & billing payload.
 
@@ -124,6 +128,8 @@ class OrgService:
         bid = self.blobs.record("org", org["id"], f"{scope_id}/{key}", name=body.name, tag=body.tag,
                                 kind=doc_kind(body.name), content_type=body.content_type,
                                 size_bytes=len(raw), sha256=storage.sha256(raw))
+        logger.info("[ingest] org %s: KB doc uploaded — blob %s (%s, %s bytes); ingestion is lazy "
+                    "(fires at project import)", org["id"], bid, body.name, len(raw))
         return next((d for d in self.blobs.list_org_docs(org["id"]) if d["id"] == bid), None)
 
     def record_doc_use(self, email: str, doc_id: int, project_id: str) -> int:

@@ -17,28 +17,18 @@ from software_factory.input_pipeline import make_prompt
 from software_factory.memory.ingest import maybe_ingest_async
 
 import console.state as state
+from software_factory.log import get_logger
 from console.deps import require_authed, authorize_project, _can_see, project_visibility
+
+logger = get_logger(__name__)
 from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, MaintenanceToggleIn,
                              OrgDocIn, DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
-                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn)
+                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, RepoAccessIn)
 
 router = APIRouter()
 
 
 # ── Scope genres (SOF-108): the intake chips, DB-backed ──────────────────────────────────────
-@router.get("/api/scope-genres")
-def scope_genres(v: tuple = Depends(require_authed)):
-    """Genre recipes for the intake scope chips: sow rows with status='Template' (authored on the
-    SOW admin screen). name = chip label; description = the genre recipe body."""
-    from software_factory.sow import SowStore
-    rows = SowStore().list_all()
-    return {"genres": [
-        {"name": r["title"], "description": r.get("body") or ""}
-        for r in rows if r.get("status") == "Template" and (r.get("title") or "").strip()
-    ]}
-
-
-# ── Recipes (CBT-9): the intake picker source — published recipes' light fields only ────────────
 @router.get("/api/recipes")
 def list_recipes(v: tuple = Depends(require_authed)):
     return {"recipes": state.recipes.published()}
@@ -72,7 +62,7 @@ def create_draft(body: DraftCreateIn, v: tuple = Depends(require_authed)):
     project_id = state.console.create_draft(owner=v[0] or "", name=body.project_name,
                                   runtime=body.runtime, planning_model=body.planning_model,
                                   impl_model=body.impl_model, model=body.model,
-                                  budget=body.budget)
+                                  budget=body.budget, github_username=body.github_username)
     return {"project_id": project_id}
 
 
@@ -216,6 +206,22 @@ def project_overview(pid: str, v: tuple = Depends(authorize_project)):
     }
 
 
+@router.get("/api/projects/{pid}/repo-access")
+def project_repo_access(pid: str, v: tuple = Depends(authorize_project)):
+    return state.console.repo_access(pid)
+
+
+@router.post("/api/projects/{pid}/repo-access")
+def request_project_repo_access(pid: str, body: RepoAccessIn, v: tuple = Depends(authorize_project)):
+    username = (body.github_username or "").strip().lstrip("@")
+    if not username:
+        raise HTTPException(status_code=400, detail="github_username is required")
+    owner = state.console.project_owner(pid)
+    if v[0] and v[0].lower() != owner:
+        raise HTTPException(status_code=403, detail="only the project owner can request repository access")
+    return state.console.request_repo_access(pid, username)
+
+
 def _project_documents(pid: str) -> dict:
     """Documents tab payload, enriched with each doc's AI summary (SOF-36) when memory has one —
     `list_doc_summaries` returns {} if nothing's been ingested yet (or ingestion is still running),
@@ -250,6 +256,8 @@ def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authori
     blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=body.name, tag=body.tag,
                  kind=state._doc_kind(body.name), content_type=body.content_type,
                  size_bytes=len(raw), sha256=storage.sha256(raw))
+    logger.info("[ingest] %s: material uploaded — blob %s (%s, %s bytes), ingestion queued",
+                pid, blob_id, body.name, len(raw))
     maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
     return _project_documents(pid)
 
@@ -515,7 +523,7 @@ def get_draft(pid: str, v: tuple = Depends(authorize_project)):
 def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_project)):
     """Structured project write-through: {name?, goal?, scope?, runtime?, recipe_id?}. Server composes
     the canonical description (goal + scope-of-work line). runtime updates the draft's build engine
-    (claude|opencode) after the eager create. recipe_id (CBT-9) must name a published recipe — a bad
+    (claude|opencode|codex) after the eager create. recipe_id (CBT-9) must name a published recipe — a bad
     id is refused with the real reason instead of silently pinning a draft/archived one; "" clears the
     selection. Call debounced/on-blur, NOT per keystroke."""
     if not state.console.is_draft(pid):
@@ -527,7 +535,7 @@ def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_proje
                                 detail=f"recipe_id {body.recipe_id!r} does not name a published recipe")
     result = state.console.set_draft_project(pid, name=body.name, goal=body.goal, scope=body.scope,
                                              runtime=body.runtime, model=body.model,
-                                             recipe_id=body.recipe_id)
+                                             recipe_id=body.recipe_id, github_username=body.github_username)
     if body.budget is not None:
         state.console.raise_budget(pid, body.budget)
         result["budget_ceiling"] = body.budget
@@ -557,6 +565,8 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
                            kind=state._doc_kind(name),
                            content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
                            size_bytes=len(raw), sha256=storage.sha256(raw))
+        logger.info("[ingest] %s: draft attachment stored — blob %s (%s, %s bytes), ingestion queued",
+                    pid, blob_id, name, len(raw))
         maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
     return {"attached": written}
 

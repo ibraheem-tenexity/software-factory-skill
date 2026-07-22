@@ -11,6 +11,13 @@ import { T, Icon, CategoryLabel, Wordmark, Btn } from "./design";
 
 type FileRow = { blobId: number; name: string; pct: number; stage: string; status: "running" | "ready" | "failed" };
 
+// SOF-226: map a documents-endpoint row to a FileRow using its real summary_status.
+function seedRow(d: { id?: string; name: string; summary_status?: "pending" | "ready" | "failed" }): FileRow {
+  if (d.summary_status === "ready") return { blobId: Number(d.id), name: d.name, pct: 100, stage: "done", status: "ready" };
+  if (d.summary_status === "failed") return { blobId: Number(d.id), name: d.name, pct: 100, stage: "failed", status: "failed" };
+  return { blobId: Number(d.id), name: d.name, pct: 0, stage: "queued", status: "running" };
+}
+
 const STALL_MS = 20_000;
 
 export function ProcessingScreen({ draftId, projectName, onDone }: { draftId: string; projectName: string; onDone: () => void }) {
@@ -26,9 +33,13 @@ export function ProcessingScreen({ draftId, projectName, onDone }: { draftId: st
     let live = true;
     api.documents(draftId).then((docs) => {
       if (!live) return;
+      // SOF-226: seed from the truth the response already carries — a doc whose ingestion
+      // finished BEFORE this screen mounted (fast ingest, missed SSE events: the stream has no
+      // replay) must render done immediately, not sit "queued" forever waiting for events that
+      // already fired.
       const rows: FileRow[] = (docs.uploaded || [])
         .filter((d) => d.id != null)
-        .map((d) => ({ blobId: Number(d.id), name: d.name, pct: 0, stage: "queued", status: "running" as const }));
+        .map((d) => seedRow(d));
       setFiles(rows);
       setLoaded(true);
     }).catch(() => setLoaded(true));
@@ -64,14 +75,30 @@ export function ProcessingScreen({ draftId, projectName, onDone }: { draftId: st
   }, [allDone, files.length, onDone]);
 
   // SOF-72: watch for a stalled ingest — no SSE event within STALL_MS of mount, or since the
-  // last event mid-run. Detection only surfaces the notice + button; the user decides.
+  // last event mid-run. SOF-226: before surfacing the notice, RECONCILE against the documents
+  // endpoint (summary_status is authoritative) — a missed SSE event (no-replay stream) then
+  // self-heals instead of stranding the user; the notice remains only for genuinely stuck docs.
   useEffect(() => {
     if (allDone) { setStalled(false); return; }
     const t = setInterval(() => {
-      if (Date.now() - lastEventAtRef.current > STALL_MS) setStalled(true);
+      if (Date.now() - lastEventAtRef.current <= STALL_MS) return;
+      api.documents(draftId).then((docs) => {
+        const byId = new Map((docs.uploaded || []).filter((d) => d.id != null).map((d) => [Number(d.id), d.summary_status]));
+        let healed = false;
+        setFiles((rows) => rows.map((r) => {
+          const s = byId.get(r.blobId);
+          if (r.status === "running" && (s === "ready" || s === "failed")) {
+            healed = true;
+            return { ...r, status: s, pct: 100, stage: s === "ready" ? "done" : "failed" };
+          }
+          return r;
+        }));
+        if (healed) { lastEventAtRef.current = Date.now(); setStalled(false); }
+        else setStalled(true);
+      }).catch(() => setStalled(true));
     }, 2000);
     return () => clearInterval(t);
-  }, [allDone]);
+  }, [allDone, draftId]);
 
   const continueAnyway = () => {
     if (firedDoneRef.current) return;

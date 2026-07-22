@@ -32,48 +32,6 @@ def _onboarding_session_id(project_id: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"onboarding:{project_id}"))
 
 
-def _matching_sow_bodies(project_name: str) -> list[dict]:
-    """SOW row(s) whose free-text `project` matches this project's name (SOF-62). No user-facing
-    "choose an SOW" mechanism exists yet — sow.project is free-text, staff-authored (Tenexity OS
-    §3.4b) — so name-match is the nearest-term linkage; a real `sow_id` on the draft is a separate,
-    later fix. Case-insensitive (a staff-typed sow.project differing only in case shouldn't
-    silently miss — the sharpest edge of the known name-match gap, per review) but still an exact
-    match otherwise. Read via dbshim like MemoryStore does — sow is a global table, not
-    project-scoped storage, so this is a plain query, not a MemoryStore method."""
-    name = (project_name or "").strip()
-    if not name:
-        return []
-    conn = dbshim.connect(".")
-    try:
-        rows = conn.execute(
-            "SELECT title, body FROM sow WHERE lower(project) = lower(?) AND body IS NOT NULL",
-            (name,),
-        ).fetchall()
-    finally:
-        conn.close()
-    return [{"title": r["title"], "body": r["body"]} for r in rows]
-
-
-def _genre_recipes(scope: list) -> list[dict]:
-    """SOF-108: recipe rows for the scope genres the user selected. A genre recipe is a sow row
-    with status='Template' whose title matches a selected chip (case-insensitive) — authored on
-    the SOW admin screen. Custom '+ Add' scopes have no row and are simply absent here."""
-    names = [s.strip().lower() for s in (scope or []) if s and s.strip()]
-    if not names:
-        return []
-    conn = dbshim.connect(".")
-    try:
-        placeholders = ",".join("?" for _ in names)
-        rows = conn.execute(
-            f"SELECT title, body FROM sow WHERE status = 'Template' AND body IS NOT NULL "
-            f"AND lower(title) IN ({placeholders})",
-            tuple(names),
-        ).fetchall()
-    finally:
-        conn.close()
-    return [{"title": r["title"], "body": r["body"]} for r in rows]
-
-
 def _document_context_rows(project_id: str) -> list[dict]:
     """blob_id/name/summary_md/status for every ingested document in this project (SOF-137: the
     full-doc-context first-turn block needs the display name doc_summary rows alone don't carry).
@@ -95,12 +53,12 @@ def _document_context_rows(project_id: str) -> list[dict]:
 
 def _build_first_turn_context(console, project_id: str, users=None) -> str:
     """SOF-62: the server-assembled project-context block for the Concierge's first turn — the
-    owning company's profile, the user's own project input, the matching SOW body, every document
+    owning company's profile, the user's own project input, the selected recipe, every document
     summary, and existing per-document assumptions. Pushed into the system prompt (see
     default_prompt.build_system_prompt), never a fake user message, so the first reply already
     accounts for everything on file with no tool call required. Missing pieces (no company profile,
-    no SOW match, no documents yet) are stated as such, never silently omitted, so the agent doesn't
-    have to guess whether a section was skipped or is genuinely empty."""
+    no selected recipe, no documents yet) are stated as such, never silently omitted, so the agent
+    doesn't have to guess whether a section was skipped or is genuinely empty."""
     from software_factory.memory.store import MemoryStore
 
     state = console._load_state(project_id)
@@ -139,30 +97,14 @@ def _build_first_turn_context(console, project_id: str, users=None) -> str:
         f"- Description: {state.description or '(not composed yet)'}"
     )
 
-    # CBT-9: a picked repo-backed recipe REPLACES the SOW + genre-recipes sections below — its
-    # body_md is the frame the interview/brief are built on, not just a guide. No brief-matches-
-    # recipe validator exists; the framing sentence is the prompt doing the work.
+    # A picked repo-backed recipe is the ONLY external framing — its body_md
+    # is the frame the interview/brief are built on. No recipe → the user's own words alone. No
+    # brief-matches-recipe validator exists; the framing sentence is the prompt doing the work.
     recipe_body = state.recipe_id and RecipeStore().body(state.recipe_id)
     if recipe_body:
         r = RecipeStore().get(state.recipe_id)
         sections.append(f"### Recipe: {r['name']} (this project builds FROM this recipe)\n"
                         f"{recipe_body}")
-    else:
-        sow_rows = _matching_sow_bodies(state.name)
-        if sow_rows:
-            sow_text = "\n\n".join(f"**{r['title']}**\n{r['body']}" for r in sow_rows)
-        else:
-            sow_text = "(no SOW on file matching this project's name)"
-        sections.append(f"### Statement of Work\n{sow_text}")
-
-        # SOF-108: genre recipes for the scope areas the user actually selected. A recipe describes
-        # what that class of tool typically looks like (screens, entities, flows) — a guide for the
-        # agent's questioning and the PRD skeleton, never a spec; the user's own words always win.
-        # Custom "+ Add" scopes simply have no recipe row and appear only in the scope list above.
-        recipe_rows = _genre_recipes(state.scope or [])
-        if recipe_rows:
-            recipe_text = "\n\n".join(f"**{r['title']}**\n{r['body']}" for r in recipe_rows)
-            sections.append(f"### Genre recipes for the selected scope areas\n{recipe_text}")
 
     # SOF-137: the FULL document text, not just its summary, unless it would blow the dedicated
     # inline-context budget above (per-doc AND running total across all documents) — under budget,
@@ -262,9 +204,10 @@ class DbConversation:
                       final_messages: list, turn: ConciergeTurn, usage: dict) -> dict:
         """Shared by `turn()` and `turn_stream()` (SOF-154): append everything the run produced —
         tool calls, tool results, the final reply — to the conversation, then return the
-        ConciergeTurn dict `{response, suggested_responses, message_id, session_id}`. `final_messages`
-        is the full message list (input + produced); `sent_len` is how many of those were the input
-        we sent, so only the newly-produced tail gets persisted here."""
+        ConciergeTurn dict `{response, suggested_responses, message_id, session_id, handed_off}`.
+        `handed_off` is the actual post-turn project phase, not agent-generated readiness state.
+        `final_messages` is the full message list (input + produced); `sent_len` is how many of
+        those were the input we sent, so only the newly-produced tail gets persisted here."""
         suggested = [sr.model_dump() for sr in turn.suggested_responses]
         new_msgs = final_messages[sent_len:]
         message_id = None
@@ -298,7 +241,8 @@ class DbConversation:
             cost_usd=usage.get("cost_usd") or 0.0,
         )
         return {"response": turn.response, "suggested_responses": suggested,
-                "message_id": message_id, "session_id": session_id}
+                "message_id": message_id, "session_id": session_id,
+                "handed_off": bool(self._console and not self._console.is_draft(project_id))}
 
     async def turn(self, project_id: str, message: str) -> dict:
         """One Concierge turn. Non-empty message = the user's turn (recorded, agent replies).
@@ -306,7 +250,7 @@ class DbConversation:
         from its system prompt (which carries the first-turn project context) + history. That is
         the whole interview mechanism: the screen is a chat box, the LLM asks because that's what
         LLMs do. Returns a ConciergeTurn dict: {response, suggested_responses, message_id,
-        session_id}."""
+        session_id, handed_off}."""
         text = (message or "").strip()
         session_id = _onboarding_session_id(project_id)
         # Checked BEFORE appending this message: an empty history means this call IS turn one —

@@ -46,7 +46,6 @@ def persist_and_compose(
     interview_md: str | None = None,
     tolerate_extract_failures: bool = False,
     product_brief_md: str | None = None,
-    genre_recipes_md: str | None = None,
     recipe_md: str | None = None,
 ) -> list[str]:
     """Write attached files into `input_dir`, converting PDFs (markitdown) and Word docs to
@@ -58,9 +57,7 @@ def persist_and_compose(
     and kept paired with their captions; falls back to the text-only converter if the image
     deps are unavailable. `product_brief_md` (the Concierge-finalized brief, SOF-63) SUPERSEDES
     the raw composition as context.md when present; `interview_md` is written verbatim as
-    `interview.md` for Stage 1 to consume. `genre_recipes_md` (SOF-96) is written verbatim as
-    `genre-recipes.md` — the selected scope genres' recipe bodies, for product-synthesis to draw
-    its per-genre PRD modules from. `recipe_md` (CBT-9) is written verbatim as `recipe.md` — the
+    `interview.md` for Stage 1 to consume. `recipe_md` (CBT-9) is written verbatim as `recipe.md` — the
     picked repo-backed recipe's body, the baseline PRD synthesis specifies deltas/configuration
     on top of.
 
@@ -104,6 +101,8 @@ def persist_and_compose(
             md, images = docx_extract.extract_with_images(src_path, input_dir)
         except ImportError:
             # original already written; _convert will keep it too
+            logger.exception("[input_pipeline] %s: image-aware docx extraction unavailable — "
+                             "falling back to text-only conversion", name)
             _convert(raw, name, extract_docx or docx_extract.extract_to_markdown)
             return
         # keep original alongside the extraction (caller records it as a blob)
@@ -154,11 +153,6 @@ def persist_and_compose(
             itf.write(interview_md.strip() + "\n")
         written.append("interview.md")
 
-    if genre_recipes_md and genre_recipes_md.strip():
-        os.makedirs(input_dir, exist_ok=True)
-        with open(os.path.join(input_dir, "genre-recipes.md"), "w") as gf:
-            gf.write(genre_recipes_md.strip() + "\n")
-        written.append("genre-recipes.md")
 
     if recipe_md and recipe_md.strip():
         os.makedirs(input_dir, exist_ok=True)

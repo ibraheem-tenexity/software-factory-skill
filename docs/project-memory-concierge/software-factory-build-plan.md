@@ -1,7 +1,7 @@
 # Software Factory — Build Plan (the Concierge + Project Memory milestone)
 
 **Date:** 2026-06-30 · **Owner:** Ibraheem · **Source of truth for status:** Linear project *Software Factory* (team SOF).
-**Grounds:** `docs/product-spec-software-factory.md`, `docs/ARCHITECTURE.md`, repo `main` @ `ded31ad`, and the design set (`project-memory-design.md`, `project-memory-stack-2026.md`, `project-memory-integration.md`, `concierge-conversation-store.md`).
+**Grounds:** `design/PRD.md` (the product-requirements authority, SOF-224 — the former `docs/product-spec-software-factory.md` was consolidated into it and deleted), `docs/ARCHITECTURE.md`, repo `main` @ `ded31ad`, and the design set (`project-memory-design.md`, `project-memory-stack-2026.md`, `project-memory-integration.md`, `concierge-conversation-store.md`).
 
 > **Status: fully executed — kept as a record of intent.** This is a point-in-time milestone plan;
 > its internal `T*.*` ids predate the Linear SOF-xx numbers now in the code. The phase structure,

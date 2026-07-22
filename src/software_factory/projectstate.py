@@ -117,7 +117,7 @@ class ProjectState:
     # real pipeline run from a project row seeded directly for a test/verify fixture, which never
     # goes through _launch_stage at all. See Console.auto_resume_dead_stage.
     launch_attempted: bool = False
-    runtime: str = "claude"  # agent runtime for this run: claude | opencode; pinned at promote_draft
+    runtime: str = "claude"  # agent runtime for this run: claude | opencode | codex; pinned at promote_draft
     # Operator-picked models, pinned at promote_draft (claude runtime; empty = stage defaults):
     # planning drives the S1/S2 orchestrators, impl drives S3.
     planning_model: str = ""
@@ -151,7 +151,8 @@ class ProjectState:
     owner: str = ""  # email of the creating user; members see only their own runs (admins see all)
     # SOF-3: the owner's GitHub handle — self-declared, unverified (GitHub's own collaborator-invite
     # accept, via the owner's real GitHub login, is the verification). Populated upstream of this
-    # ticket's scope; empty means "no username on file" (Stage 1 records a blocker, does not skip).
+    # ticket's scope; empty means no invitation requested yet. The user can provide it before
+    # provisioning or request access later from the project overview.
     # Whether the invite succeeded is NOT mirrored here — like demo-creds, it's a recorded
     # 'repo-shared' artifact (see console.repo_shared_with_owner), the single source of truth.
     owner_github_username: str = ""
@@ -163,7 +164,7 @@ class ProjectState:
     # whenever goal or scope changes via Console.set_draft_project.
     scope: list = field(default_factory=list)
     # CBT-9: the picked recipe (a `recipes` row id, or "" for none). When set, its body_md drives
-    # the concierge context + Stage-1 input IN PLACE OF the SOW/genre path (services/conversation.py,
+    # the concierge context + Stage-1 input as the sole external framing (services/conversation.py,
     # console.py::_provision_and_launch) and its repo_url seeds the build workspace (workspace_setup.py).
     recipe_id: str = ""
 

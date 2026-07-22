@@ -23,6 +23,7 @@ from .constants import (
     STAGE_MODEL as _STAGE_MODEL,
     OPENCODE_MODEL_IDS as _OPENCODE_MODEL_IDS,
     OPENCODE_DEFAULT_ALIAS as _OPENCODE_DEFAULT_ALIAS,
+    CODEX_MODEL as _CODEX_MODEL,
     PLANNING_MODELS, IMPL_MODELS,
     RUNNER_KEYS as _RUNNER_KEYS,
 )
@@ -107,7 +108,7 @@ class ProjectRequest:
     target: str = "railway"
     credentials: dict = field(default_factory=dict)
     context_files: list = field(default_factory=list)
-    runtime: str = ""  # claude | opencode; empty -> SF_RUNTIME env (default claude)
+    runtime: str = ""  # claude | opencode | codex; empty -> SF_RUNTIME env (default claude)
     planning_model: str = ""  # S1/S2 orchestrator model (claude runtime); empty -> stage default
     impl_model: str = ""      # S3 model (claude runtime); empty -> stage default
     model: str = ""           # opencode model alias: "kimi"|"glm"; empty -> _OPENCODE_DEFAULT_ALIAS
@@ -157,13 +158,8 @@ def make_prompt_stage1(req: ProjectRequest, project_id: str, projects_dir: str, 
     brief = (f"\n\nThe user was interviewed; the product brief follows (also at input/brief.md; "
              f"full transcript at input/interview.md). Treat it as authoritative project context:\n"
              f"{brief_block.strip()}") if brief_block.strip() else ""
-    if req.owner_github_username:
-        owner_access = f"  owner_github = {req.owner_github_username}  (invite as collaborator per SKILL.md Phase 2)\n"
-    else:
-        owner_access = "  owner_github = <none on file>  (record the no-owner blocker per SKILL.md Phase 2)\n"
     return (
         _orchestration_preamble("Stage 1 — Research", project_id, projects_dir, req.budget, runtime)
-        + owner_access
         + f"  app          = {req.description}{ctx}{brief}"
     )
 
@@ -1193,7 +1189,7 @@ class Console:
         # own BYOK creds above (`env` already wins on collision).
         env = {**tool_env_overrides(stage), **env}
         runtime = state.runtime or "claude"
-        # The stage RUNNER (`claude -p` / `opencode run`) is itself an LLM agent and needs its OWN
+        # The stage RUNNER (`claude -p` / `opencode run` / `codex exec`) is itself an LLM agent and needs its OWN
         # provider key to authenticate. stage_env_baseline scrubs the console's env down to a tiny
         # allowlist (so the BUILT APP can't inherit factory secrets) — which also strips the runner's
         # key, leaving Stage 1 unable to even start (claude -p dies at auth → no PRD → run parked at
@@ -1204,9 +1200,24 @@ class Console:
         # provider key in req.credentials → already in `env`), else the platform key from the console
         # env ("use ours"). Don't overwrite a BYOK key with the platform one. (Stage-2/3 retry
         # re-injection of a BYOK value — not in os.environ — is a tracked follow-up.)
-        _runner_key = "OPENROUTER_API_KEY" if runtime == "opencode" else "ANTHROPIC_API_KEY"
+        _runner_key = _RUNNER_KEYS.get(runtime)
+        if not _runner_key:
+            ProjectStore(paths["db"]).add_blocker(
+                f"Unsupported stage runtime '{runtime}' — choose Claude, OpenCode, or Codex.",
+                blocks="runtime",
+            )
+            logger.warning("[launch] %s stage %s refused — unsupported runtime=%s",
+                           project_id, stage, runtime)
+            return None
         if not env.get(_runner_key) and os.environ.get(_runner_key):
             env = {**env, _runner_key: os.environ[_runner_key]}
+        if not env.get(_runner_key):
+            ProjectStore(paths["db"]).add_blocker(
+                f"{_runner_key} is required for the {runtime} runtime. Attach a BYOK key or configure the platform key.",
+                blocks="runtime",
+            )
+            logger.warning("[launch] %s stage %s refused — %s is missing", project_id, stage, _runner_key)
+            return None
         # Project Memory MCP (SOF-41/T4.2): mint a fresh scope token for THIS project and point the
         # stage at the console's own memory endpoint. Per-run (unlike EXA_API_KEY, which is a
         # single factory-wide static key), so it's injected here rather than in
@@ -1271,7 +1282,7 @@ class Console:
         try:
             ws = prepare_workspace(
                 self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
-                recipe=recipe,
+                recipe=recipe, stage_env=env,
             )
         except RecipeSeedError as e:
             logger.warning("[launch] %s stage %s refused — recipe seed clone failed: %s",
@@ -1356,6 +1367,23 @@ class Console:
                     "--model", model,
                     "--",
                 ] + argv
+        elif runtime == "codex":
+            model = _CODEX_MODEL
+            argv = [
+                "codex", "exec",
+                "--model", model,
+                "--json",
+                "--ephemeral",
+                "--dangerously-bypass-approvals-and-sandbox",
+                prompt,
+            ]
+            # A stage must not inherit a developer machine's login, config, MCP list, or stored
+            # transcripts. CODEX_API_KEY is deliberately the only auth route for `codex exec`.
+            env = {
+                **env,
+                "CODEX_HOME": os.path.join(ws, ".codex"),
+                "PWD": ws,
+            }
         else:
             # Model precedence: the operator's per-project pick (most specific — pinned in state at
             # promote_draft, so retries keep it) > SF_MODEL env (deploy-wide knob) > stage defaults
@@ -1414,25 +1442,15 @@ class Console:
         # by the Concierge's finalize_product_brief tool — the single source, per the operator's
         # storage ruling) supersedes the raw composition as context.md.
         brief_block = self.product_brief(project_id) or ""
-        # SOF-96: selected scope genres' recipe bodies (SOF-108, sow rows with status='Template')
-        # reach Stage 1 as their own input file — until now genre recipes only fed the Concierge's
-        # onboarding chat context, never the product-synthesis phase itself.
-        # CBT-9: a picked recipe's body IS the Stage-1 baseline input (written as recipe.md) — it
-        # replaces the genre-recipes path entirely for this run (mirrors the concierge-context swap
-        # in services/conversation.py).
+        # A picked recipe's body IS the Stage-1 baseline input (written as recipe.md) — the only
+        # external framing; the retired genre-recipe path is gone (mirrors the
+        # concierge-context swap in services/conversation.py).
         recipe_id = self._load_state(project_id).recipe_id
         recipe_md = RecipeStore().body(recipe_id) if recipe_id else None
-        if recipe_md:
-            recipes_md = ""
-        else:
-            from .services.conversation import _genre_recipes
-            recipes = _genre_recipes(self._load_state(project_id).scope)
-            recipes_md = "\n\n".join(f"## {r['title']}\n\n{r['body']}" for r in recipes) if recipes else ""
         written = persist_and_compose(
             paths["input_dir"], req.description, req.context_files or [],
             extract=self._extract, interview_md=interview_md,
             product_brief_md=brief_block or None,
-            genre_recipes_md=recipes_md or None,
             recipe_md=recipe_md,
         )
         input_db = ProjectStore(paths["db"])
@@ -1504,7 +1522,7 @@ class Console:
     # ---- Durable drafts: an interview before a run exists -------------------------------
     def create_draft(self, owner: str = "", name: str = "", runtime: str = "",
                      planning_model: str = "", impl_model: str = "", model: str = "",
-                     budget: float | None = None) -> str:
+                     budget: float | None = None, github_username: str = "") -> str:
         """Mint a CANONICAL run-<8hex> id at the START of the onboarding interview and persist a
         draft ProjectState (phase='draft', held, NO artifact recorded → is_pipeline_project False, so the
         poller/ghost-resume guard ignore it until promotion). Using a canonical id up front means
@@ -1520,6 +1538,7 @@ class Console:
         state.skill_version = SKILL_VERSION
         state.name = name or ""
         state.owner = (owner or "").lower()
+        state.owner_github_username = (github_username or "").strip().lstrip("@")
         # Immutable creator stamp — set ONCE here (the earliest creation point); never mutated after.
         if not state.created_by:
             state.created_by = (owner or "").lower()
@@ -1600,17 +1619,25 @@ class Console:
         the intake form's three required fields (name+goal+budget), and a RESUMED draft must
         rehydrate it or the Continue gate can never be satisfied again after leaving the page."""
         state = self._load_state(project_id)
-        return {"name": state.name, "goal": state.goal or "", "scope": list(state.scope or []),
-                "description": state.description or "", "budget": state.budget_ceiling,
-                "recipe_id": state.recipe_id or ""}
+        return {
+            "name": state.name,
+            "goal": state.goal or "",
+            "scope": list(state.scope or []),
+            "description": state.description or "",
+            "budget": state.budget_ceiling,
+            "runtime": state.runtime or "claude",
+            "model": state.opencode_model or "kimi",
+            "recipe_id": state.recipe_id or "",
+            "github_username": state.owner_github_username or "",
+        }
 
     def set_draft_project(self, project_id: str, name: str | None = None,
                           goal: str | None = None, scope: list | None = None,
                           runtime: str | None = None, model: str | None = None,
-                          recipe_id: str | None = None) -> dict:
+                          recipe_id: str | None = None, github_username: str | None = None) -> dict:
         """Structured project setter for the Option C onboarding (draft phase). Writes the project
         name, the plain goal (state.goal), the scope-of-work backing, the build-engine runtime
-        (claude|opencode), and the picked recipe (CBT-9; caller has already validated it names a
+        (claude|opencode|codex), and the picked recipe (CBT-9; caller has already validated it names a
         published recipe) — then RECOMPOSES the canonical description = compose(goal, scope)
         server-side, so the form and the concierge agent never duplicate the format. Each field is
         optional; goal and scope recompose against each other's persisted value so independent
@@ -1625,6 +1652,8 @@ class Console:
             state.opencode_model = model if model in _OPENCODE_MODEL_IDS else ""
         if recipe_id is not None:
             state.recipe_id = recipe_id
+        if github_username is not None:
+            state.owner_github_username = github_username.strip().lstrip("@")
         if goal is not None:
             state.goal = goal
         if scope is not None:
@@ -1637,7 +1666,35 @@ class Console:
             state.description = _compose_description(eff_goal, eff_scope)
         state.save()
         return {"name": state.name, "goal": state.goal or "", "scope": list(state.scope or []),
-                "description": state.description or "", "recipe_id": state.recipe_id or ""}
+                "description": state.description or "", "recipe_id": state.recipe_id or "",
+                "github_username": state.owner_github_username or ""}
+
+    def request_repo_access(self, project_id: str, github_username: str) -> dict:
+        """Persist a GitHub handle and invite it now, or wait for provisioning to create the repo."""
+        from .db import request_repo_access
+        return request_repo_access(self._projects_dir, project_id, github_username)
+
+    def repo_access(self, project_id: str) -> dict:
+        state = self._load_state(project_id)
+        db = ProjectStore(self._paths(project_id)["db"])
+        username = (state.owner_github_username or "").strip()
+        repo_url = state.repo_url or ""
+        if any((a.get("kind") or "").lower() == "repo-shared" for a in db.artifacts()):
+            return {"status": "invited", "detail": f"GitHub invited @{username} to this repository.",
+                    "repo_url": repo_url, "github_username": username}
+        failure = next((b for b in reversed(db.blockers())
+                        if b.get("blocks") == "github-access" and not b.get("cleared")), None)
+        if failure:
+            return {"status": "failed", "detail": failure["what"].split(" failed: ", 1)[-1],
+                    "repo_url": repo_url, "github_username": username}
+        if not username:
+            return {"status": "not_requested", "detail": "Add your GitHub username to receive repository access.",
+                    "repo_url": repo_url, "github_username": ""}
+        if not repo_url:
+            return {"status": "waiting_for_repo", "detail": "The invitation will be sent when the repository is created.",
+                    "repo_url": "", "github_username": username}
+        return {"status": "ready", "detail": "Request the invitation to join this repository.",
+                "repo_url": repo_url, "github_username": username}
 
     def store_draft_creds(self, project_id: str, credentials: dict) -> dict:
         """Vault-store BYOK credentials against a draft and record the vault UUIDs in state.
@@ -2313,8 +2370,9 @@ class Console:
             "impl_model": state.impl_model,
             "opencode_model": state.opencode_model,
             "runtime": state.runtime or "claude",
-            "model": (state.opencode_model or "kimi") if (state.runtime or "claude") == "opencode"
-                     else (state.impl_model or state.planning_model or ""),
+            "model": ((state.opencode_model or "kimi") if (state.runtime or "claude") == "opencode"
+                      else (_CODEX_MODEL if (state.runtime or "claude") == "codex"
+                            else (state.impl_model or state.planning_model or ""))),
             "key_source": _key_source(state.runtime or "claude", state.creds_provided or []),
             "budget_ceiling": self._budget_ceiling(project_id),
             "paused_at_node": state.paused_at_node or "",
@@ -2785,6 +2843,7 @@ class Console:
         db = ProjectStore(paths["db"])
         state = self._load_state(project_id)
         orch_label = ("Kimi · software-factory" if state.runtime == "opencode"
+                      else "Codex · software-factory" if state.runtime == "codex"
                       else "Claude · software-factory")
         nodes = [{"data": {"id": "orchestrator", "label": orch_label,
                            "kind": "orchestrator", "status": self.current_phase(project_id)}}]
