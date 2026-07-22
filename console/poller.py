@@ -106,7 +106,7 @@ def _narrate(pid: str, key: str, text: str):
 
 def _narrate_project(pid: str, st: dict):
     console = state.console
-    links = console.project_links(pid)
+    links = console.records.project_links(pid)
     if links.get("repo"):
         _narrate(pid, "repo", f"📦 Source repo: {links['repo']}")
     if st.get("stage1_done"):

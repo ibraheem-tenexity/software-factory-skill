@@ -27,6 +27,7 @@ class ProjectMaterials:
         *,
         blobs: Any,
         console: Any,
+        records: Any,
         users: Any,
         document_kind: Callable[[str], str],
         push_ingest_progress: Callable[..., None],
@@ -34,6 +35,7 @@ class ProjectMaterials:
         self._projects_dir = projects_dir
         self._blobs = blobs
         self._console = console
+        self._records = records
         self._users = users
         self._document_kind = document_kind
         self._push_ingest_progress = push_ingest_progress
@@ -41,11 +43,11 @@ class ProjectMaterials:
     def documents(self, project_id: str) -> dict:
         """Return project uploads, produced artifacts, and the owner's organization materials."""
         doc_summaries = MemoryStore().list_doc_summaries("project", project_id)
-        org = self._users.org_for_user(self._console.project_owner(project_id))
+        org = self._users.org_for_user(self._records.project_owner(project_id))
         org_docs = self._blobs.list_org_docs(org["id"]) if org else []
         return project_view.documents(
             self._blobs.list_for("project", project_id),
-            self._console.artifacts(project_id),
+            self._records.artifacts(project_id),
             doc_summaries,
             org_docs,
         )
@@ -151,7 +153,7 @@ class ProjectMaterials:
         if not blob:
             return "not_found", None
         if scope == "org":
-            org = self._users.org_for_user(self._console.project_owner(project_id))
+            org = self._users.org_for_user(self._records.project_owner(project_id))
             if not org:
                 return "no_org", None
             self._blobs.set_scope(material_id, "org", org["id"])

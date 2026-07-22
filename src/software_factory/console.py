@@ -33,6 +33,7 @@ from .runtime_agents import AgentRegistry
 from .input_pipeline import persist_and_compose
 from .pdf_extract import extract_to_markdown
 from .projects.intake import ProjectIntake, compose_description as _compose_description, project_paths
+from .projects.records import ProjectRecords
 from .recipes.store import RecipeStore
 from . import deps as deps_mod
 from .mcp_health import check_mcp
@@ -252,6 +253,7 @@ class Console:
             extract=extract,
             skill_version=SKILL_VERSION,
         )
+        self._records = ProjectRecords(projects_dir)
         self._procs: dict = {}   # project_id -> last launched stage process (SPEC §1 handoff guard)
         # project_id -> ((mtime_ns, size), cost): the full-log cost reparse on EVERY status/poll
         # was the console's dominant CPU+IO — two pollers × every run × multi-MB stream logs.
@@ -265,6 +267,11 @@ class Console:
     def intake(self) -> ProjectIntake:
         """Project onboarding owner composed with this execution facade."""
         return self._intake
+
+    @property
+    def records(self) -> ProjectRecords:
+        """Project read-model owner composed with this execution facade."""
+        return self._records
 
     # ---- SPEC §1: stage process lifecycle ------------------------------------------------
     def _stage_process_alive(self, project_id: str) -> bool:
@@ -1628,45 +1635,25 @@ class Console:
 
     def deployments(self, project_id: str) -> dict:
         """Per-deliverable deployments (a run ships 1..N apps; no single run-level deploy_url)."""
-        rows = ProjectStore(self._paths(project_id)["db"]).deployments()
-        return {"deployments": rows, "apps": sorted({r["app"] for r in rows if r.get("app")})}
+        return self._records.deployments(project_id)
 
     def tickets(self, project_id: str) -> dict:
         """Build-ticket projection for the kanban view. Empty before Stage 2 persists tickets —
         the frontend renders an empty-state, not an error (TicketStore CREATE-IF-NOT-EXISTS)."""
-        store = TicketStore(self._paths(project_id)["tickets_db"])
-        items = [
-            {"id": t.id, "title": t.title, "wave": t.wave, "status": t.status,
-             "agent": t.agent, "provenance": t.provenance, "provenance_type": t.provenance_type,
-             "diff_lines": t.diff_lines, "acceptance": t.acceptance, "dod": t.dod,
-             "app": getattr(t, "app", None), "description": getattr(t, "description", ""),
-             "goal": getattr(t, "goal", ""), "design_refs": getattr(t, "design_refs", None),
-             "dependencies": getattr(t, "dependencies", None),
-             "scope_genre": getattr(t, "scope_genre", None),
-             "implementation_notes": getattr(t, "implementation_notes", ""),
-             "decision_log": getattr(t, "decision_log", None)}
-            for t in store.all_tickets()
-        ]
-        waves = sorted({t["wave"] for t in items})
-        return {"tickets": items, "waves": waves}
+        return self._records.tickets(project_id)
 
     def agents(self, project_id: str) -> list[dict]:
         """Agents on a run (Project View §2.5) — a flat projection of the agent registry."""
-        regs = AgentRegistry(self._paths(project_id)["agents_db"]).agents_for(project_id)
-        return [{"agent_id": a.agent_id, "role": a.role, "model": a.model, "phase": a.phase,
-                 "status": a.status, "outcome": a.outcome, "ticket_id": a.ticket_id,
-                 "cost_usd": a.cost_usd}
-                for a in regs]
+        return self._records.agents(project_id)
 
     def artifacts(self, project_id: str) -> list[dict]:
         """Factory-produced artifacts for a run (Project View Documents tab / produced docs)."""
-        return ProjectStore(self._paths(project_id)["db"]).artifacts()
+        return self._records.artifacts(project_id)
 
     def project_created(self, project_id: str) -> float | None:
         """Best-available creation time: the earliest recorded phase timestamp (projectstate carries no
         created column). None if nothing has been recorded yet."""
-        ts = [p["ts"] for p in ProjectStore(self._paths(project_id)["db"]).phases() if p.get("ts")]
-        return min(ts) if ts else None
+        return self._records.project_created(project_id)
 
     def is_pipeline_project(self, project_id: str) -> bool:
         """True only if this run was actually started by THIS pipeline (promote_draft's
@@ -1872,20 +1859,7 @@ class Console:
     def project_links(self, project_id: str) -> dict:
         """SPEC §6 delivery: the run's outward links from the artifacts table —
         {'repo': <github url>|None, 'live': <deploy url>|None}."""
-        db = ProjectStore(self._paths(project_id)["db"])
-        repo = live = None
-        for a in db.artifacts():
-            path = a.get("path") or ""
-            if not path.startswith("http"):
-                continue
-            title = (a.get("title") or "").lower()
-            kind = (a.get("kind") or "").lower()
-            if repo is None and ("repo" in title or kind == "repo"):
-                repo = path
-            elif live is None and ("live" in title or kind == "deploy"):
-                live = path
-        state = self._load_state(project_id)
-        return {"repo": repo or state.repo_url, "live": live or state.deploy_url}
+        return self._records.project_links(project_id)
 
     def demo_credentials(self, project_id: str) -> str | None:
         """SPEC §6 delivery: the seeded demo login (recorded by Stage 3 as a 'demo-creds'
@@ -1903,8 +1877,7 @@ class Console:
         """SOF-3: True once Stage 1 recorded a 'repo-shared' artifact — the owner successfully
         received a real GitHub collaborator invite. This is the durable signal the repo-reaper
         checks so it never deletes a repo the owner has actual access to."""
-        db = ProjectStore(self._paths(project_id)["db"])
-        return any((a.get("kind") or "").lower() == "repo-shared" for a in db.artifacts())
+        return self._records.repo_shared_with_owner(project_id)
 
     def stage2_artifacts(self, project_id: str) -> dict:
         """Return Stage 2 artifact paths + parsed required tokens + default dispositions."""
@@ -2175,7 +2148,7 @@ class Console:
 
     def project_owner(self, project_id: str) -> str:
         """The email that owns this run ('' = legacy/unowned). The per-route visibility gate."""
-        return (self._load_state(project_id).owner or "").lower()
+        return self._records.project_owner(project_id)
 
     def assign_unowned(self, owner_email: str) -> int:
         """One-time-ish backfill: give every ownerless run an owner (the pre-multitenancy runs).
@@ -2551,22 +2524,7 @@ class Console:
         """Recent run activity, projected from project store for the live activity feed. Shaped like the
         old event records ({type, payload, ts}) so the frontend renders unchanged — but the DATASTORE
         is the source of truth; there is no event log."""
-        db = ProjectStore(self._paths(project_id)["db"])
-        items = []
-        for p in db.phases():
-            items.append({"ts": p["ts"], "type": "phase",
-                          "payload": {"name": p["name"], "status": p["status"]}})
-        for a in db.artifacts():
-            items.append({"ts": a["ts"], "type": "artifact",
-                          "payload": {"title": a["title"], "path": a["path"]}})
-        for b in db.blockers():
-            if not b["cleared"]:
-                items.append({"ts": b["ts"], "type": "blocker", "payload": {"what": b["what"]}})
-        for v in db.verifications():
-            if v["passed"]:
-                items.append({"ts": v["ts"], "type": "done", "payload": {"url": v["url"]}})
-        items.sort(key=lambda e: e["ts"])
-        return items
+        return self._records.events(project_id)
 
     def _artifact_content(self, project_id: str, path: str) -> str | None:
         """Read an artifact's full text content: the DB-inlined `content` column first (SOF-138 —

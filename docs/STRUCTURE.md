@@ -106,6 +106,7 @@ The following are refactor targets, not permission to change behavior:
 | `software_factory.console.Console` | Retain as a temporary compatibility facade while moving project lifecycle/drafts/queries, stage execution, and cleanup into their owning contexts. |
 | `projects/intake.py` | Own draft creation, intake updates, material attachment, product-brief reads, BYOK credential references, repository-access projection, and project path composition. Production callers use the explicit `Console.intake` owner until application composition moves out of `Console`. |
 | `projects/materials.py` | Own project-material persistence, document projection, ingestion kickoff/regeneration, and deletion across storage, blobs, memory, input files, and artifact records. The router retains wire validation and HTTP error translation only. |
+| `projects/records.py` | Own coherent read-only projections over project state, tickets, agents, artifacts, deployments, and activity. Production callers use the explicit `Console.records` owner while execution compatibility methods remain. |
 | `console/routers/projects.py` | Extract project/material workflows before dividing the router into capability routes. |
 | `console/poller.py` | Move run supervision, recovery, reapers, health, and boot coordination into `workers/` and application services; leave lifespan wiring in `api/`. |
 | `console/chat_dock.py`, `console/chat_persistence.py`, `services/conversation.py` | Consolidate shared turn preparation and persistence. Keep wire encoding at the API edge. |

@@ -412,7 +412,7 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 3. The retired modules/routes/table no longer have executable references outside preserved historical planning documents.
 
 # Backend structure refactor: project intake (2026-07-22)
-1. `projects/intake.py` owns durable draft creation/updates, attachments, product-brief reads, BYOK references, repository access, and project paths.
-2. Production callers use `Console.intake`; `Console` retains execution and lifecycle policy only.
-3. `projects/materials.py` owns upload, document projection, ingestion, and deletion; the router only owns HTTP transport.
-4. `docs/ARCHITECTURE.md` and `docs/STRUCTURE.md` record the boundary and its temporary composition point.
+1. `projects/{intake,materials,records}.py` own onboarding, materials, and durable read projections; `Console` retains execution and lifecycle policy.
+2. Production callers use `Console.intake` and `Console.records`; the router only owns HTTP transport and error mapping.
+3. `projects/materials.py` owns upload, document projection, ingestion, scope changes, and deletion across storage, blobs, memory, input files, and artifacts.
+4. `docs/ARCHITECTURE.md` and `docs/STRUCTURE.md` record each boundary and temporary composition point.

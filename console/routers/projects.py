@@ -26,6 +26,7 @@ def _materials() -> ProjectMaterials:
         state.PROJECTS_DIR,
         blobs=state.blobs,
         console=state.console,
+        records=state.console.records,
         users=state.users,
         document_kind=state._doc_kind,
         push_ingest_progress=state._push_ingest_sse,
@@ -92,7 +93,7 @@ def project_graph(pid: str, v: tuple = Depends(authorize_project)):
 @router.get("/api/projects/{pid}/tickets")
 def project_tickets(pid: str, v: tuple = Depends(authorize_project)):
     """Build-ticket projection for the kanban view (empty before Stage 2)."""
-    return state.console.tickets(pid)
+    return state.console.records.tickets(pid)
 
 
 @router.get("/api/projects/{pid}/deployments")
@@ -100,7 +101,7 @@ def project_deployments(pid: str, v: tuple = Depends(authorize_project)):
     """Per-deliverable deploy state (a run ships 1..N apps; no scalar run-level deploy_url). SOF-216:
     the route delegating to Console.deployments was dropped in the app.py→routers split, leaving the
     method orphaned; this restores it (thin transport, same authorize_project guard as the siblings)."""
-    return state.console.deployments(pid)
+    return state.console.records.deployments(pid)
 
 
 @router.get("/api/projects/{pid}/brief")
@@ -109,7 +110,8 @@ def project_brief(pid: str, v: tuple = Depends(authorize_project)):
     kind='product_brief' artifact) plus its durable-storage URL (SOF-137) — and reference-backed
     assumptions from ready doc_summary rows."""
     from software_factory.memory.store import MemoryStore
-    brief_rows = [a for a in state.console.artifacts(pid) if (a.get("kind") or "") == "product_brief"]
+    brief_rows = [a for a in state.console.records.artifacts(pid)
+                  if (a.get("kind") or "") == "product_brief"]
     return {
         "brief_markdown": state.console.intake.product_brief(pid),
         "brief_url": brief_rows[-1].get("path") if brief_rows else None,
@@ -131,7 +133,7 @@ def update_project_brief(pid: str, body: dict, v: tuple = Depends(authorize_proj
 
 @router.get("/api/projects/{pid}/events")
 def project_events(pid: str, v: tuple = Depends(authorize_project)):
-    return {"events": state.console.events(pid)}
+    return {"events": state.console.records.events(pid)}
 
 
 @router.get("/api/artifacts/{artifact_id}")
@@ -192,20 +194,20 @@ def project_deps(pid: str, v: tuple = Depends(authorize_project)):
 @router.get("/api/projects/{pid}/overview")
 def project_overview(pid: str, v: tuple = Depends(authorize_project)):
     status = state.console.status(pid)
-    tickets = state.console.tickets(pid)["tickets"]
-    deployments = state.console.deployments(pid)["deployments"]
+    tickets = state.console.records.tickets(pid)["tickets"]
+    deployments = state.console.records.deployments(pid)["deployments"]
     owner = status.get("owner") or ""
     org = state.users.org_for_user(owner) if owner else None
     has_verification = bool(status.get("done")) or any(d.get("verified") for d in deployments)
     in_build = (status.get("stage") or 0) >= 2 and not status.get("done")
-    docs = project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid))
+    docs = project_view.documents(state.blobs.list_for("project", pid), state.console.records.artifacts(pid))
     return {
         "brief": project_view.brief_block(state.console.intake.draft_project(pid), status,
-                                          state.console.project_created(pid)),
+                                          state.console.records.project_created(pid)),
         "build": project_view.build_status(status, tickets),
         "services": project_view.services_at_work(org, deployments, status.get("impl_model") or "",
                                                   has_verification, in_build),
-        "agents": project_view.agents_projection(state.console.agents(pid), tickets),
+        "agents": project_view.agents_projection(state.console.records.agents(pid), tickets),
         "org": ({"name": org["name"], "industry": org.get("industry"),
                  "connected_systems": org.get("connected_systems", [])} if org else None),
         "materials_count": len(docs["uploaded"]),
@@ -223,7 +225,7 @@ def request_project_repo_access(pid: str, body: RepoAccessIn, v: tuple = Depends
     username = (body.github_username or "").strip().lstrip("@")
     if not username:
         raise HTTPException(status_code=400, detail="github_username is required")
-    owner = state.console.project_owner(pid)
+    owner = state.console.records.project_owner(pid)
     if v[0] and v[0].lower() != owner:
         raise HTTPException(status_code=403, detail="only the project owner can request repository access")
     return state.console.intake.request_repo_access(pid, username)
