@@ -154,15 +154,40 @@ export function InterviewView({ draftId, projectName, onBack, onHandoff, onPromo
 
       <div style={{ flexShrink: 0, borderTop: `1px solid ${T.borderSubtle}`, background: T.raised }}>
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "12px 24px", display: "flex", flexDirection: "column", gap: 8 }}>
-          <Composer placeholder="Answer, ask, or add anything…" value={draft} onChange={setDraft} onSend={() => send(draft)} loading={thinking} />
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ font: `400 12px/1.3 ${T.sans}`, color: error ? T.danger : T.tertiary }}>
-              {error || "Hand off whenever you're ready — the Concierge will tell you when it has enough."}
-            </span>
-            <Btn variant="primary" size="sm" onClick={onHandoff} disabled={submitting || !started}>
-              {submitting ? "Handing off…" : "Hand off to factory"} <Icon name="arrowRight" size={13} color="#fff" />
-            </Btn>
-          </div>
+          {submitting ? (
+            // SOF-193: hand-off is the single most consequential, one-way moment of the interview.
+            // Once it's underway, replace the composer + Send row entirely with an active, on-brand
+            // confirmation — so the UI reads "you've committed, the factory has it" instead of a
+            // greyed/stuck-looking pill next to a composer still inviting more input. The spinner
+            // (never a disabled control) is the unambiguous in-progress signal; the brand-soft card
+            // with a brand left-accent matches the Concierge/agent surface in the design system.
+            <div role="status" aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 12,
+                 padding: "13px 15px", borderRadius: T.rLg, background: T.brandSoft,
+                 border: `1px solid ${T.brand}`, borderLeft: `3px solid ${T.brand}` }}>
+              <span className="sf-spin" style={{ display: "inline-flex", flexShrink: 0 }}>
+                <Icon name="refresh" size={16} color={T.brand} />
+              </span>
+              <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+                <span style={{ font: `600 13px/1.2 ${T.sans}`, color: T.brandDeep }}>Handing off to the factory…</span>
+                <span style={{ font: `400 12px/1.4 ${T.sans}`, color: T.secondary }}>
+                  Your brief is locked in — the factory is taking it from here. Nothing more to do.
+                </span>
+              </span>
+              <Icon name="arrowRight" size={16} color={T.brand} />
+            </div>
+          ) : (
+            <>
+              <Composer placeholder="Answer, ask, or add anything…" value={draft} onChange={setDraft} onSend={() => send(draft)} loading={thinking} />
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ font: `400 12px/1.3 ${T.sans}`, color: error ? T.danger : T.tertiary }}>
+                  {error || "Hand off whenever you're ready — the Concierge will tell you when it has enough."}
+                </span>
+                <Btn variant="primary" size="sm" onClick={onHandoff} disabled={!started}>
+                  Hand off to factory <Icon name="arrowRight" size={13} color="#fff" />
+                </Btn>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
