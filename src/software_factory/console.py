@@ -32,6 +32,7 @@ from .project_view import INPUT_ONLY_KINDS
 from .runtime_agents import AgentRegistry
 from .input_pipeline import persist_and_compose
 from .pdf_extract import extract_to_markdown
+from .projects.intake import ProjectIntake, compose_description as _compose_description, project_paths
 from .recipes.store import RecipeStore
 from . import deps as deps_mod
 from .mcp_health import check_mcp
@@ -84,22 +85,6 @@ def _key_source(runtime: str, creds_provided: list) -> str:
     return "BYOK" if runner_key in (creds_provided or []) else "TENEXITY"
 
 
-def _compose_description(goal: str, scope=None) -> str:
-    """The CANONICAL project description = goal prose + an appended scope-of-work line.
-
-    Single source of truth for the Option C onboarding format (the frontend used to do this as
-    composeDescription; it lives server-side so the form and the concierge agent produce identical
-    strings). Scope is a list of work-area labels (e.g. ["Quoting / RFQ", "Pricing & approvals"]).
-    Empty scope → just the goal; empty goal + scope → just the scope line.
-    """
-    goal = (goal or "").strip()
-    items = [s.strip() for s in (scope or []) if s and s.strip()]
-    if not items:
-        return goal
-    line = "Scope of work: " + ", ".join(items) + "."
-    return f"{goal}\n\n{line}" if goal else line
-
-
 @dataclass
 class ProjectRequest:
     description: str
@@ -115,21 +100,6 @@ class ProjectRequest:
     name: str = ""            # operator-chosen project name (display label)
     owner: str = ""           # email of the creating user (multi-tenant: members see only their own)
     owner_github_username: str = ""  # SOF-3: owner's GitHub handle, if on file — invites them onto the repo
-
-
-def project_paths(projects_dir: str, project_id: str) -> dict:
-    base = os.path.join(projects_dir, project_id)
-    # The flat Postgres tables are the source of truth: projectstate + tickets + agents + the
-    # canvas-projected tables (phases/artifacts/blockers/gates/verifications), all keyed by project_id.
-    db = base
-    return {
-        "base": base,
-        "state_dir": base,
-        "db": db,
-        "agents_db": db,
-        "tickets_db": db,
-        "input_dir": os.path.join(base, "input"),
-    }
 
 
 def _orchestration_preamble(stage_title: str, project_id: str, projects_dir: str, budget: float,
@@ -276,6 +246,12 @@ class Console:
         self._launch = launch
         self._new_id = new_id
         self._extract = extract
+        self._intake = ProjectIntake(
+            projects_dir,
+            new_id=new_id,
+            extract=extract,
+            skill_version=SKILL_VERSION,
+        )
         self._procs: dict = {}   # project_id -> last launched stage process (SPEC §1 handoff guard)
         # project_id -> ((mtime_ns, size), cost): the full-log cost reparse on EVERY status/poll
         # was the console's dominant CPU+IO — two pollers × every run × multi-MB stream logs.
@@ -1523,206 +1499,44 @@ class Console:
     def create_draft(self, owner: str = "", name: str = "", runtime: str = "",
                      planning_model: str = "", impl_model: str = "", model: str = "",
                      budget: float | None = None, github_username: str = "") -> str:
-        """Mint a CANONICAL run-<8hex> id at the START of the onboarding interview and persist a
-        draft ProjectState (phase='draft', held, NO artifact recorded → is_pipeline_project False, so the
-        poller/ghost-resume guard ignore it until promotion). Using a canonical id up front means
-        the `db` CLI + sf_runs registry guards are satisfied the moment Stage 1 launches."""
-        project_id = self._new_id()
-        paths = self._paths(project_id)
-        os.makedirs(paths["base"], exist_ok=True)
-        ProjectStore(paths["db"]).set_phase("draft", "active")
-        state = self._load_state(project_id)
-        state.phase = "draft"
-        state.held = True
-        state.skill = "software-factory"
-        state.skill_version = SKILL_VERSION
-        state.name = name or ""
-        state.owner = (owner or "").lower()
-        state.owner_github_username = (github_username or "").strip().lstrip("@")
-        # Immutable creator stamp — set ONCE here (the earliest creation point); never mutated after.
-        if not state.created_by:
-            state.created_by = (owner or "").lower()
-            state.created_at = time.time()
-        state.runtime = runtime or os.environ.get("SF_RUNTIME", "claude")
-        state.planning_model = planning_model if planning_model in PLANNING_MODELS else ""
-        state.impl_model = impl_model if impl_model in IMPL_MODELS else ""
-        state.opencode_model = model if model in _OPENCODE_MODEL_IDS else ""
-        if budget is not None and float(budget) > 0:
-            state.budget_ceiling = float(budget)
-        state.save()
-        return project_id
+        """Compatibility entry point for the project-intake owner."""
+        return self._intake.create_draft(
+            owner, name, runtime, planning_model, impl_model, model, budget, github_username,
+        )
 
     def is_draft(self, project_id: str) -> bool:
-        return self._load_state(project_id).phase == "draft"
+        return self._intake.is_draft(project_id)
 
     def product_brief(self, project_id: str) -> str | None:
-        """The concierge-finalized product brief (markdown), read from the NEWEST artifact row
-        with kind='product_brief' (recorded by the concierge's finalize_product_brief tool, which
-        writes the MD to durable storage and records its URL as `path`, SOF-137). A legacy row
-        with inline `content` (PR #277, pre-SOF-137) still reads back directly. None = no brief
-        has been finalized for this project."""
-        from . import storage
-        paths = self._paths(project_id)
-        rows = [a for a in ProjectStore(paths["db"]).artifacts()
-                if (a.get("kind") or "") == "product_brief"]
-        if not rows:
-            return None
-        row = rows[-1]  # artifacts() is ordered by insert id → last matching row is the newest
-        content = row.get("content")
-        if content:
-            return content
-        url = row.get("path") or ""
-        if url:
-            try:
-                return storage.get_by_url(url).decode()
-            except OSError:
-                return None
-        return None
+        return self._intake.product_brief(project_id)
 
     def attach_to_draft(self, project_id: str, files: list) -> list[str]:
-        """Persist + extract files attached during the interview into the draft's input/ (PDF/DOCX
-        → Markdown[+images], wireframes survive). Records .md extractions as context artifacts;
-        original PDF/DOCX binaries are kept on disk for the caller to push to blob storage.
-        The draft stays invisible to the poller (is_pipeline_project excludes drafts).
-        Returns paths written (includes original binaries for PDF/DOCX so callers can blob-record).
-
-        SOF-56: `tolerate_extract_failures=True` — a text-free/malformed attachment here must not
-        500 the whole request (same failure-isolation principle SOF-32 applied to memory
-        ingestion); unlike `_provision_and_launch`'s Stage-1 input, a mid-interview attachment
-        failing to convert to Markdown doesn't mean the request itself failed — the original
-        still gets blob-recorded and separately ingested (memory/ingest.py has its own graceful
-        parse-failure handling)."""
-        if not files:
-            return []
-        paths = self._paths(project_id)
-        os.makedirs(paths["input_dir"], exist_ok=True)
-        written = persist_and_compose(paths["input_dir"], "", files, extract=self._extract,
-                                      tolerate_extract_failures=True)
-        db = ProjectStore(paths["db"])
-        for name in written:
-            # raw PDF/DOCX originals go to blob storage (handled by the router, not here);
-            # .md extractions + other file types (images, txt, …) become context artifacts;
-            # context.md is skipped (no description in attach calls)
-            if name == "context.md":
-                continue
-            nl = name.lower()
-            if nl.endswith(".pdf") or nl.endswith(".docx"):
-                continue  # original binary — caller blob-records it
-            db.record_artifact("input", "input/" + name, kind="context")
-        return [w for w in written if w != "context.md"]
+        return self._intake.attach_to_draft(project_id, files)
 
     def draft_project(self, project_id: str) -> dict:
-        """Read-only project projection of a draft (name + goal + scope + budget + composed
-        description) — the counterpart of set_draft_project, for the concierge's get_intake_state.
-
-        SOF-137: budget_ceiling is included here — since scope became optional, budget is one of
-        the intake form's three required fields (name+goal+budget), and a RESUMED draft must
-        rehydrate it or the Continue gate can never be satisfied again after leaving the page."""
-        state = self._load_state(project_id)
-        return {
-            "name": state.name,
-            "goal": state.goal or "",
-            "scope": list(state.scope or []),
-            "description": state.description or "",
-            "budget": state.budget_ceiling,
-            "runtime": state.runtime or "claude",
-            "model": state.opencode_model or "kimi",
-            "recipe_id": state.recipe_id or "",
-            "github_username": state.owner_github_username or "",
-        }
+        return self._intake.draft_project(project_id)
 
     def set_draft_project(self, project_id: str, name: str | None = None,
                           goal: str | None = None, scope: list | None = None,
                           runtime: str | None = None, model: str | None = None,
                           recipe_id: str | None = None, github_username: str | None = None) -> dict:
-        """Structured project setter for the Option C onboarding (draft phase). Writes the project
-        name, the plain goal (state.goal), the scope-of-work backing, the build-engine runtime
-        (claude|opencode|codex), and the picked recipe (CBT-9; caller has already validated it names a
-        published recipe) — then RECOMPOSES the canonical description = compose(goal, scope)
-        server-side, so the form and the concierge agent never duplicate the format. Each field is
-        optional; goal and scope recompose against each other's persisted value so independent
-        calls stay idempotent.
-        Returns {name, goal, scope, description}."""
-        state = self._load_state(project_id)
-        if name is not None:
-            state.name = name
-        if runtime is not None:
-            state.runtime = runtime
-        if model is not None:
-            state.opencode_model = model if model in _OPENCODE_MODEL_IDS else ""
-        if recipe_id is not None:
-            state.recipe_id = recipe_id
-        if github_username is not None:
-            state.owner_github_username = github_username.strip().lstrip("@")
-        if goal is not None:
-            state.goal = goal
-        if scope is not None:
-            state.scope = list(scope)
-        # Recompose only when there's something to compose from (avoid clobbering a hand-set
-        # description with an empty string before any project answer exists).
-        eff_goal = state.goal or ""
-        eff_scope = state.scope or []
-        if eff_goal or eff_scope:
-            state.description = _compose_description(eff_goal, eff_scope)
-        state.save()
-        return {"name": state.name, "goal": state.goal or "", "scope": list(state.scope or []),
-                "description": state.description or "", "recipe_id": state.recipe_id or "",
-                "github_username": state.owner_github_username or ""}
+        return self._intake.set_draft_project(
+            project_id, name, goal, scope, runtime, model, recipe_id, github_username,
+        )
 
     def request_repo_access(self, project_id: str, github_username: str) -> dict:
         """Persist a GitHub handle and invite it now, or wait for provisioning to create the repo."""
-        from .db import request_repo_access
-        return request_repo_access(self._projects_dir, project_id, github_username)
+        return self._intake.request_repo_access(project_id, github_username)
 
     def repo_access(self, project_id: str) -> dict:
-        state = self._load_state(project_id)
-        db = ProjectStore(self._paths(project_id)["db"])
-        username = (state.owner_github_username or "").strip()
-        repo_url = state.repo_url or ""
-        if any((a.get("kind") or "").lower() == "repo-shared" for a in db.artifacts()):
-            return {"status": "invited", "detail": f"GitHub invited @{username} to this repository.",
-                    "repo_url": repo_url, "github_username": username}
-        failure = next((b for b in reversed(db.blockers())
-                        if b.get("blocks") == "github-access" and not b.get("cleared")), None)
-        if failure:
-            return {"status": "failed", "detail": failure["what"].split(" failed: ", 1)[-1],
-                    "repo_url": repo_url, "github_username": username}
-        if not username:
-            return {"status": "not_requested", "detail": "Add your GitHub username to receive repository access.",
-                    "repo_url": repo_url, "github_username": ""}
-        if not repo_url:
-            return {"status": "waiting_for_repo", "detail": "The invitation will be sent when the repository is created.",
-                    "repo_url": "", "github_username": username}
-        return {"status": "ready", "detail": "Request the invitation to join this repository.",
-                "repo_url": repo_url, "github_username": username}
+        return self._intake.repo_access(project_id)
 
     def store_draft_creds(self, project_id: str, credentials: dict) -> dict:
         """Vault-store BYOK credentials against a draft and record the vault UUIDs in state.
 
         Called by POST /api/projects/{pid}/creds during onboarding. Only names are persisted in
         state; plaintext values never touch the DB. Returns {"creds_provided": [...names...]}."""
-        state = self._load_state(project_id)
-        existing = dict(getattr(state, "creds_vault_ids", {}) or {})
-        new_ids = {}
-        for key_name, value in (credentials or {}).items():
-            if not value:
-                continue
-            try:
-                uid = _vault.vault_store(f"byok-{project_id}-{key_name}", value)
-                if uid:
-                    new_ids[key_name] = uid
-            except Exception:
-                logger.warning(
-                    "[vault] store failed for %s key %s; recording name only",
-                    project_id,
-                    key_name,
-                    exc_info=True,
-                )
-        merged = {**existing, **new_ids}
-        state.creds_vault_ids = merged
-        state.creds_provided = sorted({*merged, *(k for k in credentials if credentials[k])})
-        state.save()
-        return {"creds_provided": state.creds_provided}
+        return self._intake.store_draft_creds(project_id, credentials)
 
     def promote_draft(self, project_id: str, description: str = "",
                       interview_md: str | None = None, target: str = "railway") -> str:

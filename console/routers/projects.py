@@ -2,30 +2,34 @@
 run-scoped actions, and the Option C draft write-through + handoff."""
 import asyncio
 import base64
-import mimetypes
-import os
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 
-from software_factory import storage, project_view
-from software_factory.console import project_paths
-from software_factory.db import ProjectStore, artifact_by_id
+from software_factory import project_view
+from software_factory.projects.materials import ProjectMaterials
+from software_factory.db import artifact_by_id
 from software_factory.deps import extract_env_creds
-from software_factory.input_pipeline import make_prompt
-from software_factory.memory.ingest import maybe_ingest_async
 
 import console.state as state
-from software_factory.log import get_logger
 from console.deps import require_authed, authorize_project, _can_see, project_visibility
 
-logger = get_logger(__name__)
 from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, MaintenanceToggleIn,
                              OrgDocIn, DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
                              RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, RepoAccessIn)
 
 router = APIRouter()
+
+
+def _materials() -> ProjectMaterials:
+    return ProjectMaterials(
+        state.PROJECTS_DIR,
+        blobs=state.blobs,
+        console=state.console,
+        users=state.users,
+        document_kind=state._doc_kind,
+        push_ingest_progress=state._push_ingest_sse,
+    )
 
 
 # ── Scope genres (SOF-108): the intake chips, DB-backed ──────────────────────────────────────
@@ -223,17 +227,7 @@ def request_project_repo_access(pid: str, body: RepoAccessIn, v: tuple = Depends
 
 
 def _project_documents(pid: str) -> dict:
-    """Documents tab payload, enriched with each doc's AI summary (SOF-36) when memory has one —
-    `list_doc_summaries` returns {} if nothing's been ingested yet (or ingestion is still running),
-    so this degrades gracefully."""
-    from software_factory.memory.store import MemoryStore
-    doc_summaries = MemoryStore().list_doc_summaries("project", pid)
-    # Org knowledge base for the "From your organization" group (design #32 / PRD §2.5b) — degrades
-    # to [] when the owner has no org on file, so the tab still renders its other two groups.
-    org = state.users.org_for_user(state.console.project_owner(pid))
-    org_docs = state.blobs.list_org_docs(org["id"]) if org else []
-    return project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid),
-                                  doc_summaries, org_docs)
+    return _materials().documents(pid)
 
 
 @router.get("/api/projects/{pid}/documents")
@@ -251,67 +245,16 @@ def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authori
         raw = base64.b64decode(body.data_b64 or "", validate=True)
     except Exception:
         raise HTTPException(status_code=400, detail="data_b64 must be valid base64")
-    key = f"materials/{uuid.uuid4().hex}-{os.path.basename(body.name)}"
-    storage.put(pid, key, raw)
-    blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=body.name, tag=body.tag,
-                 kind=state._doc_kind(body.name), content_type=body.content_type,
-                 size_bytes=len(raw), sha256=storage.sha256(raw))
-    logger.info("[ingest] %s: material uploaded — blob %s (%s, %s bytes), ingestion queued",
-                pid, blob_id, body.name, len(raw))
-    maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
-    return _project_documents(pid)
+    return _materials().upload(pid, body.name, raw, body.tag, body.content_type)
 
 
 @router.delete("/api/projects/{pid}/materials/{material_id}")
 def project_material_delete(pid: str, material_id: int, v: tuple = Depends(authorize_project)):
     """Delete an uploaded material plus storage, memory chunks/summary, and source artifact."""
-    root = state.blobs.get_blob(material_id)
-    if not root or root["scope"] != "project" or root["scope_id"] != pid:
+    documents = _materials().delete(pid, material_id)
+    if documents is None:
         raise HTTPException(status_code=404, detail="material not found")
-
-    from software_factory.memory.store import MemoryStore
-    rows = state.blobs.descendants(material_id)
-
-    memory = MemoryStore()
-    for row in rows:
-        storage.delete_by_path(row["storage_key"])
-        memory.delete_document(row["id"])
-    state.blobs.delete_tree(material_id)
-
-    # Draft uploads also live in input/ until promotion. Rebuild context.md from the remaining
-    # extracted documents so the removed text cannot remain in the next agent's source context.
-    input_dir = project_paths(state.PROJECTS_DIR, pid)["input_dir"]
-    name = os.path.basename(root.get("name") or "")
-    paths = [name, f"{name}.md"]
-    for relative in paths:
-        try:
-            os.remove(os.path.join(input_dir, relative))
-        except FileNotFoundError:
-            pass
-    remaining_docs = []
-    for blob in state.blobs.list_for("project", pid):
-        if blob.get("source_blob_id") is not None:
-            continue
-        doc_name = os.path.basename(blob.get("name") or "")
-        markdown_path = os.path.join(input_dir, f"{doc_name}.md")
-        if os.path.isfile(markdown_path):
-            with open(markdown_path) as source:
-                remaining_docs.append((doc_name, source.read()))
-    context_path = os.path.join(input_dir, "context.md")
-    context = make_prompt("", remaining_docs)
-    if context:
-        with open(context_path, "w") as target:
-            target.write(context)
-    else:
-        try:
-            os.remove(context_path)
-        except FileNotFoundError:
-            pass
-    project_store = ProjectStore(project_paths(state.PROJECTS_DIR, pid)["db"])
-    project_store.delete_artifacts_by_paths([f"input/{relative}" for relative in paths] + ["input/context.md"])
-    if context:
-        project_store.record_artifact("input", "input/context.md", kind="context")
-    return _project_documents(pid)
+    return documents
 
 
 @router.post("/api/projects/{pid}/documents/{blob_id}/summarize")
@@ -320,14 +263,12 @@ def project_document_summarize(pid: str, blob_id: int, v: tuple = Depends(author
     pipeline for one document, bypassing the unchanged-content skip so a click always produces a
     fresh summary. The user is waiting on this, unlike the upload path's fire-and-forget
     maybe_ingest_async — small enough (one document) to just block on."""
-    from software_factory.memory import ingest as memory_ingest
-    blob = state.blobs.get_blob(blob_id)
-    if not blob or blob["scope"] != "project" or blob["scope_id"] != pid:
+    result = _materials().summarize(pid, blob_id)
+    if result is None:
         raise HTTPException(status_code=404, detail="document not found")
-    result = memory_ingest.ingest_blob(blob_id, console=state.console, force=True)
     if result.get("status") == "failed":
         raise HTTPException(status_code=502, detail=result.get("error") or "summarization failed")
-    return _project_documents(pid)
+    return _materials().documents(pid)
 
 
 @router.get("/api/projects/{pid}/ingest/stream")
@@ -397,21 +338,14 @@ def project_material_scope(pid: str, material_id: int, body: MaterialScopeIn,
                            v: tuple = Depends(authorize_project)):
     """Move an uploaded material between project-scope and org-wide (PRD §2.4). →org puts it in the
     org knowledge base (appears in /api/org/docs); →project moves it back to this project."""
-    b = state.blobs.get_blob(material_id)
-    if not b:
+    status, documents = _materials().set_scope(pid, material_id, body.scope)
+    if status == "not_found":
         raise HTTPException(status_code=404, detail="material not found")
-    if body.scope == "org":
-        org = state.users.org_for_user(state.console.project_owner(pid))
-        if not org:
-            raise HTTPException(status_code=409, detail="project owner has no org on file")
-        state.blobs.set_scope(material_id, "org", org["id"])
-    elif body.scope == "project":
-        state.blobs.set_scope(material_id, "project", pid)
-    else:
+    if status == "no_org":
+        raise HTTPException(status_code=409, detail="project owner has no org on file")
+    if status == "invalid_scope":
         raise HTTPException(status_code=400, detail="scope must be 'project' or 'org'")
-    # Full 3-group payload (incl. the org knowledge base) so the toggled doc reappears in the
-    # "From your organization" group — never vanishes — and can be toggled straight back.
-    return _project_documents(pid)
+    return documents
 
 
 # ── Run-scoped actions ──────────────────────────────────────────────────────────────────────
@@ -550,24 +484,7 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
     written = state.console.attach_to_draft(pid, body.files or [])
-    # Push every original to blob storage and record it in the manifest. The documents endpoint
-    # and delete flow operate on these durable rows, regardless of whether extraction produced MD.
-    input_dir = project_paths(state.PROJECTS_DIR, pid)["input_dir"]
-    for file in body.files or []:
-        name = os.path.basename(file.get("name") or "")
-        file_path = os.path.join(input_dir, name)
-        if not name or not os.path.exists(file_path):
-            continue
-        raw = open(file_path, "rb").read()
-        key = f"materials/{uuid.uuid4().hex}-{name}"
-        storage.put(pid, key, raw)
-        blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=name,
-                           kind=state._doc_kind(name),
-                           content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
-                           size_bytes=len(raw), sha256=storage.sha256(raw))
-        logger.info("[ingest] %s: draft attachment stored — blob %s (%s, %s bytes), ingestion queued",
-                    pid, blob_id, name, len(raw))
-        maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
+    _materials().record_draft_attachments(pid, body.files or [])
     return {"attached": written}
 
 
