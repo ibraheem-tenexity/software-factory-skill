@@ -1233,11 +1233,11 @@ class ExecutionService:
             model = pick or os.environ.get("SF_MODEL") \
                 or _STAGE_MODEL.get(stage, "claude-sonnet-4-6")
             if stage == 3 and state.impl_model:
-                # The stage-3 SKILL contract pins sonnet for Task subagents; an explicit
-                # operator pick must override that in-prompt or the orchestrator fights it.
+                # Native Claude Task subagents inherit this stage model. Keep the explicit operator
+                # selection visible in the prompt without reviving the retired separate-runner
+                # instruction (SOF-234).
                 prompt = (f"{prompt}\n\nMODEL OVERRIDE (operator-pinned): this stage and every "
-                          f"Task subagent run on {model} — this overrides any model named in "
-                          f"SKILL.md.")
+                          f"native Task subagent run on {model}; do not use a separate provider runner.")
             argv = [
                 "claude", "-p", prompt,
                 "--model", model,
