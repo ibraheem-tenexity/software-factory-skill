@@ -312,8 +312,8 @@ function FactoryApp() {
   const [budget, setBudget] = React.useState(30);
   const go = (r) => setRoute((prev) => ({ ...prev, ...r }));
   if (route.view === 'org') return <OrgAdmin onBack={() => go({ view: 'dashboard' })} />;
-  if (route.view === 'explore') return <ExploreRecipes onBack={() => go({ view: 'dashboard' })} onStart={(id) => go({ view: 'new', recipe: id == null ? undefined : id })} />;
-  if (route.view === 'new') return <OptionC onExit={() => go({ view: 'dashboard' })} initialRecipe={route.recipe} />;
+  if (route.view === 'explore') return <ExploreRecipes onBack={() => go({ view: route.from === 'new' ? 'new' : 'dashboard', from: undefined })} onStart={(id) => go({ view: 'new', recipe: id == null ? undefined : id, from: undefined })} />;
+  if (route.view === 'new') return <OptionC onExit={() => go({ view: 'dashboard' })} initialRecipe={route.recipe} onExplore={() => go({ view: 'explore', from: 'new' })} />;
   if (route.view === 'build') return <BuildProgress projectName={`Acme Industrial · ${route.project ? route.project.name : 'Project'}`} budget={budget}
     peerTabs={{ onSwitch: (id) => id === 'exit' ? go({ view: 'dashboard' }) : id === 'build' ? null : go({ view: 'project', tab: id }) }} />;
   if (route.view === 'project') {
