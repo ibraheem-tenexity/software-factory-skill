@@ -36,6 +36,7 @@ class ChatDock:
         try:
             phase = (self._console.status(project_id).get("phase") or "").lower()
         except Exception:
+            logger.exception("[chat_dock] status lookup failed for %s — defaulting context to 'build'", project_id)
             return "build"
         return _PHASE_CONTEXT.get(phase, "build")
 
@@ -71,6 +72,7 @@ class ChatDock:
                 history = [{"role": m["role"], "content": m["content"]}
                            for m in chat_persistence.chat_history(project_id)]
             except Exception:
+                logger.exception("[chat_dock] history load failed for %s — starting from empty history", project_id)
                 history = []
         history.append({"role": "user", "content": content})
 
@@ -81,6 +83,7 @@ class ChatDock:
             result = await agent.run(history)
             turn = result["structured_response"]
         except Exception as e:
+            logger.exception("[chat_dock] chat turn failed for %s", project_id)
             yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
             return
 

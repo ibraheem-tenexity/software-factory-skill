@@ -63,5 +63,4 @@ def _emit_langfuse_span(project_id: str, model: str, provider: str,
         ):
             pass
     except Exception:
-        logger.debug("[memory.cost] Langfuse span failed — ingestion cost still recorded",
-                     exc_info=True)
+        logger.exception("[memory.cost] Langfuse span failed — ingestion cost still recorded")

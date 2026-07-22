@@ -13,6 +13,7 @@ single source of truth, never a separate event stream.
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 import sys
@@ -28,6 +29,8 @@ from .repositories._exec import PathExec
 from .repositories.canvas import (ProjectStateRepository, PhaseRepository, ArtifactRepository,
                                        BlockerRepository, GateRepository, VerificationRepository,
                                        DeploymentRepository)
+
+logger = logging.getLogger(__name__)
 
 
 def db_path(projects_dir: str, project_id: str) -> str:
@@ -281,7 +284,9 @@ def _provision_db(projects_dir: str, project_id: str) -> int:
                 state.deploy_db_pending = {}  # SOF-159: salvaged a handle → clear the breadcrumb
             state.save()  # else the pending marker STAYS set — the breadcrumb for reconciliation
         except Exception:
-            pass
+            logger.exception("[provision-db] failed to salvage partial serviceId for project %s",
+                             project_id)
+        logger.exception("[provision-db] provision failed for project %s", project_id)
         sys.stderr.write(f"provision-db failed: {e}\n")
         return 1
 
@@ -426,6 +431,10 @@ def main(argv: list[str]) -> int:
                     if b"\x00" not in raw:
                         _content = raw.decode("utf-8", errors="replace")
             except OSError:
+                # Best-effort inline content: on a read error the artifact still records path-only.
+                # Log the traceback so a read failure isn't invisible behind the fallback.
+                logger.exception("[record-artifact] could not inline content of %r (recording path-only)",
+                                 _path)
                 _content = None
         db.record_artifact(rest[0], _path,
                            rest[2] if len(rest) > 2 else None,

@@ -44,6 +44,7 @@ def _stage_model(stage: int) -> str:
         from .constants import STAGE_MODEL
         return os.environ.get("SF_MODEL") or STAGE_MODEL.get(stage, "") or ""
     except Exception:
+        logger.exception("[tenexity_os] stage %s model lookup failed — degrading to empty label", stage)
         return ""
 
 
@@ -77,6 +78,7 @@ def _read_skill(slug: str, runtime: str) -> tuple[str, str | None]:
         with open(path, encoding="utf-8") as f:
             text = f.read()
     except OSError:
+        logger.exception("[tenexity_os] skill file unreadable at %s — degrading to placeholder card", path)
         return (f"(skill file not found: skills/{slug}/{_skill_filename(runtime)})", None)
     return (text, _frontmatter_description(text))
 

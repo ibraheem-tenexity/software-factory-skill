@@ -23,6 +23,10 @@ import os
 import secrets
 import time
 
+from .log import get_logger
+
+logger = get_logger(__name__)
+
 SESSION_TTL = 8 * 3600       # 8h — short-lived; SF_SESSION_SECRET rotation is the global-logout lever
 COOKIE = "sf_session"
 SERVICE_HEADER = "X-SF-Service-Token"
@@ -201,4 +205,7 @@ def verify_password(password: str, stored: str) -> bool:
                             n=int(n), r=int(r), p=int(p), dklen=len(expected))
         return hmac.compare_digest(dk, expected)
     except Exception:
+        # A malformed/corrupt stored hash (not a wrong password — that returns False above) is a real
+        # provisioning/data bug; log the traceback so a "can't log in" report is diagnosable, then fail closed.
+        logger.exception("[auth] password verify errored on a malformed stored hash — failing closed")
         return False

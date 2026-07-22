@@ -47,6 +47,7 @@ def _concierge_model_id() -> str | None:
         row = SystemAgentStore().get("CONCIERGE")
         return row["model_id"] if row and row.get("model_id") else None
     except Exception:
+        logger.exception("[chat_agent] CONCIERGE model_id lookup failed — falling back to env model selection")
         return None
 
 
@@ -102,6 +103,7 @@ def _extract_usage(messages: list) -> dict:
                 if price is not None:
                     cost = input_tokens * price["input"] + output_tokens * price["output"]
             except Exception:
+                logger.exception("[chat_agent] pricing lookup failed for %s — cost_usd left null", model)
                 cost = None
             return {"model": model, "provider": provider, "input_tokens": input_tokens,
                     "output_tokens": output_tokens, "cost_usd": cost}

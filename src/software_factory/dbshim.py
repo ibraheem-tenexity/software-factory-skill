@@ -25,10 +25,13 @@ never by dbshim. Run discovery (`registry_projects`) reads the flat `projectstat
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
 import time
+
+logger = logging.getLogger(__name__)
 
 _RETRY_SLEEP = 0.5
 _TRIES = 3
@@ -81,7 +84,11 @@ class _StatePool:
             from pgvector.psycopg import register_vector
             register_vector(conn)
         except Exception:
-            pass
+            # Failing to register the vector adapter is non-fatal to connecting but makes `vector`
+            # columns read back as strings — log the traceback at debug (runs once per real
+            # connection, so noise is bounded) rather than swallow it entirely.
+            logger.debug("[dbshim] pgvector register_vector failed — vector reads may be wrong",
+                         exc_info=True)
         return conn
 
     def _new_conn(self):
@@ -258,6 +265,7 @@ def registry_projects() -> list:
         finally:
             conn.close()
     except Exception:
+        logger.exception("[dbshim] registry_projects read failed — returning empty run list")
         return []
 
 
@@ -274,6 +282,8 @@ def project_in_registry(project_id: str) -> bool:
         finally:
             conn.close()
     except Exception:
+        logger.exception("[dbshim] project_in_registry read failed for %s — returning False",
+                         project_id)
         return False
 
 

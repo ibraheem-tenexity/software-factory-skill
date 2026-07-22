@@ -4,8 +4,11 @@ import time
 from fastapi import Depends, HTTPException, Request
 
 from software_factory import auth
+from software_factory.log import get_logger
 
 import console.state as state
+
+logger = get_logger(__name__)
 
 _LAST_ACTIVE_THROTTLE = 60   # seconds — don't write last_active more than once a minute per user
 
@@ -28,7 +31,9 @@ def viewer(request: Request) -> tuple:
                 try:
                     state.users.touch_last_active(u["id"])
                 except Exception:
-                    pass   # activity stamp is best-effort; never fail a request on it
+                    # activity stamp is best-effort; never fail a request on it — but log why it failed
+                    logger.exception("[auth] last_active stamp failed for uid %s (best-effort, ignored)",
+                                     u["id"])
             return (u["email"], u["role"], True)
     return (None, None, False)
 

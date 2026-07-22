@@ -27,6 +27,10 @@ import os
 import urllib.error
 import urllib.request
 
+from .log import get_logger
+
+logger = get_logger(__name__)
+
 
 def enabled() -> bool:
     """True when Supabase Storage is configured; else the local-filesystem fallback is used."""
@@ -72,8 +76,13 @@ def url_by_path(obj: str) -> str:
             endpoint, data=body, method="POST",
             headers={"apikey": os.environ["SUPABASE_SERVICE_KEY"],
                      "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            signed_path = json.loads(r.read())["signedURL"]
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                signed_path = json.loads(r.read())["signedURL"]
+        except Exception:
+            logger.exception("[storage] signing URL failed for %s — object URL unavailable "
+                             "(egress/quota 402 or upstream error)", obj)
+            raise
         return f"{base}/storage/v1{signed_path}"
     return "file://" + os.path.join(_local_root(), obj)
 
@@ -89,36 +98,45 @@ def put(scope_id: str, key: str, data) -> str:
     obj = _object_path(scope_id, key)
     raw = _as_bytes(data)
     content_type = mimetypes.guess_type(key)[0] or "application/octet-stream"
-    if enabled():
-        base = os.environ["SUPABASE_URL"].rstrip("/")
-        bucket = os.environ["SF_STORAGE_BUCKET"]
-        endpoint = f"{base}/storage/v1/object/{bucket}/{obj}"
-        req = urllib.request.Request(
-            endpoint, data=raw, method="POST",
-            headers={"apikey": os.environ["SUPABASE_SERVICE_KEY"],
-                     "Content-Type": content_type, "x-upsert": "true"})
-        with urllib.request.urlopen(req, timeout=30):
-            pass
-    else:
-        dest = os.path.join(_local_root(), obj)
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with open(dest, "wb") as f:
-            f.write(raw)
+    try:
+        if enabled():
+            base = os.environ["SUPABASE_URL"].rstrip("/")
+            bucket = os.environ["SF_STORAGE_BUCKET"]
+            endpoint = f"{base}/storage/v1/object/{bucket}/{obj}"
+            req = urllib.request.Request(
+                endpoint, data=raw, method="POST",
+                headers={"apikey": os.environ["SUPABASE_SERVICE_KEY"],
+                         "Content-Type": content_type, "x-upsert": "true"})
+            with urllib.request.urlopen(req, timeout=30):
+                pass
+        else:
+            dest = os.path.join(_local_root(), obj)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(raw)
+    except Exception:
+        logger.exception("[storage] upload failed for %s (%d bytes) — object not stored "
+                         "(egress/quota 402 or upstream error)", obj, len(raw))
+        raise
     return url_by_path(obj)
 
 
 def get_by_path(obj: str) -> bytes:
     """Fetch an object's bytes at its full bucket-relative path — see `url_by_path`."""
-    if enabled():
-        base = os.environ["SUPABASE_URL"].rstrip("/")
-        bucket = os.environ["SF_STORAGE_BUCKET"]
-        endpoint = f"{base}/storage/v1/object/{bucket}/{obj}"
-        req = urllib.request.Request(
-            endpoint, headers={"apikey": os.environ["SUPABASE_SERVICE_KEY"]})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return r.read()
-    with open(os.path.join(_local_root(), obj), "rb") as f:
-        return f.read()
+    try:
+        if enabled():
+            base = os.environ["SUPABASE_URL"].rstrip("/")
+            bucket = os.environ["SF_STORAGE_BUCKET"]
+            endpoint = f"{base}/storage/v1/object/{bucket}/{obj}"
+            req = urllib.request.Request(
+                endpoint, headers={"apikey": os.environ["SUPABASE_SERVICE_KEY"]})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.read()
+        with open(os.path.join(_local_root(), obj), "rb") as f:
+            return f.read()
+    except Exception:
+        logger.exception("[storage] download failed for %s (egress/quota 402 or upstream error)", obj)
+        raise
 
 
 def get(scope_id: str, key: str) -> bytes:
@@ -153,11 +171,16 @@ def get_by_url(url: str) -> bytes:
     (local fallback) or a Supabase signed `https://` URL (works with a plain GET, no auth headers;
     the token is embedded in the query string). For callers that only kept the URL a writer
     returned, not the original scope_id/key/path."""
-    if url.startswith("file://"):
-        with open(url[len("file://"):], "rb") as f:
-            return f.read()
-    with urllib.request.urlopen(url, timeout=30) as r:
-        return r.read()
+    try:
+        if url.startswith("file://"):
+            with open(url[len("file://"):], "rb") as f:
+                return f.read()
+        with urllib.request.urlopen(url, timeout=30) as r:
+            return r.read()
+    except Exception:
+        # Strip the query string: a Supabase signed URL carries its bearer token there.
+        logger.exception("[storage] download-by-url failed for %s", url.split("?", 1)[0])
+        raise
 
 
 def listing(scope_id: str) -> list[str]:

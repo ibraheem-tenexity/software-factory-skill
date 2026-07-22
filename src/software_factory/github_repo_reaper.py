@@ -31,11 +31,14 @@ Reap policy mirrors deploy_db.py persistent mode:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
 from dataclasses import dataclass
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 # First 8–16 lowercase hex chars after a hyphen, at the end of the name.
 # Anchored with $ so "my-repo-abcd1234" matches but "my-repo-abcd1234-extra" doesn't.
@@ -108,6 +111,7 @@ def list_org_repos(org: str, run: Callable[[list[str]], RunResult] = _real_runne
     try:
         return json.loads(result.stdout) or []
     except Exception:
+        logger.exception("[github-reaper] could not parse `gh repo list %s` output", org)
         return []
 
 
