@@ -18,7 +18,11 @@ ENV PUPPETEER_CACHE_DIR=/ms-puppeteer
 # from hitting the registry: that command comes from the `tools` DB table (SOF-81's
 # workspace_setup.mcp_config(), not this Dockerfile), so dropping `@latest` there needs its own
 # data migration against the seeded row — tracked as a fast-follow, out of scope for this hotfix.
-RUN npm install -g @railway/cli @playwright/mcp@0.0.78 playwright @mermaid-js/mermaid-cli
+# SOF-235: pin @railway/cli — an unpinned install floated onto 5.27/5.28, whose `railway add --json`
+# stdout no longer carries serviceId, which crash-parked every stage-3 provision and leaked an
+# orphan Postgres each attempt. The GraphQL serviceId-resolution fix makes provision robust to this
+# regardless, but pinning stops surprise CLI drift from re-breaking us on a future rebuild.
+RUN npm install -g @railway/cli@5.28.0 @playwright/mcp@0.0.78 playwright @mermaid-js/mermaid-cli
 
 # Chromium + OS libs into a SHARED path so the non-root runtime user can use them.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
