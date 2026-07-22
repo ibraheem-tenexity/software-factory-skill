@@ -193,7 +193,7 @@ function ProjectMaintenanceView() {
   return <div style={{ height: '100%', overflow: 'auto', padding: '28px 32px', background: T.bg }}><div style={{ maxWidth: 760, margin: '0 auto' }}><CategoryLabel>Post-delivery</CategoryLabel><h1 style={{ font: `700 25px/1.2 ${T.display}`, margin: '7px 0' }}>Maintenance</h1><p style={{ font: `400 13px/1.6 ${T.sans}`, color: T.secondary }}>The existing maintenance workflow remains available after deployment. This project-knowledge change does not alter its controls or lifecycle.</p></div></div>;
 }
 
-function ProjectKnowledgeDashboard({ project, tab, onTab, onBack, onOpenBuild, onResume, budget, onBudgetChange, loading = false, ingesting = false, onResumeInterview }) {
+function ProjectKnowledgeDashboard({ project, tab, onTab, onBack, onOpenBuild, onResume, budget, onBudgetChange, loading = false, ingesting = false, onResumeInterview, conciergeCollapsed, onConciergeCollapsedChange }) {
   const p = project || PROJECTS[0];
   const isDone = p.status === 'deployed' || p.phase === 'Done';
   const st = (typeof STATUS !== 'undefined' && STATUS[p.status]) || { label: 'Building', tone: 'info' };
@@ -208,11 +208,11 @@ function ProjectKnowledgeDashboard({ project, tab, onTab, onBack, onOpenBuild, o
       <div style={{ height: 55, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 13, minWidth: 0 }}>{onBack && <Btn variant="ghost" size="sm" onClick={onBack}><Icon name="arrowLeft" size={14} /> Projects</Btn>}<Wordmark size={17} /><span style={{ font: `400 13px/1 ${T.mono}`, color: T.tertiary }}>/</span><span style={{ font: `600 13px/1 ${T.sans}`, color: T.fg, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span><StatusPill tone={st.tone}>{st.label}</StatusPill></div><Avatar name="Ibraheem K" size={28} tone="brand" /></div>
       <ProjectTabs tab={tab} onTab={onTab} onOpenBuild={onOpenBuild} isDone={isDone} />
     </header>
-    <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+    <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex' }}>
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', backgroundImage: tab === 'overview' ? `radial-gradient(circle, ${T.borderSubtle} 1px, transparent 1px)` : 'none', backgroundSize: '22px 22px' }}>
         {loading ? <div style={{ padding: 24 }}><ProjectDashboardSkel tab={tab === 'files' ? 'docs' : 'overview'} /></div> : tab === 'brief' ? <ProductBriefView onSelected={setSelectedBriefHeading} /> : tab === 'outputs' ? <FactoryOutputsView onSelected={setSelectedOutput} /> : tab === 'files' ? <ProjectFilesView /> : tab === 'maintenance' && isDone ? <ProjectMaintenanceView /> : <ProjectOverview project={p} onTab={onTab} onOpenBuild={onOpenBuild} onResume={onResumeInterview || onResume} budget={cap} onBudgetChange={onBudgetChange} ingesting={ingesting} />}
       </div>
-      <ProjectConcierge context={context} onOpen={(a) => openArtifact(a)} docChips={context === 'files' ? ['What’s in the walkthrough?', 'Summarize the RFQ example', 'What does the discount matrix say?'] : undefined} selectedLabel={tab === 'brief' ? selectedBriefHeading : tab === 'outputs' ? selectedOutput?.label : undefined} />
+      <ProjectConcierge context={context} onOpen={(a) => openArtifact(a)} docChips={context === 'files' ? ['What’s in the walkthrough?', 'Summarize the RFQ example', 'What does the discount matrix say?'] : undefined} selectedLabel={tab === 'brief' ? selectedBriefHeading : tab === 'outputs' ? selectedOutput?.label : undefined} collapsed={conciergeCollapsed} onCollapsedChange={onConciergeCollapsedChange} />
     </div>
   </div>;
 }

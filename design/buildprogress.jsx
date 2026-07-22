@@ -243,9 +243,11 @@ function ConciergeRail({ done, total, allDone, onOpen }) {  const seed = allDone
   );
 }
 
-function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Industrial · Quote-to-ERP', peerTabs, engine, budget = 30 }) {
+function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Industrial · Quote-to-ERP', peerTabs, engine, budget = 30, conciergeCollapsed, onConciergeCollapsedChange, consoleView, onConsoleViewChange }) {
   const sim = useBuildSim();
-  const [view, setView] = React.useState('kanban');
+  const [localView, setLocalView] = React.useState('activity');
+  const view = consoleView || localView;
+  const setView = (next) => { setLocalView(next); onConsoleViewChange && onConsoleViewChange(next); };
   const [doc, setDoc] = React.useState(null);
   const engLabel = (typeof engineLabel === 'function') ? engineLabel(engine) : 'Claude Code';
   const engShort = ({ claude: 'Claude Code', codex: 'Codex 5.6', kimi: 'Kimi K3' })[engine && engine.provider] || 'Claude Code';
@@ -293,7 +295,7 @@ function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Indus
       )}
       </div>
 
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+      <div style={{ position: 'relative', flex: 1, display: 'flex', minHeight: 0 }}>
         <div style={{ flex: 1, minWidth: 0, padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 15 }}>
           <StageRail runState={run} onRewind={(id) => resumeRun(id)} />
           <RecoveryBar runState={run} onResume={() => resumeRun()} onRetry={() => resumeRun()} onRewind={(id) => resumeRun(id)} />
@@ -302,14 +304,14 @@ function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Indus
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ font: `700 16px/1 ${T.display}`, letterSpacing: '-0.015em', color: T.fg }}>{view === 'kanban' ? 'Build board' : view === 'tree' ? 'Process tree' : 'Process graph'}</span>
-              <span style={{ font: `500 11px/1 ${T.mono}`, color: T.secondary }}>{sim.done}/{sim.total} tickets · {pct}%</span>
+              <span style={{ font: `700 16px/1 ${T.display}`, letterSpacing: '-0.015em', color: T.fg }}>{view === 'activity' ? 'Activity' : view === 'kanban' ? 'Build board' : view === 'tree' ? 'Process tree' : 'Process map'}</span>
+              <span style={{ font: `500 11px/1 ${T.mono}`, color: T.secondary }}>{view === 'activity' ? `${FACTORY_ACTIVITY.length} events · chronological` : `${sim.done}/${sim.total} tickets · ${pct}%`}</span>
               <span style={{ width: 110, height: 6, borderRadius: 3, background: T.sunken, overflow: 'hidden', display: 'inline-block' }}>
                 <span style={{ display: 'block', height: '100%', width: pct + '%', background: allDone ? T.success : T.brand, transition: 'width .5s' }} />
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Segmented value={view} onChange={setView} options={[{ id: 'kanban', label: 'Kanban' }, { id: 'tree', label: 'Tree' }, { id: 'map', label: 'Map' }]} />
+              <Segmented value={view} onChange={setView} options={[{ id: 'activity', label: 'Activity' }, { id: 'kanban', label: 'Kanban' }, { id: 'tree', label: 'Tree' }, { id: 'map', label: 'Map' }]} />
               {!allDone && view === 'kanban' && (
                 <Btn variant={sim.playing ? 'secondary' : 'primary'} size="sm" onClick={() => sim.setPlaying(!sim.playing)}>
                   <Icon name={sim.playing ? 'pause' : 'play'} size={13} color={sim.playing ? T.fg : '#fff'} /> {sim.playing ? 'Pause agents' : 'Run agents'}
@@ -320,7 +322,9 @@ function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Indus
           </div>
 
           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-            {view === 'kanban'
+            {view === 'activity'
+              ? <FactoryActivity onOpen={(a) => openArtifact(a)} />
+              : view === 'kanban'
               ? <div style={{ height: '100%', overflow: 'auto', paddingRight: 2 }}><Kanban tickets={sim.tickets} justMoved={sim.justMoved} /></div>
               : view === 'tree'
               ? <GraphView onOpen={(a) => openArtifact(a)} sim={sim} onViewTickets={() => setView('kanban')} engineLabel={engShort} />
@@ -347,7 +351,7 @@ function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Indus
             )}
           </div>
         </div>
-        <ProjectConcierge context="build" build={{ done: sim.done, total: sim.total, allDone }} onOpen={(a) => openArtifact(a)} />
+        <ProjectConcierge context="build" build={{ done: sim.done, total: sim.total, allDone }} onOpen={(a) => openArtifact(a)} collapsed={conciergeCollapsed} onCollapsedChange={onConciergeCollapsedChange} />
       </div>
     </div>
   );

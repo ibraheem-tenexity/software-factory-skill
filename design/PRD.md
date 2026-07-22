@@ -344,13 +344,27 @@ do not add a code-default prompt, section validator, readiness tracker, or new s
 **The one rule:** there is **one** Concierge, and it looks and behaves the same everywhere.
 The project home, Product Brief, Factory outputs, Factory console, Files, and conditional
 post-delivery Maintenance view together are the **"Project Console,"** and `ProjectConcierge` is
-the always-visible dock (`width: 340`, right-hand, `borderLeft`) on every view. Same full shell
+the shared dock (`width: 340`, right-hand, `borderLeft`) on every view. Same full shell
 (`ConciergeHeader` + scrolling detailed message history + working/tool activity + contextual
 material + suggestion chips + unrestricted `Composer`); only the **context** changes.
 
 The open conversation is primary. Suggested prompts and document actions accelerate common work;
 they never replace free text, hide the transcript, or reduce the Concierge to an About panel or
 shortcut list.
+
+**Minimize without reserving space:** the header has one **Minimize Concierge** control. Minimized
+state removes the 340px dock from layout entirely and leaves a 44px floating sparkle button over the
+bottom-right edge of the current project view. Working or unread activity is a status dot on this
+button. Reopening restores the same transcript, unsent draft, selected context, and scroll position;
+switching peer views preserves the minimized preference for that project visit. The floating button
+is not a narrow rail and consumes no permanent content width.
+
+**One chronological conversation:** customer messages, Concierge messages, and meaningful system
+events share one ordered timeline. Routine lifecycle events are compact neutral rows with time,
+icon, and label. Attention and failure events add a restrained warning/danger marker and expandable
+truthful detail. Artifact-created events have **Open output**. Consecutive retries may be summarized
+as one entry only when their individual timestamps remain available. There is no detached **Recent
+activity** block and no Feed / Tray / Latest switch inside the conversation.
 
 **Single prop drives everything:** `context` is one of:
 - `'overview'` — project home. Subtitle "Watching this project"; suggestions are progress
@@ -363,9 +377,9 @@ shortcut list.
   artifact and producing stage. It explains decisions, relates an output back to the brief, and
   accepts steering requests without replacing the artifact reader.
 - `'build'` — factory console. Subtitle "Relaying the build"; shows a **"Steer the build"**
-  helper card and the `ConciergeArtifacts` list (artifacts produced by completed nodes); a
-  `WorkingPill` shows while the build runs. Takes a `build={{done,total,allDone}}` prop and an
-  `onOpen` callback to open an artifact.
+  helper card and interleaves relevant system events with the conversation; a `WorkingPill` shows
+  while the build runs. Takes a `build={{done,total,allDone}}` prop and an `onOpen` callback for
+  artifact-created events.
 - `'files'` — source files. Subtitle "Across your source material"; suggestion chips ask about
   specific uploaded or organization files (passed via the `docChips` prop). **Document Q&A with citations is
   a later feature** — the groundwork is here (`conciergeReply` matches a question against the
@@ -465,18 +479,23 @@ conditional on a completed/deployed project and is not redesigned by this inform
 **Purpose:** show and steer the agent pipeline building the project. Most
 important screen in the product.
 **Top bar:** ← Projects · wordmark · project name · phase pill · spend/cap. Peer tab strip when opened from a project. The `spend / $<cap> cap` reflects the project's editable **budget cap** (total spend ceiling, §2.4 / §2.5a).
-**Right: persistent Concierge dock** (`ProjectConcierge context="build"`, §2.4b) — the
-same always-visible assistant that appears on every Project Console screen. Relays live build
-updates (e.g. "Playwright caught a tax-rounding bug, Sonnet's fixing it"), shows a **"steer
-the build"** helper card and the **Artifacts produced** list, and has a composer to **steer
-the build team**. (This replaced the former *left*-hand `ConciergeRail` so the Concierge sits
-in the same spot — right side — on the overview, console, and documents screens alike.)
+**Right: persistent Concierge dock** (`ProjectConcierge context="build"`, §2.4b) — the same
+assistant that appears on every Project Console screen and can be minimized without reserving
+layout width. It interleaves relevant operational events with messages, shows a **"steer the
+build"** helper card, and has a composer to **steer the build team**. Factory outputs remain in
+their project view; the exhaustive event record lives in Activity below.
 **Main column:**
 - **Pipeline stage-rail** — the full pipeline as chips with Stage gates (diamonds): `extract → provision → research → [Stage 1] → architect → design(NEW) → tickets → [Stage 2] → wait-for-deps → build → test → deploy`. Done = checked, active = pulsing, deps = amber.
 - **Crash / pause recovery** — each completed node writes **immutable checkpoint artifacts** (the files in the Artifact Viewer); the run's durable state is the set of completed checkpoints, not in-memory progress. When a run **crashes** (node failure) or is **paused**, the stage-rail marks the halt node (red / amber) and downstream nodes fade to `queued`, and a **Recovery bar** appears: **Resume from `<node>`** (re-runs the halt node onward, reusing every upstream checkpoint — no re-research/re-architecting), **Retry `<node>`** (re-run just the halt node, e.g. after a transient failure or a now-provided key), or **Rewind to…** an earlier checkpoint (click any completed node, or pick from the dropdown — that node + downstream are invalidated and recomputed, upstream reused). The build Kanban is idempotent per-ticket, so a resumed build picks up only the not-done tickets. Header shows `run crashed` / `run paused`; the **Pause** control drives the paused state in the demo (a crash sets the same recovery flow at runtime).
 - **Wait-for-deps bar** — **stage-triggered**: appears *only after* the build reaches the wait-for-deps stage (not shown the rest of the run), marked with a `STAGE-TRIGGERED` badge and copy explaining why it surfaced now. The dependency set is **derived from the project's architecture**, so the **count varies per project** (factory + app design); the layout is an auto-wrapping grid that **scales to any number** of dependencies. Header tracks `resolved / total` and flips to "Dependencies resolved — build unblocked" when complete. Each dependency offers **3 resolution options**: **Get from MCP**, **Mock it**, or **Input key**. Build is gated until all are resolved. **Input key** additionally offers **Import from org secrets** (§2.3): a picker of the organization vault (`ORG_SECRETS`) with the best name/kind match badged `MATCH`; choosing one wires the dependency to that secret **by reference** (`org:<NAME>`) — the raw value is never shown — or the operator can still paste a key manually.
 - **Design review bar** (`DesignReviewBar`, `buildprogress.jsx`) · **WAVE 2 — designed, not yet shipping** — **stage-triggered** like the deps bar: surfaces only once the **design** node has completed. The design node (Kimi K3) generates high-fidelity screens from the PRD + the org's brand theme (§2.3 Brand & theme), then waits for the customer. The bar shows the generated screens as clickable mockup tiles (each opens the `screens` fig artifact in the Artifact Viewer), header `design · Kimi K3 · on your brand theme`, and copy explaining the two paths: **Approve & continue** locks the look (bar flips to a green "Design locked — tickets and the build proceed from these N screens", with **Re-open review**) — or **iterate via the Concierge** ("denser quote table", "approvals first"), which re-generates only the affected screens. Rendered between the stage-rail/Recovery bar and the wait-for-deps bar (design precedes deps in the pipeline).
-- **View toggle: Kanban · Tree · Map**
+- **View toggle: Activity · Kanban · Tree · Map**
+  - **Activity** (`concierge.jsx` → `FactoryActivity`): the exhaustive chronological operational
+    record for stage transitions, agent actions, retries, interventions, failures, and produced
+    artifacts. It uses the same event records rendered in the Concierge conversation. Opening the
+    console from an alert selects Activity and scrolls to that event; ordinary entry remembers the
+    user's last console mode during the current project visit. Activity is a mode, not a permanent
+    split rail.
   - **Kanban**: columns Backlog → Claimed → Building (WIP cap) → Testing → Done; ticket cards show id, title, assigned agent (avatar), tags (bug / needs-key / e2e). "Run agents" advances the live sim; bugs in Testing loop back to Building.
   - **Tree**: process tree — orchestrator root → each pipeline node → its spawned sub-agent → the artifacts it produced (clickable).
   - **Map**: force-graph layout of the same pipeline with curved edges, the active path highlighted, satellites for sub-agents/deps.
@@ -736,9 +755,9 @@ screen (`ProcessingScreen`, ingest progress bar + live log + ETA) → live Conci
 Hand off to factory.** The current gate and the two valid handoff initiators are defined only in
 §2.4a; the former fixed-question completion gate is superseded. Large uploads can be sent to the
 **background** (project home with a live "processing" banner + **Resume interview**). One
-persistent `ProjectConcierge` dock (right side, `width 340`) now appears on all three Project
-Console surfaces — overview / factory console / documents — driven by a `context` prop
-(`overview` / `build` / `docs` / `ingesting`). Files: `concierge.jsx` (new), `optionC.jsx`
+persistent `ProjectConcierge` dock (right side, `width 340` when open) now appears across the
+Project Console and can be minimized without reserving width. It is driven by the current project
+view's `context` prop. Files: `concierge.jsx`, `optionC.jsx`
 (state machine + `InterviewView`), `orgproject.jsx` (dock + background banner),
 `buildprogress.jsx` (dock on console). Document Q&A with **citations is a later feature** —
 groundwork only.

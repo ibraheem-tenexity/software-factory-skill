@@ -418,7 +418,7 @@ function AiTint({ children, style }) {
 }
 
 // Conversation item — ONE bubble shape, identified by avatar+name, never alignment.
-function Message({ who, persona, text, confidence, anim, badge }) {
+function Message({ who, persona, text, confidence, anim, badge, time }) {
   const isAgent = who === 'agent';
   return (
     <article style={{ display: 'flex', gap: 10, animation: anim ? 'sfRise .35s var(--ease-out, ease) both' : 'none' }}>
@@ -435,6 +435,7 @@ function Message({ who, persona, text, confidence, anim, badge }) {
           {isAgent && <span style={{ font: `500 10px/1 ${T.sans}`, letterSpacing: '0.08em', textTransform: 'uppercase',
             background: T.brandSoft, color: T.brandDeep, padding: '3px 6px', borderRadius: 4 }}>{badge || 'Concierge'}</span>}
           {confidence && <ConfidencePill band={confidence} />}
+          {time && <span style={{ marginLeft: 'auto', font: `500 9.5px/1 ${T.mono}`, color: T.tertiary }}>{time}</span>}
         </header>
         <p style={{ margin: 0, font: `400 13.5px/1.5 ${T.sans}`, color: isAgent ? T.secondary : T.fg }}>{text}</p>
       </div>
