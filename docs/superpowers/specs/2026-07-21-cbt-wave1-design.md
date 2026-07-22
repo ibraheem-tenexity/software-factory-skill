@@ -1,5 +1,7 @@
 # CBT Wave 1 — implementation design
 
+> **Record status (SOF-224):** a dated, operator-approved **decision record** — it does not define requirements. Product requirements live in `design/PRD.md`; this file is kept as the dated evidence behind its rulings (sources-only, recipe runtime, engine trio, Wave-1 scope).
+
 **Date:** 2026-07-21 · **Status:** operator-approved design, pre-plan
 **Source design:** PR #379 (`design/TICKETS.md`, `design/PRD.md` §2.3/§2.4/§2.8/§6 entries 33–38, 41)
 **Structure authority:** `docs/STRUCTURE.md` (PR #382, merged) — followed strictly per operator directive.
