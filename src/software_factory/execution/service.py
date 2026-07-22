@@ -1942,9 +1942,24 @@ class ExecutionService:
             return "active"
         return "cleaned" if phase in ("done", "blocked", "stopped") else "pending"
 
+    @staticmethod
+    def _stop_flags(blockers: list[dict]) -> tuple[bool, bool]:
+        """(budget_stopped, credential_stopped) from a run's blocker rows. An uncleared budget or
+        credential blocker means the run is stopped / needs-input, not active — so the list and the
+        detail projections MUST report the same thing. SOF-145: the detail endpoint used to omit
+        both, so a budget-stopped run looked un-stopped there; SOF-148 is the credential sibling."""
+        budget = any(b.get("blocks") == "budget" and not b["cleared"] for b in blockers)
+        credential = any(b.get("blocks") == "credential" and not b["cleared"] for b in blockers)
+        return budget, credential
+
     def status(self, project_id: str) -> dict:
         state = self._load_state(project_id)
         reg = AgentRegistry(self._paths(project_id)["agents_db"])
+        # SOF-145/148: compute the stop flags the SAME way the list endpoint does, so the detail
+        # endpoint (benchmark monitor / headless harness pollers, the project view) sees a budget-
+        # or credential-stopped run as stopped instead of null.
+        budget_stopped, credential_stopped = self._stop_flags(
+            ProjectStore(self._paths(project_id)["db"]).blockers())
         return {
             "project_id": project_id,
             "skill": state.skill,
@@ -1981,6 +1996,8 @@ class ExecutionService:
             "crashed_at_node": state.crashed_at_node or "",
             "auto_resume_count": state.auto_resume_count,
             "held": state.held,
+            "budget_stopped": budget_stopped,
+            "credential_stopped": credential_stopped,
             "owner": state.owner,
             "maintenance_enabled": state.maintenance_enabled,
             # SOF-165 PR2: count of open tier-2 recovery actions for this run — a lightweight signal
@@ -2075,22 +2092,12 @@ class ExecutionService:
                 continue   # soft-deleted — hidden unless the caller asked to include them
             if owner is not None and (st.owner or "").lower() != owner:
                 continue   # member view: skip runs they don't own (unowned '' never matches)
-            # A budget-stopped run is NOT active: surfacing it with a live/green status misled
-            # the operator into thinking frozen ghosts were consuming (the b594a5f4/0eb69fdd UI
-            # confusion). An uncleared budget blocker = stopped, full stop.
-            budget_stopped = any(
-                b.get("blocks") == "budget" and not b["cleared"]
-                for b in blocker_rows[name]
-            )
-            # SOF-148: same reasoning as budget_stopped — a credential-blocked run's auto-resume
-            # returns False forever (never reaches 'crashed'), so without a surfaced flag it sits
-            # invisible, looking like whatever phase it was last in. An uncleared credential
-            # blocker means the run needs an operator to provision the real credential, not a
-            # crash to auto-heal from.
-            credential_stopped = any(
-                b.get("blocks") == "credential" and not b["cleared"]
-                for b in blocker_rows[name]
-            )
+            # A budget-stopped run is NOT active: surfacing it with a live/green status misled the
+            # operator into thinking frozen ghosts were consuming (the b594a5f4/0eb69fdd UI
+            # confusion). A credential-blocked run's auto-resume returns False forever (never reaches
+            # 'crashed'), so without a surfaced flag it sits invisible (SOF-148). Both are computed by
+            # _stop_flags, shared verbatim with the detail endpoint (SOF-145).
+            budget_stopped, credential_stopped = self._stop_flags(blocker_rows[name])
             # Last activity (epoch) for the dashboard's "updated" column; falls back to the
             # registry create time for a registry-only run with no local dir yet.
             try:
