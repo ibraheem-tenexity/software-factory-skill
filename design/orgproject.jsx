@@ -368,7 +368,7 @@ function ProjectDashboardSkel({ tab }) {
   );
 }
 
-function ProjectDashboard({ project, tab, onTab, onBack, onOpenBuild, onResume, budget, onBudgetChange, loading = false, ingesting = false, onResumeInterview }) {
+function LegacyProjectDashboard({ project, tab, onTab, onBack, onOpenBuild, onResume, budget, onBudgetChange, loading = false, ingesting = false, onResumeInterview }) {
   const [doc, setDoc] = React.useState(null);
   const p = project || PROJECTS[0];
   const isDraft = p.status === 'draft';
@@ -632,6 +632,11 @@ function ProjectDashboard({ project, tab, onTab, onBack, onOpenBuild, onResume, 
       </div>
     </div>
   );
+}
+
+function ProjectDashboard(props) {
+  const KnowledgeDashboard = window.ProjectKnowledgeDashboard;
+  return KnowledgeDashboard ? <KnowledgeDashboard {...props} /> : <LegacyProjectDashboard {...props} />;
 }
 
 Object.assign(window, { ORG, ORG_DOCS, ORG_SECRETS, OrgAdmin, ProjectDashboard, ProjectViewStandalone, FileTile, PROJ_SERVICES });

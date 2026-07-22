@@ -281,7 +281,7 @@ function BuildProgress({ onBack, backLabel = 'Intake', projectName = 'Acme Indus
       </div>
       {peerTabs && (
         <div style={{ display: 'flex', gap: 2, padding: '0 22px' }}>
-          {[{ id: 'overview', label: 'Overview' }, { id: 'build', label: 'Factory console' }, { id: 'docs', label: 'Documents' }].map((t) => {
+          {PROJECT_TABS.map((t) => {
             const on = t.id === 'build';
             return <button key={t.id} onClick={() => peerTabs.onSwitch(t.id)} style={{ position: 'relative', padding: '11px 14px', background: 'none', border: 'none', cursor: 'pointer',
               font: `${on ? 600 : 500} 13px/1 ${T.sans}`, color: on ? T.fg : T.secondary }}>
