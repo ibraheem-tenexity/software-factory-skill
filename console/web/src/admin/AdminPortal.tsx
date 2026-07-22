@@ -51,8 +51,12 @@ function NavIcon({ name, size = 17, color = "currentColor" }: { name: keyof type
   );
 }
 
+function readInitialView(): string {
+  return new URLSearchParams(location.search).get("view") || "organizations";
+}
+
 export function AdminPortal() {
-  const [view, setView] = React.useState<string>("organizations");
+  const [view, setView] = React.useState<string>(readInitialView());
   const [agent, setAgent] = React.useState<AdminAgent | null>(null);
   const [agentModal, setAgentModal] = React.useState<AdminAgent | null | "new">(null);
   const [clientModal, setClientModal] = React.useState<AdminClient | null | "new">(null);
@@ -65,6 +69,14 @@ export function AdminPortal() {
   const [clientVersion, setClientVersion] = React.useState(0);
   const [toolVersion, setToolVersion] = React.useState(0);
   const searchRef = React.useRef<HTMLInputElement>(null);
+
+  // Sync view → ?view= (SOF-223, same pattern as OrgAdminScreen's `sec`/SOF-220) so reloading on a
+  // specific admin sidebar section (Recipes, Users, …) doesn't drop back to the default view.
+  React.useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    if (view !== "organizations") p.set("view", view); else p.delete("view");
+    history.replaceState(null, "", "?" + p.toString());
+  }, [view]);
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
