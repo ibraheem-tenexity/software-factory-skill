@@ -412,7 +412,7 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 3. The retired modules/routes/table no longer have executable references outside preserved historical planning documents.
 
 # Backend structure refactor: project intake (2026-07-22)
-1. `projects/intake.py` now owns durable draft creation and updates, attachments, product-brief reads, BYOK references, repository access, and project path composition.
-2. `Console` is intentionally a compatibility facade for that surface while it still owns stage execution and lifecycle policy.
-3. `console/routers/projects.py` imports project paths from the projects context; `docs/ARCHITECTURE.md` and `docs/STRUCTURE.md` record the ownership and shim.
-4. Python compilation and the Vite production build pass.
+1. `projects/intake.py` owns durable draft creation/updates, attachments, product-brief reads, BYOK references, repository access, and project paths.
+2. Production callers use `Console.intake`; `Console` retains execution and lifecycle policy only.
+3. `projects/materials.py` owns upload, document projection, ingestion, and deletion; the router only owns HTTP transport.
+4. `docs/ARCHITECTURE.md` and `docs/STRUCTURE.md` record the boundary and its temporary composition point.

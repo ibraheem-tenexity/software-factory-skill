@@ -112,10 +112,9 @@ class ProjectMaterials:
         name = os.path.basename(root.get("name") or "")
         paths = [name, f"{name}.md"]
         for relative in paths:
-            try:
-                os.remove(os.path.join(input_dir, relative))
-            except FileNotFoundError:
-                pass
+            path = os.path.join(input_dir, relative)
+            if os.path.exists(path):
+                os.remove(path)
         remaining_docs = []
         for blob in self._blobs.list_for("project", project_id):
             if blob.get("source_blob_id") is not None:
@@ -131,10 +130,8 @@ class ProjectMaterials:
             with open(context_path, "w") as target:
                 target.write(context)
         else:
-            try:
+            if os.path.exists(context_path):
                 os.remove(context_path)
-            except FileNotFoundError:
-                pass
         store = ProjectStore(project_paths(self._projects_dir, project_id)["db"])
         store.delete_artifacts_by_paths([f"input/{relative}" for relative in paths] + ["input/context.md"])
         if context:

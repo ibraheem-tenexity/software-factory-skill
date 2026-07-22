@@ -261,6 +261,11 @@ class Console:
     def _paths(self, project_id: str) -> dict:
         return project_paths(self._projects_dir, project_id)
 
+    @property
+    def intake(self) -> ProjectIntake:
+        """Project onboarding owner composed with this execution facade."""
+        return self._intake
+
     # ---- SPEC §1: stage process lifecycle ------------------------------------------------
     def _stage_process_alive(self, project_id: str) -> bool:
         p = self._procs.get(project_id)
@@ -1417,7 +1422,7 @@ class Console:
         # SOF-63: a Concierge-finalized product brief (the kind='product_brief' ARTIFACT, written
         # by the Concierge's finalize_product_brief tool — the single source, per the operator's
         # storage ruling) supersedes the raw composition as context.md.
-        brief_block = self.product_brief(project_id) or ""
+        brief_block = self._intake.product_brief(project_id) or ""
         # A picked recipe's body IS the Stage-1 baseline input (written as recipe.md) — the only
         # external framing; the retired genre-recipe path is gone (mirrors the
         # concierge-context swap in services/conversation.py).
@@ -1495,49 +1500,6 @@ class Console:
             raise RuntimeError(f"stage 1 launch was refused for {project_id} — see its recorded blockers")
         return project_id
 
-    # ---- Durable drafts: an interview before a run exists -------------------------------
-    def create_draft(self, owner: str = "", name: str = "", runtime: str = "",
-                     planning_model: str = "", impl_model: str = "", model: str = "",
-                     budget: float | None = None, github_username: str = "") -> str:
-        """Compatibility entry point for the project-intake owner."""
-        return self._intake.create_draft(
-            owner, name, runtime, planning_model, impl_model, model, budget, github_username,
-        )
-
-    def is_draft(self, project_id: str) -> bool:
-        return self._intake.is_draft(project_id)
-
-    def product_brief(self, project_id: str) -> str | None:
-        return self._intake.product_brief(project_id)
-
-    def attach_to_draft(self, project_id: str, files: list) -> list[str]:
-        return self._intake.attach_to_draft(project_id, files)
-
-    def draft_project(self, project_id: str) -> dict:
-        return self._intake.draft_project(project_id)
-
-    def set_draft_project(self, project_id: str, name: str | None = None,
-                          goal: str | None = None, scope: list | None = None,
-                          runtime: str | None = None, model: str | None = None,
-                          recipe_id: str | None = None, github_username: str | None = None) -> dict:
-        return self._intake.set_draft_project(
-            project_id, name, goal, scope, runtime, model, recipe_id, github_username,
-        )
-
-    def request_repo_access(self, project_id: str, github_username: str) -> dict:
-        """Persist a GitHub handle and invite it now, or wait for provisioning to create the repo."""
-        return self._intake.request_repo_access(project_id, github_username)
-
-    def repo_access(self, project_id: str) -> dict:
-        return self._intake.repo_access(project_id)
-
-    def store_draft_creds(self, project_id: str, credentials: dict) -> dict:
-        """Vault-store BYOK credentials against a draft and record the vault UUIDs in state.
-
-        Called by POST /api/projects/{pid}/creds during onboarding. Only names are persisted in
-        state; plaintext values never touch the DB. Returns {"creds_provided": [...names...]}."""
-        return self._intake.store_draft_creds(project_id, credentials)
-
     def promote_draft(self, project_id: str, description: str = "",
                       interview_md: str | None = None, target: str = "railway") -> str:
         """Promote a draft into a real run: launch Stage 1 against the EXISTING draft id, threading
@@ -1545,12 +1507,12 @@ class Console:
         new id is minted.
 
         SOF-137 (Minimum Machinery): the only gate is a mechanical fact — a product brief exists
-        (`self.product_brief(project_id)` returns non-None) — checked HERE, not just at the HTTP
+        (`self.intake.product_brief(project_id)` returns non-None) — checked HERE, not just at the HTTP
         router, so every caller (the promote route, the concierge's `hand_off_to_factory` tool) is
         gated by construction and sees the SAME honest reason. Raises Conflict (409, same wire
         shape app.py's global ServiceError handler serializes exc.detail verbatim)."""
         from .services.errors import Conflict
-        if self.product_brief(project_id) is None:
+        if self._intake.product_brief(project_id) is None:
             raise Conflict("no product brief exists yet — finalize one first")
         state = self._load_state(project_id)
         # The description anchors the prompt; prefer an explicit one, else the plain goal.

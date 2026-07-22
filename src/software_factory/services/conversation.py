@@ -235,7 +235,7 @@ class DbConversation:
         )
         return {"response": turn.response, "suggested_responses": suggested,
                 "message_id": message_id, "session_id": session_id,
-                "handed_off": bool(self._console and not self._console.is_draft(project_id))}
+                "handed_off": bool(self._console and not self._console.intake.is_draft(project_id))}
 
     async def turn(self, project_id: str, message: str) -> dict:
         """One Concierge turn. Non-empty message = the user's turn (recorded, agent replies).

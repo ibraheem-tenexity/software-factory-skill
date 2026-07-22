@@ -63,10 +63,11 @@ def create_draft(body: DraftCreateIn, v: tuple = Depends(require_authed)):
     PATCH/attach/promote and into /api/chat so the rail and the form share ONE draft."""
     if not (body.project_name or "").strip():
         raise HTTPException(status_code=400, detail="project_name is required")
-    project_id = state.console.create_draft(owner=v[0] or "", name=body.project_name,
-                                  runtime=body.runtime, planning_model=body.planning_model,
-                                  impl_model=body.impl_model, model=body.model,
-                                  budget=body.budget, github_username=body.github_username)
+    project_id = state.console.intake.create_draft(
+        owner=v[0] or "", name=body.project_name, runtime=body.runtime,
+        planning_model=body.planning_model, impl_model=body.impl_model, model=body.model,
+        budget=body.budget, github_username=body.github_username,
+    )
     return {"project_id": project_id}
 
 
@@ -110,7 +111,7 @@ def project_brief(pid: str, v: tuple = Depends(authorize_project)):
     from software_factory.memory.store import MemoryStore
     brief_rows = [a for a in state.console.artifacts(pid) if (a.get("kind") or "") == "product_brief"]
     return {
-        "brief_markdown": state.console.product_brief(pid),
+        "brief_markdown": state.console.intake.product_brief(pid),
         "brief_url": brief_rows[-1].get("path") if brief_rows else None,
         "assumptions": MemoryStore().assumptions("project", pid),
     }
@@ -123,7 +124,9 @@ def update_project_brief(pid: str, body: dict, v: tuple = Depends(authorize_proj
     canonical description; the product brief itself is the Concierge-authored artifact and is
     not editable here. Returns {name, goal, scope, description}."""
     body = body or {}
-    return state.console.set_draft_project(pid, goal=body.get("goals"), scope=body.get("scope"))
+    return state.console.intake.set_draft_project(
+        pid, goal=body.get("goals"), scope=body.get("scope"),
+    )
 
 
 @router.get("/api/projects/{pid}/events")
@@ -197,7 +200,7 @@ def project_overview(pid: str, v: tuple = Depends(authorize_project)):
     in_build = (status.get("stage") or 0) >= 2 and not status.get("done")
     docs = project_view.documents(state.blobs.list_for("project", pid), state.console.artifacts(pid))
     return {
-        "brief": project_view.brief_block(state.console.draft_project(pid), status,
+        "brief": project_view.brief_block(state.console.intake.draft_project(pid), status,
                                           state.console.project_created(pid)),
         "build": project_view.build_status(status, tickets),
         "services": project_view.services_at_work(org, deployments, status.get("impl_model") or "",
@@ -212,7 +215,7 @@ def project_overview(pid: str, v: tuple = Depends(authorize_project)):
 
 @router.get("/api/projects/{pid}/repo-access")
 def project_repo_access(pid: str, v: tuple = Depends(authorize_project)):
-    return state.console.repo_access(pid)
+    return state.console.intake.repo_access(pid)
 
 
 @router.post("/api/projects/{pid}/repo-access")
@@ -223,7 +226,7 @@ def request_project_repo_access(pid: str, body: RepoAccessIn, v: tuple = Depends
     owner = state.console.project_owner(pid)
     if v[0] and v[0].lower() != owner:
         raise HTTPException(status_code=403, detail="only the project owner can request repository access")
-    return state.console.request_repo_access(pid, username)
+    return state.console.intake.request_repo_access(pid, username)
 
 
 def _project_documents(pid: str) -> dict:
@@ -448,9 +451,9 @@ def get_draft(pid: str, v: tuple = Depends(authorize_project)):
     """Read the draft's intake fields to REHYDRATE the onboarding form when resuming an existing draft
     (the read counterpart to PATCH /draft). Returns {name, goal, scope, description}.
     Draft-only: a promoted project has no editable draft intake."""
-    if not state.console.is_draft(pid):
+    if not state.console.intake.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
-    return state.console.draft_project(pid)
+    return state.console.intake.draft_project(pid)
 
 
 @router.patch("/api/projects/{pid}/draft")
@@ -460,16 +463,17 @@ def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_proje
     (claude|opencode|codex) after the eager create. recipe_id (CBT-9) must name a published recipe — a bad
     id is refused with the real reason instead of silently pinning a draft/archived one; "" clears the
     selection. Call debounced/on-blur, NOT per keystroke."""
-    if not state.console.is_draft(pid):
+    if not state.console.intake.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
     if body.recipe_id:
         recipe = state.recipes.get(body.recipe_id)
         if not recipe or recipe.get("status") != "published":
             raise HTTPException(status_code=400,
                                 detail=f"recipe_id {body.recipe_id!r} does not name a published recipe")
-    result = state.console.set_draft_project(pid, name=body.name, goal=body.goal, scope=body.scope,
-                                             runtime=body.runtime, model=body.model,
-                                             recipe_id=body.recipe_id, github_username=body.github_username)
+    result = state.console.intake.set_draft_project(
+        pid, name=body.name, goal=body.goal, scope=body.scope, runtime=body.runtime,
+        model=body.model, recipe_id=body.recipe_id, github_username=body.github_username,
+    )
     if body.budget is not None:
         state.console.raise_budget(pid, body.budget)
         result["budget_ceiling"] = body.budget
@@ -481,9 +485,9 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
     """Attach project materials (walkthrough video / documents) to the draft's input/.
     PDF/DOCX originals are kept alongside their .md extractions, pushed to object storage,
     and recorded as blobs so they appear in GET /api/projects/{pid}/documents.uploaded."""
-    if not state.console.is_draft(pid):
+    if not state.console.intake.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
-    written = state.console.attach_to_draft(pid, body.files or [])
+    written = state.console.intake.attach_to_draft(pid, body.files or [])
     _materials().record_draft_attachments(pid, body.files or [])
     return {"attached": written}
 
@@ -491,9 +495,9 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
 @router.post("/api/projects/{pid}/creds")
 def store_draft_creds(pid: str, body: CredsIn, v: tuple = Depends(authorize_project)):
     """Store BYOK credentials in Vault against a draft. Returns cred names, never values."""
-    if not state.console.is_draft(pid):
+    if not state.console.intake.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
-    return state.console.store_draft_creds(pid, body.credentials)
+    return state.console.intake.store_draft_creds(pid, body.credentials)
 
 
 @router.post("/api/projects/{pid}/promote")
@@ -506,7 +510,7 @@ def promote_draft(pid: str, body: PromoteIn, v: tuple = Depends(authorize_projec
     console.promote_draft() itself, not here, so it raises the SAME services.errors.Conflict (409,
     identical wire shape) for every caller: this route AND the concierge's hand_off_to_factory tool
     (concierge_tools.py). Neither the button nor the agent sees a different reason."""
-    if not state.console.is_draft(pid):
+    if not state.console.intake.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
     try:
         project_id = state.console.promote_draft(pid, description=body.description, target=body.target)

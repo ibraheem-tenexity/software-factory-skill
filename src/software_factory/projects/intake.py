@@ -109,6 +109,7 @@ class ProjectIntake:
             try:
                 return storage.get_by_url(url).decode()
             except OSError:
+                logger.exception("[intake] failed to read product brief for %s", project_id)
                 return None
         return None
 
@@ -219,11 +220,10 @@ class ProjectIntake:
                 if uid:
                     new_ids[key_name] = uid
             except Exception:
-                logger.warning(
+                logger.exception(
                     "[vault] store failed for %s key %s; recording name only",
                     project_id,
                     key_name,
-                    exc_info=True,
                 )
         merged = {**existing, **new_ids}
         state.creds_vault_ids = merged

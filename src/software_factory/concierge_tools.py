@@ -164,7 +164,7 @@ def build_project_tools(console: Console, project_id: str) -> list:
         """Read back your own finalized product brief in full, so you can check it against your
         system prompt's criteria (scope, pain points, business problem, audience) before hand-off.
         Returns a message saying none exists yet if finalize_product_brief hasn't been called."""
-        brief = console.product_brief(project_id)
+        brief = console.intake.product_brief(project_id)
         return brief if brief else "no product brief exists yet — call finalize_product_brief first"
 
     @tool
