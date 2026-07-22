@@ -25,10 +25,24 @@ def _events(text: str):
 
 
 # OpenCode events carry no model id, so the token-pricing fallback uses the run's model.
-OPENCODE_FALLBACK_MODEL = "openrouter/moonshotai/kimi-k2.7-code"
+# Accepted risk: this is a single GLOBAL constant, not per-run — recomputing cost_usd() on a
+# HISTORICAL log whose step_finish events lack authoritative part.cost (the `else` branch below,
+# ~line 68-72) reprices those old steps at whatever model this constant currently names. A
+# K2.7-run log recomputed after this bump reprices its fallback-priced steps at K3 rates (~4x,
+# upward only). Accepted: the normal path always carries authoritative part.cost (this fallback
+# rarely fires) and per-event model tracking is machinery a model-alias bump doesn't justify.
+# Revisit only if opencode ever starts emitting a model id per event.
+OPENCODE_FALLBACK_MODEL = "openrouter/moonshotai/kimi-k3"
 
 
-def cost_usd(text: str, prices: dict | None = None) -> float:
+def cost_components(text: str, prices: dict | None = None) -> tuple[float, float]:
+    """(authoritative, estimate) — split the same accumulation `cost_usd()` sums, so a caller that
+    needs to tell "a session's real, final cost" apart from "a still-in-flight session's token
+    guess" can (SOF-215). `authoritative` is `finished[sid]` summed (each session's own max-of-
+    results, i.e. real billing); `estimate` is `tail[sid]` summed (token-priced guess for a
+    session that hasn't emitted a terminal result yet — killed, or simply still running).
+    See `cost_usd`'s docstring for the full per-runtime accounting rules; this is the same pass,
+    just returning both halves instead of their sum."""
     # project.log APPENDS every stage's session, keyed per session; the log may be claude
     # stream-json or opencode --format json (one runtime per run — ProjectState.runtime pins it —
     # but one parser handles both vocabularies; the schemas are disjoint).
@@ -77,9 +91,24 @@ def cost_usd(text: str, prices: dict | None = None) -> float:
             tail[sid] = tail.get(sid, 0.0) + (
                 usage.get("input_tokens", 0) * rate["input"]
                 + usage.get("cache_read_input_tokens", 0) * rate["cached"]
+                # SOF-218: a cache-write-heavy in-flight session undershoots without this term —
+                # the authoritative `result.total_cost_usd` above already bills it correctly, only
+                # the pre-result token estimate was missing it.
+                + usage.get("cache_creation_input_tokens", 0) * rate.get("cache_write", rate["input"])
                 + usage.get("output_tokens", 0) * rate["output"]
             )
-    return round(sum(finished.values()) + sum(tail.values()), 6)
+    return round(sum(finished.values()), 6), round(sum(tail.values()), 6)
+
+
+def cost_usd(text: str, prices: dict | None = None) -> float:
+    """Authoritative + estimate combined — the whole-run number the dashboard/budget-enforcement
+    checks want. See `cost_components` for the split (SOF-215: the persisted monotonic spend floor
+    must only ever be raised by the authoritative half, never the estimate — an in-flight guess
+    can substantially overshoot what a session's eventual real total turns out to be, and once
+    that got locked in as "spend can only go up," every later real stage's spend became invisible
+    until it organically exceeded the false ceiling)."""
+    authoritative, estimate = cost_components(text, prices)
+    return round(authoritative + estimate, 6)
 
 
 def agents(text: str) -> list[dict]:

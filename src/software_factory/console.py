@@ -27,9 +27,11 @@ from .constants import (
     RUNNER_KEYS as _RUNNER_KEYS,
 )
 from . import artifacts, checkpoint as ckpt, deploy_db, env as _env, recovery, streamlog, vault as _vault
+from .project_view import INPUT_ONLY_KINDS
 from .runtime_agents import AgentRegistry
 from .input_pipeline import persist_and_compose
 from .pdf_extract import extract_to_markdown
+from .recipes.store import RecipeStore
 from . import deps as deps_mod
 from .mcp_health import check_mcp
 from .projectstate import ProjectState
@@ -39,7 +41,7 @@ from .repositories._exec import PathExec
 from .repositories.canvas import ProjectStateRepository, PhaseRepository, BlockerRepository, ArtifactRepository
 from .repositories.runtime_agents import AgentRepository
 from .tickets import TicketStore
-from .workspace_setup import prepare_workspace, tool_env_overrides, write_agent_file
+from .workspace_setup import prepare_workspace, tool_env_overrides, write_agent_file, RecipeSeedError
 from .log import get_logger
 
 logger = get_logger(__name__)
@@ -667,16 +669,43 @@ class Console:
             return state.phase
         return max(active, key=lambda n: idx[n])
 
+    def _run_spend(self, project_id: str, state=None) -> float:
+        """SOF-186: THIS run's monotonic spend basis, EXCLUDING console-side ingestion. It is the
+        banked cost of all superseded stage attempts (prior_attempts_usd) PLUS the current attempt's
+        live log cost (project.log from spend_seal_offset onward), floored by the persisted
+        high-water spent_usd. Monotonic across a stage auto-resume/retry: retry_stage banks the dead
+        attempt into prior_attempts_usd and reseals, so the relaunched attempt ADDS on top instead of
+        the live parse silently dropping the dead attempt (the $20.07->$14.13 regression).
+
+        SOF-215: the persisted floor is raised using ONLY the authoritative half of the current
+        attempt's cost (completed sessions' real `result.total_cost_usd`/opencode step costs) —
+        NEVER a still-in-flight session's token estimate. An estimate can substantially overshoot
+        what that session's eventual authoritative total turns out to be (observed live: a stage-2
+        session's in-flight estimate read $22.77 against its own final, authoritative $7.12). Once
+        an inflated estimate got locked into "spend only ever goes up," an entire later stage's
+        real cost (~$8, stage 3) became invisible — never displayed, never re-persisted — because
+        it never organically exceeded the false ceiling. The RETURNED value still includes the
+        fuller estimate-inclusive total (budget enforcement must see a still-growing in-flight cost
+        in real time, not wait for a session's terminal result) — only the PERSISTED floor is
+        estimate-immune. Despite the name (kept for the docstring history above), this is the one
+        place that owns floor persistence: every direct `state.spent_usd = self._run_spend(...)`
+        call site relies on this write happening here."""
+        state = state or self._load_state(project_id)
+        prior = state.prior_attempts_usd or 0.0
+        authoritative, estimate = self._attempt_cost_components(project_id, state)
+        authoritative_total = prior + authoritative
+        if authoritative_total > (state.spent_usd or 0.0):
+            state.spent_usd = authoritative_total
+            state.save()
+        return max(prior + authoritative + estimate, state.spent_usd or 0.0)
+
     def _project_spend(self, project_id: str) -> float:
         """THIS run's own spend (the per-project budget basis). Prior runs/projects do NOT count —
-        each run/project is independently capped. Authoritative cost from the project.log, falling
-        back to the recorded projectstate spend, PLUS console-side ingestion spend (SOF-27) — a
-        separate accumulator, since ingestion never runs as a stage process and so never appears
-        in project.log or gets counted by the max() below."""
-        # max(): the log-derived figure normally leads, but the persisted projectstate spend survives
-        # log loss / parser regressions — the budget guard must never silently under-count.
+        each run/project is independently capped. The run spend (SOF-186 monotonic accumulator, see
+        _run_spend) PLUS console-side ingestion spend (SOF-27) — a separate accumulator, since
+        ingestion never runs as a stage process and so never appears in project.log."""
         state = self._load_state(project_id)
-        return max(self._cost(project_id), state.spent_usd or 0) + (state.ingestion_spent_usd or 0)
+        return self._run_spend(project_id, state) + (state.ingestion_spent_usd or 0.0)
 
     def _budget_ceiling(self, project_id: str) -> float:
         """SPEC §4: per-project ceiling — the run's own override, else SF_COST_CEILING (default 30)."""
@@ -758,7 +787,7 @@ class Console:
         state = self._load_state(project_id)
         if state.phase != "stopped":
             state.phase = "stopped"
-            state.spent_usd = max(state.spent_usd or 0, self._cost(project_id))
+            state.spent_usd = self._run_spend(project_id, state)
             self._upload_project_log(project_id, state)
             state.save()
             AgentRegistry(self._paths(project_id)["agents_db"]).finalize_orphans(project_id, stage_ok=False)
@@ -1132,11 +1161,14 @@ class Console:
         if spend + reserve > ceiling:
             logger.info("[launch] %s stage %s refused — per-run budget: $%.2f + reserve $%.2f > ceiling $%.2f",
                         project_id, stage, spend, reserve, ceiling)
-            ProjectStore(paths["db"]).add_blocker(
-                f"Per-run budget: this run ${spend:.2f} + reserve ${reserve:.2f} "
-                f"> ceiling ${ceiling:.2f} — stage {stage} launch refused",
-                blocks="budget",
-            )
+            db = ProjectStore(paths["db"])
+            already = any(b.get("blocks") == "budget" and not b["cleared"] for b in db.blockers())
+            if not already:
+                db.add_blocker(
+                    f"Per-run budget: this run ${spend:.2f} + reserve ${reserve:.2f} "
+                    f"> ceiling ${ceiling:.2f} — stage {stage} launch refused",
+                    blocks="budget",
+                )
             return None
 
         state = self._load_state(project_id)
@@ -1232,9 +1264,20 @@ class Console:
             logger.debug("[launch] %s prompt-override lookup failed — using on-disk default",
                          project_id, exc_info=True)
             override = None
-        ws = prepare_workspace(
-            self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
-        )
+        # CBT-9: a picked recipe seeds the workspace (build tree at stage 3, AGENTS.md context at
+        # stages 1-2) + the fork-and-extend SKILL block. A seed clone failure is an honest launch
+        # refusal (the git error recorded as a blocker), same shape as the hard-gated MCP check below.
+        recipe = RecipeStore().get(state.recipe_id) if state.recipe_id else None
+        try:
+            ws = prepare_workspace(
+                self._projects_dir, project_id, stage, runtime=runtime, skill_override=override,
+                recipe=recipe,
+            )
+        except RecipeSeedError as e:
+            logger.warning("[launch] %s stage %s refused — recipe seed clone failed: %s",
+                           project_id, stage, e)
+            ProjectStore(paths["db"]).add_blocker(f"Recipe seed: {e}", blocks="recipe")
+            return None
         for callsign, row in agent_rows:
             try:
                 write_agent_file(ws, callsign, row)
@@ -1374,14 +1417,23 @@ class Console:
         # SOF-96: selected scope genres' recipe bodies (SOF-108, sow rows with status='Template')
         # reach Stage 1 as their own input file — until now genre recipes only fed the Concierge's
         # onboarding chat context, never the product-synthesis phase itself.
-        from .services.conversation import _genre_recipes
-        recipes = _genre_recipes(self._load_state(project_id).scope)
-        recipes_md = "\n\n".join(f"## {r['title']}\n\n{r['body']}" for r in recipes) if recipes else ""
+        # CBT-9: a picked recipe's body IS the Stage-1 baseline input (written as recipe.md) — it
+        # replaces the genre-recipes path entirely for this run (mirrors the concierge-context swap
+        # in services/conversation.py).
+        recipe_id = self._load_state(project_id).recipe_id
+        recipe_md = RecipeStore().body(recipe_id) if recipe_id else None
+        if recipe_md:
+            recipes_md = ""
+        else:
+            from .services.conversation import _genre_recipes
+            recipes = _genre_recipes(self._load_state(project_id).scope)
+            recipes_md = "\n\n".join(f"## {r['title']}\n\n{r['body']}" for r in recipes) if recipes else ""
         written = persist_and_compose(
             paths["input_dir"], req.description, req.context_files or [],
             extract=self._extract, interview_md=interview_md,
             product_brief_md=brief_block or None,
             genre_recipes_md=recipes_md or None,
+            recipe_md=recipe_md,
         )
         input_db = ProjectStore(paths["db"])
         for name in written:
@@ -1549,14 +1601,17 @@ class Console:
         rehydrate it or the Continue gate can never be satisfied again after leaving the page."""
         state = self._load_state(project_id)
         return {"name": state.name, "goal": state.goal or "", "scope": list(state.scope or []),
-                "description": state.description or "", "budget": state.budget_ceiling}
+                "description": state.description or "", "budget": state.budget_ceiling,
+                "recipe_id": state.recipe_id or ""}
 
     def set_draft_project(self, project_id: str, name: str | None = None,
                           goal: str | None = None, scope: list | None = None,
-                          runtime: str | None = None, model: str | None = None) -> dict:
+                          runtime: str | None = None, model: str | None = None,
+                          recipe_id: str | None = None) -> dict:
         """Structured project setter for the Option C onboarding (draft phase). Writes the project
-        name, the plain goal (state.goal), the scope-of-work backing, and the build-engine runtime
-        (claude|opencode) — then RECOMPOSES the canonical description = compose(goal, scope)
+        name, the plain goal (state.goal), the scope-of-work backing, the build-engine runtime
+        (claude|opencode), and the picked recipe (CBT-9; caller has already validated it names a
+        published recipe) — then RECOMPOSES the canonical description = compose(goal, scope)
         server-side, so the form and the concierge agent never duplicate the format. Each field is
         optional; goal and scope recompose against each other's persisted value so independent
         calls stay idempotent.
@@ -1568,6 +1623,8 @@ class Console:
             state.runtime = runtime
         if model is not None:
             state.opencode_model = model if model in _OPENCODE_MODEL_IDS else ""
+        if recipe_id is not None:
+            state.recipe_id = recipe_id
         if goal is not None:
             state.goal = goal
         if scope is not None:
@@ -1580,7 +1637,7 @@ class Console:
             state.description = _compose_description(eff_goal, eff_scope)
         state.save()
         return {"name": state.name, "goal": state.goal or "", "scope": list(state.scope or []),
-                "description": state.description or ""}
+                "description": state.description or "", "recipe_id": state.recipe_id or ""}
 
     def store_draft_creds(self, project_id: str, credentials: dict) -> dict:
         """Vault-store BYOK credentials against a draft and record the vault UUIDs in state.
@@ -1813,7 +1870,7 @@ class Console:
                 if ok:
                     state.stage1_done = True
                     state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
-                    state.spent_usd = self._cost(project_id) or state.spent_usd
+                    state.spent_usd = self._run_spend(project_id, state)
                     self._upload_project_log(project_id, state)
                     state.save()
                     ckpt.write(project_id, "stage:1")
@@ -1898,7 +1955,7 @@ class Console:
             return False
         state.stage2_done = True
         state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
-        state.spent_usd = self._cost(project_id) or state.spent_usd
+        state.spent_usd = self._run_spend(project_id, state)
         self._upload_project_log(project_id, state)
         # Parse required tokens from architecture.md
         for root, _dirs, files in os.walk(base):
@@ -1948,16 +2005,13 @@ class Console:
         # "decision-log.md") — Stage 3 clones the SAME canonical repo Stage 2 committed to (SOF-22),
         # so it would otherwise inherit Stage 2's already-gated file via git history and this check
         # could never tell "Stage 2's leftover" from "Stage 3 actually wrote its own."
-        base = paths["base"]
-        decision_log_root = None
-        for root, _dirs, files in os.walk(base):
-            if "build-decision-log.md" in files:
-                decision_log_root = root
-                break
-        if decision_log_root is None:
+        # SOF-187: read via the shared DB-first helper, not a raw disk walk — the agent's own
+        # teardown step deletes the workspace AFTER recording this artifact, so a disk-only read
+        # here made this gate permanently unsatisfiable post-teardown (the exact incident: a real
+        # done run got relaunched because this gate could never find the file again).
+        decision_log_text = self._artifact_content(project_id, "build-decision-log.md")
+        if decision_log_text is None:
             return False
-        with open(os.path.join(decision_log_root, "build-decision-log.md")) as f:
-            decision_log_text = f.read()
         decision_log_ok, _reasons = artifacts.decision_log_is_complete(decision_log_text)
         if not decision_log_ok:
             return False
@@ -1975,7 +2029,7 @@ class Console:
         state.phase = "done"
         state.skill, state.skill_version = "software-factory", SKILL_VERSION  # heal host-owned stamp (agents share the db file)
         # Persist the final spend into project store so cost survives log loss (SPEC §4 durability).
-        state.spent_usd = max(state.spent_usd or 0, self._cost(project_id))
+        state.spent_usd = self._run_spend(project_id, state)
         self._upload_project_log(project_id, state)
         state.save()
         ckpt.write(project_id, "stage:3")
@@ -2154,6 +2208,14 @@ class Console:
             state.stage1_done = False
         if stage <= 2:
             state.stage2_done = False
+        # SOF-186: bank the just-ended attempt's cost into the run-level accumulator and reseal the
+        # log at its current end, so the relaunched attempt's spend ADDS to the run total instead of
+        # the live log-parse silently dropping the dead attempt (the $20.07->$14.13 regression). The
+        # prior orchestrator is already gone (the _stage_process_alive guard above returned), so its
+        # log region is complete; _attempt_cost reads it (authoritative result if it produced one,
+        # else the token estimate) before we move the seal past it.
+        state.prior_attempts_usd = (state.prior_attempts_usd or 0.0) + self._attempt_cost(project_id, state)
+        state.spend_seal_offset = self._log_size(project_id)
         state.save()
 
         req = ProjectRequest(description=state.description or "", target=state.deploy_target or "railway")
@@ -2170,34 +2232,50 @@ class Console:
         result = self._launch_stage(project_id, stage, prompt, env)
         return project_id if result is not None else None
 
-    def _cost(self, project_id: str) -> float:
-        """streamlog.cost_usd with an (mtime,size)-keyed cache — an unchanged project.log always
-        yields the same cost, so the multi-MB reparse only happens when the log actually grew.
-        Safe for the budget teeth: a stale hit is impossible (any append changes the key)."""
+    def _attempt_cost(self, project_id: str, state=None) -> float:
+        """SOF-186: the CURRENT stage attempt's total cost (authoritative + in-flight estimate) —
+        see `_attempt_cost_components` for the split this sums. Used by `retry_stage`'s banking
+        write: at that moment the attempt's process is already confirmed dead, so whatever this
+        returns for its now-frozen log region IS the final answer for it (a killed session's own
+        estimate never becomes MORE authoritative later — the process is gone), unlike the
+        still-alive-session case `_run_spend` guards against."""
+        return sum(self._attempt_cost_components(project_id, state))
+
+    def _attempt_cost_components(self, project_id: str, state=None) -> tuple[float, float]:
+        """(authoritative, estimate) over the CURRENT stage attempt's region of project.log — the
+        bytes from the run's spend_seal_offset onward (retry_stage reseals to the log end on every
+        relaunch, so prior attempts live before the offset and are banked in prior_attempts_usd
+        instead). See `streamlog.cost_components` for what each half means.
+
+        (mtime,size,offset)-keyed cache — an unchanged log always yields the same cost, so the
+        multi-MB reparse only happens when the log grew or was resealed; a stale hit is impossible
+        (any append changes st_size, any reseal changes the offset)."""
+        state = state or self._load_state(project_id)
+        off = state.spend_seal_offset or 0
         p = os.path.join(self._paths(project_id)["base"], "project.log")
         try:
             st = os.stat(p)
-            key = (st.st_mtime_ns, st.st_size)
+            key = (st.st_mtime_ns, st.st_size, off)
         except OSError:
-            return 0.0
+            return (0.0, 0.0)
         hit = self._cost_cache.get(project_id)
         if hit and hit[0] == key:
             return hit[1]
-        val = streamlog.cost_usd(self._full_log(project_id))
+        try:
+            with open(p, "rb") as f:
+                f.seek(off)
+                text = f.read().decode("utf-8", "replace")
+        except OSError:
+            return (0.0, 0.0)
+        val = streamlog.cost_components(text)
         self._cost_cache[project_id] = (key, val)
-        if val:
-            state = self._load_state(project_id)
-            if val != (state.spent_usd or 0):
-                state.spent_usd = val
-                state.save()
         return val
 
-    def _full_log(self, project_id: str) -> str:
-        p = os.path.join(self._paths(project_id)["base"], "project.log")
-        if not os.path.exists(p):
-            return ""
-        with open(p, "r", errors="replace") as f:
-            return f.read()
+    def _log_size(self, project_id: str) -> int:
+        try:
+            return os.path.getsize(os.path.join(self._paths(project_id)["base"], "project.log"))
+        except OSError:
+            return 0
 
     def _workspace_state(self, project_id: str, phase: str) -> str:
         ws = os.path.join(self._paths(project_id)["base"], "workspace")
@@ -2219,7 +2297,7 @@ class Console:
             "phase": self.current_phase(project_id),
             "done": state.phase == "done",
             "deploy_url": state.deploy_url,
-            "spent_usd": self._cost(project_id) or state.spent_usd,
+            "spent_usd": self._run_spend(project_id, state),
             "creds_provided": state.creds_provided,
             "byo_railway": "RAILWAY_TOKEN" in (state.creds_provided or []),
             "workspace": self._workspace_state(project_id, state.phase),
@@ -2656,13 +2734,22 @@ class Console:
         items.sort(key=lambda e: e["ts"])
         return items
 
-    def artifact(self, project_id: str, path: str) -> dict:
-        # SOF-138: prefer the inline `content` recorded in the DB at record time — it survives
-        # workspace teardown, unlike the file on disk. Fall back to the filesystem for older rows
-        # recorded before content was persisted (and while their workspace still exists).
-        row = ProjectStore(self._paths(project_id)["db"]).artifact_by_path(path)
+    def _artifact_content(self, project_id: str, path: str) -> str | None:
+        """Read an artifact's full text content: the DB-inlined `content` column first (SOF-138 —
+        survives workspace teardown), falling back to the live filesystem for pre-SOF-138 rows or
+        a still-live workspace. Returns None if the artifact isn't found anywhere.
+
+        SOF-187: this is the ONE shared read path any stage-completion gate (or artifact fetch)
+        should use. A gate that reads straight from disk becomes PERMANENTLY unsatisfiable once
+        the stage-3 agent's own teardown step (workspace.destroy) deletes the workspace — which
+        defeats auto_resume_dead_stage's "already done, don't relaunch" check for stage 3, since
+        that check depends entirely on detect_stage3_done() seeing every gate pass. Any future
+        stage-completion gate that needs to read a recorded document (e.g. PR #364's PRD.md gate)
+        should call this instead of its own os.walk — that's the whole fix, reused."""
+        db = ProjectStore(self._paths(project_id)["db"])
+        row = db.artifact_by_path(path)
         if row and row.get("content") is not None:
-            return {"path": path, "content": row["content"][:200000]}
+            return row["content"]
 
         # Artifact paths arrive relative to wherever the recording agent worked: the run base
         # (host: "input/..."), the workspace (orchestrator: "architecture.md"), or the cloned
@@ -2680,7 +2767,13 @@ class Console:
             full = os.path.realpath(os.path.join(root, path))
             if os.path.commonpath([full, base]) == base and os.path.isfile(full):
                 with open(full, "r", errors="replace") as f:
-                    return {"path": path, "content": f.read()[:200000]}
+                    return f.read()
+        return None
+
+    def artifact(self, project_id: str, path: str) -> dict:
+        content = self._artifact_content(project_id, path)
+        if content is not None:
+            return {"path": path, "content": content[:200000]}
         return {"error": "not found", "path": path}
 
     def graph(self, project_id: str) -> dict:
@@ -2738,8 +2831,11 @@ class Console:
             src = "phase:" + rec.phase if rec.phase in PIPELINE else "orchestrator"
             edges.append({"data": {"source": src, "target": nid, "etype": "hierarchy"}})
 
-        # Artifacts — from the artifacts table
-        for i, a in enumerate(db.artifacts()):
+        # Artifacts — from the artifacts table. SOF-199: skip input-only kinds (context,
+        # product_brief) the same way project_view.documents() already does for the Documents tab
+        # — an input artifact shouldn't appear as a peer node of the factory's real output (the
+        # product_brief-vs-prd duplication SOF-182 found).
+        for i, a in enumerate(a for a in db.artifacts() if a.get("kind") not in INPUT_ONLY_KINDS):
             path = a.get("path") or ""
             if path.startswith("http"):
                 status = "created"

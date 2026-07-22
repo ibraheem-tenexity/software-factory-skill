@@ -3,6 +3,12 @@
 **Companion to** `project-memory-design.md` · **Date:** 2026-06-30
 **Goal:** the smallest set of current, proven libraries that delivers the hierarchical + hybrid design — and an explicit list of what *not* to pull in. The anti-bloat thesis below is the whole point.
 
+> **As shipped (annotation):** every core decision here held — dense via OpenRouter, Postgres
+> `tsvector` as the sparse channel, RRF fusion, no separate vector DB, no LangChain in the retrieval
+> path. Two concretes to read against `models.py`: the embedding dimension shipped as
+> **`halfvec(3072)`** (`google/gemini-embedding-2`), and there is **no reserved `sparsevec` column
+> at all** — the learned-sparse slot was omitted, not reserved (a fully deferred upgrade).
+
 ---
 
 ## Decision: embeddings go through OpenRouter (dense) + Postgres for sparse

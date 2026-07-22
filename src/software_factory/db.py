@@ -136,8 +136,15 @@ class ProjectStore:
     def record_deployment(self, app: str, url: str, status: str = "live",
                           service_name: Optional[str] = None, verified: bool = False) -> None:
         """Record one deliverable's deployment. A run ships 1..N deliverables (mobile-web/web/api),
-        so deploy state is per-app, not a single run-level deploy_url."""
-        self._deployment_repo.insert(app, service_name, url, status, 1 if verified else 0, time.time())
+        so deploy state is per-app, not a single run-level deploy_url. The deploy step and the later
+        verify step both call this for the SAME (app, url) — update that row in place rather than
+        inserting a sibling (SOF-219: the verify call was inserting a duplicate row differing only
+        in `verified`)."""
+        ts = time.time()
+        if self._deployment_repo.find(app, url) is not None:
+            self._deployment_repo.update_existing(app, url, service_name, status, 1 if verified else 0, ts)
+        else:
+            self._deployment_repo.insert(app, service_name, url, status, 1 if verified else 0, ts)
 
     # ---- projection reads (scoped to this run) ---------------------------------------
     def phase_status(self) -> dict:

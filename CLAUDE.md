@@ -36,6 +36,41 @@ substitutes for an agent's judgment weakens the product and adds code nobody ask
    them; if something is confusing, say what and ask. When code has changed between sessions,
    operator edits are authoritative — surface anything questionable in them, then defer.
 
+## Code Organization Direction
+
+The target backend shape is a **bounded-context modular monolith**. The detailed package map,
+ownership rules, and transition guidance live in `docs/STRUCTURE.md`; read it before making a
+structural change.
+
+- Organize production code by the business capability it owns (`projects`, `execution`,
+  `conversation`, `identity`, `memory`, etc.), not by generic technical buckets such as a broad
+  `services/` or `repositories/` layer.
+- Keep related functions together when they change for the same workflow. Do not create a module
+  for a single function or class merely to make files smaller.
+- Split a module only when its callers, dependencies, or policy diverge. A new repository,
+  service, helper, or interface must own real SQL, policy, mapping, lifecycle, or an external
+  boundary; pass-through layers are clutter and should be folded into their owner.
+- Keep API routers and CLI commands thin transport adapters. Workers own background lifecycle
+  policy; integrations own provider-specific transport; feature packages own application policy.
+- Preserve HTTP, CLI, database, queue, artifact, and agent behavior while refactoring. Internal
+  imports may change. Use short-lived compatibility shims only while real callers migrate, then
+  remove the shim in the same refactor program.
+- Keep Alembic revisions as immutable operational history. Keep vendored resources and bundled
+  skills isolated from application packages. Do not merge them into the modular-monolith layout.
+- Prefer explicit query/projection modules for cross-context reads over adding unrelated methods
+  to a generic service. Update `docs/ARCHITECTURE.md` and `docs/STRUCTURE.md` when a structural
+  move lands.
+
+
+# Log full traceback for every caught exception — NEVER swallow silently or with basic message
+Every `except` block MUST log the full traceback — `logger.exception(...)` or
+`logger.error("...: %s", traceback.format_exc())` — *including* fire-and-forget paths that 
+return a fallback (`None`/`False`/a default): log the traceback FIRST, then fall back. A bare 
+`except: pass`, `except: return False`, or `except: return None` that logs nothing or a custom message is forbidden — it destroys the only evidence of what actually failed and 
+makes remote debugging impossible. 
+Honest errors reach the LOGS, not just the user and the agent.
+Full traceback should be logged for errors
+
 ## Verification (NO unit/integration tests — operator directive, 2026-07-08)
 
 Do not write, run, or wait on unit/integration tests; they must not block or delay anything.

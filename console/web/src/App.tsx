@@ -16,6 +16,10 @@ function readInitialView(): "project" | "factory" {
   return new URLSearchParams(location.search).get("view") === "factory" ? "factory" : "project";
 }
 
+function readInitialShowOrg(): boolean {
+  return new URLSearchParams(location.search).get("screen") === "org";
+}
+
 export function App() {
   const [projectId, setProjectId] = useState<string | null>(readInitialProject());
   const [showProjects, setShowProjects] = useState<boolean>(!readInitialProject());
@@ -24,8 +28,9 @@ export function App() {
   // Resuming an existing draft (project-view "Complete setup & start building"): the onboarding adopts
   // this draft id instead of minting a new one, and rehydrates its fields from GET /draft. null = fresh.
   const [resumeProjectId, setResumeProjectId] = useState<string | null>(null);
-  // Org admin route (dashboard org switcher / "Manage organization →"). Placeholder until §2.3.
-  const [showOrg, setShowOrg] = useState<boolean>(false);
+  // Org admin route (dashboard org switcher / "Manage organization →"), synced to ?screen=org
+  // (SOF-220) so a reload while in Org Admin doesn't drop back to the Dashboard.
+  const [showOrg, setShowOrg] = useState<boolean>(readInitialShowOrg());
   // Open-run peer view (§2.5): 'project' = ProjectView (Overview/Documents tabs); 'factory' = the
   // Factory Console. The "Factory console" peer-tab flips this; FactoryConsole's back returns here.
   const [openView, setOpenView] = useState<"project" | "factory">(readInitialView());
@@ -42,6 +47,13 @@ export function App() {
     if (openView === "factory") p.set("view", "factory"); else p.delete("view");
     history.replaceState(null, "", "?" + p.toString());
   }, [openView]);
+
+  // Sync showOrg → ?screen=org (SOF-220), same pattern as openView above.
+  useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    if (showOrg) p.set("screen", "org"); else p.delete("screen");
+    history.replaceState(null, "", "?" + p.toString());
+  }, [showOrg]);
 
   const openProject = (id: string) => { setProjectId(id); setShowProjects(false); setShowOnboarding(false); setOpenView("project"); syncUrl(id); };
   const backToProjects = () => { setProjectId(null); setShowProjects(true); syncUrl(null); };

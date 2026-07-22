@@ -70,6 +70,10 @@ class CompanyProfile:
     # Metadata
     mode: str                       # "quick" | "deep"
 
+    # Per-field attribution (CBT-1): deep mode only, and only for fields the synthesis could
+    # attribute to a specific consulted URL — never fabricated, never present in quick mode.
+    field_sources: dict[str, str] | None = None
+
     def to_dict(self) -> dict:
         return asdict(self)
 
@@ -143,8 +147,13 @@ Research the company "{name}"{website_hint}{extra_hint} and return a JSON object
   "products": ["<product or service name>"],
   "competitors": [{{"name": "<competitor>", "url": "<url>", "description": "<one line>"}}],
   "recent_news": ["<recent headline or signal>"],
-  "sources": ["<URL you consulted>"]
+  "sources": ["<URL you consulted>"],
+  "field_sources": {{"<field name above>": "<the specific URL you actually used for that field>"}}
 }}
+
+For "field_sources": for each profile field you fill in, also note the specific URL you used —
+but OMIT any field you cannot attribute to one specific consulted URL. Never invent a URL just to
+fill this in.
 
 Return ONLY valid JSON. No markdown fences. No commentary."""
 
@@ -344,6 +353,10 @@ def _fusion_research(
             f"Fusion response had no parseable panel or synthesized JSON "
             f"({len(panels_raw)} panel(s) found, 0 parsed)")
 
+    field_sources = data.get("field_sources")
+    if not isinstance(field_sources, dict):
+        field_sources = None  # never fabricate a mapping the model didn't actually emit
+
     return CompanyProfile(
         name=data.get("name") or name,
         website=data.get("website"),
@@ -357,6 +370,7 @@ def _fusion_research(
         recent_news=data.get("recent_news") or [],
         sources=data.get("sources") or [],
         mode="deep",
+        field_sources=field_sources,
     )
 
 

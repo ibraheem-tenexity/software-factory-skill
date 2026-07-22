@@ -10,6 +10,7 @@ import uuid
 from software_factory import dbshim
 from software_factory.constants import CONCIERGE_SAFE_FALLBACK
 from software_factory.data_transfer_objects.chat_agent import ConciergeTurn
+from software_factory.recipes.store import RecipeStore
 from software_factory.tagged_reply import parse_tagged_reply
 
 logger = logging.getLogger(__name__)
@@ -138,21 +139,30 @@ def _build_first_turn_context(console, project_id: str, users=None) -> str:
         f"- Description: {state.description or '(not composed yet)'}"
     )
 
-    sow_rows = _matching_sow_bodies(state.name)
-    if sow_rows:
-        sow_text = "\n\n".join(f"**{r['title']}**\n{r['body']}" for r in sow_rows)
+    # CBT-9: a picked repo-backed recipe REPLACES the SOW + genre-recipes sections below — its
+    # body_md is the frame the interview/brief are built on, not just a guide. No brief-matches-
+    # recipe validator exists; the framing sentence is the prompt doing the work.
+    recipe_body = state.recipe_id and RecipeStore().body(state.recipe_id)
+    if recipe_body:
+        r = RecipeStore().get(state.recipe_id)
+        sections.append(f"### Recipe: {r['name']} (this project builds FROM this recipe)\n"
+                        f"{recipe_body}")
     else:
-        sow_text = "(no SOW on file matching this project's name)"
-    sections.append(f"### Statement of Work\n{sow_text}")
+        sow_rows = _matching_sow_bodies(state.name)
+        if sow_rows:
+            sow_text = "\n\n".join(f"**{r['title']}**\n{r['body']}" for r in sow_rows)
+        else:
+            sow_text = "(no SOW on file matching this project's name)"
+        sections.append(f"### Statement of Work\n{sow_text}")
 
-    # SOF-108: genre recipes for the scope areas the user actually selected. A recipe describes
-    # what that class of tool typically looks like (screens, entities, flows) — a guide for the
-    # agent's questioning and the PRD skeleton, never a spec; the user's own words always win.
-    # Custom "+ Add" scopes simply have no recipe row and appear only in the scope list above.
-    recipe_rows = _genre_recipes(state.scope or [])
-    if recipe_rows:
-        recipe_text = "\n\n".join(f"**{r['title']}**\n{r['body']}" for r in recipe_rows)
-        sections.append(f"### Genre recipes for the selected scope areas\n{recipe_text}")
+        # SOF-108: genre recipes for the scope areas the user actually selected. A recipe describes
+        # what that class of tool typically looks like (screens, entities, flows) — a guide for the
+        # agent's questioning and the PRD skeleton, never a spec; the user's own words always win.
+        # Custom "+ Add" scopes simply have no recipe row and appear only in the scope list above.
+        recipe_rows = _genre_recipes(state.scope or [])
+        if recipe_rows:
+            recipe_text = "\n\n".join(f"**{r['title']}**\n{r['body']}" for r in recipe_rows)
+            sections.append(f"### Genre recipes for the selected scope areas\n{recipe_text}")
 
     # SOF-137: the FULL document text, not just its summary, unless it would blow the dedicated
     # inline-context budget above (per-doc AND running total across all documents) — under budget,

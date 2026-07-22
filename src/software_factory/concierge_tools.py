@@ -4,7 +4,9 @@
 the tools the agent may call:
   · project memory — write_to_project_memory / get_from_project_memory / create_project_summary
   · pipeline       — check_project_status (returns live state so the agent reasons about progress)
-  · company research — exa_search (quick) / fusion_search (deep), from research.py
+  · company research — exa_search (quick) / fusion_search (deep), from research.py; enrich_company
+    (CBT-4) is the CBT-1 wow-prefill lookup specifically — same quick-mode call, name-or-website
+    input, "sources only" result the concierge is instructed to present honestly (default_prompt.py)
   · document reading (SOF-62) — search_document_summaries (coarse, pick 2-3 relevant documents) /
     fetch_document_markdown (read one in full)
   · product brief (SOF-137, Minimum Machinery) — finalize_product_brief (writes the brief MD to
@@ -102,6 +104,18 @@ def build_project_tools(console: Console, project_id: str) -> list:
             return f"research unavailable: {exc}"
 
     @tool
+    def enrich_company(name: str = "", website: str = "") -> str:
+        """Look a company up on the web (quick mode, ~1-3s) — the CBT-1 wow-prefill lookup. Returns
+        profile fields + the source URLs consulted (never a confidence score). Use when the user
+        hasn't described their company yet and agrees to a lookup ("want me to look you up?");
+        pass whichever of name/website you have — the other is optional."""
+        try:
+            p = research_company(name or website, website=website or None, mode="quick")
+            return json.dumps(p.to_dict())
+        except ResearchError as exc:
+            return f"company lookup failed: {exc}"  # truth degrades the answer, never kills the chat
+
+    @tool
     def search_document_summaries(query: str) -> str:
         """Find which 2-3 uploaded documents are relevant to `query` by searching document-level
         summaries (fast, coarse). Call this BEFORE fetch_document_markdown or chunk-level search
@@ -167,6 +181,6 @@ def build_project_tools(console: Console, project_id: str) -> list:
         return "handed off — Stage 1 is launching"
 
     return [write_to_project_memory, get_from_project_memory, create_project_summary,
-            check_project_status, exa_search, fusion_search, search_document_summaries,
-            fetch_document_markdown, finalize_product_brief, read_product_brief,
-            hand_off_to_factory]
+            check_project_status, exa_search, fusion_search, enrich_company,
+            search_document_summaries, fetch_document_markdown, finalize_product_brief,
+            read_product_brief, hand_off_to_factory]

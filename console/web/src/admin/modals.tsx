@@ -531,6 +531,7 @@ export function ClientModal({
   const [spend, setSpend] = React.useState(client?.spend ?? "$0.00");
   const [last, setLast] = React.useState(client?.last_activity ?? "");
   const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
   const save = () => {
     const body = {
       name,
@@ -541,6 +542,7 @@ export function ClientModal({
       last_activity: last,
     };
     setBusy(true);
+    setError(null);
     const p = client
       ? api.adminUpdateClient(client.org_id, body)
       : api.adminCreateClient(body as any);
@@ -548,7 +550,12 @@ export function ClientModal({
       setBusy(false);
       onSaved();
       onClose();
-    }).catch(() => setBusy(false));
+    }).catch((e: any) => {
+      // SOF-196: creating a client whose name already exists is a guarded-invariant 409 — show the
+      // server's honest reason instead of silently dropping the click.
+      setBusy(false);
+      setError(typeof e?.detail === "string" ? e.detail : "Couldn’t save organization.");
+    });
   };
   return (
     <div style={overlay}>
@@ -580,6 +587,7 @@ export function ClientModal({
           <Field label="Last activity">
             <TextInput value={last} onChange={setLast} placeholder="—" />
           </Field>
+          {error && <div style={{ font: `400 12.5px/1.4 ${T.sans}`, color: T.danger }}>{error}</div>}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
             <Btn onClick={onClose}>Cancel</Btn>
             <Btn variant="primary" onClick={save} disabled={!name || busy}>

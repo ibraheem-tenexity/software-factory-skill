@@ -17,7 +17,7 @@ from software_factory.input_pipeline import make_prompt
 from software_factory.memory.ingest import maybe_ingest_async
 
 import console.state as state
-from console.deps import require_authed, authorize_project, _can_see
+from console.deps import require_authed, authorize_project, _can_see, project_visibility
 from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, MaintenanceToggleIn,
                              OrgDocIn, DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
                              RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn)
@@ -38,11 +38,27 @@ def scope_genres(v: tuple = Depends(require_authed)):
     ]}
 
 
+# ── Recipes (CBT-9): the intake picker source — published recipes' light fields only ────────────
+@router.get("/api/recipes")
+def list_recipes(v: tuple = Depends(require_authed)):
+    return {"recipes": state.recipes.published()}
+
+
 # ── Runs: list + create ───────────────────────────────────────────────────────────────────────
 @router.get("/api/projects")
 def projects_list(include_archived: bool = False, v: tuple = Depends(require_authed)):
-    owner = None if v[1] == "admin" else v[0]
-    return {"projects": state.console.list_projects(owner=owner, include_archived=include_archived)}
+    # SOF-221: scope to the session's tenancy boundary (was v[1]=="admin" → every org's runs, a
+    # cross-tenant leak for non-internal customer org-admins). project_visibility() returns None for
+    # the operator god-view, else the set of run-owner emails this session may see.
+    scope = project_visibility(v)
+    if scope is None:
+        runs = state.console.list_projects(owner=None, include_archived=include_archived)
+    elif len(scope) == 1:                       # member / org-less admin → own only (efficient path)
+        runs = state.console.list_projects(owner=next(iter(scope)), include_archived=include_archived)
+    else:                                       # org-admin → their org's runs (any member as owner)
+        runs = [r for r in state.console.list_projects(owner=None, include_archived=include_archived)
+                if (r.get("owner") or "").lower() in scope]
+    return {"projects": runs}
 
 
 # ── Drafts (Option C onboarding) ──────────────────────────────────────────────────────────────
@@ -82,6 +98,14 @@ def project_graph(pid: str, v: tuple = Depends(authorize_project)):
 def project_tickets(pid: str, v: tuple = Depends(authorize_project)):
     """Build-ticket projection for the kanban view (empty before Stage 2)."""
     return state.console.tickets(pid)
+
+
+@router.get("/api/projects/{pid}/deployments")
+def project_deployments(pid: str, v: tuple = Depends(authorize_project)):
+    """Per-deliverable deploy state (a run ships 1..N apps; no scalar run-level deploy_url). SOF-216:
+    the route delegating to Console.deployments was dropped in the app.py→routers split, leaving the
+    method orphaned; this restores it (thin transport, same authorize_project guard as the siblings)."""
+    return state.console.deployments(pid)
 
 
 @router.get("/api/projects/{pid}/brief")
@@ -489,13 +513,21 @@ def get_draft(pid: str, v: tuple = Depends(authorize_project)):
 
 @router.patch("/api/projects/{pid}/draft")
 def patch_draft(pid: str, body: DraftPatchIn, v: tuple = Depends(authorize_project)):
-    """Structured project write-through: {name?, goal?, scope?, runtime?}. Server composes the canonical
-    description (goal + scope-of-work line). runtime updates the draft's build engine (claude|opencode)
-    after the eager create. Call debounced/on-blur, NOT per keystroke."""
+    """Structured project write-through: {name?, goal?, scope?, runtime?, recipe_id?}. Server composes
+    the canonical description (goal + scope-of-work line). runtime updates the draft's build engine
+    (claude|opencode) after the eager create. recipe_id (CBT-9) must name a published recipe — a bad
+    id is refused with the real reason instead of silently pinning a draft/archived one; "" clears the
+    selection. Call debounced/on-blur, NOT per keystroke."""
     if not state.console.is_draft(pid):
         raise HTTPException(status_code=409, detail="not a draft (already promoted)")
+    if body.recipe_id:
+        recipe = state.recipes.get(body.recipe_id)
+        if not recipe or recipe.get("status") != "published":
+            raise HTTPException(status_code=400,
+                                detail=f"recipe_id {body.recipe_id!r} does not name a published recipe")
     result = state.console.set_draft_project(pid, name=body.name, goal=body.goal, scope=body.scope,
-                                             runtime=body.runtime, model=body.model)
+                                             runtime=body.runtime, model=body.model,
+                                             recipe_id=body.recipe_id)
     if body.budget is not None:
         state.console.raise_budget(pid, body.budget)
         result["budget_ceiling"] = body.budget
