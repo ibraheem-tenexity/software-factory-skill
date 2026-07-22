@@ -104,6 +104,13 @@ process-node graph). Right = auth form.
   render provider-replica sign-in buttons, mock SSO/credential affordances, or
   unverifiable trust badges — a dead affordance is a dishonest one (Principle:
   honest errors, everywhere).
+
+> **Prototype note (SOF-224):** the current `login.jsx` artboard is **kept as-is for
+> now** — it still shows the future affordances above. That is a deliberate hold, not a
+> spec violation: this section governs the *shipping* app, where the future paths must not
+> render until a real provider verifies them (row 8 of §9 — the app change is the WEB
+> lane). The prototype is not being reworked in this PR.
+
 **Footer:** "Request access" for users not yet on the allow-list.
 **Behavior:** any successful auth → projects dashboard — **except an invited user's first sign-in**, which routes to first-time onboarding (§3.7 chain, §2.4 fresh mode, website prefilled from the email domain). Sign-in is gated by the
 allow-list managed in Tenexity OS (§3.7).
