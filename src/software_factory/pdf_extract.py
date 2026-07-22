@@ -12,6 +12,10 @@ from __future__ import annotations
 import os
 from typing import Callable
 
+from .log import get_logger
+
+logger = get_logger(__name__)
+
 
 def extract_to_markdown(path: str, convert: Callable[[str], str] | None = None) -> str:
     """Return the Markdown text of the document at `path`.
@@ -32,7 +36,8 @@ def _default_convert(path: str) -> str:
         try:
             return _pandoc_convert(path)
         except Exception:
-            pass  # pandoc missing/failed — markitdown[docx] still extracts, just flatter tables
+            # pandoc missing/failed — markitdown[docx] still extracts, just flatter tables.
+            logger.exception("[ingest] %s: pandoc docx conversion failed — falling back to markitdown", path)
     return _markitdown_convert(path)
 
 

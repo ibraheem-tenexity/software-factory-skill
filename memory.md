@@ -373,3 +373,8 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 # ProcessingScreen SSE-race fix + markitdown .env landmine (2026-07-22)
 1. SOF-226: ProcessingScreen seeded every doc as running and learned completion ONLY from no-replay SSE — a doc ingested before mount = infinite spinner (operator hit it live). Fix: seed rows from summary_status + reconcile via a documents re-fetch when the stall watchdog fires. Browser-verified: pre-ingested doc -> instant advance to interview.
 2. LOCAL DEV LANDMINE (SOF-228): `import markitdown` autoloads dotenv, find_dotenv walks UP from a worktree to the MAIN repo's live .env -> injects SF_GOOGLE_CLIENT_ID/SF_SESSION_SECRET mid-process at first doc parse -> local console flips auth-on mid-run. Immunize: launch worktree consoles with SF_GOOGLE_CLIENT_ID="" (override=False respects it).
+# Ingestion logging fix (2026-07-22, operator-ordered)
+1. memory/ingest.py now narrates the FULL lifecycle server-side: START(name/scope/size) -> parsed -> chunked -> embedded(model) -> summarized(real tokens) -> DONE(wall time, chunks, assumptions), + SKIPPED(dedup) + deleted-mid-ingest lines.
+2. Every failure path uses logger.exception (full traceback) per the new CLAUDE.md rule — parse/embed/summarize failures, pandoc fallbacks in pdf/docx_extract, embed rate-limit retries, input_pipeline docx ImportError fallback.
+3. Upload entry points log too: project material + draft attach ([ingest] queued) and org KB (lazy note).
+4. Verified by REAL runs: happy path (real OpenRouter embed + Haiku summary, 7.4s, all lines observed) and failure path (bogus key -> ERROR + traceback + status=failed). App-wide logging pass is the follow-up.

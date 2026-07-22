@@ -17,7 +17,10 @@ from software_factory.input_pipeline import make_prompt
 from software_factory.memory.ingest import maybe_ingest_async
 
 import console.state as state
+from software_factory.log import get_logger
 from console.deps import require_authed, authorize_project, _can_see, project_visibility
+
+logger = get_logger(__name__)
 from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, MaintenanceToggleIn,
                              OrgDocIn, DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
                              RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn)
@@ -250,6 +253,8 @@ def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authori
     blob_id = state.blobs.record("project", pid, f"{pid}/{key}", name=body.name, tag=body.tag,
                  kind=state._doc_kind(body.name), content_type=body.content_type,
                  size_bytes=len(raw), sha256=storage.sha256(raw))
+    logger.info("[ingest] %s: material uploaded — blob %s (%s, %s bytes), ingestion queued",
+                pid, blob_id, body.name, len(raw))
     maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
     return _project_documents(pid)
 
@@ -557,6 +562,8 @@ def attach_draft(pid: str, body: AttachIn, v: tuple = Depends(authorize_project)
                            kind=state._doc_kind(name),
                            content_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
                            size_bytes=len(raw), sha256=storage.sha256(raw))
+        logger.info("[ingest] %s: draft attachment stored — blob %s (%s, %s bytes), ingestion queued",
+                    pid, blob_id, name, len(raw))
         maybe_ingest_async(blob_id, state.console, push_progress=state._push_ingest_sse)
     return {"attached": written}
 

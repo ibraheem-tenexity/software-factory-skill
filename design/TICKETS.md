@@ -253,6 +253,25 @@ Tickets); industry preload packs via recipes. AC: interview questions follow
 the skeleton; artifact rail groups by folder; selecting an industry recipe
 preloads its pack.
 
+**CBT-31 · WEB · existing-replacement — Invite-led organization onboarding**
+The live OS "New organization" dialog is a manual CRUD form asking operators
+to type **computed** values (total spend, active projects, in-flight tickets,
+last activity) — replace it with the invite-led chain (PRD §3.7): "New
+organization" and "Provide access" open one invite modal (email + access
+type; operator may **pre-seed identity/context fields** — name + website
+prefilled from the email domain, industry optional, all editable); send →
+allow-list `invited`; invite email (CBT-29) → sign-in with the user's
+preferred method (Google / Microsoft / email / SSO) → first sign-in
+**always** routes to fresh-mode onboarding (blank or pre-seeded alike) →
+web prefill (CBT-3) fills the remainder with the user → confirm → first
+project. Organization table columns are system-derived, never editable.
+AC: no telemetry entry form exists anywhere; inviting a real email produces
+an `invited` allow-list row; operator-provided name/website/industry appear
+on file in the invited user's onboarding; first sign-in lands in fresh
+onboarding (not the dashboard) whether pre-seeded or not; preferred-method
+sign-in works for all four methods; nothing is asked of the user twice.
+Depends: CBT-29 (verified domain), CBT-1/3 (prefill wiring).
+
 ---
 
 ## Session output (this PR)
