@@ -444,7 +444,7 @@ export const api = {
   // drives single/multi-select render. No `choices`/`done`.
   converse: (projectId: string, message: string) =>
     send<{ response: string; suggested_responses: { response: string; type: "single select" | "multi select" }[];
-          message_id?: string; session_id?: string }>(`/api/projects/${projectId}/converse`, "POST", { message }),
+          message_id?: string; session_id?: string; handed_off: boolean }>(`/api/projects/${projectId}/converse`, "POST", { message }),
   // SOF-154: streaming sibling of `converse` — NDJSON over the raw Response body, same shape as
   // `chatStream` below. Caller reads `.body.getReader()` and parses `working`/`token`/`option`/
   // `done`/`error` events itself.

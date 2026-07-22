@@ -72,6 +72,10 @@ def _embed_batch_with_retry(client, model: str, batch: list[str],
             # Forcing "float" removes that round-trip and its failure mode entirely.
             resp = client.embeddings.create(model=model, input=batch, encoding_format="float")
         except RateLimitError as exc:
+            logger.warning("[ingest] embed_texts: rate-limited by provider (attempt %s/%s, "
+                           "batch_size=%s) — backing off %.1fs: %s",
+                           attempt + 1, _MAX_RETRIES, len(batch),
+                           _BACKOFF_SECONDS * (2 ** attempt), exc)
             last_err = exc
             sleep(_BACKOFF_SECONDS * (2 ** attempt))
             continue

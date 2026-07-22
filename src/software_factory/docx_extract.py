@@ -13,6 +13,10 @@ import os
 import re
 from typing import Callable
 
+from .log import get_logger
+
+logger = get_logger(__name__)
+
 
 def extract_with_images(path: str, out_dir: str, img_subdir: str = "images") -> tuple[str, list[str]]:
     """Convert a .docx to Markdown, extracting EVERY embedded image — including images that
@@ -81,6 +85,7 @@ def _pandoc_convert(path: str) -> str:
         return pypandoc.convert_file(path, "gfm")
     except Exception:
         # pandoc binary unavailable/failed — degrade to mammoth (no tables, but real text).
+        logger.exception("[ingest] %s: pandoc conversion failed — degrading to mammoth (tables lost)", path)
         import mammoth
         with open(path, "rb") as f:
             return mammoth.convert_to_markdown(f).value

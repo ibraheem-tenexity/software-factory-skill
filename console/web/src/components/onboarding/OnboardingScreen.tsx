@@ -778,7 +778,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   }
 
   if (view === "interview" && draftId) {
-    return <InterviewView draftId={draftId} projectName={p.name} goal={p.goal} onBack={() => setView("intake")} onHandoff={handoff} submitting={submitting} error={error} />;
+    return <InterviewView draftId={draftId} projectName={p.name} goal={p.goal} onBack={() => setView("intake")} onHandoff={handoff} onPromoted={() => onComplete(draftId)} submitting={submitting} error={error} />;
   }
 
   const company = onFile?.name || "";

@@ -121,7 +121,7 @@ granularity instead.
 | `dbshim.py` | The storage seam: `connect(path)` returns a minimal DB-API wrapper over **psycopg3** against the configured Postgres/pooler endpoint (`prepare_threshold=None`); `?`→`%s` + `RETURNING` translation. All per-project stores go through it; `registry_projects()` lists `public.projectstate`. |
 | `env.py` | dev/prod tiering (`SF_ENVIRONMENT`): `stage_env_baseline()` (scrubs console secrets from stage child processes), Railway project allowlist. |
 | `auth.py` + `users.py` | Google-OAuth login (`google-auth` token verify) + HMAC `uid`/`token_version` session cookie + service token; `UserStore` = the allowlist+RBAC directory (`roles`/`role_permissions`, status invited/active/disabled, per-request role resolution) backing membership + per-project ownership. |
-| `chat_agent.py` | The LangChain `ChatOpenAI`-compatible Factory Concierge. It interviews the user over the onboarding draft, calls `hand_off_to_factory` (`promote_draft`) once the brief is finalized, and answers status/dependency questions. Its effective prompt is `CONCIERGE_INSTRUCTIONS` plus an env-safe, 60-second cached `system_agents.CONCIERGE` override. |
+| `chat_agent.py` | The LangChain `ChatOpenAI`-compatible Factory Concierge. It interviews the user over the onboarding draft, calls `hand_off_to_factory` (`promote_draft`) once the brief is finalized, and answers status/dependency questions. A completed turn includes the factual `handed_off` result so onboarding navigates when the tool succeeds. Its effective prompt is `CONCIERGE_INSTRUCTIONS` plus an env-safe, 60-second cached `system_agents.CONCIERGE` override. |
 | `input_pipeline.py`, `pdf_extract.py`, `docx_extract.py` | Ingest: attachments → Markdown, compose the Stage-1 input (`context.md` + `brief.md` + `interview.md`). `docx_extract.extract_with_images` (mammoth + markdownify) keeps **wireframe images inside Word tables** → `input/images/`. |
 | `workspace_setup.py`, `workspace.py` | Per-stage ephemeral workspace: SKILL contract, `.mcp.json`, runtime-specific setup (`opencode.json` or Codex `.codex/config.toml` and `AGENTS.md`), prior-stage artifacts, vendored design skills. `.mcp.json` (SOF-81) is COMPOSED FROM the `tools` table (`mcp_config(stage)` → `tools.ToolStore`, filtered by `attached_to` containing `STAGE-{n}`, MCP-shaped rows only) — the OS Tools tab is the source of truth for what a stage build gets, by construction. Falls back to a hardcoded dict only if the table read itself fails (boot resilience). `tool_env_overrides(stage)` returns vault-backed env var overrides for any attached tool with a key set, merged into the stage's env by `console.py::_launch_stage`. |
 | `deploy.py` | Shared command and health-check primitives used by deployment/database helpers; Stage 3 drives app deployment through its Railway MCP/skill contract. |
@@ -347,8 +347,8 @@ alongside its `pyproject.toml` declaration.
 - **Create a project (Option C, the only path):** `POST /api/drafts` mints the canonical id
   (`create_draft`, phase="draft"; attached material may already create artifacts, but the poller ignores
   drafts) → the
-  concierge interview finalizes a product brief → `POST /api/projects/{id}/promote` (or the
-  concierge's `hand_off_to_factory` tool, same call) → `promote_draft` → `_provision_and_launch`
+  concierge interview finalizes a product brief → the user clicks **Hand off to factory** or the
+  Concierge calls `hand_off_to_factory` after agreement → `promote_draft` → `_provision_and_launch`
   writes `input/`, stamps `owner`, persists `ProjectState`, launches Stage 1.
 - **Advance:** poller detects stage done → launches next stage → auto-satisfies deps or pauses for a
   secret → stage 3 builds, deploys to `sf-<project_id>`, drives Playwright, records verification.

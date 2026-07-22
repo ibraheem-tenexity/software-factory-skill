@@ -15,6 +15,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from typing import Callable
 
 from .. import docx_extract, pdf_extract, storage
@@ -41,6 +42,7 @@ def maybe_ingest_async(blob_id: int, console, push_progress: Callable[[str | Non
     """Fire-and-forget: spawn ingest_blob on a daemon thread. Never blocks the caller (an upload
     HTTP handler) and never lets an ingest failure propagate into it — a genuine failure (missing
     key, model error) is caught inside ingest_blob and marked `failed`, not swallowed here."""
+    logger.info("[ingest] blob %s: queued for background ingestion", blob_id)
     t = threading.Thread(target=_ingest_blob_safe, args=(blob_id, console, push_progress),
                         daemon=True, name=f"ingest-blob-{blob_id}")
     t.start()
@@ -237,19 +239,26 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
     `force=True` (SOF-36's Regenerate button) bypasses the unchanged-content dedup skip below —
     a user who explicitly asks for a fresh summary wants one even if the file hasn't changed."""
     push_progress = push_progress or _noop_progress
+    t0 = time.monotonic()
     blobs_store = BlobStore()
     memory_store = MemoryStore()
     blob = blobs_store.get_blob(blob_id)
     if blob is None:
+        logger.warning("[ingest] blob %s: not found — nothing to ingest", blob_id)
         return {"blob_id": blob_id, "status": "failed", "error": "blob not found"}
 
     scope, scope_id = blob["scope"], blob["scope_id"]
     project_id = scope_id if scope == "project" else None
     doc_name = blob.get("name") or f"blob-{blob_id}"
 
+    logger.info("[ingest] blob %s (%s): START — scope=%s/%s size=%s bytes force=%s",
+                blob_id, doc_name, scope, scope_id, blob.get("size_bytes"), force)
+
     existing = memory_store.get_doc_summary(blob_id)
     if (not force and existing and existing.get("status") == "ready"
             and existing.get("content_sha256") == blob.get("sha256")):
+        logger.info("[ingest] blob %s (%s): SKIPPED — content unchanged (sha256 dedup), already ready",
+                    blob_id, doc_name)
         return {"blob_id": blob_id, "status": "ready", "skipped": "unchanged (content_sha256 dedup)"}
 
     push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "parsing", "pct": 5, "status": "running"})
@@ -261,13 +270,16 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
             md_text, image_paths = _extract(src_path, tmp_dir)
             if image_paths:
                 _record_extracted_images(blob, image_paths, blobs_store)
+        logger.info("[ingest] blob %s (%s): parsed — %s chars markdown, %s extracted image(s)",
+                    blob_id, doc_name, len(md_text or ""), len(image_paths))
     except Exception as exc:
-        logger.warning("[memory.ingest] blob %s (%s) parse failed: %s", blob_id, doc_name, exc)
+        logger.exception("[ingest] blob %s (%s): PARSE FAILED — marking doc failed", blob_id, doc_name)
         memory_store.upsert_doc_summary(blob_id, scope, scope_id, status="failed")
         push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "parsing", "pct": 100, "status": "failed"})
         return {"blob_id": blob_id, "status": "failed", "error": str(exc)}
 
     if blobs_store.get_blob(blob_id) is None:
+        logger.info("[ingest] blob %s (%s): blob deleted mid-ingest (after parse) — aborting cleanly", blob_id, doc_name)
         return {"blob_id": blob_id, "status": "deleted"}
 
     # SOF-60: persist the full converted markdown (chunking loses whole-document order) as an
@@ -278,16 +290,21 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
     push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "chunking", "pct": 20, "status": "running"})
     chunks = chunker.chunk_markdown(md_text)
     valid_section_paths = {path for _o, path, _t in chunks if path}
+    logger.info("[ingest] blob %s (%s): chunked — %s chunk(s), %s distinct section(s)",
+                blob_id, doc_name, len(chunks), len(valid_section_paths))
 
     push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "embedding", "pct": 40, "status": "running"})
     try:
         vectors = embed.embed_texts([text for _o, _p, text in chunks]) if chunks else []
+        logger.info("[ingest] blob %s (%s): embedded — %s vector(s) via %s",
+                    blob_id, doc_name, len(vectors), embed.DEFAULT_MODEL)
     except Exception as exc:
-        logger.warning("[memory.ingest] blob %s (%s) embedding failed: %s", blob_id, doc_name, exc)
+        logger.exception("[ingest] blob %s (%s): EMBEDDING FAILED — marking doc failed", blob_id, doc_name)
         memory_store.upsert_doc_summary(blob_id, scope, scope_id, status="failed")
         push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "embedding", "pct": 100, "status": "failed"})
         return {"blob_id": blob_id, "status": "failed", "error": str(exc)}
     if blobs_store.get_blob(blob_id) is None:
+        logger.info("[ingest] blob %s (%s): blob deleted mid-ingest (after embed) — aborting cleanly", blob_id, doc_name)
         return {"blob_id": blob_id, "status": "deleted"}
     memory_store.replace_chunks(blob_id, chunks, scope=scope, scope_id=scope_id, dense=vectors)
 
@@ -303,13 +320,19 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
     push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "summarizing", "pct": 65, "status": "running"})
     try:
         summary_md, outline, raw_facts, usage = _summarize_and_extract_facts(chunks, doc_name)
+        logger.info("[ingest] blob %s (%s): summarized — %s prompt + %s completion tokens via %s",
+                    blob_id, doc_name, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0),
+                    SUMMARIZE_MODEL)
     except Exception as exc:
-        logger.warning("[memory.ingest] blob %s (%s) summarization failed: %s", blob_id, doc_name, exc)
+        logger.exception("[ingest] blob %s (%s): SUMMARIZATION FAILED — marking doc failed", blob_id, doc_name)
         memory_store.upsert_doc_summary(blob_id, scope, scope_id, status="failed")
         push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "summarizing", "pct": 100, "status": "failed"})
         return {"blob_id": blob_id, "status": "failed", "error": str(exc)}
 
     assumptions, _unreferenced = _filter_assumptions(raw_facts, blob_id, valid_section_paths)
+    if _unreferenced:
+        logger.info("[ingest] blob %s (%s): %s assumption(s) kept, %s dropped (unreferenced section_path)",
+                    blob_id, doc_name, len(assumptions), len(_unreferenced))
 
     if usage:
         summarize_cost = _estimate_cost_usd(SUMMARIZE_MODEL, "chat", prompt_tokens=usage.get("prompt_tokens", 0),
@@ -323,6 +346,7 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
                                   output_tokens=usage.get("completion_tokens", 0), usd=summarize_cost)
 
     if blobs_store.get_blob(blob_id) is None:
+        logger.info("[ingest] blob %s (%s): blob deleted mid-ingest (after summarize) — aborting cleanly", blob_id, doc_name)
         return {"blob_id": blob_id, "status": "deleted"}
 
     memory_store.upsert_doc_summary(
@@ -334,6 +358,8 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
         _recompute_project_rollup(console, scope_id, memory_store)
 
     push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "done", "pct": 100, "status": "ready"})
+    logger.info("[ingest] blob %s (%s): DONE in %.1fs — status=ready chunks=%s assumptions=%s",
+                blob_id, doc_name, time.monotonic() - t0, len(chunks), len(assumptions))
     return {"blob_id": blob_id, "status": "ready", "chunks": len(chunks), "assumptions": len(assumptions)}
 
 
