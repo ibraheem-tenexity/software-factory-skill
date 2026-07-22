@@ -101,7 +101,7 @@ function ImageEditor({ images, onChange }: { images: RecipeImage[]; onChange: (v
 }
 
 // ── minimal markdown preview (headers/lists/paragraphs — the description is internal notes, not
-//    a rendered deliverable, so this deliberately stays lighter than sow.tsx's full renderer) ──
+//    a rendered deliverable, so this deliberately stays lighter than the full artifact renderer) ──
 
 function inlineRender(text: string): React.ReactNode {
   const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);

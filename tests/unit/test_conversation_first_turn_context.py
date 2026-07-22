@@ -1,6 +1,5 @@
-"""SOF-62: the first-turn project-context block (services/conversation.py) — assembly
-(_build_first_turn_context/_matching_sow_bodies) and the once-per-project injection wiring in
-DbConversation. Written fresh against the current API; NOT built on test_conversation_db.py,
+"""SOF-62: the first-turn project-context block (services/conversation.py) and the once-per-project
+injection wiring in DbConversation. Written fresh against the current API; NOT built on test_conversation_db.py,
 which fails at import post-c97c7eb (filed separately as SOF-67).
 
 No DB, no network: dbshim.connect and MemoryStore are patched throughout.
@@ -11,66 +10,41 @@ from unittest.mock import MagicMock, patch
 from software_factory.services.conversation import (
     DbConversation,
     _build_first_turn_context,
-    _matching_sow_bodies,
 )
 
 
 def _state(name="Acme", goal="Automate quoting", scope=None, description="desc"):
     s = MagicMock()
     s.name, s.goal, s.scope, s.description = name, goal, scope or [], description
+    s.recipe_id = ""
     return s
 
 
-class TestMatchingSowBodies:
-    def test_empty_project_name_short_circuits_without_a_query(self):
-        with patch("software_factory.services.conversation.dbshim.connect") as connect:
-            result = _matching_sow_bodies("")
-        assert result == []
-        connect.assert_not_called()
-
-    def test_queries_by_project_name_and_shapes_rows(self):
-        conn = MagicMock()
-        conn.execute.return_value.fetchall.return_value = [
-            {"title": "SOW A", "body": "Build a widget"},
-        ]
-        with patch("software_factory.services.conversation.dbshim.connect", return_value=conn):
-            result = _matching_sow_bodies("Acme")
-        assert result == [{"title": "SOW A", "body": "Build a widget"}]
-        conn.execute.assert_called_once()
-        assert conn.execute.call_args[0][1] == ("Acme",)
-        conn.close.assert_called_once()
-
-
 class TestBuildFirstTurnContext:
-    def test_assembles_all_four_sections_when_everything_is_present(self):
+    def test_assembles_user_and_document_context_without_a_retired_sow_section(self):
         console = MagicMock()
         console._load_state.return_value = _state()
-        with patch("software_factory.services.conversation._matching_sow_bodies",
-                   return_value=[{"title": "SOW A", "body": "Build a widget"}]), \
+        with patch("software_factory.services.conversation._document_context_rows", return_value=[]), \
              patch("software_factory.memory.store.MemoryStore") as MS:
-            MS.return_value.list_doc_summaries.return_value = {
-                1: {"summary_md": "A summary", "status": "ready"}}
             MS.return_value.assumptions.return_value = [
                 {"fact": "Uses Epicor", "document_name": "doc.pdf"}]
             block = _build_first_turn_context(console, "proj-1")
 
         assert "### The user's own input" in block
         assert "Acme" in block and "Automate quoting" in block
-        assert "### Statement of Work" in block and "Build a widget" in block
-        assert "### Document summaries" in block and "A summary" in block
+        assert "### Statement of Work" not in block
+        assert "### Documents" in block and "no documents uploaded yet" in block
         assert "### Existing per-document assumptions" in block
         assert "Uses Epicor (from doc.pdf)" in block
 
     def test_missing_pieces_are_stated_not_silently_dropped(self):
         console = MagicMock()
         console._load_state.return_value = _state(name="")
-        with patch("software_factory.services.conversation._matching_sow_bodies", return_value=[]), \
+        with patch("software_factory.services.conversation._document_context_rows", return_value=[]), \
              patch("software_factory.memory.store.MemoryStore") as MS:
-            MS.return_value.list_doc_summaries.return_value = {}
             MS.return_value.assumptions.return_value = []
             block = _build_first_turn_context(console, "proj-1")
 
-        assert "no SOW on file" in block
         assert "no documents uploaded yet" in block
         assert "no per-document assumptions" in block
 

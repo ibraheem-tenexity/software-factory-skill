@@ -53,12 +53,12 @@ def _document_context_rows(project_id: str) -> list[dict]:
 
 def _build_first_turn_context(console, project_id: str, users=None) -> str:
     """SOF-62: the server-assembled project-context block for the Concierge's first turn — the
-    owning company's profile, the user's own project input, the matching SOW body, every document
+    owning company's profile, the user's own project input, the selected recipe, every document
     summary, and existing per-document assumptions. Pushed into the system prompt (see
     default_prompt.build_system_prompt), never a fake user message, so the first reply already
     accounts for everything on file with no tool call required. Missing pieces (no company profile,
-    no SOW match, no documents yet) are stated as such, never silently omitted, so the agent doesn't
-    have to guess whether a section was skipped or is genuinely empty."""
+    no selected recipe, no documents yet) are stated as such, never silently omitted, so the agent
+    doesn't have to guess whether a section was skipped or is genuinely empty."""
     from software_factory.memory.store import MemoryStore
 
     state = console._load_state(project_id)
@@ -97,7 +97,7 @@ def _build_first_turn_context(console, project_id: str, users=None) -> str:
         f"- Description: {state.description or '(not composed yet)'}"
     )
 
-    # CBT-9 (SOW retired): a picked repo-backed recipe is the ONLY external framing — its body_md
+    # A picked repo-backed recipe is the ONLY external framing — its body_md
     # is the frame the interview/brief are built on. No recipe → the user's own words alone. No
     # brief-matches-recipe validator exists; the framing sentence is the prompt doing the work.
     recipe_body = state.recipe_id and RecipeStore().body(state.recipe_id)

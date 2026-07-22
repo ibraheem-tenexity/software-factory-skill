@@ -524,7 +524,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
 
   const fresh = mode === "fresh";
 
-  // Scope card retired (recipes replaced SOW, operator 2026-07-22): p.scope persists only as a
+  // Scope card retired (recipes are the external project framing): p.scope persists only as a
   // backend field the concierge may still set conversationally. name+goal+budget gate Continue.
   const projChecks: Check[] = [
     { id: "name", label: "Project name", done: !!p.name },

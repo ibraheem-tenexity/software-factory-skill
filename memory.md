@@ -399,3 +399,8 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 # Design agent (technical-user flow + Explore nav) Update at Time: 22:07:2026:11:02:00.000
 1. First-time intake gains a collapsed bring-your-own-repo and conventions card; project setup persists repo link, GitHub PAT, framework/runtime, commands, and coding standards to the organization.
 2. Explore navigation now supports gallery round-trips from intake and projects without losing the originating view.
+
+# SOW retirement repair (2026-07-22)
+1. Removed the obsolete `seed_genre_recipes.py` executable and SOW-only test coverage left behind by the retirement.
+2. Updated retained admin/conversation/input-pipeline test code to the SOW-free interfaces and terminology.
+3. The retired modules/routes/table no longer have executable references outside preserved historical planning documents.

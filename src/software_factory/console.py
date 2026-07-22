@@ -1442,8 +1442,8 @@ class Console:
         # by the Concierge's finalize_product_brief tool — the single source, per the operator's
         # storage ruling) supersedes the raw composition as context.md.
         brief_block = self.product_brief(project_id) or ""
-        # CBT-9 (SOW retired): a picked recipe's body IS the Stage-1 baseline input (written as
-        # recipe.md) — the only external framing; the genre-recipes/SOW path is gone (mirrors the
+        # A picked recipe's body IS the Stage-1 baseline input (written as recipe.md) — the only
+        # external framing; the retired genre-recipe path is gone (mirrors the
         # concierge-context swap in services/conversation.py).
         recipe_id = self._load_state(project_id).recipe_id
         recipe_md = RecipeStore().body(recipe_id) if recipe_id else None

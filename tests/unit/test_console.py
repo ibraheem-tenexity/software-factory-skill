@@ -869,8 +869,8 @@ def test_pasted_description_is_persisted_and_input_artifact_is_real(tmp_path):
     # is a REAL green node, not a hollow placeholder.
     import os
     c = console(tmp_path, FakeLauncher())
-    rid = c.start_project(ProjectRequest(description="the full SOW text"))
-    assert open(os.path.join(str(tmp_path), rid, "input", "context.md")).read() == "the full SOW text"
+    rid = c.start_project(ProjectRequest(description="the full project text"))
+    assert open(os.path.join(str(tmp_path), rid, "input", "context.md")).read() == "the full project text"
     inp = [n["data"] for n in c.graph(rid)["nodes"] if n["data"]["kind"] == "artifact" and n["data"]["label"] == "input"]
     assert inp and inp[0]["status"] == "created"
 

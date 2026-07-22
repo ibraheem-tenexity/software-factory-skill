@@ -89,18 +89,18 @@ def test_file_missing_content_raises_rather_than_silently_skipping(tmp_path):
 
 def test_docx_is_extracted_to_markdown_and_composed(tmp_path):
     # Word docs follow the same contract as PDFs: persisted -> converted (pandoc) -> raw file
-    # consumed -> markdown + composed context written. Singer-SOW is the canonical .docx input.
+    # consumed -> markdown + composed context written. The AutoBuilder brief is the canonical .docx input.
     import base64, os
     b64 = base64.b64encode(b"PK fake docx bytes").decode()
     written = persist_and_compose(
         str(tmp_path), "build the AutoBuilder",
-        [{"name": "singer-sow.docx", "content_b64": b64}],
-        extract_docx=lambda p: "# Singer SOW\n\nrecipes, quotes, P21",
+        [{"name": "autobuilder-brief.docx", "content_b64": b64}],
+        extract_docx=lambda p: "# AutoBuilder brief\n\nrecipes, quotes, P21",
     )
-    assert "singer-sow.docx.md" in written and "context.md" in written
+    assert "autobuilder-brief.docx.md" in written and "context.md" in written
     # original kept on disk so caller can push it to blob storage
-    assert "singer-sow.docx" in written
-    assert os.path.exists(os.path.join(str(tmp_path), "singer-sow.docx"))
+    assert "autobuilder-brief.docx" in written
+    assert os.path.exists(os.path.join(str(tmp_path), "autobuilder-brief.docx"))
     ctx = open(os.path.join(str(tmp_path), "context.md")).read()
     assert "build the AutoBuilder" in ctx and "recipes, quotes, P21" in ctx
 
@@ -255,22 +255,6 @@ def test_tolerate_extract_failures_excludes_the_failed_doc_from_composed_context
     ctx = open(os.path.join(input_dir, "context.md")).read()
     assert "real content" in ctx
     assert "blank.pdf" not in ctx    # a failed doc never gets an "## Attached document:" section
-
-
-def test_docx_extractor_real_pandoc_on_singer_sow():
-    # Real-binary integration check (skipped when pypandoc/mammoth aren't installed locally):
-    # the actual Singer SOW must extract with structure intact.
-    import pytest, os
-    doc = "/home/ibraheem/sf-docx-input/singer-sow-autobuilder.docx"
-    if not os.path.isfile(doc):
-        pytest.skip("canonical Singer SOW not present")
-    try:
-        from software_factory.docx_extract import extract_to_markdown as dx
-        md = dx(doc)
-    except ImportError:
-        pytest.skip("pypandoc/mammoth not installed locally")
-    assert len(md) > 2000
-    assert "82,500" in md or "82.5" in md or "$82" in md   # the milestone pricing survives
 
 
 def test_product_brief_supersedes_raw_composition_as_context(tmp_path):
