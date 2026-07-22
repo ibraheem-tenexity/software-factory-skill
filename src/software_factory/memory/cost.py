@@ -2,8 +2,8 @@
 project's ledger, so the poller's existing stop-at-ceiling budget brake counts it.
 
 Ingestion never runs as a stage process, so its cost never appears in project.log — the source
-Console._cost() parses. Recording it into ProjectState.ingestion_spent_usd (a separate
-accumulator from spent_usd) makes it visible to Console._project_spend(), which both
+Console._run_spend()/_attempt_cost() parse. Recording it into ProjectState.ingestion_spent_usd (a
+separate accumulator from spent_usd) makes it visible to Console._project_spend(), which both
 Console.enforce_budget() (run unconditionally every poller tick, not gated on a live stage
 process) and Console._launch_stage()'s per-run ceiling refusal already read.
 """

@@ -296,6 +296,14 @@ class UserStore:
         rows = self._repo.org_by_id(org_id)
         return self._decode_org(rows[0]) if rows else None
 
+    def get_org_by_name(self, name: str) -> dict | None:
+        """The active org with this name (case/trim-insensitive), or None — SOF-196 dedupe lookup.
+        Names are unique among active orgs (enforced by the PR-B index), so at most one row matches."""
+        if not (name or "").strip():
+            return None
+        rows = self._repo.org_by_name(name)
+        return self._decode_org(rows[0]) if rows else None
+
     def list_orgs(self) -> list:
         return [self._decode_org(r) for r in self._repo.all_orgs()]
 

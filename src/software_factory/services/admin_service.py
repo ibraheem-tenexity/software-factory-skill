@@ -12,7 +12,7 @@ import datetime
 import json
 import os
 
-from software_factory import tenexity_os
+from software_factory import notify, tenexity_os
 from software_factory.users import TENEXITY_ORG_ID
 from .errors import Invalid, NotFound, Conflict, Unprocessable
 
@@ -219,6 +219,11 @@ class AdminService:
     def create_client(self, body, by: str) -> dict:
         if not (body.name or "").strip():
             raise Invalid("name required")
+        # SOF-196: "create a new client" is an explicit-create intent — an existing same-named org
+        # means the admin should edit that one, not silently spawn a duplicate. Honest 409, not a
+        # second org. (To ADD a user to an existing org, the invite path find-or-creates instead.)
+        if self.users.get_org_by_name(body.name):
+            raise Conflict(f"An organization named “{body.name.strip()}” already exists")
         oid = self.users.create_org(body.name, industry=body.industry, website=body.website, by=by or "")
         return {"client": self.users.get_org(oid)}
 
@@ -226,6 +231,14 @@ class AdminService:
         if not self.users.get_org(org_id):
             raise NotFound("unknown org")
         fields = {k: val for k, val in body.model_dump().items() if val is not None}
+        # SOF-198: renaming to a name ANOTHER active org already holds would create a duplicate (and
+        # a raw 500 once the SOF-196 0028 unique index is live). Guard it — but exclude THIS org's own
+        # row so a self-rename / case-only change on itself doesn't false-collide.
+        new_name = fields.get("name")
+        if new_name:
+            existing = self.users.get_org_by_name(new_name)
+            if existing and existing["id"] != org_id:
+                raise Conflict(f"An organization named “{new_name.strip()}” already exists")
         self.users.update_org(org_id, **fields)
         return {"client": self.users.get_org(org_id)}
 
@@ -264,19 +277,32 @@ class AdminService:
             self.users.upsert(email, role or "member", by=by)   # staff default member unless role given
             self.users.set_profile(email, is_internal=True, org_id=TENEXITY_ORG_ID,
                                    name=body.name, designation=body.designation, sign_in_method=method)
+            org_name = "Tenexity"
         else:
             if not (body.org_name or "").strip():
                 raise Invalid("org_name required for a new org")
-            oid = self.users.create_org(body.org_name, by=by)
+            # SOF-196: find-or-create by name. The intent here is "add this user to org X" — if X
+            # already exists, attach to it; only create when it's genuinely new. This is what stops
+            # a retried invite (SOF-195 no-email → retry) from minting a second identical-named org.
+            existing = self.users.get_org_by_name(body.org_name)
+            oid = existing["id"] if existing else self.users.create_org(body.org_name, by=by)
             self.users.invite_member(email, oid, role=role or "admin", by=by)  # org default admin
             self.users.set_profile(email, name=body.name, designation=body.designation,
                                    sign_in_method=method)
+            org_name = body.org_name
         if method == "password":
             self.users.set_password(email, body.password)
             self.users.set_status(email, "active")
         else:
             self.users.set_status(email, "invited")
-        return self._access_rows()
+        # SOF-197: the one shared invite-email builder (SOF-140 org path uses the same function).
+        # Fire-and-forget, never fails the provisioning (the user row is already created); the UI
+        # reads invite_email_sent honestly. granted=True only for a password-method admin add — the
+        # password itself is shared out-of-band, never in this email.
+        payload = self._access_rows()
+        payload["invite_email_sent"] = notify.send_invite(
+            email, org_name=org_name, inviter=by, granted=(method == "password"))
+        return payload
 
     def access_update(self, email: str, body, caller: str) -> dict:
         em = (email or "").strip().lower()

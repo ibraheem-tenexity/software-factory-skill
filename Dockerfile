@@ -13,7 +13,12 @@ ENV PUPPETEER_CACHE_DIR=/ms-puppeteer
 # whose postinstall must download a platform-native binary, which fails in this build
 # (omit=optional / no network for the optional dep) and leaves an unrunnable text stub.
 # We install it via the official native installer below instead.
-RUN npm install -g @railway/cli @playwright/mcp playwright @mermaid-js/mermaid-cli
+# SOF-207: pin @playwright/mcp so the image build doesn't float onto a version we haven't run
+# against. NOTE — this alone does not stop the runtime `npx @playwright/mcp@latest` invocation
+# from hitting the registry: that command comes from the `tools` DB table (SOF-81's
+# workspace_setup.mcp_config(), not this Dockerfile), so dropping `@latest` there needs its own
+# data migration against the seeded row — tracked as a fast-follow, out of scope for this hotfix.
+RUN npm install -g @railway/cli @playwright/mcp@0.0.78 playwright @mermaid-js/mermaid-cli
 
 # Chromium + OS libs into a SHARED path so the non-root runtime user can use them.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright

@@ -80,11 +80,19 @@ app = FastAPI(title="software-factory console", lifespan=lifespan)
 # with the same {"detail": ...} body FastAPI's HTTPException uses, so the wire contract is unchanged.
 from fastapi.responses import JSONResponse  # noqa: E402
 from software_factory.services.errors import ServiceError  # noqa: E402
+from software_factory.recipes.store import RecipeValidationError  # noqa: E402
 
 
 @app.exception_handler(ServiceError)
 async def _service_error_handler(request: Request, exc: ServiceError):
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+# CBT-9: a recipe save refused for a bad repo (the one sanctioned fact gate) — the admin sees
+# EXACTLY the store's own reason, same shape as ServiceError's {"detail": ...} body.
+@app.exception_handler(RecipeValidationError)
+async def _recipe_validation_error_handler(request: Request, exc: RecipeValidationError):
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 # ── Structured access log ───────────────────────────────────────────────────────────────────

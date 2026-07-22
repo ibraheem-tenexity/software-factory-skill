@@ -40,14 +40,18 @@ def require_authed(v: tuple = Depends(viewer)) -> tuple:
 
 
 def _can_see(v: tuple, project_id: str) -> bool:
-    """Ownership gate enforced on EVERY run-scoped route — filtering the list is not enough,
-    a member could fetch another's run by URL. Admin/service = all; member = own only."""
-    email, role, ok = v
-    if not ok:
+    """Ownership + tenancy gate enforced on EVERY run-scoped route — filtering the list is not
+    enough, a caller could fetch another's run by URL. SOF-221: this gated on role=="admin" ALONE,
+    so a non-internal customer org-admin could fetch ANY org's run by id. Now driven by the shared
+    `project_visibility` boundary so the list and the per-run gate can't diverge: internal
+    staff/service = all; a non-internal org-admin = only their org's runs; a member = own only."""
+    if not v[2]:
         return False
-    if role == "admin":
+    scope = project_visibility(v)
+    if scope is None:                      # internal staff / service token = cross-tenant god view
         return True
-    return bool(project_id) and state.console.project_owner(project_id) == (email or "").lower()
+    owner = (state.console.project_owner(project_id) or "").lower() if project_id else ""
+    return bool(owner) and owner in scope
 
 
 def authorize_project(pid: str, v: tuple = Depends(require_authed)) -> tuple:
@@ -83,3 +87,36 @@ def require_staff(v: tuple = Depends(require_authed)) -> tuple:
     if not _staff_session(v):
         raise HTTPException(status_code=403, detail="staff only")
     return v
+
+
+def _org_of(email: str | None) -> str | None:
+    """The org_id a user email belongs to, or None (unknown user / no org on file)."""
+    u = state.users.get_user((email or "").lower())
+    return (u.get("org_id") or None) if u else None
+
+
+def project_visibility(v: tuple):
+    """The set of run-OWNER emails this session may see, or None for the full cross-tenant view.
+
+    THE single run-tenancy boundary (SOF-221) — used by BOTH the `/api/projects` list and the
+    per-run `_can_see` gate so the two can't drift (they had: the list showed a role==admin caller
+    every org's runs, and the gate let them fetch any run by id). Mirrors `_staff_session`:
+      - internal staff / service token → None (operator god-view; unchanged).
+      - non-internal org-admin → every member of THEIR org (incl. self). Runs are owner(email)-
+        scoped with no org_id column, so a run's org is derived LIVE from its owner's users.org_id
+        (owner ∈ the admin's org's members) — no projectstate backfill/migration needed.
+      - a member, or an admin with no org on file → only themselves (can't leak).
+    """
+    email, role, ok = v
+    if not ok:
+        return set()
+    if _staff_session(v):
+        return None
+    me = (email or "").lower()
+    if role == "admin":
+        org_id = _org_of(me)
+        if org_id:
+            emails = {(m.get("email") or "").lower() for m in state.users.list_org_members(org_id)}
+            emails.add(me)
+            return emails
+    return {me}

@@ -225,7 +225,15 @@ def execute(sql: str, params: tuple = ()) -> list:
 
 
 def connect(path: str):
-    os.makedirs(path or ".", exist_ok=True)  # project.log/chat.jsonl live here
+    # Best-effort: `path` is discarded after this line — the Postgres connection below never reads
+    # it. This only pre-creates the directory a LATER local file write (project.log/chat.jsonl)
+    # will use; that write fails on its own if the directory genuinely can't exist. SOF-191: an
+    # unscoped cross-project lookup (GET /api/artifacts/{id}) passes SF_RUNS_DIR itself, which this
+    # process may lack permission to create — a PermissionError here must never fail a pure DB read.
+    try:
+        os.makedirs(path or ".", exist_ok=True)
+    except OSError:
+        pass
     return PgConn(_pg_connect(_db_url()))
 
 

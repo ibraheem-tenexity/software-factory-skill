@@ -49,6 +49,11 @@ class OrgDocPatchIn(BaseModel):
     tag: str | None = None
 
 
+class OrgDiscoveryIn(BaseModel):
+    repo_url: str = ""
+    pat_secret: str | None = None
+
+
 class OrgDocUseIn(BaseModel):
     project_id: str = ""
 
@@ -67,6 +72,12 @@ class OrgMemberPatchIn(BaseModel):
 class OrgBillingIn(BaseModel):
     plan: str | None = None
     monthly_budget_cap: float | None = None
+
+
+class CompanyEnrichIn(BaseModel):
+    name: str | None = None
+    website: str | None = None
+    email_domain: str | None = None
 
 
 class ChatIn(BaseModel):
@@ -159,6 +170,7 @@ class DraftPatchIn(BaseModel):
     runtime: str | None = None   # "claude"|"opencode" — lets the Build-engine card update the draft's runtime after the eager create
     model: str | None = None     # opencode model alias: "kimi"|"glm"
     budget: float | None = None  # update the spend ceiling
+    recipe_id: str | None = None  # CBT-9: the picked recipe id (must name a published recipe), or "" to clear
 
 
 class CredsIn(BaseModel):
@@ -258,6 +270,28 @@ class SowPatchIn(BaseModel):
     version: int | None = None
     status: str | None = None
     body: str | None = None
+
+
+class RecipeIn(BaseModel):
+    name: str
+    tagline: str | None = None
+    category: str | None = None
+    capabilities: list | None = None
+    body_md: str | None = None
+    repo_url: str | None = None
+    images: list | None = None
+    status: str = "draft"
+
+
+class RecipePatchIn(BaseModel):
+    name: str | None = None
+    tagline: str | None = None
+    category: str | None = None
+    capabilities: list | None = None
+    body_md: str | None = None
+    repo_url: str | None = None
+    images: list | None = None
+    status: str | None = None
 
 
 # ── Org Secrets vault (§2.3) ────────────────────────────────────────────────────────────────────

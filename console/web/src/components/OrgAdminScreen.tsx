@@ -5,22 +5,31 @@
 // Usage & billing via /api/org/usage (+ PATCH /api/org/billing). Every section degrades to an empty
 // state until its backend lands, so the screen ships independently.
 import { useEffect, useRef, useState } from "react";
-import { api, Org, Member, OrgDoc, OrgUsage, OrgSecret } from "../api";
+import { api, Org, Member, OrgDoc, OrgUsage, OrgSecret, CompanyProfile, DiscoveryStatus, ApiError } from "../api";
 import { useMe } from "./MeContext";
 import { T, Icon, Sparkle, CategoryLabel, Btn, StatusPill, Avatar, Wordmark, Field, TextInput } from "./onboarding/design";
+import { EnrichFromWeb } from "./onboarding/EnrichFromWeb";
 import { AccountMenu } from "./AccountMenu";
 import { ListRowSkel, FileTileSkel, MetricCardSkel } from "./skeleton";
+import { openOrgDoc } from "./factory/Artifacts";
 
-type Section = "profile" | "knowledge" | "systems" | "secrets" | "team" | "billing";
+type Section = "profile" | "knowledge" | "discovery" | "systems" | "secrets" | "team" | "billing";
 
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "profile", label: "Company profile" },
   { id: "knowledge", label: "Knowledge base" },
+  { id: "discovery", label: "Codebase discovery" },
   { id: "systems", label: "Connected systems" },
   { id: "secrets", label: "Secrets" },
   { id: "team", label: "Team & access" },
   { id: "billing", label: "Usage & billing" },
 ];
+
+const DISCOVERY_DOC_DESC: Record<string, string> = {
+  "AGENTS.md": "Repo architecture, conventions & extension points.",
+  "CLAUDE.md": "Build / test / deploy commands, read from CI.",
+  "integrations.md": "External systems this codebase talks to.",
+};
 
 // Known org-level integrations; "connected" is driven by org.connected_systems.
 const SYSTEM_CATALOG: { id: string; label: string; kind: string; scope?: string; note?: string }[] = [
@@ -108,8 +117,20 @@ function FileTile({ d, onDelete, onSave }: { d: OrgDoc; onDelete?: () => void; o
   );
 }
 
+function readInitialSection(): Section {
+  const s = new URLSearchParams(location.search).get("section");
+  return SECTIONS.some((x) => x.id === s) ? (s as Section) : "profile";
+}
+
 export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
-  const [sec, setSec] = useState<Section>("profile");
+  const [sec, setSec] = useState<Section>(readInitialSection());
+  // Sync sec → ?section= (SOF-220) so reloading on a specific admin tab (Team, Knowledge base, …)
+  // stays on that tab instead of resetting to Company profile.
+  useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    if (sec !== "profile") p.set("section", sec); else p.delete("section");
+    history.replaceState(null, "", "?" + p.toString());
+  }, [sec]);
   const [org, setOrg] = useState<Org | null>(null);
   const me = useMe();
   const [members, setMembers] = useState<Member[]>([]);
@@ -124,6 +145,7 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Partial<Org>>({});
   const [saving, setSaving] = useState(false);
+  const [enriching, setEnriching] = useState(false);  // CBT-3 "Enrich from web" panel toggle
 
   // invite
   const [inviting, setInviting] = useState(false);
@@ -139,6 +161,12 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
   const [secretsLoading, setSecretsLoading] = useState(true);
   const [secretModal, setSecretModal] = useState<{ mode: "add" } | { mode: "rotate"; name: string } | null>(null);
   const [secretForm, setSecretForm] = useState({ name: "", kind: "api_key", value: "", show: false });
+
+  // codebase discovery (CBT-6/7)
+  const [discovery, setDiscovery] = useState<DiscoveryStatus | null>(null);
+  const [discoveryRepo, setDiscoveryRepo] = useState("");
+  const [discoveryPat, setDiscoveryPat] = useState("");
+  const [discoveryStarting, setDiscoveryStarting] = useState(false);
 
   const docsInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -187,7 +215,33 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
     loadUsage();
   }, []);
 
-  useEffect(() => { if (sec === "secrets") loadSecrets(); }, [sec]);
+  useEffect(() => { if (sec === "secrets" || sec === "discovery") loadSecrets(); }, [sec]);
+
+  // Codebase discovery: load once on entering the tab, then poll every 3s WHILE a run is in
+  // progress (status is a pure projection of live state — nothing to poll once it's not running).
+  useEffect(() => {
+    if (sec !== "discovery") return;
+    let live = true;
+    const load = () => api.discoveryStatus().then((d) => { if (live) setDiscovery(d); }).catch(() => undefined);
+    load();
+    const h = setInterval(() => { if (discovery?.running) load(); }, 3000);
+    return () => { live = false; clearInterval(h); };
+  }, [sec, discovery?.running]);
+
+  const runDiscovery = async () => {
+    if (!discoveryRepo.trim()) return;
+    setDiscoveryStarting(true);
+    setNotice("");
+    try {
+      const d = await api.startDiscovery({ repo_url: discoveryRepo.trim(), pat_secret: discoveryPat || undefined });
+      setDiscovery(d);
+    } catch (e) {
+      const detail = (e as ApiError)?.detail;
+      setNotice(typeof detail === "string" && detail ? detail : "Discovery couldn't start — check the repo URL.");
+    } finally {
+      setDiscoveryStarting(false);
+    }
+  };
 
   const saveSecret = async () => {
     if (secretModal?.mode === "add") {
@@ -216,6 +270,22 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
       setOrg(d.org); setEditing(false);
     } catch { setNotice("Couldn’t save — try again."); }
     setSaving(false);
+  };
+
+  // CBT-3: "Use these details" is the only write from a web lookup — a real PATCH /api/org,
+  // mapping only the fields the profile actually returned (never overwriting with a blank).
+  const acceptEnrichedCompany = async (profile: CompanyProfile) => {
+    const patch: Partial<Org> = {};
+    if (profile.name) patch.name = profile.name;
+    if (profile.industry) patch.industry = profile.industry;
+    if (profile.sub_focus) patch.sub_focus = [profile.sub_focus];
+    if (profile.website) patch.website = profile.website;
+    if (profile.connected_systems?.length) patch.connected_systems = profile.connected_systems;
+    try {
+      const d = await api.patchOrg(patch);
+      setOrg(d.org);
+      setEnriching(false);
+    } catch { setNotice("Couldn’t save — try again."); }
   };
 
   const toggleSystem = async (id: string, connect: boolean) => {
@@ -312,7 +382,15 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
                 <SecHead title="Company profile" desc="The canonical context every project inherits — set once, reused everywhere."
                   action={editing
                     ? <div style={{ display: "flex", gap: 8 }}><Btn variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Btn><Btn variant="primary" size="sm" onClick={saveProfile} disabled={saving}>{saving ? "Saving…" : "Save"}</Btn></div>
-                    : <Btn variant="secondary" size="sm" onClick={startEdit}>Edit profile</Btn>} />
+                    : <div style={{ display: "flex", gap: 8 }}>
+                        <Btn variant="ghost" size="sm" onClick={() => setEnriching((x) => !x)}><Icon name="search" size={13} /> {enriching ? "Close" : "Enrich from web"}</Btn>
+                        <Btn variant="secondary" size="sm" onClick={startEdit}>Edit profile</Btn>
+                      </div>} />
+                {enriching && !editing && (
+                  <div style={{ marginBottom: 16, padding: "16px 18px", border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised, boxShadow: T.shadowXs }}>
+                    <EnrichFromWeb initialWebsite={org?.website || ""} onAccept={acceptEnrichedCompany} />
+                  </div>
+                )}
                 {!editing ? (
                   <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: "hidden", background: T.raised, boxShadow: T.shadowXs }}>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1px", background: T.borderSubtle }}>
@@ -360,6 +438,81 @@ export function OrgAdminScreen({ onBack }: { onBack: () => void }) {
                   <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "30px", textAlign: "center", font: `400 13px/1.5 ${T.sans}`, color: T.tertiary }}>
                     No org documents yet. Upload price books, line cards, policies, and SOPs here so every project can reuse them.
                   </div>
+                )}
+              </>
+            )}
+
+            {/* ── Codebase discovery ── */}
+            {sec === "discovery" && (
+              <>
+                <SecHead title="Codebase discovery" desc="Point discovery agents at your repo — they generate AGENTS.md, CLAUDE.md, and integrations.md straight into the knowledge base." />
+                {discovery === null ? (
+                  <ListRowSkel rows={2} />
+                ) : (
+                  <>
+                    <div style={{ display: "flex", gap: 9, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 14 }}>
+                      <div style={{ flex: 1, minWidth: 240 }}>
+                        <Field label="Repository" hint="Access tokens live in Secrets — discovery agents read only, never write.">
+                          <TextInput mono value={discoveryRepo} onChange={setDiscoveryRepo} placeholder="github.com/your-org/your-repo" />
+                        </Field>
+                      </div>
+                      {secrets.length > 0 && (
+                        <Field label="Access token (optional)">
+                          <select value={discoveryPat} onChange={(e) => setDiscoveryPat(e.target.value)} disabled={discovery.running}
+                            style={{ height: 34, borderRadius: T.rMd, border: `1px solid ${T.borderDefault}`, background: T.bg, color: T.fg, font: `400 13px/1 ${T.sans}`, padding: "0 9px" }}>
+                            <option value="">Public repo — no token</option>
+                            {secrets.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+                          </select>
+                        </Field>
+                      )}
+                      <Btn variant="primary" onClick={runDiscovery}
+                        disabled={discoveryStarting || discovery.running || discoveryRepo.trim().length < 4}>
+                        <Icon name="github" size={14} color="#fff" />
+                        {discovery.running ? "Running…" : discovery.artifacts.length ? "Re-run discovery" : "Run discovery"}
+                      </Btn>
+                    </div>
+
+                    {discovery.running && (
+                      <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: "#0d0d10", overflow: "hidden", marginBottom: 14 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 12px", borderBottom: "1px solid #2a2a30" }}>
+                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.brand }} />
+                          <CategoryLabel style={{ color: "#a8a8b0" }}>Discovery agent in your repo · {money(discovery.spent_usd)} spent</CategoryLabel>
+                        </div>
+                        <pre style={{ margin: 0, maxHeight: 160, overflow: "auto", padding: "10px 13px", font: `400 12px/1.5 ${T.mono}`, color: "#9a9aa2", whiteSpace: "pre-wrap" }}>
+                          {discovery.log_tail || "starting…"}
+                        </pre>
+                      </div>
+                    )}
+
+                    {!discovery.running && discovery.artifacts.length > 0 && (
+                      <>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
+                          <Icon name="check" size={14} color={T.success} />
+                          <CategoryLabel style={{ color: T.success }}>Generated &amp; saved to knowledge base</CategoryLabel>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {discovery.artifacts.map((d) => (
+                            <button key={d.name} onClick={() => openOrgDoc(d.blob_id, d.name)}
+                              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: T.rMd,
+                                border: `1px solid ${T.borderSubtle}`, background: T.raised, cursor: "pointer", textAlign: "left", width: "100%" }}>
+                              <Icon name="file" size={15} color={T.brandDeep} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <span style={{ font: `600 12.5px/1.2 ${T.mono}`, color: T.fg }}>{d.name}</span>
+                                <span style={{ display: "block", font: `400 11.5px/1.4 ${T.sans}`, color: T.secondary, marginTop: 2 }}>{DISCOVERY_DOC_DESC[d.name] || ""}</span>
+                              </div>
+                              <span style={{ font: `400 11px/1 ${T.mono}`, color: T.tertiary, flexShrink: 0 }}>{relTime(d.updated)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    {!discovery.running && discovery.artifacts.length === 0 && (
+                      <div style={{ border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg, padding: "30px", textAlign: "center", font: `400 13px/1.5 ${T.sans}`, color: T.tertiary }}>
+                        No discovery run yet — point it at your repo above.
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}

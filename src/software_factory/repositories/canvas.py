@@ -178,6 +178,23 @@ class DeploymentRepository:
                                                    service_name=service_name, url=url, status=status,
                                                    verified=verified, ts=ts))
 
+    def update_existing(self, app, url, service_name, status, verified, ts) -> None:
+        """Update the existing (project_id, app, url) row in place — the verify step re-recording
+        the same deliverable it already deployed should correct that row's `verified`/`status`,
+        not insert a sibling (SOF-219)."""
+        self._x.execute(update(deployments).where(
+            deployments.c.project_id == self._pid(),
+            deployments.c.app == app,
+            deployments.c.url == url,
+        ).values(service_name=service_name, status=status, verified=verified, ts=ts))
+
+    def find(self, app, url):
+        return self._x.fetchone(select(deployments).where(
+            deployments.c.project_id == self._pid(),
+            deployments.c.app == app,
+            deployments.c.url == url,
+        ))
+
     def all_for_project(self) -> list:
         return self._x.fetchall(select(deployments).where(deployments.c.project_id == self._pid())
                                 .order_by(deployments.c.id))

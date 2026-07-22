@@ -31,7 +31,20 @@ _log_offsets: dict = {}  # pid -> bytes uploaded on last log flush
 # not an in-process dict — a console restart (redeploy/OOM) must not hand out a fresh set of "free"
 # resumes, or a run can retry forever across restarts without ever reaching mark_stage_crashed
 # (the only path that notifies the operator).
-_AUTO_RESUME_MAX = int(os.environ.get("SF_AUTO_RESUME_MAX", "2") or 2)
+#
+# SOF-217: read FRESH every tick (a function, not a module-level constant frozen at import) —
+# console.py's own auto_resume_dead_stage() reads this SAME env var fresh on every call. A frozen
+# import-time constant here assumed "a Railway env change always restarts the process" (see the
+# _SILENCE_* comment below) — if that assumption is ever wrong for a given deploy/runtime, poller
+# and console would silently disagree on the cap: e.g. poller still thinks resumes_so_far < a
+# STALE higher max (so it keeps calling auto_resume_dead_stage — which internally refuses via its
+# own FRESH, lower cap) and the `elif resumes_so_far >= _AUTO_RESUME_MAX` branch that calls
+# mark_stage_crashed() is never reached at all — a silent, permanent wedge, never a crash, never a
+# resume, matching exactly what was observed live (project-414784ebacee4dca sat in phase=research
+# with auto_resume_count pinned at the cap for 45+ minutes, no crash-park, no blocker). Reading
+# fresh here closes that whole risk class regardless of whether it was the exact trigger.
+def _auto_resume_max() -> int:
+    return int(os.environ.get("SF_AUTO_RESUME_MAX", "2") or 2)
 _health_bad_since = [None]  # [-]: None = healthy; float = first failure ts (alert once)
 # SOF-164: output-silence classification bands (seconds), env-tunable. Coherent with the existing
 # scales — 300s = stage_finished's opencode idle grace (past normal streaming-quiet); 900s sits
@@ -319,17 +332,18 @@ def _poll_transitions():
                     # SOF-116: read the PERSISTED count (state.auto_resume_count via status()),
                     # not an in-process dict — survives console restarts.
                     resumes_so_far = st.get("auto_resume_count", 0)
-                    if not st.get("done") and resumes_so_far < _AUTO_RESUME_MAX:
+                    auto_resume_max = _auto_resume_max()  # SOF-217: fresh, matches console.py
+                    if not st.get("done") and resumes_so_far < auto_resume_max:
                         if console.auto_resume_dead_stage(pid):
                             n = console.status(pid).get("auto_resume_count", resumes_so_far + 1)
                             _narrate(pid, "resume-%d" % n,
                                      "⚠️ Stage process died mid-flight — auto-resumed "
-                                     f"(attempt {n}/{_AUTO_RESUME_MAX}).")
-                    elif not st.get("done") and resumes_so_far >= _AUTO_RESUME_MAX:
+                                     f"(attempt {n}/{auto_resume_max}).")
+                    elif not st.get("done") and resumes_so_far >= auto_resume_max:
                         # Auto-resume cap exhausted — land in 'crashed' for Recovery-bar resume.
                         if console.mark_stage_crashed(pid):
                             _narrate(pid, "crashed-final",
-                                     f"⛔ Stage crashed after {_AUTO_RESUME_MAX} auto-resume "
+                                     f"⛔ Stage crashed after {auto_resume_max} auto-resume "
                                      "attempts — paused for operator (use Resume to continue).")
                     # SOF-163: catches a single ticket orphaned WHILE the stage is still alive —
                     # distinct from the whole-stage recovery above, which only fires once the
@@ -389,18 +403,31 @@ def _boot():
         print("[warn] no OPENAI_API_KEY or OPENROUTER_API_KEY — chat agent disabled, API-only mode")
     # Quarantine debris under projects_dir: agents misusing db verbs once created dirs like
     # "build-plan.md/project store" on the volume — moved aside (never deleted), so discovery and
-    # the boot backfill only ever see real runs.
+    # the boot backfill only ever see real runs. `_org` is a second sanctioned non-project entry
+    # (ingestion's codebase-discovery scratch, CBT-6 — org-level clones/logs live under
+    # PROJECTS_DIR/_org/<org_id>/, the same writable volume the project runs use) — exempted by
+    # name exactly like `_quarantine` itself, so a boot/redeploy never sweeps a live discovery run.
     try:
         from software_factory.constants import PROJECT_ID_RE
         qdir = os.path.join(state.PROJECTS_DIR, "_quarantine")
         for name in os.listdir(state.PROJECTS_DIR):
             p = os.path.join(state.PROJECTS_DIR, name)
-            if os.path.isdir(p) and name != "_quarantine" and not PROJECT_ID_RE.fullmatch(name):
+            if os.path.isdir(p) and name not in ("_quarantine", "_org") and not PROJECT_ID_RE.fullmatch(name):
                 os.makedirs(qdir, exist_ok=True)
                 os.rename(p, os.path.join(qdir, f"{name}.{int(time.time())}"))
                 print(f"[janitor] quarantined {name}", flush=True)
     except Exception as e:
         print(f"[janitor] FAILED: {e}", flush=True)
+    # SOF-208: a console restart mid-discovery-run kills the in-process budget watcher thread
+    # while the `claude -p` child keeps running uncapped. start()/status() reap this lazily on the
+    # org's next interaction (SOF-205/#391); this boot-time sweep catches the org that never has one.
+    try:
+        from software_factory.ingestion.discovery import sweep_orphaned_discovery_runs
+        reaped = sweep_orphaned_discovery_runs()
+        if reaped:
+            print(f"[discovery-sweep] reaped orphaned agents for org(s): {reaped}", flush=True)
+    except Exception as e:
+        print(f"[discovery-sweep] FAILED: {e}", flush=True)
     if _env.sf_environment() == "prod":
         # Apply migrations (Alembic upgrade head) so every table exists. Defensive backstop to
         # entrypoint.sh (idempotent).

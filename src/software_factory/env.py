@@ -61,6 +61,12 @@ _STAGE_ESSENTIAL = {
     # factory-console), surviving the scrub; the built app never sees it (the SKILL strips any
     # token from the recorded remote URL and it isn't forwarded to the app's Railway vars).
     "GH_TOKEN", "GITHUB_TOKEN",
+    # SOF-212: which GitHub org new repos are created under (SOF-204's repo.py org-prefix reads
+    # this). Scrubbed, `repo.py` sees an empty string and silently falls back to the personal
+    # account — SOF-204's whole point was defeated in exactly the process that creates repos.
+    # Same posture as GH_TOKEN: factory config (set on factory-console), never forwarded to the
+    # built app's Railway vars.
+    "SF_GITHUB_ORG",
     # Railway token — the stage-3 build agent deploys via the Railway MCP/CLI, which authenticate
     # from RAILWAY_TOKEN. Scrubbed, the railway MCP can't start ("can't find Railway tools") and
     # any Railway API call returns "Not Authorized" → the agent CANNOT deploy (#112). Forward the

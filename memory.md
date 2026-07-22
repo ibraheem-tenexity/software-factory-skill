@@ -334,3 +334,32 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 2. design/{TICKETS.md (new, CBT-1..30 sprint breakdown in DSN/WEB/PIPE/OPS lanes), discovery.jsx (new), PRD.md, optionC.jsx, orgproject.jsx, recipes.jsx, recipedata.jsx, dashboard.jsx, buildprogress.jsx, shared.jsx, Software Factory Onboarding.html} on branch agent/design-cbt-journey. NOTE: the design archive was previously UNTRACKED; first commit on this branch imports it verbatim so design work is diffable in PRs from now on.
 3. Key recon finding for the sprint: research.py already enriches companies via Exa/Fusion but is unwired to any UI route (CBT-1 is mostly a wiring job); codex has zero occurrences in the codebase (fully new); MaintenanceTab is a placeholder; recipes exist as text blueprints, not repo-backed.
 4. Summary: all six new flows browser-verified live against the canvas (lookup->accept, discovery run, theme process, recipe suggest->accept, Codex select, gate approve); PR targets staging.
+# Codex Update at Time: 16:07:2026:00:00:00.000
+1. Synced the canonical architecture narrative and schema/service diagrams with current staging code.
+2. docs/ARCHITECTURE.md, docs/schema-erd.{dot,md,svg}, docs/service-architecture.svg.
+3. Corrected stale runtime, stage-gate, persistence, auth, schema, and deployment claims from a source-backed audit.
+4. Summary: DOT render and model-table coverage pass; documentation diff is clean.
+
+# Claude Update at Time: 20:07:2026:14:30:40.000
+1. SOF-194: credential check no longer treats a transient GitHub/Railway 5xx as a permanently-dead credential (which SOF-148 makes non-resumable → hard-wedged a valid-token run).
+2. src/software_factory/creds.py (retry + transient/terminal classify, capture stderr); skills/stage-1-research/SKILL.md + SKILL.opencode.md (record check.blocks category, not hardcoded 'credential').
+3. check_gh/check_railway retry a non-definitive failure (3 attempts, 1s/2s backoff); a surviving 5xx/network signal → resumable 'transient' blocker (auto-resume relaunches), only a real auth reject (401/403/Bad credentials) → non-resumable 'credential' (SOF-148 preserved).
+4. Summary: creds.py compiles; verified via injected-runner driver (10 cases incl. simulated 5xx + auth-reject + the exact incident) — all pass; poller credential_stopped is category-keyed so 'transient' correctly auto-resumes.
+
+# Codex Update at Time: 20:07:2026:20:03:35.000
+1. Recorded the approved backend structure direction: bounded-context modular monolith.
+2. CLAUDE.md and docs/{ARCHITECTURE,STRUCTURE}.md on agent/structure-direction-20260720.
+3. The policy applies to parallel work: feature ownership over generic layers, no pass-through files, preserve behavior, and keep migrations/vendor tooling isolated.
+4. Summary: source-backed audit covered 153 non-test Python files; refactor plan follows this decision record.
+
+# CBT Wave 1 shipped (2026-07-21)
+1. Four lanes merged to staging 019ba9b: repo-backed recipes (recipes/ context, migration 0029, fork-and-extend build seed), company-enrich wow prefill (research router + enrich_company tool + found-card), codebase discovery (ingestion/ context, org KB), Kimi K3 bump.
+2. Spec/plan: docs/superpowers/{specs,plans}/2026-07-21-cbt-wave1-*. Gate record: 1 Critical (PAT leak) + 8 Important caught pre-merge; final whole-branch review READY; follow-ups SOF-210.
+3. Recipes rule: recipe body replaces SOW in concierge context; repo seeds stage-3; NO fork-verification code (prompt-delivered, outcome gates only). Sources-only product-wide (no confidence tiers) — operator ruling.
+4. Staging ACs (K3/A6/B4/C4) pending SOF-207 green; codex adapter = SOF-200 (separate agent).
+
+# Codex Update at Time: 21:07:2026:15:55:00.000
+1. Fixed the admin Users invite feedback: successful delivery, failed delivery, and an unavailable delivery status now remain visible after the modal closes.
+2. console/web/src/admin/users.tsx on branch agent/fix-user-invite.
+3. Production Resend sender was malformed (display name only); corrected it to the verified factory.tenexity.ai sender and Railway redeployed successfully.
+4. Summary: Vite build plus browser checks for accepted, failed, and missing delivery status pass; real staging and production Resend calls were accepted.
