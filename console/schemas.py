@@ -102,12 +102,13 @@ class SuggestedResponseOut(BaseModel):
 
 
 class ConverseOut(BaseModel):
-    # T2.2: {response, suggested_responses[]} — no `choices`/`done`. Empty suggested_responses
-    # means a plain-text turn; the FE derives single/multi-select purely from each item's `type`.
+    # T2.2: no `choices`/readiness `done`. Empty suggested_responses means a plain-text turn; the
+    # FE derives single/multi-select from each item's `type`. handed_off reports actual project state.
     response: str
     suggested_responses: list[SuggestedResponseOut] = []
     message_id: str = ""
     session_id: str = ""
+    handed_off: bool = False  # factual result of this turn, so the UI follows agent-triggered promotion
 
 
 class TranscribeIn(BaseModel):
@@ -306,4 +307,3 @@ class SecretCreateIn(BaseModel):
 
 class SecretRotateIn(BaseModel):
     value: str
-

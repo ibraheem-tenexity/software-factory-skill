@@ -62,7 +62,7 @@ export function App() {
   useEffect(() => { if (!projectId) api.projects().catch(() => {}); }, [projectId]);
 
   if (showOnboarding) {
-    return <OnboardingScreen resumeProjectId={resumeProjectId} onComplete={(id) => { setResumeProjectId(null); openProject(id); }} onBack={() => { setShowOnboarding(false); setResumeProjectId(null); setShowProjects(true); syncUrl(null); }} />;
+    return <OnboardingScreen resumeProjectId={resumeProjectId} onComplete={(id) => { setResumeProjectId(null); openProject(id); setOpenView("factory"); }} onBack={() => { setShowOnboarding(false); setResumeProjectId(null); setShowProjects(true); syncUrl(null); }} />;
   }
 
   if (showOrg) {

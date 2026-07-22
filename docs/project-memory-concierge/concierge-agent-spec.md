@@ -46,9 +46,9 @@ Rules the whole system relies on:
 - **`response` is required and non-empty.** It's the assistant's utterance.
 - **`suggested_responses` empty ⇒ a plain-text turn.** The FE shows just the message + the free-text Composer.
 - **`suggested_responses` non-empty ⇒ the FE renders selectable options.** Each item carries its own `type`: `single select` → radio rows (clicking submits immediately); `multi select` → checkbox rows (tick several → Confirm submits the joined set). *The multiple-choice behavior is 100% determined by the shape of this output — there is no separate "choices" field and no server-side question-type state.*
-- **No `done` flag.** The old `done` is gone. Hand-off is a **user action** owned by the on-screen checklist/button (per the spec: the user decides when to proceed). If the Concierge wants to *invite* hand-off, it offers it as a `suggested_response` (e.g. `{"response":"Hand off to the factory","type":"single select"}`) or, once wired, calls a real `handoff` tool — but readiness is never a hidden boolean.
+- **No `done` flag.** The old readiness flag is gone. After the user and Concierge agree to proceed, hand-off may come from the on-screen button or the real Concierge tool. A completed turn carries the factual `handed_off` result so the UI navigates after a successful tool call; readiness is never a hidden boolean.
 
-This replaces the old `ConverseOut {message, choices, done}`. New `ConverseOut` mirrors the contract exactly: `{response: str, suggested_responses: [{response: str, type: str}]}`.
+This replaces the old `ConverseOut {message, choices, done}`. New `ConverseOut` is `{response: str, suggested_responses: [{response: str, type: str}], handed_off: bool}`; `handed_off` reflects the real post-turn project phase rather than agent judgment.
 
 ### Enforcing the shape in LangChain
 The final turn is coerced to a Pydantic schema so the JSON is guaranteed, not hoped for:
@@ -91,7 +91,7 @@ Because the fourteen tools are gone, the belt begins minimal. We add back **only
 
 - **Memory read tools** (from the Project Memory milestone): `get_project_overview`, `search_memory`, `get_document_summary` — these become the Concierge's way to answer "what did you learn from my docs" for real. Read-only.
 - **Intake persistence** — *only if/when* it actually writes (e.g., a single `save_project_field` over the real store). If it's not wired to persistence, it isn't a tool; the Concierge just converses and the FE form owns the writes.
-- **Handoff** — optional real tool later; until then, hand-off is the checklist/button + a suggested-response invite.
+- **Handoff** — a real tool over the same `promote_draft` function as the button. Its successful turn reports `handed_off: true`, which moves onboarding to the Factory Console.
 
 Principle: **an unbound-to-reality tool is worse than no tool.** Empty belt is fine; the agent is still useful as prompt + structured conversation.
 
@@ -121,7 +121,7 @@ A new operator screen: **one filterable table of all conversation history across
 
 ## 8. Net changes to the plan
 
-- **Phase 2 (Concierge)** becomes: *rip out* the OpenAI-Agents-SDK agent + all 14 tools + the scripted mock; *build* the LangChain agent = system prompt + tool belt (starts empty) + `ConciergeTurn` structured output; new `ConverseOut` = `{response, suggested_responses[]}`.
+- **Phase 2 (Concierge)** becomes: *rip out* the OpenAI-Agents-SDK agent + all 14 tools + the scripted mock; *build* the LangChain agent = system prompt + tool belt (starts empty) + `ConciergeTurn` structured output; new `ConverseOut` = `{response, suggested_responses[], handed_off}`.
 - **Conversation store**: rename `thread_id`→`session_id`; guarantee `message_id` in the FE response; `suggested_responses` live in the agent row's `json_blob`.
 - **New ticket — Admin history table** (Tenexity OS): the filterable cross-tenant conversation index (§7).
 - **Dependency:** the LangChain agent depends on the conversation store (history replay) and, for real tools, on the Memory MCP — but it can ship with an **empty tool belt** the moment the store is ready.

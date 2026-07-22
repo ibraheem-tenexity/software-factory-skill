@@ -12,8 +12,8 @@ import { T, Icon, CategoryLabel, Wordmark, Btn, StatusPill, Message, Composer, S
 
 type ChatTurn = { who: "user" | "agent"; text: string; suggested?: { response: string; type: "single select" | "multi select" }[] };
 
-export function InterviewView({ draftId, projectName, onBack, onHandoff, submitting, error }: {
-  draftId: string; projectName: string; goal?: string; onBack: () => void; onHandoff: () => void; submitting: boolean; error: string;
+export function InterviewView({ draftId, projectName, onBack, onHandoff, onPromoted, submitting, error }: {
+  draftId: string; projectName: string; goal?: string; onBack: () => void; onHandoff: () => void; onPromoted: () => void; submitting: boolean; error: string;
 }) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [thinking, setThinking] = useState(false);
@@ -83,6 +83,7 @@ export function InterviewView({ draftId, projectName, onBack, onHandoff, submitt
             // normal case; only visibly changes anything if the stream genuinely drifted.
             ensureBubble();
             updateBubble(() => ({ who: "agent", text: evt.response, suggested: evt.suggested_responses || [] }));
+            if (evt.handed_off) onPromoted();
           } else if (evt.type === "error") {
             fail();
           }
