@@ -306,7 +306,7 @@ function FactoryActivity({ onOpen, actions }) {
   </section>;
 }
 
-function conciergeSeed(context, build, sourceContext) {
+function conciergeSeed(context, build, selectedLabel) {
   if (context === 'build') {
     return build && build.allDone
       ? [{ who: 'agent', time: '12:35', text: `All ${build.total} tickets are green and the app is deployed. Want me to walk you through the live build?` }]
@@ -322,7 +322,7 @@ function conciergeSeed(context, build, sourceContext) {
     return [{ who: 'agent', text: 'These are the factory’s real outputs, organized by the stage that produced them. Pick one and I can explain the decision, connect it back to the brief, or help you steer what happens next.' }];
   }
   if (context === 'files' || context === 'docs') {
-    return [{ who: 'agent', text: 'These are the source directories and files the factory works from. I read the generated directory summaries first, then narrow retrieval to the smallest relevant subtree before opening individual documents.' }];
+    return [{ who: 'agent', text: `These are the source directories and files the factory works from${selectedLabel ? ` — you are viewing ${selectedLabel}` : ''}. For this delivery I still search all project-readable source material semantically; selecting a directory helps you navigate but does not restrict my retrieval yet.` }];
   }
   if (context === 'maintenance') {
     return [{ who: 'agent', text: 'The product has shipped. I’m still here to help you understand what is running, describe a change, or start the next maintenance task.' }];
@@ -332,18 +332,9 @@ function conciergeSeed(context, build, sourceContext) {
   }
   return [{ who: 'agent', text: 'I’m watching this project for you — 5 of 11 tickets done, 3 agents working, $4.20 spent. Ask me about progress, scope, or anything in your documents.' }];
 }
-function conciergeReply(context, text, sourceContext) {
-  const t = text.toLowerCase();
+function conciergeReply(context, _text, selectedLabel) {
   if (context === 'files' || context === 'docs') {
-    if (sourceContext) {
-      const source = sourceContext.type === 'file' ? sourceContext.name : sourceContext.type === 'directory' ? `the generated ${sourceContext.name} directory summary` : 'the generated source overview';
-      const coverage = sourceContext.summary_status === 'Failed' || sourceContext.summary_status === 'failed' ? ' Its latest refresh failed, so I would keep the incomplete coverage visible rather than treating this as current.' : sourceContext.summary_status === 'Needs refresh' || sourceContext.summary_status === 'pending' ? ' It is awaiting refresh, so I would verify the underlying file before relying on it.' : '';
-      return `From ${source}: ${sourceContext.summary_md}${coverage}`;
-    }
-    const docs = (window.PROJ_MATERIALS || []).map((m) => m.name);
-    const hit = docs.find((n) => t.includes(n.split('.')[0].split('-')[0]) || t.includes(n.toLowerCase()));
-    if (hit) return `From ${hit}: that’s covered there. I’ll cite the exact section once document citations ship — for now I can summarize what it contains.`;
-    return 'I’ll start from the source overview, choose the most relevant directory summary, then narrow the search to that subtree.';
+    return `I can search all project-readable source material using the current flat semantic search${selectedLabel ? ` while you are viewing ${selectedLabel}` : ''}. I will not claim the search was limited to this directory.`;
   }
   if (context === 'build') return 'On it — I’ve relayed that to the build team and flagged it on the board. I’ll surface any change here as the agents pick it up.';
   if (context === 'brief') return 'I can revise that in the Product Brief. Tell me the outcome you want, and I’ll keep the rest of the document consistent with it.';
@@ -352,8 +343,8 @@ function conciergeReply(context, text, sourceContext) {
   return 'Got it. I’ll keep an eye on the build and surface anything relevant here.';
 }
 
-function ProjectConcierge({ context = 'overview', build, onOpen, docChips, selectedLabel, sourceContext, collapsed, onCollapsedChange }) {
-  const chat = useConciergeChat(conciergeSeed(context, build, sourceContext), (text) => conciergeReply(context, text, sourceContext));
+function ProjectConcierge({ context = 'overview', build, onOpen, docChips, selectedLabel, collapsed, onCollapsedChange }) {
+  const chat = useConciergeChat(conciergeSeed(context, build, selectedLabel), (text) => conciergeReply(context, text, selectedLabel));
   const [localCollapsed, setLocalCollapsed] = React.useState(false);
   const savedScroll = React.useRef(0);
   const isCollapsed = typeof collapsed === 'boolean' ? collapsed : localCollapsed;
@@ -365,7 +356,7 @@ function ProjectConcierge({ context = 'overview', build, onOpen, docChips, selec
   React.useEffect(() => {
     if (priorContext.current === context) return;
     priorContext.current = context;
-    const next = conciergeSeed(context, build, sourceContext)[0];
+    const next = conciergeSeed(context, build, selectedLabel)[0];
     if (next) chat.push(next);
   }, [context]);
   const subtitle = context === 'build' ? (build && build.allDone ? 'Build complete' : 'Relaying the build')

@@ -381,12 +381,13 @@ activity** block and no Feed / Tray / Latest switch inside the conversation.
   while the build runs. Takes a `build={{done,total,allDone}}` prop and an `onOpen` callback for
   artifact-created events.
 - `'files'` — source files and directories. Subtitle "Across your source material"; receives the
-  selected directory summary or file and suggestion chips ask about that specific context
-  (`docChips`). The Concierge and other agents read directory summaries before querying individual
-  documents so they can narrow retrieval to the relevant subtree. The selected file or directory is
-  passed as structured `sourceContext`; the prototype reply reads its current summary and surfaces a
-  failed or stale status instead of bypassing it with a filename match. **Document Q&A with inline
-  citations is a later feature** — current replies name their source context but do not fabricate
+  selected directory or file as display context and suggestion chips ask about what the user is
+  viewing (`docChips`). **Explicit Phase 1 exception (operator decision, 2026-07-22):** the live
+  Concierge continues using the existing flat semantic search across all project-readable memory.
+  Selecting a directory does not constrain retrieval, and the UI must not claim that it does.
+  Structured `sourceContext` and directory-scoped Concierge retrieval are deferred to SOF-237 and
+  do not block the Files browser, real directories, or generated directory summaries. **Document
+  Q&A with inline citations is also outside this increment** — current replies must not fabricate
   section-level citations.
 - `'maintenance'` — post-delivery maintenance. Preserves the existing delivered-project context
   and open composer; this information-architecture change does not redesign that workflow.
@@ -503,11 +504,17 @@ ingestion path regenerates affected summaries bottom-up. The UI exposes the trut
 failed child document does not disappear: the directory summary names the incomplete coverage and
 the UI retains the child's failure state.
 
-**Agent retrieval contract:** agents start from the root directory summaries, choose the smallest
-likely subtree, then search/fetch within that directory id. A directory-scoped query includes all
-descendants; agents do not receive an invented claim that the chosen directory is sufficient. Search
-results retain their source document id and path. Direct file selection remains available when the
-agent already knows the source.
+**Phase 1 agent retrieval contract:** the Files hierarchy and summaries help people understand and
+navigate the source collection, but agents continue using the existing flat semantic search across
+all project-readable memory. Selecting a directory is display context only: it does not filter a
+memory query, and neither the UI nor the Concierge may claim that the answer came only from that
+subtree. Search results retain their existing source document id and path. Direct file selection
+remains available when the agent already knows the source.
+
+**Deferred — SOF-237:** structured `sourceContext` and optional directory-scoped retrieval will later
+allow the Concierge to start from directory summaries and search a selected subtree. This is the one
+operator-approved Phase 1 deferral in the Project Console epic and blocks none of the directory,
+summary, Files UI, or other Project Console work.
 
 **Required backend/database extension (not present in the current flat document API):** add a scoped
 directory relation with `id`, `scope`, `scope_id`, nullable `parent_id`, `name`, `summary_md`,
@@ -517,12 +524,13 @@ unique. The project documents projection returns a directory tree plus file rows
 flat arrays. Authenticated mutations create a scoped directory, upload a material into a directory,
 and reassign an existing blob's `directory_id`; a cross-scope reassignment uses the existing scope
 change and validates the destination belongs to the new scope. The memory/query tools accept an
-optional directory id that filters to its subtree. The Files Concierge receives a structured
-`sourceContext` (`type`, `id`, `scope`, `name`, `summary_md`, `summary_status`) rather than only a
-display label. Existing project and org documents migrate into their corresponding scope roots
-without changing their blob ids, summaries, storage keys, or access rules. This is deliberately a
-material backend, database, ingestion, API, and agent-tool change; the design must not imply it
-already ships.
+optional directory id that filters to its subtree **only when deferred issue SOF-237 is implemented**;
+the initial directory work does not change the existing flat retrieval behavior. SOF-237 also owns
+passing structured `sourceContext` (`type`, `id`, `scope`, `name`, `summary_md`, `summary_status`) to
+the Files Concierge. Existing project and org documents migrate into their corresponding scope roots
+without changing their blob ids, summaries, storage keys, or access rules. The initial Files work is
+deliberately a material backend, database, ingestion, and API change; the design must not imply that
+directory-scoped agent retrieval already ships.
 
 **2.5e Maintenance:** preserves the implemented post-delivery Maintenance tab and lifecycle. It is
 conditional on a completed/deployed project and is not redesigned by this information architecture.
