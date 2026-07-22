@@ -120,9 +120,11 @@ function MiniBar({ pct }) { return <span style={{ display: 'block', height: 4, b
 
 /* ---- views ---- */
 function AdminClients() {
+  const [inviteOpen, setInviteOpen] = React.useState(false);
   return (
     <React.Fragment>
-      <PageTitle title="Organizations" sub="Customer organizations and their portfolios of factory projects." actions={<AdminBtn primary>+ New organization</AdminBtn>} />
+      <PageTitle title="Organizations" sub="Customer organizations and their portfolios of factory projects. Counts and spend are computed live — a new organization is created by inviting its admin (Provide access), never by hand-entering telemetry." actions={<AdminBtn primary onClick={() => setInviteOpen(true)}>+ New organization</AdminBtn>} />
+      {inviteOpen && <InviteModal onClose={() => setInviteOpen(false)} />}
       <div style={{ border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, overflow: 'hidden', background: T.raised }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 130px 140px 130px 130px', gap: 16, padding: '11px 18px', borderBottom: `1px solid ${T.borderSubtle}`, background: T.sunken }}>
           <ColHead>Organization</ColHead><ColHead>Active projects</ColHead><ColHead>In-flight tickets</ColHead><ColHead>Total spend</ColHead><ColHead style={{ textAlign: 'right' }}>Last activity</ColHead>
@@ -407,12 +409,34 @@ const ALLOWED = [
   { email: 'dana@brassica.com', type: 'New org', org: 'Brassica Markets', role: 'Org admin', status: 'invited' },
 ];
 
+// Best-effort org-name guess from the invite email's domain — prefill only,
+// always editable. Common mailbox providers yield no guess.
+function guessOrgFromEmail(email) {
+  const d = (String(email).split('@')[1] || '').toLowerCase().trim();
+  if (!d || ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com', 'proton.me', 'protonmail.com', 'aol.com', 'comcast.net'].includes(d)) return '';
+  const sld = d.split('.').length > 1 ? d.split('.').slice(-2)[0] : d;
+  return sld.split(/[-_]/).map((w) => (w ? w[0].toUpperCase() + w.slice(1) : '')).join(' ');
+}
+
 function InviteModal({ onClose }) {
   const [email, setEmail] = React.useState('');
   const [type, setType] = React.useState('New org');
   const [org, setOrg] = React.useState('');
+  const [site, setSite] = React.useState('');
+  const [ind, setInd] = React.useState('');
+  const [orgTouched, setOrgTouched] = React.useState(false);
+  const [siteTouched, setSiteTouched] = React.useState(false);
   const [list, setList] = React.useState(ALLOWED);
   const valid = /\S+@\S+\.\S+/.test(email);
+  // domain prefill: org name + website guessed from the invite email's domain;
+  // both stay editable. Anything the operator provides here becomes on-file
+  // data in the invited user's onboarding — provided, never asked twice.
+  React.useEffect(() => {
+    const d = (String(email).split('@')[1] || '').toLowerCase().trim();
+    const free = ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com', 'proton.me', 'protonmail.com', 'aol.com', 'comcast.net'].includes(d);
+    if (!orgTouched) setOrg(free ? '' : guessOrgFromEmail(email));
+    if (!siteTouched) setSite(free ? '' : d);
+  }, [email, orgTouched, siteTouched]);
   const send = () => {
     if (!valid) return;
     setList((l) => [{ email, type, org: type === 'Tenexity' ? 'Tenexity' : (org || 'New organization'), role: type === 'Tenexity' ? 'Operator' : 'Org admin', status: 'invited' }, ...l]);
@@ -438,9 +462,25 @@ function InviteModal({ onClose }) {
             </Field>
           </div>
           {type === 'New org' ? (
-            <Field label="Organization name" hint="They’ll be created as the admin of this new organization.">
-              <TextInput value={org} onChange={setOrg} placeholder="e.g. Northwind Supply Co." />
-            </Field>
+            <React.Fragment>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <Field label="Organization name" hint="Prefilled from their email domain — edit freely.">
+                  <TextInput value={org} onChange={(v) => { setOrgTouched(true); setOrg(v); }} placeholder="e.g. Northwind Supply Co." />
+                </Field>
+                <Field label="Website" optional hint="Their domain, if you know it — pre-seeds their onboarding.">
+                  <TextInput value={site} onChange={(v) => { setSiteTouched(true); setSite(v); }} placeholder="company.com" mono />
+                </Field>
+              </div>
+              <Field label="Industry" optional hint="Anything you provide here is already filled in for them — never asked twice.">
+                <TextInput value={ind} onChange={setInd} placeholder="e.g. Industrial Distribution" />
+              </Field>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '11px 13px', borderRadius: T.rMd, border: `1px solid ${T.brand}33`, background: T.brandSoft + '55' }}>
+                <Icon name="arrowRight" size={13} color={T.brandDeep} style={{ marginTop: 2, flexShrink: 0 }} />
+                <p style={{ margin: 0, font: `400 12px/1.55 ${T.sans}`, color: T.secondary }}>
+                  What happens next: they get the invite email, sign in <b style={{ color: T.fg }}>with their preferred method</b> (Google, Microsoft, email, or org SSO), and land in guided setup — anything you provided above is already on file, the Concierge researches the rest with them, and it walks them to their first project. Nobody fills anything in twice.
+                </p>
+              </div>
+            </React.Fragment>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: T.rMd, background: T.brandSoft + '66', border: `1px solid ${T.brand}33` }}>
               <Sparkle size={12} color={T.brandDeep} /><span style={{ font: `400 12.5px/1.4 ${T.sans}`, color: T.secondary }}>Internal <b style={{ color: T.fg }}>Tenexity operator</b> — full access to every tenant, project, and agent.</span>
@@ -575,6 +615,7 @@ function AdminPortal() {
   const [agent, setAgent] = React.useState(null);
   const [proj, setProj] = React.useState(null);
   const [signedOut, setSignedOut] = React.useState(false);
+  const [inviteOpen, setInviteOpen] = React.useState(false);
   if (signedOut) return <SignedOut onBack={() => setSignedOut(false)} />;
   const openProject = (p) => { setProj(p); setView('projects'); };
   if (proj) return <AdminProjectView project={proj} onBack={() => setProj(null)} />;
@@ -624,6 +665,7 @@ function AdminPortal() {
             <span style={{ font: `500 10px/1 ${T.mono}`, color: T.tertiary, border: `1px solid ${T.borderSubtle}`, borderRadius: 4, padding: '2px 4px' }}>⌘K</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <AdminBtn primary onClick={() => setInviteOpen(true)} title="Invite a user — a new organization's admin or an internal operator"><Icon name="plus" size={14} color="#fff" /> Provide access</AdminBtn>
             <AdminBtn title="Return to the customer console"><Icon name="arrowLeft" size={14} color={T.fg} /> Back to console</AdminBtn>
             <AccountMenu onSignOut={() => setSignedOut(true)} />
           </div>
@@ -646,6 +688,7 @@ function AdminPortal() {
         </div>
       </div>
       {agent && <AgentPromptPanel agent={agent} onClose={() => setAgent(null)} />}
+      {inviteOpen && <InviteModal onClose={() => setInviteOpen(false)} />}
     </div>
   );
 }

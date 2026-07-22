@@ -63,8 +63,8 @@ process-node graph, SOC-2 trust line). Right = auth form.
 3. **Email + password** (show/hide toggle, forgot-password link).
 4. **Organization SSO** — toggles to a work-domain entry (SAML/OIDC), with a back link.
 **Footer:** "Request access" for users not yet on the allow-list.
-**Behavior:** any successful auth → projects dashboard. Sign-in is gated by the
-allow-list managed in Tenexity OS (§3.6).
+**Behavior:** any successful auth → projects dashboard — **except an invited user's first sign-in**, which routes to first-time onboarding (§3.7 chain, §2.4 fresh mode, website prefilled from the email domain). Sign-in is gated by the
+allow-list managed in Tenexity OS (§3.7).
 
 ### 2.2 Projects dashboard  (`dashboard.jsx` → `Dashboard`; nav shell `FactoryApp`)
 **Purpose:** the home screen after login; list the org's projects.
@@ -417,7 +417,7 @@ projects + agent workforce snapshot.
 
 ### 3.2 Organizations (tenants)
 Table of every org ("organization" is the canonical term for a customer — used everywhere, never "client"): initials, name, active projects, in-flight tickets, total
-spend, last activity. **+ New organization**.
+spend, last activity. **All computed columns are system-derived** — initials come from the name, and projects/tickets/spend/activity are live aggregates; they are **never hand-entered**. **+ New organization** opens the **invite modal** (§3.7): the operator may pre-seed the org's **identity/context fields** (name, website, industry) and invites its admin in the same action — the invited user always gets onboarding either way (§3.7 chain), with whatever the operator provided already on file. There is no telemetry entry form anywhere.
 
 **Projects (all)**
 Every project across all clients. Filters (organization, factory, **user/owner**, status, mode) +
@@ -471,13 +471,19 @@ never in platform Settings (§3.8); platform knobs never appear here.
   agents read this too, and act on it.
 
 ### 3.7 Provide access (invite)  (`InviteModal`)
-Triggered from the top-bar **Provide access** button. Form:
+Triggered from the top-bar **Provide access** button and from **+ New organization** (§3.2). This is the ONLY way an organization or user comes into being — the invited person gets the full onboarding experience, never a hand-entered row. Form:
 - **Email** address.
 - **Access type** dropdown: **New org** or **Tenexity**.
-  - **New org** → also capture organization name; the invited user becomes the **admin of that new org**.
+  - **New org** → the operator may **pre-seed the org's identity/context fields**: **organization name** (prefilled from the invite email's domain — `nick@cbtcompany.com` → "Cbtcompany"; editable), **website** (optional; prefilled with the domain itself; editable), **industry** (optional). Common mailbox providers yield no guesses. The invited user becomes the **admin of that new org**; whatever was provided here is **on file for their onboarding — provided once, never asked twice**. A **"What happens next"** strip spells out the flow below.
   - **Tenexity** → internal operator with full cross-tenant access.
 - On send → email is **added to the sign-in allow-list** (status `invited` → `active` after first sign-in). Login (§2.1) only admits allow-listed emails.
 **Allowed sign-ins** list shown in the modal: email, org, role, status.
+
+**The invite → onboarded chain (wire exactly like this):**
+1. Operator sends the invite; the person gets the email (requires the verified sending domain — `TICKETS.md` CBT-29) with a link to the app.
+2. They sign in **with their preferred method** — Google / Microsoft / email+password / org SSO (§2.1 — all four stay equal citizens). First sign-in flips them to `active`.
+3. First sign-in routes to **first-time onboarding** (§2.4 fresh mode) — **always, whether the operator pre-seeded fields or not**. The website field is prefilled from their email domain (or the operator-provided website), and any operator-provided fields (name, website, industry) are already on file and editable. The **web prefill** researches the remainder with them: lookup → found-card with source labels → they confirm → the org profile (industry, scale, systems) is completed *with* them, not typed by anyone twice.
+4. They continue through context gathering (materials, systems, recipes) and **start their first project** on the same sitting — intake → processing → interview → handoff (§2.4a). The Concierge carries the whole way.
 
 ---
 
@@ -761,11 +767,25 @@ Files: `discovery.jsx`, `optionC.jsx`, `concierge.jsx`, `buildprogress.jsx`, `bu
 `artifactviewer.jsx`, `artifacts.jsx`, `admin.jsx`, `shared.jsx` (comments), `PRD.md` (§1, §2.4a,
 §2.6, §2.7, this entry).
 
+**42 · Invite-led organization onboarding — the full experience from one email** (§3.2, §3.7, §2.1)
+— organizations are created **by inviting their admin**, never by hand-entering telemetry:
+the old "New organization" form (which asked operators to type *computed* values — spend, active
+projects, tickets, last activity) is gone from the spec; those columns are system-derived. The
+**Provide access** modal (now actually wired — top-bar button + the §3.2 button; it previously
+existed unrendered) lets the operator **pre-seed identity/context fields** (name + website prefilled
+from the invite email's domain, industry optional — all editable) and shows a **"What happens next"**
+strip: invite email → sign in **with their preferred method** (Google / Microsoft / email / SSO, all
+equal) → first sign-in **always** routes to **first-time onboarding** — operator-provided fields
+already on file, the web prefill (entry 33) researches the rest **with them** → they confirm →
+context → **first project**, one sitting, Concierge the whole way. Nobody fills anything in twice.
+Files: `admin.jsx` (`guessOrgFromEmail` + domain prefill, modal fields, wiring), `PRD.md` (§2.1
+routing, §3.2 computed columns, §3.7 chain).
+
 ---
 
 ## 7. File map for this iteration (quick reference)
 
-- **`TICKETS.md`** *(new)* — the CBT design-partner sprint: 30 tickets (CBT-1…30) across four lanes
+- **`TICKETS.md`** *(new)* — the CBT design-partner sprint: 31 tickets (CBT-1…31) across four lanes
   (DSN design / WEB console frontend / PIPE pipeline-backend / OPS infra), grounded in a recon of the
   real codebase; wave-ordered for the 27th. File into Linear (team SOF).
 - **`discovery.jsx`** *(new — loaded in `Software Factory Onboarding.html` right after `concierge.jsx`)*
