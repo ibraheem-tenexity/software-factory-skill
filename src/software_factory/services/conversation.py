@@ -262,9 +262,10 @@ class DbConversation:
                       final_messages: list, turn: ConciergeTurn, usage: dict) -> dict:
         """Shared by `turn()` and `turn_stream()` (SOF-154): append everything the run produced —
         tool calls, tool results, the final reply — to the conversation, then return the
-        ConciergeTurn dict `{response, suggested_responses, message_id, session_id}`. `final_messages`
-        is the full message list (input + produced); `sent_len` is how many of those were the input
-        we sent, so only the newly-produced tail gets persisted here."""
+        ConciergeTurn dict `{response, suggested_responses, message_id, session_id, handed_off}`.
+        `handed_off` is the actual post-turn project phase, not agent-generated readiness state.
+        `final_messages` is the full message list (input + produced); `sent_len` is how many of
+        those were the input we sent, so only the newly-produced tail gets persisted here."""
         suggested = [sr.model_dump() for sr in turn.suggested_responses]
         new_msgs = final_messages[sent_len:]
         message_id = None
@@ -298,7 +299,8 @@ class DbConversation:
             cost_usd=usage.get("cost_usd") or 0.0,
         )
         return {"response": turn.response, "suggested_responses": suggested,
-                "message_id": message_id, "session_id": session_id}
+                "message_id": message_id, "session_id": session_id,
+                "handed_off": bool(self._console and not self._console.is_draft(project_id))}
 
     async def turn(self, project_id: str, message: str) -> dict:
         """One Concierge turn. Non-empty message = the user's turn (recorded, agent replies).
@@ -306,7 +308,7 @@ class DbConversation:
         from its system prompt (which carries the first-turn project context) + history. That is
         the whole interview mechanism: the screen is a chat box, the LLM asks because that's what
         LLMs do. Returns a ConciergeTurn dict: {response, suggested_responses, message_id,
-        session_id}."""
+        session_id, handed_off}."""
         text = (message or "").strip()
         session_id = _onboarding_session_id(project_id)
         # Checked BEFORE appending this message: an empty history means this call IS turn one —
