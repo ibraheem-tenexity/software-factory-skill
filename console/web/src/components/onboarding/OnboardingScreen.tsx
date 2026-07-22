@@ -309,7 +309,7 @@ function BudgetPicker({ value, onChange }: { value: number | null; onChange: (v:
         </div>
       )}
       <p style={{ margin: 0, font: `400 11.5px/1.4 ${T.sans}`, color: T.tertiary }}>
-        {value != null ? `Factory stops and notifies you when spend reaches $${value}.` : "No cap - the factory runs to completion (billed at actual cost)."}
+        {value != null ? `Factory stops and notifies you when spend reaches $${value}.` : "Choose a total project cap to continue."}
       </p>
     </div>
   );
@@ -808,7 +808,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <Field label="What are you building?" hint="One or two sentences on the outcome you want.">
                         <TextArea rows={3} value={p.goal} onChange={(v) => setProj("goal", v)} placeholder="e.g. Replace the manual quoting spreadsheet and write won quotes back to Epicor…" />
                       </Field>
-                      <Field label="Budget cap" optional hint="Stop and notify when spend reaches this amount. Leave unset to run to completion.">
+                      <Field label="Budget cap" hint="Required total spend ceiling for this project.">
                         <BudgetPicker value={budget} onChange={setBudget} />
                       </Field>
                       <Field label="GitHub username" optional hint="We'll invite this account to the project repository after it is created.">
@@ -911,7 +911,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <Field label="What are you building?" hint="One or two sentences on the outcome you want.">
                         <TextArea rows={3} value={p.goal} onChange={(v) => setProj("goal", v)} placeholder="e.g. Replace the manual quoting spreadsheet…" />
                       </Field>
-                      <Field label="Budget cap" optional hint="Stop and notify when spend reaches this amount. Leave unset to run to completion.">
+                      <Field label="Budget cap" hint="Required total spend ceiling for this project.">
                         <BudgetPicker value={budget} onChange={setBudget} />
                       </Field>
                       <Field label="GitHub username" optional hint="We'll invite this account to the project repository after it is created.">
