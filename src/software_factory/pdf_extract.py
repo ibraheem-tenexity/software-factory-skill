@@ -47,7 +47,30 @@ def _pandoc_convert(path: str) -> str:
     return pypandoc.convert_file(path, "gfm")
 
 
+def _import_markitdown():
+    """Import markitdown WITHOUT letting its transitive python-dotenv autoload mutate os.environ.
+
+    Importing markitdown triggers python-dotenv, whose `find_dotenv` walks UP from the current
+    working directory and loads the nearest `.env`. In a dev worktree that nearest file is the
+    repo's LIVE `.env`, so the import silently injects real secrets (SF_GOOGLE_CLIENT_ID,
+    SF_SESSION_SECRET, …) into `os.environ` — flipping a local auth-off console to authed the
+    moment the first document is parsed (SOF-228). Snapshot `os.environ` before the import and
+    restore it after, so the autoload's side effect cannot leak. No-op in deployed containers
+    (no parent `.env` to find) and a one-time cost (markitdown is module-cached after first import).
+    """
+    snapshot = dict(os.environ)
+    try:
+        from markitdown import MarkItDown
+        return MarkItDown
+    finally:
+        for k in set(os.environ) - set(snapshot):
+            del os.environ[k]                       # drop keys the autoload ADDED
+        for k, v in snapshot.items():
+            if os.environ.get(k) != v:
+                os.environ[k] = v                   # revert CHANGED / restore any REMOVED
+
+
 def _markitdown_convert(path: str) -> str:
-    from markitdown import MarkItDown
+    MarkItDown = _import_markitdown()
 
     return MarkItDown().convert(path).text_content
