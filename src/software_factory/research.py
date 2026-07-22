@@ -41,6 +41,7 @@ def _fusion_judge_model() -> str | None:
     try:
         return (ToolStore().config_for("fusion") or {}).get("judge_model") or None
     except Exception:
+        logger.exception("[research] fusion judge_model config read failed — using the plugin's default judge")
         return None
 
 
@@ -108,6 +109,7 @@ def _exa_search(
         )
         resp.raise_for_status()
     except Exception as exc:
+        logger.exception("[research] exa search transport failed")
         raise ResearchError(f"Exa search failed: {exc}") from exc
 
     results = resp.json().get("results", [])
@@ -314,6 +316,7 @@ def _fusion_post(payload: dict, api_key: str, timeout: float) -> tuple[str, floa
             )
             resp.raise_for_status()
         except Exception as exc:
+            logger.exception("[research] fusion transport failed")
             raise ResearchError(f"Fusion research failed: {exc}") from exc
         try:
             body = resp.json()
@@ -397,6 +400,7 @@ def _fusion_via_proxy(url: str, token: str | None, question: str, timeout: float
         resp.raise_for_status()
         return resp.json()
     except httpx.HTTPError as exc:
+        logger.exception("[research] fusion proxy call failed")
         raise ResearchError(f"Fusion research proxy failed: {exc}") from exc
 
 
