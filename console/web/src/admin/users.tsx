@@ -173,7 +173,9 @@ function useUsersAndClients() {
   return { users, clients, loading: usersQ.loading, refresh };
 }
 
-function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+type InviteNoticeTone = "success" | "warning";
+
+function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: (notice: string, tone?: InviteNoticeTone) => void }) {
   const [email, setEmail] = React.useState("");
   const [name, setName] = React.useState("");
   const [designation, setDesignation] = React.useState("");
@@ -219,14 +221,16 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
           const r = await api.adminResendInvite(email);
           setCreatedLink(r.link);
         } catch {
-          onCreated();
+          onCreated(`User created for ${email.trim()}, but the sign-in link could not be retrieved.`, "warning");
         }
       } else if (d.invite_email_sent === false) {
         // Don't silently close on a failed email — the admin needs to know to tell the
         // invitee out-of-band, same as OrgAdminScreen's inviteMember notice.
         setInvitedNoLink(true);
+      } else if (d.invite_email_sent === true) {
+        onCreated(`Invitation email accepted for delivery to ${email.trim()}.`);
       } else {
-        onCreated();
+        onCreated(`User invited for ${email.trim()}, but email delivery status was unavailable.`, "warning");
       }
     } catch (e: any) {
       // Surface the server's honest reason (e.g. a guarded-invariant 409) instead of a generic line.
@@ -453,7 +457,7 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                 <Mono style={{ fontSize: 11, color: T.secondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{createdLink}</Mono>
               </div>
               <AdminBtn onClick={() => navigator.clipboard.writeText(createdLink!)}>Copy</AdminBtn>
-              <AdminBtn primary onClick={() => { onCreated(); }}>Done</AdminBtn>
+              <AdminBtn primary onClick={() => { onCreated(`User created for ${email.trim()}. Share the sign-in link above.`, emailFailed ? "warning" : "success"); }}>Done</AdminBtn>
             </div>
           </div>
         )}
@@ -464,7 +468,7 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
               email address at the console.
             </Mono>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <AdminBtn primary onClick={() => { onCreated(); }}>Done</AdminBtn>
+              <AdminBtn primary onClick={() => { onCreated(`User invited for ${email.trim()}, but the invitation email could not be sent.`, "warning"); }}>Done</AdminBtn>
             </div>
           </div>
         )}
@@ -840,6 +844,7 @@ export function UsersManagement() {
   const [add, setAdd] = React.useState(false);
   const [drawer, setDrawer] = React.useState<AdminAccessUser | null>(null);
   const [me, setMe] = React.useState<Me | null>(null);
+  const [inviteNotice, setInviteNotice] = React.useState<{ message: string; tone: InviteNoticeTone } | null>(null);
 
   React.useEffect(() => {
     api.me().then(setMe).catch(() => setMe(null));
@@ -925,11 +930,38 @@ export function UsersManagement() {
         title="Users"
         sub="The master users table — everyone allowed to sign in, across every organization and internal Tenexity staff."
         actions={
-          <AdminBtn primary onClick={() => setAdd(true)}>
+          <AdminBtn primary onClick={() => { setInviteNotice(null); setAdd(true); }}>
             <Icon name="plus" size={14} color="#fff" /> Add user
           </AdminBtn>
         }
       />
+
+      {inviteNotice && (
+        <div
+          role="status"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: 16,
+            padding: "10px 12px",
+            border: `1px solid ${inviteNotice.tone === "success" ? T.success : T.warning}`,
+            borderRadius: T.rMd,
+            background: inviteNotice.tone === "success" ? T.successSoft : T.warningSoft,
+          }}
+        >
+          <span style={{ font: `500 12.5px/1.4 ${T.sans}`, color: inviteNotice.tone === "success" ? T.success : T.warning }}>{inviteNotice.message}</span>
+          <button
+            type="button"
+            onClick={() => setInviteNotice(null)}
+            title="Dismiss notification"
+            style={{ border: "none", background: "transparent", color: inviteNotice.tone === "success" ? T.success : T.warning, cursor: "pointer", padding: 2 }}
+          >
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
         <MetricCard label="Total users" value={counts.total} hint="across all organizations" accent />
@@ -1087,7 +1119,7 @@ export function UsersManagement() {
         )}
       </div>
 
-      {add && <AddUserModal onClose={() => setAdd(false)} onCreated={refresh} />}
+      {add && <AddUserModal onClose={() => setAdd(false)} onCreated={(message, tone = "success") => { setAdd(false); refresh(); setInviteNotice({ message, tone }); }} />}
       {drawer && <UserDrawer user={drawer} currentUserEmail={me?.email} onClose={() => setDrawer(null)} onChanged={refresh} />}
     </>
   );
