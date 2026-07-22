@@ -15,6 +15,7 @@ check.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Callable, Iterable
@@ -24,6 +25,8 @@ import urllib.request
 
 from . import env
 from .deploy import RunResult, _real_runner
+
+logger = logging.getLogger(__name__)
 
 # ===========================================================================================
 # RAILWAY GRAPHQL API — thin helpers for service-delete and variables-read.
@@ -130,6 +133,47 @@ def _graphql_find_service_by_name(project_id: str, service_name: str, token: str
     return None
 
 
+def _graphql_list_services(project_id: str, token: str) -> dict[str, dict]:
+    """Snapshot a project's services as {serviceId: {"name", "createdAt"}} via GraphQL — the basis
+    for resolving a just-added service by diffing against a pre-add snapshot (SOF-235), independent
+    of `railway add`'s drifting --json stdout. Returns {} on any error (full traceback logged)."""
+    try:
+        resp = _graphql(
+            """query Services($projectId: String!) {
+                 project(id: $projectId) { services { edges { node { id name createdAt } } } }
+               }""",
+            {"projectId": project_id},
+            token,
+        )
+    except Exception:
+        logger.exception("deploy-db: GraphQL service-list query failed for project %s", project_id)
+        return {}
+    edges = (((resp.get("data") or {}).get("project") or {}).get("services") or {}).get("edges") or []
+    out: dict[str, dict] = {}
+    for e in edges:
+        node = e.get("node") or {}
+        sid = node.get("id")
+        if sid:
+            out[sid] = {"name": node.get("name"), "createdAt": node.get("createdAt")}
+    return out
+
+
+def _resolve_new_service(pre_add: dict, project_id: str, token: str) -> tuple[str | None, str | None]:
+    """Resolve the (serviceId, serviceName) of the Postgres just created by `railway add`,
+    independent of the CLI's stdout, by diffing the live GraphQL service list against a pre-add
+    snapshot (SOF-235). A "new" service is one present now but absent from `pre_add`; we keep only
+    `Postgres-*` services (what `railway add --database postgres` creates) and, if several appeared,
+    pick the newest by `createdAt`. Returns (None, None) when no new Postgres service appeared."""
+    post_add = _graphql_list_services(project_id, token)
+    candidates = [(sid, node) for sid, node in post_add.items()
+                  if sid not in pre_add and (node.get("name") or "").startswith("Postgres")]
+    if not candidates:
+        return None, None
+    candidates.sort(key=lambda c: c[1].get("createdAt") or "", reverse=True)
+    sid, node = candidates[0]
+    return sid, node.get("name")
+
+
 def set_app_variable(project_id: str, name: str, value: str, service_id: str | None = None) -> dict:
     """Set one environment variable on a run-app's OWN deployed Railway service (never the deploy
     -DB service) and trigger a redeploy so the live app picks it up — the #107 "provide your own
@@ -223,11 +267,17 @@ def provision(project_id: str, context_dir: str,
     """Provision (or RESUME) this run's Railway Postgres and return + persist its connection info
     {DATABASE_URL, provider, service, service_id, project_id} to context_dir/deploy-db.json.
 
-    Behavior verified against the live railway CLI (5.12.1):
+    Behavior verified against the live railway CLI (5.12.1); SOF-235 made serviceId resolution
+    robust to `railway add --json` stdout drift on newer CLIs (5.27/5.28 stopped returning it):
       • `railway add --database postgres` is INTERACTIVE (prompts + hangs headless) — the bare form was
-        the original stall. We use `--json`, which returns {serviceId, serviceName:"Postgres-XXXX"}.
-      • Railway auto-names the service; we CAPTURE the returned serviceId and read DATABASE_URL from THAT
-        id (`railway variables --service <serviceId> --json`) — reading by a guessed name was the bug.
+        the original stall. We use `--json`, which on 5.12.1 returned {serviceId, serviceName:"Postgres-XXXX"}.
+      • Railway auto-names the service; we CAPTURE its serviceId and read DATABASE_URL from THAT id
+        (`railway variables --service <serviceId> --json`) — reading by a guessed name was the bug.
+      • serviceId resolution (SOF-235): first TRUST `railway add --json` stdout; if the CLI's --json
+        shape drifted and returned no serviceId, RESOLVE it via a live GraphQL diff — snapshot the
+        project's service IDs before `add`, then find the newly-appeared `Postgres-*` service after
+        (newest by createdAt if several). This survives arbitrary stdout drift and, by adopting the
+        just-created service, stops the orphan-Postgres leak that a raised provision used to cause.
       • Railway provisions the Postgres ASYNCHRONOUSLY: DATABASE_URL may be absent on the first
         variables read. We poll with backoff (~10× over ~30s) until it appears.
     IDEMPOTENT: the serviceId is persisted the MOMENT `add` succeeds (before the variables read), so a
@@ -257,15 +307,32 @@ def provision(project_id: str, context_dir: str,
 
     svc_id, svc_name = info.get("service_id"), info.get("service")
     if not svc_id:
+        add_token = os.environ.get("RAILWAY_TOKEN", "")
+        # SOF-235: snapshot the project's existing service IDs BEFORE `railway add` so we can
+        # resolve the newly-created Postgres by diffing the live GraphQL service list — a source
+        # of truth that is INDEPENDENT of `railway add`'s --json stdout, whose shape drifted across
+        # CLI versions (5.12.1 → 5.27/5.28) and silently stopped returning `serviceId`. Empty when
+        # GraphQL is unavailable (no token / no project id) — we then rely on stdout parsing alone.
+        pre_add = (_graphql_list_services(railway_project_id, add_token)
+                   if (add_token and railway_project_id) else {})
         # In dev (no RAILWAY_TOKEN), link the CLI to the correct project before `railway add`
         # since `add` has no -p/--project flag. In prod, RAILWAY_TOKEN is project-scoped so
         # no link is needed. Guard on railway_project_id too: if unconfigured, skip silently.
-        if not os.environ.get("RAILWAY_TOKEN") and railway_project_id:
+        if not add_token and railway_project_id:
             run(["railway", "link", "-p", railway_project_id])
         add_out = run(["railway", "add", "--database", "postgres", "--json"]).stdout
+        # First TRUST the CLI stdout (some versions still return serviceId); FALL BACK to a live
+        # GraphQL diff when the --json shape drifted and yielded no id (SOF-235). If the diff finds
+        # a just-created Postgres we couldn't otherwise track, we ADOPT it here — that is precisely
+        # what stops the orphan leak (the service exists on Railway either way).
         svc_id, svc_name = _parse_added_service(add_out)
+        if not svc_id and add_token and railway_project_id:
+            svc_id, svc_name = _resolve_new_service(pre_add, railway_project_id, add_token)
         if not svc_id:
-            raise RuntimeError(f"railway add --json returned no serviceId: {(add_out or '')[:200]!r}")
+            # Genuine failure: neither stdout nor the GraphQL diff surfaced a provisioned service.
+            raise RuntimeError(
+                "railway add produced no resolvable serviceId (stdout parse and GraphQL diff both "
+                f"failed): {(add_out or '')[:200]!r}")
         # Persist the handle BEFORE reading variables: if the read fails, the retry reuses this exact
         # service instead of adding another one. service_id is also the durable teardown handle.
         write_file(context_dir, {"service_id": svc_id, "service": svc_name,
