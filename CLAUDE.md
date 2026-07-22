@@ -85,6 +85,9 @@ real API calls for backend — and confirm observed behavior before claiming any
 Do not theorize about a failure you can reproduce and read logs for. Never claim "done" without
 having watched it work; report outcomes faithfully, including what you did not verify.
 
+**UI review:** Every UI change MUST be reviewed with Playwright through the available MCP/plugin.
+In Codex, use the in-app browser's Playwright interface when it is available.
+
 **No time estimates** (operator directive, 2026-07-08): AI development-time estimates are
 systematically wrong — days of "estimate" are minutes of agent work. Never defer or descope for
 time reasons; report by what is DONE, not by ETA.
