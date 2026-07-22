@@ -225,9 +225,12 @@ def owner_to_org(orgs: list, members_by_org: dict) -> dict:
 
 def agent_roster(system_agents: list, rollups: list) -> list:
     """Merge the system_agents identity rows (callsign/name/prompt/model_id/version) with live
-    per-role rollups from the runtime_agents table; append any live role not in system_agents as its
-    own card (honest: a live agent not yet named). Roles are matched to rollups by callsign, since
-    the old per-role registry `role` column no longer exists on system_agents."""
+    per-role rollups from the runtime_agents table. system_agents is the SOLE source of roster
+    membership (migration-seeded, operator-editable — "the frontend shows only DB rows"); the
+    rollups only DECORATE a defined agent with its run stats. Run-specific sub-agent roles that a
+    build spawns (e.g. per-ticket agents recorded in runtime_agents) are telemetry, not
+    definitions, and are deliberately NOT surfaced as roster cards. Roles are matched to rollups by
+    callsign, since the old per-role registry `role` column no longer exists on system_agents."""
     by_role = {(r.get("role") or "").lower(): r for r in rollups}
     used = set()
     out = []
@@ -249,11 +252,6 @@ def agent_roster(system_agents: list, rollups: list) -> list:
             used.add(key)
         out.append(card(e["name"], e["callsign"], e.get("callsign"), e.get("model_id"),
                         e.get("version") or 0, e.get("prompt"), roll))
-    # live roles not claimed by any roster entry → their own cards
-    for role, roll in by_role.items():
-        if role and role not in used:
-            out.append(card(role.title(), role.upper(), role, None, 0,
-                            "Live pipeline agent (not in the curated roster).", roll))
     return out
 
 
