@@ -1,6 +1,4 @@
-"""
-Default Prompts For Agents
-"""
+"""DB-backed Concierge prompt resolution plus code-owned context composition."""
 from __future__ import annotations
 
 import logging
@@ -108,7 +106,7 @@ def build_system_prompt(context: str = "intake", first_turn_context: str | None 
     """The base concierge prompt framed for `context` — one identity, focus set per session.
 
     `first_turn_context` (SOF-62) is the server-assembled project-context block — the user's own
-    input, the matching SOW body, document summaries, and existing per-document assumptions —
+    input, the selected recipe body, document summaries, and existing per-document assumptions —
     appended to the SYSTEM prompt (never a fake user message) so the Concierge's very first reply
     already accounts for everything on file, with no tool call required. Only ever passed for a
     project's first turn; `DbConversation._get_agent` bakes it into that project's ChatAgent once

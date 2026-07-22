@@ -38,9 +38,11 @@ There are two audiences / two app surfaces:
    work shows visible, specific progress — never a spinner for an unknown wait.
 2. **One assistant, one identity, everywhere.** The Concierge is the same
    character with the same voice on every project screen; only its focus changes.
-3. **Nothing is created by accident.** State-changing actions (create project,
-   start build) are explicit, named, confirmed actions — never a side effect of
-   navigation or of sending the Concierge a message.
+3. **Nothing is created by accident.** State-changing actions are explicit, named, and confirmed.
+   Project creation belongs only to **Create project**. A build may start from the named **Hand off
+   to factory** button or from the Concierge's real handoff tool after clear conversational
+   agreement; a successful handoff always moves the UI to the Factory Console. Navigation and
+   unrelated Concierge messages never create or start anything.
 4. **Show sources, don't invent a score.** Every inferred fact is traceable to
    exactly where it came from (file, upload, answer, url) — the system never
    asserts a confidence level it has no real way to compute.
@@ -201,37 +203,30 @@ states it stays on through the build. Composer at bottom.
 > **interviews them**, and only then is the build handed off. The same Concierge
 > assistant then stays visible on every project screen forever.
 
-#### The state machine (where it lives, exactly)
+#### Runtime flow and handoff contract
 
-All four steps are one React component, `OptionC` in `optionC.jsx`. It holds a single
-state variable that decides which screen renders:
+`OnboardingScreen` owns the three pre-build views: `intake` → `processing` → `interview`.
+`App` owns the post-handoff destination. There is no question counter, `interviewDone` flag, or
+agent-generated readiness state in application code.
 
-```
-const [view, setView] = React.useState('intake');
-//  'intake'      → the creation form (the original Option C screen)
-//  'processing'  → <ProcessingScreen/>           (from concierge.jsx)
-//  'interview'   → <InterviewView/>               (defined at the bottom of optionC.jsx)
-//  'build'       → <BuildProgress/>               (the factory console; build starts here)
-```
+Readiness is the Concierge's judgment in its database-backed system prompt. The only mechanical
+handoff gate is the factual one: a `product_brief` artifact exists. The source-backed **What I
+learned** reflection remains required: every stated fact names its source and any unsourced claim
+is asked as a question rather than presented as truth.
 
-There is also `const [interviewDone, setInterviewDone] = React.useState(false)` — it is
-**false** until the user answers every interview question, and the **Hand off to factory**
-button is disabled while it is false. This is the gate that stops people from skipping the
-interview.
+There are exactly two valid handoff initiators:
 
-> **Handoff gate — adjudicated (SOF-224 #2, shipped reconciliation):** readiness to
-> build is the **agent's judgment** (Principle 6 — the customer can also call "that's
-> enough"); the only mechanical gate is the factual one: a `product_brief` artifact
-> **exists** (`SELECT … WHERE kind='product_brief'` — the brief-refactor behavior now
-> shipping). The question-counter gate described above is the *prototype* model. What is
-> NOT negotiable in either model: the **source-backed reflection is shown and explicitly
-> confirmed** before handoff — the "What I learned" review (Step 3 below) where every
-> fact links to its real source, and any fact without a source appears as a question,
-> never as a stated fact (build-plan T3.4 trust test). An implementation that shows a
-> bare chat box with an always-available handoff button is **wrong** and must be fixed,
-> not specced around.
+1. The user clicks **Hand off to factory**, which calls `POST /api/projects/{id}/promote`.
+2. After clear agreement in the conversation, the Concierge calls `hand_off_to_factory`, which
+   invokes the same `promote_draft` function.
 
-**The transitions, in order — wire them exactly like this:**
+On a completed Concierge turn the server returns factual `handed_off` state derived from the real
+project phase. `handed_off: true` and a successful button response both invoke the same completion
+callback and navigate immediately to the Factory Console. A refusal or failure leaves the user in
+the interview and shows the real reason. The UI never infers handoff from assistant prose and never
+issues a second promotion request after the tool succeeds.
+
+**The transitions, in order:**
 
 1. **`intake` → `processing`** — the green **Continue** button calls `setView('processing')`.
    (File: `optionC.jsx`, the intake footer button. It was previously `setView('build')`; do not revert that.)
@@ -242,9 +237,8 @@ interview.
    `onBackground` prop. In the standalone artboard this is wired to jump to the **project
    home** (`ProjectViewStandalone`) with its live "processing in background" banner. See
    "Backgrounding" below.
-4. **`interview` → handoff** — `InterviewView`'s interview rail calls `onComplete`, which sets
-   `interviewDone = true`; that un-disables **Hand off to factory**, whose click calls
-   `onHandoff` → `setView('build')`. **The build only starts here.**
+4. **`interview` → Factory Console** — either valid handoff path above calls the shared completion
+   callback with the promoted project id. The Factory Console opens immediately.
 
 #### Step 2 — `ProcessingScreen`  (`concierge.jsx`)
 
@@ -307,49 +301,22 @@ background" + a **Resume interview** button). The promise to the user: the proje
 updating as results land, and they can pick the interview back up anytime. The persistent
 Concierge dock on that page also switches to its `ingesting` context (see §2.4b).
 
-#### Step 3 — `InterviewView` + `InterviewRail`  (interview defined in `optionC.jsx`; rail in `concierge.jsx`)
+#### Step 3 — `InterviewView`
 
-**Layout:** two columns. The **main column** is a calm review of what the Concierge learned
-from the uploads; the **right rail** (`InterviewRail`, fixed `width: 340`) is the active Q&A
-the user must finish.
+The interview is one full-height Concierge conversation, not a scripted question-counter UI.
 
-**Main column (`InterviewView`):**
-- Top bar with a **← Setup** back button (`setView('intake')`), wordmark, project name, and a
-  mono badge reading **"STEP 3 OF 3 · INTERVIEW"**.
-- A **"What I learned from your materials"** card: each row is an `.ai-tint` block (the
-  standard AI-tell treatment from §1) carrying a learned fact, the source file name (with a
-  `file` icon, in mono) — the per-fact source trace; no confidence tier (§1). The
-  rows come from the `LEARNED` constant at the top of the interview code — edit that array to
-  change them.
-- A **"This project"** card echoing the project name and the goal, rendered through
-  `GoalMarkdown` (see §2.4c) so markdown in the goal shows formatted.
-- A sticky bottom action bar: a status line (turns green and reads "Interview complete" once
-  done) + the **Hand off to factory** button, disabled until `done` is true.
-
-**Right rail (`InterviewRail`):**
-- Uses the shared `ConciergeHeader` (subtitle shows `Interview · <answered>/<total>`) and a
-  segmented **progress strip** (one bar segment per question: green = answered, brand =
-  current).
-- Asks the questions in the `INTERVIEW_Q` constant **one at a time**. Each question is
-  answered through a **checkable option list** (`ChoiceList`, in `concierge.jsx`) plus a
-  free-text `Composer` — both call the same `answer()` function. **Every question declares a
-  `select` mode** that the model picks per question:
-  - **`'single'`** — radio-style rows (round check indicator); clicking a row submits that
-    answer immediately. Header label "Choose one."
-  - **`'multi'`** — checkbox-style rows (square check indicator); the user ticks several, then
-    a **Confirm (n)** button submits the joined set. Header label "Select all that apply."
-  Each option renders as a full-width selectable row with a check mark when chosen (brand fill
-  + white `check` icon), **not** as a plain pill. The `ChoiceList` is keyed by question index
-  so its selection resets between questions. After each answer the agent says "Got it." and
-  posts the next question (uses `setTimeout`; all timers cleared on unmount).
-- When the last question is answered it posts a closing message, shows a green **"Ready to
-  build"** confirmation card, and calls `onComplete()` → which flips `interviewDone` upstream.
-
-**To change the interview:** edit `INTERVIEW_Q` (array of `{q, select, opts[]}` where `select`
-is `'single'` or `'multi'`) and `LEARNED`. The number of progress segments and the gating all
-derive from `INTERVIEW_Q.length` automatically — you don't touch anything else. (The pill-style
-`QuickReplies` component still exists and is used for *suggested prompts* on the persistent
-dock — it is **not** the interview answer control; interview answers use `ChoiceList`.)
+- The top bar contains **← Setup**, the wordmark, project name, online/thinking status, and
+  **STEP 3 OF 3 · INTERVIEW**.
+- The Concierge asks exactly one useful question per turn, using the project, recipe, processed
+  documents, memory, and conversation history already available to it.
+- The final reply streams as prose plus optional single- or multi-select responses. The free-text
+  composer remains available so the customer can correct, add, or stop the interview naturally.
+- Source-backed learned facts are shown before handoff; the customer can correct them in the same
+  conversation. There is no confidence score and no fixed `INTERVIEW_Q`/`LEARNED` array.
+- The footer contains the composer, honest handoff/error status, and **Hand off to factory**. The
+  server's `product_brief EXISTS` check is authoritative; client state never fabricates readiness.
+- When the Concierge tool hands off, the completed turn carries `handed_off: true`; when the button
+  hands off, the promote response carries the project id. Both open the Factory Console.
 
 ---
 
@@ -388,8 +355,8 @@ list + suggestion chips + `Composer`); only the **context** changes.
 `useConciergeChat(seed, replyFor)` hook in `concierge.jsx`. It owns the message list, the
 draft, the "thinking" label rotation, auto-scroll, and timer cleanup. `seed` is the opening
 messages; `replyFor(userText)` returns the scripted reply (`conciergeReply` handles the
-persistent dock). **Replies are scripted in the prototype — connect to the live model when
-implementing.**
+persistent dock). **This hook is design-canvas simulation only. The implemented app uses the live
+LangChain Concierge and durable conversation store; do not reproduce this script in runtime.**
 
 ---
 
@@ -519,15 +486,11 @@ REAL/DEMO toggle. The **user filter** ("All users") narrows the table to a singl
 **Layout:** left master list (name, status pill, category, build count) + right **editor**: editable name + tagline, a status toggle, **Classification** (category chips + a systems tag editor), **What the customer gets** (capability tag editor), **Linked GitHub repos** (name / url / description rows, add/unlink — internal), **Image artifacts** (named striped-placeholder tiles, add/remove — internal), and a **Description** markdown body with **Write · Split · Preview** live preview (shared `Markdown`). **Save** + **Open in viewer ↗** (opens the description in the Artifact Viewer, new tab). **+ New recipe** seeds a blank Draft.
 **Status cascade:** Draft / Published / Archived — **only Published recipes appear in the customer picker.** Data lives in `recipedata.jsx` (`RECIPES`, `RECIPE_STATUS`, `RECIPE_CATEGORIES`); each recipe's description registers into the artifact registry (type `md`, project "Recipes").
 
-> **SOW → Recipes — the one current-state statement (SOF-224):** **Recipes are the
-> library.** The legacy `sow` table / `SowStore` and the scope-genre fallback
-> (`_genre_recipes`) still exist in the codebase and keep working for projects with
-> **no** selected recipe — a deliberate, temporary coexistence (operator-approved
-> Wave-1 decision, 2026-07-21) until the restructure's cleanup retires them. The old
-> product spec's "Statements of Work" library (its §5.3) is **historical** — recipes
-> replaced it (entry 31); do not build SOW features. Storage: a **fresh `recipes`
-> table** (not an extension of `sow`); no `repo_tree`/index column — the build clones
-> the repo fresh and the validation clone is discarded after its `AGENTS.md` check.
+> **SOW → Recipes — current state:** **Recipes are the only library.** The legacy `sow` table,
+> `SowStore`, routes, UI, and scope-genre fallback are retired. A project with no selected recipe
+> proceeds from its own intake and brief; it never falls back to SOW data. Storage is the standalone
+> `recipes` table; no `repo_tree`/index column exists because validation and build preparation clone
+> the repository when needed.
 **Customer picker** (`RecipePicker`, exported from `recipes.jsx`, used in `optionC.jsx` intake): a grid of Published-recipe cards (category, name, tagline, first few capabilities) plus an always-present **No template** card (build purely from the brief). Selection is optional and toggleable; value is a recipe id or `null`.
 
 ### 3.4c Artifacts index  (`admin.jsx` → `AdminArtifacts`)
@@ -634,7 +597,9 @@ success rate, and an editable system prompt (see §3.4).
 
 ## 5. Build notes / non-goals for the prototype
 - All data is mock but representative; wire to real services when implementing.
-- Concierge replies are scripted in the prototype; connect to the live model.
+- The design canvas uses scripted Concierge replies for visual demonstration only. The implemented
+  app uses the live LangChain Concierge described in §2.4a and `docs/ARCHITECTURE.md`; never port the
+  prototype script into runtime behavior.
 - `Factories` (OS) is a placeholder. `Settings` (OS) is specced — §3.8.
 - The canvas (`Software Factory Onboarding.html`) is a presentation shell only;
   the real app should route these screens with a router and real auth/state.
@@ -663,7 +628,7 @@ success rate, and an editable system prompt (see §3.4).
 
 **5 · Recipes library** (§3.4b) — OS → **Recipes**. Pick a recipe in the left list → edit its name/tagline/category/systems, the customer-facing capability list, the **linked GitHub repos** and **image artifacts** (internal), and the markdown description (**Write · Split · Preview**); cycle its status (Draft/Published/Archived); **+ New recipe** seeds a blank Draft; **Open in viewer ↗** opens the description in the Artifact Viewer (new tab). Customers select from Published recipes during intake (see #31).
 
-**6 · Artifact Viewer + markdown viewer** (§2.7) — OS → **Artifacts** (index of every file) → click any card to open `ArtifactViewer.html` in a new tab. Also reachable from a project's **Produced documents** / **Documents** tab and the console tree/map/concierge. `.md`/SOW files render as formatted markdown with an "On this page" TOC; SVG/code/JSON/CSV/repo/image each get a typed view.
+**6 · Artifact Viewer + markdown viewer** (§2.7) — OS → **Artifacts** (index of every file) → click any card to open `ArtifactViewer.html` in a new tab. Also reachable from a project's **Produced documents** / **Documents** tab and the console tree/map/concierge. Markdown files render as formatted content with an "On this page" TOC; SVG/code/JSON/CSV/repo/image each get a typed view.
 
 **7 · Operators open any project's dashboard** (§3.3) — OS → **Projects** (or the Overview "most active" list) → **click a project row** → its Overview / Documents / Factory-console tabs, with **← Projects** back.
 
@@ -691,11 +656,11 @@ success rate, and an editable system prompt (see §3.4).
 
 **19 · Archive / delete a project** (§2.5) — Projects dashboard → any project row's **⋯** menu → **Archive project** (confirm modal) moves it to the **Archived** section. From there the **⋯** menu offers **Restore project** and **Delete permanently** (confirm modal, destructive).
 
-**21 · Concierge interview flow + persistent dock** (§2.4a, §2.4b) — **NEW, the big one.** The
-intake CTA is now **Continue**, not "Hand off to factory." Flow: **Intake form → Processing
-screen (`ProcessingScreen`, ingest progress bar + live log + ETA) → Concierge interview
-(`InterviewView` + `InterviewRail`, an active Q&A you must finish) → Hand off to factory
-(gated on the interview being complete) → build starts.** Large uploads can be sent to the
+**21 · Concierge interview flow + persistent dock** (§2.4a, §2.4b) — historical design milestone.
+The intake CTA became **Continue**, not "Hand off to factory." Flow: **Intake form → Processing
+screen (`ProcessingScreen`, ingest progress bar + live log + ETA) → live Concierge interview →
+Hand off to factory.** The current gate and the two valid handoff initiators are defined only in
+§2.4a; the former fixed-question completion gate is superseded. Large uploads can be sent to the
 **background** (project home with a live "processing" banner + **Resume interview**). One
 persistent `ProjectConcierge` dock (right side, `width 340`) now appears on all three Project
 Console surfaces — overview / factory console / documents — driven by a `context` prop
@@ -704,12 +669,9 @@ Console surfaces — overview / factory console / documents — driven by a `con
 `buildprogress.jsx` (dock on console). Document Q&A with **citations is a later feature** —
 groundwork only.
 
-**23 · Interview answers are single/multi-select check lists** (§2.4a) — interview questions are
-no longer answered with plain pill bubbles. Each `INTERVIEW_Q` entry declares a `select` mode
-(`'single'` = radio rows, submit on click; `'multi'` = checkbox rows + **Confirm**). Rendered by
-the new `ChoiceList` component (`concierge.jsx`) as full-width rows with check marks. The model
-chooses the mode per question based on the information it needs. Pill `QuickReplies` is retained
-only for *suggested prompts* on the persistent dock.
+**23 · Interview answers are single/multi-select check lists** (§2.4a) — historical prototype
+milestone, superseded by the live interview. The agent may still offer single- or multi-select
+options, but there is no fixed `INTERVIEW_Q` list or client-side question counter.
 
 **24 · Create the project first (intake gate)** (§2.4) — the first thing the user does in intake
 is name the project and click **Create project** (`SaveBasics`). This is a real creation event
@@ -727,7 +689,7 @@ both fresh & returning modes); new `lock` icon in `shared.jsx`.
 button** for speech-to-text, powered by a shared `useDictation` hook + `MicButton` (Web Speech
 API, `shared.jsx`). Built into the shared `TextInput`, `TextArea`, and `Composer` primitives
 (so it propagates everywhere automatically), plus the upload-description box, the agent
-system-prompt editor (`admin.jsx`), the SOW title + body (`sow.jsx`), inline org-cell edits,
+system-prompt editor (`admin.jsx`), the former SOW title + body (later removed with `sow.jsx`), inline org-cell edits,
 and the file/user search boxes. Tapping the mic turns it red and appends transcribed speech to
 the field's current value; tapping again stops. On browsers without SpeechRecognition the mic
 **renders nothing** and fields are unchanged (no layout shift). Password fields are excluded.
@@ -1002,21 +964,18 @@ text ramp, radii `T.rMd`/`T.rLg`/`T.rXl`, `T.shadowXs`, fonts `T.sans` (Hanken G
 | # | Conflict | Ruling | Status |
 |---|---|---|---|
 | 1 | Concierge chat could silently create an `Untitled project` draft | Chat collects locally; creation is ONLY the named **Create project** action (Principle 3) | Spec'd §2.4; app bug → WEB |
-| 2 | App's interview = bare chat box, handoff always available | Source-backed "What I learned" review + explicit confirmation required; readiness = agent judgment + `product_brief EXISTS` gate; question-counter is prototype-only | Spec'd §2.4a; app → WEB |
+| 2 | App's interview and handoff behavior diverged across prototype, prompt, and UI | Source-backed reflection remains required; readiness = agent judgment + `product_brief EXISTS`; button or Concierge tool may hand off after agreement; either success navigates to Factory Console | Reconciled §2.4a; reflection presentation remains WEB |
 | 3 | Budget labeled "optional" yet required by readiness | Cap is **required** — money-safety; no uncapped copy anywhere | Spec'd §2.4; app copy → WEB |
 | 4 | Failed doc-list load auto-advanced as "nothing to process" | A failed ingest never advances; real error + retry; `onDone` never fires on failure | Spec'd §2.4a; app → WEB |
 | 5 | Confidence pills both required (old §1) and forbidden (operator ruling) | **Sources only, product-wide** — the dated ruling wins; pills stripped from archive (entry 41) | DONE here; residual app rendering (ticket confidence) → WEB |
 | 6 | Concierge placement: left on console, right elsewhere; entry 14 vs 21 | **Right-hand dock everywhere**, context-specific copy (§2.4b); entry 14 marked superseded | DONE here; app console placement/contexts → WEB |
 | 7 | Engine design one generation behind (Claude/OpenCode+subpick) | **Trio:** Claude Code / Codex 5.6 / Kimi K3 (entry 36) | DONE here; app picker → WEB (shipped w/ Wave 1) |
 | 8 | Auth spec promised Microsoft/SSO/recovery/SOC-2 the app deliberately omits (SOF-15) | Current = Google + email/password; the rest marked **future — never render unverified affordances** | Spec'd §2.1 |
-| 9 | Recipes vs SOW: replaced here, still a library in the old spec | Recipes are the library; `sow` legacy coexists temporarily (Wave-1 decision); old spec §5.3 historical | Spec'd §3.4b |
+| 9 | Recipes vs SOW: replaced here, still a library in the old spec | Recipes are the sole library; SOW storage, routes, UI, and fallbacks are retired | Reconciled §3.4b |
 | 10 | Artifact Viewer promised typed json/csv/repo; app uses generic `<pre>` | Typed views = designed/future; current = generic renderer | Spec'd §2.7 |
 | 11 | Future artboards (Explore, Brand & theme, Dev conventions) looked current | Labeled **WAVE 2 — designed, not yet shipping** (§2.3, §2.8, canvas labels); prefill/discovery/engines labeled **WAVE 1 — shipping** | DONE here |
 | 12 | This archive was missing `TICKETS.md`, §2.8, entries 33–41 referenced by the Wave-1 doc | Landed via PR #379 (design archive now tracked in git) | DONE |
 
-**Docs disposition:** `docs/product-spec-software-factory.md` — consolidated in
-(§0.1/§0.2 principles & personas, §8) and **deleted**. `docs/superpowers/specs/
-2026-07-21-cbt-wave1-design.md` — kept as a **decision record** (dated, operator-
-approved; not a requirements source). `docs/project-memory-concierge/
-software-factory-build-plan.md` — already self-marked "fully executed — kept as a
-record of intent"; pointer to this file added.
+**Docs disposition:** completed product specs, Concierge/project-memory designs, and Wave-1
+implementation plans were consolidated into this PRD and `docs/ARCHITECTURE.md`, then deleted.
+Git and Linear retain their historical decisions; the working tree keeps only current guidance.

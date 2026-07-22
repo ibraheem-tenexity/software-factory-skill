@@ -1,8 +1,7 @@
 """DB-backed Concierge conversation service — see `DbConversation` below.
 
 `SF_CONVERSATION_DB` is retired (the operator declared it permanent-on): `DbConversation` is now
-unconditionally the conversation service, backed by `ConversationStore`. The in-memory mock
-(`Conversation`, scripted turns for a keyless demo) and its tests are removed with it.
+unconditionally the conversation service, backed by `ConversationStore`.
 """
 import logging
 import uuid
@@ -26,9 +25,8 @@ _INLINE_CONTEXT_TOTAL_TOKENS = 40_000
 
 
 def _onboarding_session_id(project_id: str) -> str:
-    """Deterministic session_id for the (exactly one) onboarding conversation per project —
-    concierge-conversation-store.md §2. uuid5 over a fixed, standard namespace so this needs no
-    magic constant of its own and is stable across processes/deployments."""
+    """Deterministic session_id for the one onboarding conversation per project. uuid5 over a
+    fixed standard namespace needs no private magic constant and is stable across deployments."""
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"onboarding:{project_id}"))
 
 
@@ -150,16 +148,11 @@ def _build_first_turn_context(console, project_id: str, users=None) -> str:
 
 
 class DbConversation:
-    """DB-backed Concierge conversation (SOF-31/T1.3) — the SAME turn()/history() contract as the
-    mock above, now durable via ConversationStore. Storage-only swap per the ticket's own scope:
-    the scripted `_SCRIPT` reply logic is preserved verbatim (not coupled to the agent rewrite —
-    that's T2.x), just re-homed to read "how many prior agent turns" from persisted history
-    instead of an in-memory list.
+    """Durable onboarding Concierge over ConversationStore and the LangChain ChatAgent.
 
-    `choices`/`done` were never a persisted concept even in the mock — they're recomputed fresh
-    from script position on every `turn()` call. `history()` keeps that: it reports an empty
-    `choices` list per row (the existing test contract only asserts `role` values from
-    `history()`, never `choices`/`content`, so this is a safe, surgical simplification)."""
+    One cached agent is bound per project. Conversation rows preserve user, agent, and real tool
+    messages for replay; readiness is not persisted. The response reports factual `handed_off`
+    state from the project phase so agent-triggered promotion can drive UI navigation."""
 
     def __init__(self, users=None, store=None, agent=None, console=None):
         if store is not None:

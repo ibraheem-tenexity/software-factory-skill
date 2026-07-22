@@ -1,5 +1,5 @@
-"""SOF-38 (T4.1): hybrid dense + tsvector search over `chunk`, fused with Reciprocal Rank Fusion —
-project-memory-integration.md §2. Dense (pgvector cosine `<=>`) and keyword (Postgres native
+"""SOF-38 (T4.1): hybrid dense + tsvector search over `chunk`, fused with Reciprocal Rank Fusion.
+Dense (pgvector cosine `<=>`) and keyword (Postgres native
 `tsvector`/`ts_rank_cd`) channels are each capped at `_CHANNEL_LIMIT`, then combined by RRF
 (`1/(_RRF_K + rank)` per channel, summed) so a passage strong in either channel — not just both —
 surfaces. No reranker/contextual-retrieval prepend/learned-sparse here; those are deferred per the

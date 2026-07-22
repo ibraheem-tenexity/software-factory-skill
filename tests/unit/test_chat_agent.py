@@ -1,7 +1,7 @@
 """Tests for chat_agent — model selection and draft model-pick threading.
 
 SOF-35: the OpenAI Agents SDK runtime (`Agent`/`Runner`) and its 14 tools (`make_tools`,
-`ChatAgentRunner`) are removed — no ported behavior, see concierge-agent-spec.md §1. Tests for
+`ChatAgentRunner`) are removed — no ported behavior. Tests for
 the removed tools/runner are deleted, not adapted; the LangChain rebuild (T2.1/T2.2) ships with
 its own tests against the new architecture. The concierge system prompt + override cache now
 live in `default_prompt.py` (see test_default_prompt_sof62.py) and `check_and_notify` no longer

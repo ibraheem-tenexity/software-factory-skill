@@ -1,5 +1,4 @@
-"""SOF-41 (T4.2): console-hosted Project Memory MCP — project-memory-integration.md §4,
-project-memory-design.md §7/§8.
+"""SOF-41 (T4.2): console-hosted Project Memory MCP.
 
 Exposes seven tools over streamable-HTTP MCP: `get_project_overview`, `list_documents`,
 `get_document_summary`, `search_memory` (T4.1), `search_document_summaries` (SOF-60),

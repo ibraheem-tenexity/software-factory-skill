@@ -1,9 +1,8 @@
-"""Factory Concierge = system prompt + a LangChain agent + real tools, and nothing else
-(concierge-agent-spec.md §2). https://docs.langchain.com/oss/python/langchain/agents
+"""Factory Concierge = a database-backed system prompt + a LangChain agent + real tools.
 
-Everything else lives where it belongs: the output-contract data classes in
-`data_transfer_objects/chat_agent.py`, the prompts + operator-override cache in `default_prompt.py`,
-the model/context constants in `constants.py`, and the tool belt in `concierge_tools.py`.
+Everything else lives where it belongs: output DTOs in `data_transfer_objects/chat_agent.py`,
+DB prompt resolution and context composition in `default_prompt.py`, model/context constants in
+`constants.py`, and the tool belt in `concierge_tools.py`.
 """
 from __future__ import annotations
 
@@ -111,7 +110,7 @@ def _extract_usage(messages: list) -> dict:
 
 
 class ChatAgent:
-    """One context-parameterized LangChain agent (spec §2/§4.6). `_agent` is exactly what
+    """One context-parameterized LangChain agent. `_agent` is exactly what
     `create_agent` returns; `run` feeds it the conversation history and returns a ConciergeTurn.
 
     `context` sets the focus (same identity everywhere). `tools`/`model` are injectable — pass a

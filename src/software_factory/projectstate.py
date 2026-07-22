@@ -91,8 +91,8 @@ class ProjectState:
     # this field into that same blob.
     memory_overview: str = ""
     # Durable facts the Concierge saves during the interview via its write_to_project_memory tool
-    # (concierge-agent-spec.md §5). Persisted into the same projectstate.data JSON blob as
-    # memory_overview — the "no third table" pattern — and read back by get_from_project_memory.
+    # Persisted into the same projectstate.data JSON blob as memory_overview — the "no third table"
+    # pattern — and read back by get_from_project_memory.
     concierge_notes: list = field(default_factory=list)
     # SOF-63 NOTE: the Concierge's finalized product brief is NOT state — it's the
     # kind='product_brief' ARTIFACT (markdown in artifacts.content, newest row wins; written by

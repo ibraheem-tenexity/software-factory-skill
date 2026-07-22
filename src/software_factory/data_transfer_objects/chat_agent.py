@@ -2,7 +2,7 @@
 
 Two groups live here together on purpose (all chat-agent DTOs in one file):
   · ChatMessage — one persisted/streamed chat turn (used by the /api/chat dock + poller narration).
-  · SuggestedResponse / ConciergeTurn — the Concierge output contract (concierge-agent-spec.md §3):
+  · SuggestedResponse / ConciergeTurn — the Concierge output contract:
     the JSON the agent emits to the human, from which the multiple-choice UI is derived
     (empty suggested_responses ⇒ plain text; non-empty ⇒ single-select radios / multi-select
     checkboxes; each item's `type` decides). No `choices` field, no `done` flag — the shape IS the state.

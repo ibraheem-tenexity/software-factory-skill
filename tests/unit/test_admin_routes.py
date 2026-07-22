@@ -237,7 +237,7 @@ def test_stage_skill_detail_serves_real_skill_md(staff_mod, staff_client, monkey
     assert oc["prompt"] != staff_client.get("/api/admin/agents/STAGE-3").json()["prompt"]
 
 
-def test_concierge_card_is_code_backed_and_live(staff_mod, staff_client, monkeypatch):
+def test_concierge_card_is_db_backed_and_live(staff_mod, staff_client, monkeypatch):
     _login(staff_mod, staff_client, monkeypatch)
     monkeypatch.delenv("SF_CHAT_MODEL", raising=False)        # make the model label deterministic
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)   # (no kimi fallback)
@@ -246,9 +246,9 @@ def test_concierge_card_is_code_backed_and_live(staff_mod, staff_client, monkeyp
     assert card["kind"] == "concierge" and card["name"] == "Factory Concierge"
     d = staff_client.get("/api/admin/agents/CONCIERGE").json()
     assert d["prompt_source"] == "code" and d["prompt_applied"] is True and d["editable"] is True
-    assert "Factory Concierge" in d["prompt"]                 # the REAL CONCIERGE_INSTRUCTIONS
+    assert "Factory Concierge" in d["prompt"]                 # configured system_agents prompt
     assert d["model"] == "gpt-5.4"                             # default concierge model
-    assert d["source_ref"].endswith("CONCIERGE_INSTRUCTIONS")
+    assert d["source_ref"] == "system_agents.CONCIERGE.prompt"
 
 
 def test_stage_prompt_edit_applies_per_runtime_and_reverts(staff_mod, staff_client, monkeypatch):

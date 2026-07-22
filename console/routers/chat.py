@@ -53,8 +53,8 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
     console = state.console
     project_id = body.project_id
     # Messaging an EXISTING run requires ownership; a new conversation mints a durable DRAFT
-    # (canonical run-<8hex>) up front so the interview persists to chat.jsonl from turn one and
-    # survives a refresh/restart. The draft is invisible to the pipeline poller until promotion.
+    # (canonical run-<8hex>) up front so the interview persists from turn one and survives a
+    # refresh/restart. The draft is invisible to the pipeline poller until promotion.
     if project_id and not _can_see(v, project_id):
         raise HTTPException(status_code=403, detail="forbidden")
     if not project_id:
@@ -98,8 +98,9 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
 @router.post("/api/projects/{pid}/converse", response_model=ConverseOut)
 async def converse(pid: str, body: ConverseIn, v: tuple = Depends(authorize_project)):
     """One onboarding-Concierge turn: record the user's message, return the agent's reply as a
-    ConciergeTurn — {response, suggested_responses[]}. Backed by the DB-backed `DbConversation`
-    (async ChatAgent). `authorize_project` gates cross-org access."""
+    ConciergeTurn — {response, suggested_responses[], handed_off}. `handed_off` reflects the real
+    project phase after any tool call, so the UI can navigate on agent-triggered promotion. Backed
+    by the DB-backed `DbConversation`; `authorize_project` gates cross-org access."""
     return await state.conversation_svc.turn(pid, body.message)
 
 
