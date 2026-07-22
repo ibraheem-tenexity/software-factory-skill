@@ -371,24 +371,6 @@ tools = Table(
     Column("updated_at", DateTime(timezone=True), server_default=func.now()),
 )
 
-sow = Table(
-    "sow", metadata,
-    Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("title", Text, nullable=False),
-    Column("org", Text),
-    Column("project", Text),
-    Column("value", Text),
-    Column("file", Text),
-    Column("version", Integer, nullable=False, server_default="1"),
-    Column("status", Text, nullable=False, server_default="Draft"),
-    Column("body", Text),
-    Column("created_at", DateTime(timezone=True), server_default=func.now()),
-    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
-    CheckConstraint(
-        "status in ('Template','Draft','In review','Sent','Signed')",
-        name="sow_status_check",
-    ),
-)
 
 recipes = Table(
     "recipes", metadata,
@@ -508,7 +490,7 @@ eval_scores = Table(
 PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, deployments)
 FLAT_TABLES = PROJECTDB + (tickets, runtime_agents, checkpoint)
 GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
-                 system_agents, tools, sow, recipes,
+                 system_agents, tools, recipes,
                  doc_summary, chunk, conversation, org_secrets,
                  autopsy_processed_runs, autopsy_signatures, eval_scores, recovery_actions)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES

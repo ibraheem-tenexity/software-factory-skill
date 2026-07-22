@@ -1442,25 +1442,15 @@ class Console:
         # by the Concierge's finalize_product_brief tool — the single source, per the operator's
         # storage ruling) supersedes the raw composition as context.md.
         brief_block = self.product_brief(project_id) or ""
-        # SOF-96: selected scope genres' recipe bodies (SOF-108, sow rows with status='Template')
-        # reach Stage 1 as their own input file — until now genre recipes only fed the Concierge's
-        # onboarding chat context, never the product-synthesis phase itself.
-        # CBT-9: a picked recipe's body IS the Stage-1 baseline input (written as recipe.md) — it
-        # replaces the genre-recipes path entirely for this run (mirrors the concierge-context swap
-        # in services/conversation.py).
+        # CBT-9 (SOW retired): a picked recipe's body IS the Stage-1 baseline input (written as
+        # recipe.md) — the only external framing; the genre-recipes/SOW path is gone (mirrors the
+        # concierge-context swap in services/conversation.py).
         recipe_id = self._load_state(project_id).recipe_id
         recipe_md = RecipeStore().body(recipe_id) if recipe_id else None
-        if recipe_md:
-            recipes_md = ""
-        else:
-            from .services.conversation import _genre_recipes
-            recipes = _genre_recipes(self._load_state(project_id).scope)
-            recipes_md = "\n\n".join(f"## {r['title']}\n\n{r['body']}" for r in recipes) if recipes else ""
         written = persist_and_compose(
             paths["input_dir"], req.description, req.context_files or [],
             extract=self._extract, interview_md=interview_md,
             product_brief_md=brief_block or None,
-            genre_recipes_md=recipes_md or None,
             recipe_md=recipe_md,
         )
         input_db = ProjectStore(paths["db"])

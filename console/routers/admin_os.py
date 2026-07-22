@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 import console.state as state
 from console.deps import require_staff
 from console.schemas import (DemoIn, PromptIn, InviteIn, AccessPatchIn, AgentIn, AgentPatchIn,
-                             ToolIn, ToolPatchIn, ToolKeyIn, OrgIn, OrgPatchIn, SowIn, SowPatchIn,
+                             ToolIn, ToolPatchIn, ToolKeyIn, OrgIn, OrgPatchIn,
                              RecipeIn, RecipePatchIn)
 
 router = APIRouter()
@@ -149,28 +149,6 @@ def admin_access_revoke(email: str, v: tuple = Depends(require_staff)):
     return state.admin_service.access_revoke(email)
 
 
-# ── SOW (Statement of Work) CRUD ──────────────────────────────────────────────────────────────────
-@router.get("/api/admin/sow")
-def admin_sow_list(v: tuple = Depends(require_staff)):
-    return state.admin_service.sow_list()
-
-
-@router.get("/api/admin/sow/{sow_id}")
-def admin_sow_get(sow_id: int, v: tuple = Depends(require_staff)):
-    return state.admin_service.sow_get(sow_id)
-
-
-@router.post("/api/admin/sow")
-def admin_sow_create(body: SowIn, v: tuple = Depends(require_staff)):
-    return state.admin_service.sow_create(body)
-
-
-@router.patch("/api/admin/sow/{sow_id}")
-def admin_sow_update(sow_id: int, body: SowPatchIn, v: tuple = Depends(require_staff)):
-    return state.admin_service.sow_update(sow_id, body)
-
-
-# ── Recipes (CBT-9) — repo-backed recipes, staff-authored ───────────────────────────────────────
 @router.get("/api/admin/recipes")
 def admin_recipes_list(v: tuple = Depends(require_staff)):
     return {"recipes": state.recipes.list_all()}

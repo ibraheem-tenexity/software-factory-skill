@@ -370,27 +370,32 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 3. Production Resend sender was malformed (display name only); corrected it to the verified factory.tenexity.ai sender and Railway redeployed successfully.
 4. Summary: Vite build plus browser checks for accepted, failed, and missing delivery status pass; real staging and production Resend calls were accepted.
 
+# SOW retirement (2026-07-22, operator-ordered)
+1. The SOW/genre-recipes concept is GONE: sow table dropped (migration 0031), SowStore + repositories/sow + admin /api/admin/sow routes + /api/scope-genres + SowIn schemas removed; recipes (0029) are the sole framing.
+2. Concierge context + Stage-1 input: recipe body_md only — the "### Statement of Work" and genre-recipes sections and input/genre-recipes.md no longer exist (services/conversation.py, console.py, input_pipeline.py).
+3. UI: the intake "Scope of work" chips card + ScopeOfWork component removed (both modes); p.scope persists backend-only (concierge may set; PRD per-genre gate no-ops on empty scope). ArtifactViewer ?sow= mode + adminSowGet/AdminSow removed.
+4. Destructive on purpose: sow rows not migrated (operator retired the concept). Design archive delta requested from the design agent (PRD + optionC.jsx).
+
 # Codex Update at Time: 22:07:2026:00:00:00.000
 1. Project repositories now invite the saved owner GitHub handle from host-side `provision-repo`; the `repo-shared` artifact remains the success proof and GitHub's exact failure is visible/retryable.
 2. `src/software_factory/{db,repo,console,projectstate}.py`, `console/{schemas,routers/projects}.py`, and onboarding/project-overview UI on branch agent/project-repo-invites.
 3. A handle can be supplied during project setup or later through `POST /api/projects/{pid}/repo-access`; Stage-1 agent prompts no longer issue GitHub invites themselves.
 4. Summary: Python compilation and the Vite production build pass; staging GitHub-token and browser acceptance remain pending deployment.
+
 # ProcessingScreen SSE-race fix + markitdown .env landmine (2026-07-22)
-1. SOF-226: ProcessingScreen seeded every doc as running and learned completion ONLY from no-replay SSE — a doc ingested before mount = infinite spinner (operator hit it live). Fix: seed rows from summary_status + reconcile via a documents re-fetch when the stall watchdog fires. Browser-verified: pre-ingested doc -> instant advance to interview.
+1. SOF-226: ProcessingScreen seeded every doc as running and learned completion ONLY from no-replay SSE — a doc ingested before mount = infinite spinner. Fix: seed rows from summary_status + reconcile via a documents re-fetch when the stall watchdog fires. Browser-verified: pre-ingested doc -> instant advance to interview.
 2. LOCAL DEV LANDMINE (SOF-228): `import markitdown` autoloads dotenv, find_dotenv walks UP from a worktree to the MAIN repo's live .env -> injects SF_GOOGLE_CLIENT_ID/SF_SESSION_SECRET mid-process at first doc parse -> local console flips auth-on mid-run. Immunize: launch worktree consoles with SF_GOOGLE_CLIENT_ID="" (override=False respects it).
+
 # Ingestion logging fix (2026-07-22, operator-ordered)
 1. memory/ingest.py now narrates the FULL lifecycle server-side: START(name/scope/size) -> parsed -> chunked -> embedded(model) -> summarized(real tokens) -> DONE(wall time, chunks, assumptions), + SKIPPED(dedup) + deleted-mid-ingest lines.
 2. Every failure path uses logger.exception (full traceback) per the new CLAUDE.md rule — parse/embed/summarize failures, pandoc fallbacks in pdf/docx_extract, embed rate-limit retries, input_pipeline docx ImportError fallback.
 3. Upload entry points log too: project material + draft attach ([ingest] queued) and org KB (lazy note).
 4. Verified by REAL runs: happy path (real OpenRouter embed + Haiku summary, 7.4s, all lines observed) and failure path (bogus key -> ERROR + traceback + status=failed). App-wide logging pass is the follow-up.
+
 # Design agent (SOF-224 PRD consolidation) Update at Time: 22:07:2026:10:36:00.000
-1. Consolidated all product requirements into design/PRD.md as the single authority (SOF-224): authority order declared (CLAUDE.md > dated operator decisions > PRD > architecture docs > labeled artboards); folded in the retired product spec's 6 principles (§0.1), personas (§0.2), success metrics/prioritization/risks (§8); new §9 adjudication log rules all 12 review findings with status (spec'd-here vs WEB-lane vs already-done).
-2. design/PRD.md (§0/§2.1/§2.3/§2.4/§2.4a/§2.6/§2.7/§2.8/§3.4b/§6 entry 14, new §8/§9), design/Software Factory Onboarding.html (Explore labeled WAVE 2), docs/superpowers/specs/2026-07-21-cbt-wave1-design.md (marked decision record), docs/project-memory-concierge/software-factory-build-plan.md (grounds repointed) on branch agent/sof-224-prd-consolidation (stacked on #417's branch tip).
-3. docs/product-spec-software-factory.md DELETED after folding its unique content in (operator directive: other PRDs removed once incorporated); wave1 spec + build plan kept as historical records with authority pointers.
-4. Key rulings: auth current=Google+email/pw, Microsoft/SSO/recovery/SOC-2 marked future (SOF-15); budget cap REQUIRED; chat never creates a project row; failed ingest never auto-advances; handoff = agent readiness + product_brief EXISTS gate + source-backed confirmation; background processing CURRENT (not P2); Explore/theme/conventions/design-gate labeled WAVE 2, prefill/discovery/engines WAVE 1.
+1. Consolidated all product requirements into design/PRD.md as the single authority (SOF-224): authority order declared (CLAUDE.md > dated operator decisions > PRD > architecture docs > labeled artboards); folded in the retired product spec's principles, personas, success metrics, prioritization, risks, and adjudication log.
+2. `docs/product-spec-software-factory.md` was deleted after its unique content moved into the canonical PRD; historical plans remain with authority pointers.
 
 # Design agent (technical-user flow + Explore nav) Update at Time: 22:07:2026:11:02:00.000
-1. Technical-user flow: first-time intake gains collapsed "bring my own repo & conventions" card (TechSetupCard): repo link (build seed), GitHub PAT (write-only -> org vault GITHUB_PAT), framework/runtime, install/test commands, coding standards — saved to the org (same data as Org-admin Codebase discovery / Dev conventions); discovery section now shows the PAT field explicitly.
-2. Explore navigation closed: intake Recipe card "Browse the gallery" link (both modes) + FactoryApp round-trip (route.from) so <- Projects returns to the originating screen; canvas artboard shows the back chrome. Dashboard Explore button already shipped (entry 37).
-3. design/{optionC.jsx, discovery.jsx, dashboard.jsx, Software Factory Onboarding.html, PRD.md (§2.3/§2.4/§2.8 + changelog 43)} on branch agent/design-tech-user-explore-nav (stacked on #419).
-4. Browser-verified: card expands with PAT write-only copy; dashboard->gallery->start-from-this->intake preselected ("Quote Follow-Up" rail note); intake->gallery->back round-trip clean.
+1. First-time intake gains a collapsed bring-your-own-repo and conventions card; project setup persists repo link, GitHub PAT, framework/runtime, commands, and coding standards to the organization.
+2. Explore navigation now supports gallery round-trips from intake and projects without losing the originating view.

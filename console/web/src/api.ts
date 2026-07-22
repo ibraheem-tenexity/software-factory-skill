@@ -362,19 +362,6 @@ export type AdminConversationsFilter = {
   limit?: number;
 };
 
-export type AdminSow = {
-  id: number;
-  title: string;
-  org?: string | null;
-  project?: string | null;
-  value?: string | null;
-  file?: string | null;
-  version: number;
-  status: string;
-  body?: string | null;
-  created_at?: string | number | null;
-  updated_at?: string | number | null;
-};
 
 function checkAuth(r: Response): void {
   if (r.status === 401) window.dispatchEvent(new CustomEvent("sf:auth-expired"));
@@ -544,9 +531,6 @@ export const api = {
     send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "PATCH", body),
   adminDeleteAccess: (email: string) => send<{ users: AdminAccessUser[] }>(`/api/admin/access/${encodeURIComponent(email)}`, "DELETE"),
   adminResendInvite: (email: string) => send<{ email: string; status: string; link: string }>(`/api/admin/access/${encodeURIComponent(email)}/resend`, "POST"),
-  // adminSowGet is the last surviving SOW fetcher — the admin SOW editor (sow.tsx) was removed
-  // (operator scope change), but ArtifactViewer.tsx's `?sow=<id>` mode still reads a SOW row.
-  adminSowGet: (id: number) => get<AdminSow>(`/api/admin/sow/${id}`),
   // CBT-9 (admin): Recipes library CRUD. Create/patch may reject with a 400 whose `.detail` is
   // the store's verbatim reason (e.g. a repo missing AGENTS.md/CLAUDE.md) — callers must surface it.
   adminListRecipes: () => get<{ recipes: AdminRecipe[] }>("/api/admin/recipes"),
@@ -572,8 +556,6 @@ export const api = {
   // Pydantic); the real BYOK path is submitCreds.
   createDraft: (body?: { project_name?: string; runtime?: string; model?: string; keySource?: string; key?: string; budget?: number; github_username?: string }) =>
     send<{ project_id: string }>("/api/drafts", "POST", body || {}),
-  // SOF-108: DB-backed scope chips — genre recipes authored on the SOW screen (status='Template').
-  scopeGenres: () => get<{ genres: { name: string; description: string }[] }>("/api/scope-genres"),
   // CBT-9: published recipes — the intake picker source (light fields only; body_md/repo_url stay
   // internal-only, per the store's published() projection).
   listRecipes: () => get<{ recipes: RecipeLight[] }>("/api/recipes"),
