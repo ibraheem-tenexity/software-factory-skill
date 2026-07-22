@@ -71,7 +71,7 @@ class _FakeUsers:
 def _service(rows):
     repo = _FakeConversationRepo(rows)
     svc = AdminService(_FakeConsole(), _FakeUsers(), agent_store=None, tool_store=None,
-                       prompts=None, sow_store=None, conversation_repo=repo)
+                       conversation_repo=repo)
     return svc, repo
 
 

@@ -1,7 +1,7 @@
 """Extract a Word document (.docx) to Markdown.
 
 Primary: pandoc via pypandoc (`pypandoc_binary` bundles the pandoc binary — no system dep).
-Chosen over markitdown/mammoth/docx2txt after benchmarking on the real Singer SOW: pandoc is
+Chosen over markitdown/mammoth/docx2txt after benchmarking on a structured project brief: pandoc is
 the only method that preserves headings + TABLES (milestone pricing) + lists with GFM output.
 Fallback: mammoth (pure-Python; keeps headings/lists, flattens tables) if pandoc can't init.
 

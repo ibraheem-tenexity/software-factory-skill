@@ -164,7 +164,7 @@ class ProjectState:
     # whenever goal or scope changes via Console.set_draft_project.
     scope: list = field(default_factory=list)
     # CBT-9: the picked recipe (a `recipes` row id, or "" for none). When set, its body_md drives
-    # the concierge context + Stage-1 input IN PLACE OF the SOW/genre path (services/conversation.py,
+    # the concierge context + Stage-1 input as the sole external framing (services/conversation.py,
     # console.py::_provision_and_launch) and its repo_url seeds the build workspace (workspace_setup.py).
     recipe_id: str = ""
 

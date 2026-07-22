@@ -20,27 +20,7 @@ from software_factory.repositories._exec import GlobalExec
 from software_factory.repositories.system_agents import SystemAgentRepository
 from software_factory.repositories.blobs import BlobRepository
 from software_factory.repositories.conversation import ConversationRepository
-from software_factory.repositories.sow import SowRepository
 from software_factory.repositories.users import UserRepository
-
-
-def test_sow_repo_created_at_and_updated_at_are_float_not_decimal_or_datetime():
-    repo = SowRepository(GlobalExec())
-    row = repo.insert(title="SOF-55 boundary test", org=None, project=None, value=None,
-                      file=None, version=1, status="Draft", body=None)
-    try:
-        assert isinstance(row["created_at"], float)
-        assert isinstance(row["updated_at"], float)
-        assert isinstance(repo.by_id(row["id"])["created_at"], float)
-        updated = repo.update_fields(row["id"], title="renamed")
-        assert isinstance(updated["updated_at"], float)
-        assert any(isinstance(r["created_at"], float) for r in repo.list_all() if r["id"] == row["id"])
-    finally:
-        conn = dbshim.connect(".")
-        try:
-            conn.execute("DELETE FROM sow WHERE id = ?", (row["id"],))
-        finally:
-            conn.close()
 
 
 def test_system_agents_repo_updated_at_is_float_not_decimal():

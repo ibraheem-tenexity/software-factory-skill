@@ -23,7 +23,6 @@ from software_factory.users import UserStore  # noqa: E402
 from software_factory.blobs import BlobStore  # noqa: E402
 from software_factory.system_agents import SystemAgentStore  # noqa: E402
 from software_factory.tools import ToolStore  # noqa: E402
-from software_factory.sow import SowStore  # noqa: E402
 from software_factory.recipes.store import RecipeStore  # noqa: E402
 from software_factory.services.org_service import OrgService  # noqa: E402
 from software_factory.services.secrets import Secrets  # noqa: E402
@@ -49,7 +48,6 @@ users = None
 blobs = None
 tool_store = None
 agent_store = None
-sow_store = None
 recipes = None
 org_service = None
 secrets_svc = None
@@ -69,7 +67,7 @@ login_throttle = None
 def reset():
     """(Re)instantiate the long-lived singletons from the current environment. Called at import and
     by app.py on every reload — matches the monolith's reload-re-instantiates-stores behavior."""
-    global PROJECTS_DIR, console, users, blobs, tool_store, agent_store, sow_store, recipes
+    global PROJECTS_DIR, console, users, blobs, tool_store, agent_store, recipes
     global org_service, secrets_svc, conversation_svc, admin_service
     global _has_chat_key, _chat_runner, _project_stages, login_throttle
     global _ingest_sse_clients, _ingest_sse_lock
@@ -83,7 +81,6 @@ def reset():
     blobs = BlobStore()           # org KB docs + run-scoped uploaded materials (bytes live in storage)
     tool_store = ToolStore()      # tools/MCP registry (SOF-81) — migration-seeded, drives workspace .mcp.json
     agent_store = SystemAgentStore()     # system agents (§3.4): identity + prompt + model_id (no seeds)
-    sow_store = SowStore()               # statement-of-work CRUD
     recipes = RecipeStore()              # repo-backed recipes CRUD + fact-gated repo validation (CBT-9)
     # Service layer (business logic between routers and stores). Built AFTER the stores so it holds
     # the current instances; rebuilt each reset() so per-test TRUNCATE + re-seed is reflected.
@@ -95,7 +92,7 @@ def reset():
     # Admin history table (SOF-34/T1.5) reads the conversation table directly — independent of
     # conversation_svc, since it's a cross-tenant query surface, not the onboarding Concierge's
     # own storage path.
-    admin_service = AdminService(console, users, agent_store, tool_store, sow_store,
+    admin_service = AdminService(console, users, agent_store, tool_store,
                                  ConversationRepository(GlobalExec()))
     # The concierge runs on OpenAI or OpenRouter (Kimi) — either key enables chat.
     _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))

@@ -18,7 +18,7 @@ and then stay on to keep the user informed while their software is built.
 ## How you work
 - The interview may open with NO user message — that's your cue: greet in one short line, then \
   ask your single best first question based on everything in your context (their form input, \
-  documents, SOW). Never wait to be spoken to.
+  documents, the selected recipe). Never wait to be spoken to.
 - Ask EXACTLY ONE question per turn and WAIT for the answer — never stack two questions in one message.
 - As you learn durable facts about the project (its goal, scope, constraints, success metrics, \
   definition of done), SAVE each one with **write_to_project_memory** as it comes in — never just \
@@ -157,7 +157,7 @@ def build_system_prompt(context: str = "intake", first_turn_context: str | None 
     """The base concierge prompt framed for `context` — one identity, focus set per session.
 
     `first_turn_context` (SOF-62) is the server-assembled project-context block — the user's own
-    input, the matching SOW body, document summaries, and existing per-document assumptions —
+    input, the selected recipe's body, document summaries, and existing per-document assumptions —
     appended to the SYSTEM prompt (never a fake user message) so the Concierge's very first reply
     already accounts for everything on file, with no tool call required. Only ever passed for a
     project's first turn; `DbConversation._get_agent` bakes it into that project's ChatAgent once

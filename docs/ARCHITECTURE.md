@@ -222,7 +222,7 @@ parity review because those two schema construction paths can drift.
   `model`/`provider`/token/`cost_usd` attribution. Replaces the in-memory `/converse` mock and the
   volume-only `chat.jsonl` — see `concierge-conversation-store.md`.
 - `system_agents` — one editable prompt/model row per orchestrator callsign; `tools` — the stage-attached
-  MCP/API registry; `sow` — statement-of-work records; `org_secrets` — org-secret metadata with Vault
+  MCP/API registry (the SOW concept is fully retired — `recipes` replaced it, migration 0031 dropped the table); `org_secrets` — org-secret metadata with Vault
   pointers; `autopsy_processed_runs` / `autopsy_signatures`, `recovery_actions`, and `eval_scores` —
   durable benchmark, recovery, and evaluation ledgers.
 - `recipes` (migration 0029) — repo-backed build recipes: customer-facing fields (name/tagline/

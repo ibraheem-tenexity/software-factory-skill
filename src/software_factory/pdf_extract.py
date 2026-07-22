@@ -2,7 +2,7 @@
 
 The pipeline and the chat layer need one place to turn an uploaded document into
 usable text. `extract_to_markdown` routes by type — .docx through pandoc (the only
-converter that preserves headings + tables + lists on real SOW inputs; markitdown
+converter that preserves headings + tables + lists on structured project inputs; markitdown
 is the fallback), everything else through markitdown. The converter is injectable
 so the wrapper is testable without a real binary file. An empty extraction
 raises — a silently blank result is a failure, not a valid output.

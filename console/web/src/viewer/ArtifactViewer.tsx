@@ -1,7 +1,7 @@
 // ArtifactViewer.tsx — standalone new-tab artifact viewer.
 // Entry: ArtifactViewer.html?doc=<artifact_id> (project artifact; fetches GET /api/artifacts/{id},
-// then GET /api/projects/{project_id}/overview for the left rail) — or ?sow=<sow_id> (Tenexity OS
-// SOW) — or ?blob=<blob_id>&name=<filename> (an org-scope KB blob, e.g. codebase-discovery's
+// then GET /api/projects/{project_id}/overview for the left rail) — or ?blob=<blob_id>&name=<filename>
+// (an org-scope KB blob, e.g. codebase-discovery's generated docs).
 // generated docs; fetches GET /api/org/docs/{id}/content, no rail).
 import { useEffect, useState } from "react";
 import { api, ApiError, ProjectArtifact } from "../api";
@@ -26,7 +26,7 @@ type ArtifactDetail = {
 function kindLabel(kind: string, path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() || "";
   const MAP: Record<string, string> = { deploy: "Deploy", repo: "Repo", "demo-creds": "Creds",
-    context: "Context", md: "Markdown", sow: "SOW", svg: "SVG", code: "Code",
+    context: "Context", md: "Markdown", svg: "SVG", code: "Code",
     json: "JSON", csv: "CSV", image: "Image", fig: "Design", mockup: "Mockup", "flow-map": "Flow Map",
     "decision-log": "Decision Log" };
   return MAP[kind] || MAP[ext] || kind || "File";
@@ -34,7 +34,7 @@ function kindLabel(kind: string, path: string): string {
 
 function badgeTone(kind: string): { bg: string; color: string } {
   if (kind === "deploy" || kind === "repo") return { bg: T.successSoft, color: T.success };
-  if (kind === "md" || kind === "sow") return { bg: T.brandSoft, color: T.brandDeep };
+  if (kind === "md") return { bg: T.brandSoft, color: T.brandDeep };
   return { bg: T.sunken, color: T.secondary };
 }
 
@@ -48,7 +48,7 @@ function extOf(path: string): string {
 }
 
 function isMd(kind: string, path: string): boolean {
-  return kind === "md" || kind === "sow" || ["md", "mdx"].includes(extOf(path));
+  return kind === "md" || ["md", "mdx"].includes(extOf(path));
 }
 function isSvg(kind: string, path: string): boolean {
   return kind === "svg" || extOf(path) === "svg";
@@ -140,7 +140,6 @@ function ContentBody({ artifact }: { artifact: ArtifactDetail }) {
 export function ArtifactViewer() {
   const params = new URLSearchParams(location.search);
   const docId = params.get("doc");
-  const sowId = params.get("sow");
   const blobId = params.get("blob");
   const blobName = params.get("name") || "";
 
@@ -154,27 +153,9 @@ export function ArtifactViewer() {
   const [overrideLoading, setOverrideLoading] = useState(false);
 
   useEffect(() => {
-    if (sowId) {
-      // SOW mode: fetch from /api/admin/sow/{id} and synthesise an ArtifactDetail
-      api.adminSowGet(Number(sowId))
-        .then((sow) => {
-          setArtifact({
-            id: sow.id,
-            project_id: `sow-${sow.id}`,
-            title: sow.title,
-            kind: "sow",
-            path: `sow-${sow.id}.md`,
-            content: sow.body ?? "",
-            updated: typeof sow.updated_at === "number" ? sow.updated_at : 0,
-            agent: null,
-          });
-        })
-        .catch((e) => setError(String(e)));
-      return;
-    }
     if (blobId) {
       // Org-scope KB blob mode (e.g. codebase-discovery's generated docs) — a different
-      // table/id-space from `artifacts`, no project rail to load, mirrors the sow-mode shape above.
+      // table/id-space from `artifacts`, no project rail to load, a synthesized ArtifactDetail, same shape as project artifacts.
       api.orgDocContent(Number(blobId))
         .then((r) => {
           setArtifact({
@@ -194,7 +175,7 @@ export function ArtifactViewer() {
         });
       return;
     }
-    if (!docId) { setError("No doc=, sow=, or blob= parameter in URL."); return; }
+    if (!docId) { setError("No doc= or blob= parameter in URL."); return; }
     api.getArtifact(docId)
       .then((a) => {
         setArtifact(a as ArtifactDetail);
@@ -210,7 +191,7 @@ export function ArtifactViewer() {
         const detail = (e as ApiError)?.detail;
         setError(typeof detail === "string" && detail ? detail : "This artifact couldn't be loaded.");
       });
-  }, [docId, sowId, blobId, blobName]);
+  }, [docId, blobId, blobName]);
 
   const displayArtifact = artifact
     ? (override

@@ -36,7 +36,6 @@ type Check = { id: string; label: string; done: boolean; optional?: boolean; nud
 // T2.2: suggestedResponses replaces choices — {response,type} drives single/multi-select render.
 type ChatMsg = { role: string; content: string; suggestedResponses?: SuggestedResponseOption[] };
 
-const SCOPE = ["Quoting / RFQ", "Order entry", "Pricing & approvals", "Inventory", "AP / AR", "Customer comms"];
 
 // id↔label helpers (orgs store labels; the fresh form picks tile/integration ids).
 const industryLabel = (idOrLabel: string) => INDUSTRIES.find((i) => i.id === idOrLabel)?.label || idOrLabel;
@@ -103,40 +102,6 @@ function OrgCell({ label, value, editing, onChange }: { label: string; value: st
           style={{ width: "100%", boxSizing: "border-box", height: 30, padding: "0 9px", borderRadius: T.rSm, border: `1px solid ${T.borderDefault}`, background: T.bg, color: T.fg, font: `500 13px/1 ${T.sans}`, outline: "none" }} />
       ) : (
         <span style={{ font: `500 13px/1.35 ${T.sans}`, color: value ? T.fg : T.tertiary }}>{value || "—"}</span>
-      )}
-    </div>
-  );
-}
-
-// Scope-of-work multi-select with a "+ Add" affordance for a custom scope / software type.
-function ScopeOfWork({ options, value, onChange, onAddOption }:
-  { options: string[]; value: string[]; onChange: (v: string[]) => void; onAddOption: (o: string) => void }) {
-  const [adding, setAdding] = useState(false);
-  const [text, setText] = useState("");
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  useEffect(() => { if (adding && inputRef.current) inputRef.current.focus(); }, [adding]);
-  const sel = value || [];
-  const toggle = (o: string) => onChange(sel.includes(o) ? sel.filter((x) => x !== o) : [...sel, o]);
-  const commit = () => {
-    const t = text.trim();
-    if (t) { onAddOption(t); if (!sel.includes(t)) onChange([...sel, t]); }
-    setText(""); setAdding(false);
-  };
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-      {options.map((o) => <Chip key={o} selected={sel.includes(o)} onClick={() => toggle(o)}>{o}</Chip>)}
-      {adding ? (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 4px 3px 11px", borderRadius: 9999, border: `1px solid ${T.brand}`, background: T.brandSoft }}>
-          <input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } else if (e.key === "Escape") { setText(""); setAdding(false); } }}
-            onBlur={commit} placeholder="Custom scope or software…"
-            style={{ width: 168, border: "none", outline: "none", background: "transparent", font: `500 13px/1 ${T.sans}`, color: T.brandDeep }} />
-          <button onMouseDown={(e) => e.preventDefault()} onClick={commit} title="Add" style={{ width: 24, height: 24, flexShrink: 0, display: "grid", placeItems: "center", borderRadius: "50%", border: "none", background: T.brand, color: "#fff", cursor: "pointer" }}><Icon name="check" size={12} color="#fff" /></button>
-        </span>
-      ) : (
-        <button onClick={() => setAdding(true)} style={{ display: "inline-flex", alignItems: "center", gap: 5, font: `500 13px/1 ${T.sans}`, padding: "8px 13px", borderRadius: 9999, cursor: "pointer", border: `1px dashed ${T.borderDefault}`, background: T.raised, color: T.secondary }}>
-          <Icon name="plus" size={13} color={T.tertiary} /> Add
-        </button>
       )}
     </div>
   );
@@ -369,18 +334,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
   // returning "on file" org card — inline-edit (Manage) state, seeded from onFile when editing starts.
   const [orgEdit, setOrgEdit] = useState<{ company: string; industry: string; scale: string; systems: string; subFocus: string; website: string }>(
     { company: "", industry: "", scale: "", systems: "", subFocus: "", website: "" });
-  // Scope-of-work options; grows when the user adds a custom scope/software via "+ Add".
-  // SOF-108: seeded from the DB (genre recipes authored on the SOW screen, status='Template');
-  // the SCOPE constant is only the fallback while loading / when no recipes exist yet.
-  const [scopeOptions, setScopeOptions] = useState<string[]>(SCOPE);
-  useEffect(() => {
-    api.scopeGenres().then((r) => {
-      const names = (r.genres || []).map((g) => g.name).filter(Boolean);
-      if (names.length) setScopeOptions((prev) => [...names, ...prev.filter((o) => !names.includes(o) && !SCOPE.includes(o))]);
-    }).catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // fresh-user company setup
   const [f, setF] = useState<{ industry: string; sub: string[]; name: string; size: string; revenue: string; role: string; site: string; ints: string[] }>(
     { industry: "", sub: [], name: "", size: "", revenue: "", role: "", site: "", ints: [] });
@@ -462,7 +415,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
         if (d.runtime === "claude" || d.runtime === "opencode" || d.runtime === "codex") {
           setEngine((x) => ({ ...x, provider: d.runtime as EngineProvider, model: d.model === "glm" ? "glm" : "kimi" }));
         }
-        if (d.scope) setScopeOptions((opts) => Array.from(new Set([...opts, ...d.scope])));
         // SOF-137: budget is now a required intake field (scope became optional) — a resumed
         // draft must rehydrate it, or Continue can never be satisfied again after leaving the page.
         if (d.budget != null) setBudget(d.budget);
@@ -572,8 +524,8 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
 
   const fresh = mode === "fresh";
 
-  // SOF-137 (Minimum Machinery): scope is optional — the chips stay available (ScopeOfWork below)
-  // for whoever wants to use them, but Continue no longer requires one. name+goal+budget suffice.
+  // Scope card retired (recipes are the external project framing): p.scope persists only as a
+  // backend field the concierge may still set conversationally. name+goal+budget gate Continue.
   const projChecks: Check[] = [
     { id: "name", label: "Project name", done: !!p.name },
     { id: "goal", label: "What you’re building", done: p.goal.length > 20 },
@@ -626,7 +578,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       setError(typeof e?.detail === "string" ? e.detail : String(e?.message || e));
     }
   };
-  const addScopeOption = (o: string) => setScopeOptions((s) => (s.includes(o) ? s : [...s, o]));
 
   // Save Project basics → mint the draft (POST /api/drafts) and unlock the rest of the form.
   const saveBasics = async () => {
@@ -889,9 +840,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                   <Card cat="Your first project" title="Starting point" desc="Fork a proven recipe, or start from a blank build.">
                     <RecipePicker recipes={recipes} loading={recipesLoading} value={recipeId} onChange={selectRecipe} />
                   </Card>
-                  <Card cat="Your first project" title="Scope of work" desc="Which parts of the business does this project touch?">
-                    <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
-                  </Card>
                   <Card cat="Your first project" title="Build engine" desc="Choose the coding agent that builds this project. The factory, console, and output look the same either way.">
                     <EnginePicker value={engine} onChange={setEngine} />
                   </Card>
@@ -994,9 +942,6 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       : { display: "flex", flexDirection: "column", gap: 16, opacity: 0.4, filter: "grayscale(0.5)", pointerEvents: "none", userSelect: "none" }}>
                   <Card cat="This project" title="Starting point" desc="Fork a proven recipe, or start from a blank build.">
                     <RecipePicker recipes={recipes} loading={recipesLoading} value={recipeId} onChange={selectRecipe} />
-                  </Card>
-                  <Card cat="This project" title="Scope of work" desc="Which parts of the business does this project touch?">
-                    <ScopeOfWork options={scopeOptions} value={p.scope} onChange={(v) => setProj("scope", v)} onAddOption={addScopeOption} />
                   </Card>
                   <Card cat="This project" title="Build engine" desc="Choose the coding agent that builds this project. The factory, console, and output look the same either way.">
                     <EnginePicker value={engine} onChange={setEngine} />
