@@ -380,11 +380,14 @@ activity** block and no Feed / Tray / Latest switch inside the conversation.
   helper card and interleaves relevant system events with the conversation; a `WorkingPill` shows
   while the build runs. Takes a `build={{done,total,allDone}}` prop and an `onOpen` callback for
   artifact-created events.
-- `'files'` — source files. Subtitle "Across your source material"; suggestion chips ask about
-  specific uploaded or organization files (passed via the `docChips` prop). **Document Q&A with citations is
-  a later feature** — the groundwork is here (`conciergeReply` matches a question against the
-  `window.PROJ_MATERIALS` file list and answers from it) but inline source citations are
-  explicitly deferred, and the copy says so.
+- `'files'` — source files and directories. Subtitle "Across your source material"; receives the
+  selected directory summary or file and suggestion chips ask about that specific context
+  (`docChips`). The Concierge and other agents read directory summaries before querying individual
+  documents so they can narrow retrieval to the relevant subtree. The selected file or directory is
+  passed as structured `sourceContext`; the prototype reply reads its current summary and surfaces a
+  failed or stale status instead of bypassing it with a filename match. **Document Q&A with inline
+  citations is a later feature** — current replies name their source context but do not fabricate
+  section-level citations.
 - `'maintenance'` — post-delivery maintenance. Preserves the existing delivered-project context
   and open composer; this information-architecture change does not redesign that workflow.
 - `'ingesting'` — shown on the project home while uploads process in the background. Subtitle
@@ -468,9 +471,58 @@ customer-readable titles. Selecting one renders it inside the project shell thro
 Markdown/typed artifact body. The underlying id, kind, path, agent, and stage are unchanged. The
 standalone Artifact Viewer remains available through **Open in new tab**.
 
-**2.5d Files:** source material only—**Uploaded by you** and **From your organization**—using the
-existing tiles, upload controls, scope behavior, and data. Factory outputs do not appear here, and
-the Product Brief is not duplicated as a file tile.
+**2.5d Files:** a hierarchical source-material browser. Factory outputs do not appear here, and the
+Product Brief is not duplicated as a source file. The existing project-vs-organization scope remains
+real: every persisted directory belongs to exactly one scope and all descendants inherit that
+scope. The top-level **Files** screen is a virtual presentation that combines the project and
+organization roots; it is not a mixed-scope directory and has no directory id. Its recent-file
+section links to files in their real scoped directories rather than containing duplicate blob
+memberships. Moving a document across the two persisted roots performs the existing scope change;
+it is not a cosmetic drag between labels.
+
+The default Files surface is recognizable as a file browser rather than a grid of blank cards:
+
+- a directory tree and breadcrumbs expose the current path;
+- folders use folder silhouettes, counts, scope, and a short summary preview;
+- PDF, spreadsheet, document, image, and video files use large typed file icons, with the filename,
+  size/duration, updated time, and ingest status as secondary information;
+- selecting a source file exposes its existing document summary and actions without treating it as a
+  factory artifact; and
+- **New folder** creates a real directory in the current scoped root, while uploads and existing
+  files may be assigned or moved to a real directory. Empty directories say that they contain no
+  indexed material; no plausible summary is fabricated. Rename and directory deletion are not part
+  of this design increment.
+
+**Generated directory summaries are read-only.** Each directory has a generated Markdown summary
+derived from the current summaries of every document and child directory in its subtree. It states
+what the directory contains, which questions it can help answer, and the notable files an agent may
+need. There is no manual edit action and no parallel user-authored folder note. Adding, removing,
+moving, or re-ingesting a descendant mechanically makes ancestor summaries stale; the background
+ingestion path regenerates affected summaries bottom-up. The UI exposes the truthful state
+**Summarizing**, **Ready**, **Needs refresh**, or **Failed**, plus the last successful refresh. A
+failed child document does not disappear: the directory summary names the incomplete coverage and
+the UI retains the child's failure state.
+
+**Agent retrieval contract:** agents start from the root directory summaries, choose the smallest
+likely subtree, then search/fetch within that directory id. A directory-scoped query includes all
+descendants; agents do not receive an invented claim that the chosen directory is sufficient. Search
+results retain their source document id and path. Direct file selection remains available when the
+agent already knows the source.
+
+**Required backend/database extension (not present in the current flat document API):** add a scoped
+directory relation with `id`, `scope`, `scope_id`, nullable `parent_id`, `name`, `summary_md`,
+`summary_status`, `summary_source_hash`, and timestamps; add nullable `directory_id` to source blobs.
+The database enforces that parent and child directories share a scope and that sibling names are
+unique. The project documents projection returns a directory tree plus file rows rather than three
+flat arrays. Authenticated mutations create a scoped directory, upload a material into a directory,
+and reassign an existing blob's `directory_id`; a cross-scope reassignment uses the existing scope
+change and validates the destination belongs to the new scope. The memory/query tools accept an
+optional directory id that filters to its subtree. The Files Concierge receives a structured
+`sourceContext` (`type`, `id`, `scope`, `name`, `summary_md`, `summary_status`) rather than only a
+display label. Existing project and org documents migrate into their corresponding scope roots
+without changing their blob ids, summaries, storage keys, or access rules. This is deliberately a
+material backend, database, ingestion, API, and agent-tool change; the design must not imply it
+already ships.
 
 **2.5e Maintenance:** preserves the implemented post-delivery Maintenance tab and lifecycle. It is
 conditional on a completed/deployed project and is not redesigned by this information architecture.
@@ -1021,8 +1073,8 @@ text ramp, radii `T.rMd`/`T.rLg`/`T.rXl`, `T.shadowXs`, fonts `T.sans` (Hanken G
   board with stage progress, crash recovery, dependency resolution (§2.6); the
   persistent Concierge (§2.4b); basic cross-tenant visibility + sign-in management
   (§3.2/§3.4a).
-- **P1 (complete, not just functional):** org shared context & knowledge base (§2.3);
-  projects dashboard w/ archive/delete (§2.2); project overview (§2.5a); Artifact
+- **P1 (complete, not just functional):** org shared context & hierarchical knowledge base
+  (§2.3, §2.5d); projects dashboard w/ archive/delete (§2.2); project overview (§2.5a); Artifact
   Viewer (§2.7); extra build-board views; agent roster (§3.5); tools registry (§3.6).
 - **P2 (high value, can trail):** the full produced-files index (§3.4c); markdown
   polish in the goal field.
@@ -1071,6 +1123,7 @@ text ramp, radii `T.rMd`/`T.rLg`/`T.rXl`, `T.shadowXs`, fonts `T.sans` (Hanken G
 | 11 | Future artboards (Explore, Brand & theme, Dev conventions) looked current | Labeled **WAVE 2 — designed, not yet shipping** (§2.3, §2.8, canvas labels); prefill/discovery/engines labeled **WAVE 1 — shipping** | DONE here |
 | 12 | This archive was missing `TICKETS.md`, §2.8, entries 33–41 referenced by the Wave-1 doc | Landed via PR #379 (design archive now tracked in git) | DONE |
 | 13 | Project overview mixed user direction, source files, factory outputs, services, and agents as equal cards | Keep one project shell; separate Product Brief, Factory outputs, Factory console, and Files; preserve the full Concierge; fixed brief templates are forbidden | Designed §2.4a–§2.7; app implementation → WEB |
+| 14 | The source-material API and Files screen are flat, so neither people nor agents can narrow retrieval by directory | Add real scoped directories, read-only generated subtree summaries, directory-first agent retrieval, and an icon-led browser; this requires database, ingestion, API, tool, and frontend work | Designed §2.5d; app implementation → WEB |
 
 **Docs disposition:** completed product specs, Concierge/project-memory designs, and Wave-1
 implementation plans were consolidated into this PRD and `docs/ARCHITECTURE.md`, then deleted.

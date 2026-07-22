@@ -181,12 +181,219 @@ function FactoryOutputsView({ onSelected }) {
   </div>;
 }
 
-function ProjectFilesView() {
-  return <div style={{ height: '100%', overflow: 'auto', padding: '26px 30px 60px', background: T.bg }}><div style={{ maxWidth: 930, margin: '0 auto' }}>
-    <CategoryLabel>Source material</CategoryLabel><h1 style={{ font: `700 25px/1.2 ${T.display}`, letterSpacing: '-.02em', margin: '7px 0 5px', color: T.fg }}>Files the factory works from</h1><p style={{ font: `400 12.5px/1.5 ${T.sans}`, color: T.secondary, margin: '0 0 23px' }}>Uploads and organization knowledge stay here. Factory-produced documents live separately in Factory outputs.</p>
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}><h2 style={{ font: `600 14px/1 ${T.sans}`, margin: 0 }}>Uploaded by you</h2><KnowledgeButton><Icon name="plus" size={13} /> Add file</KnowledgeButton></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 28 }}>{PROJ_MATERIALS.map((m) => <FileTile key={m.name} {...m} />)}</div>
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}><h2 style={{ font: `600 14px/1 ${T.sans}`, margin: 0 }}>From your organization</h2><span style={{ font: `400 11.5px/1 ${T.sans}`, color: T.tertiary }}>· reusable knowledge base</span></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>{ORG_DOCS.map((d) => <FileTile key={d.name} {...d} />)}</div>
-  </div></div>;
+const SOURCE_FILE_META = {
+  'process-walkthrough.mp4': { summary: 'A narrated walkthrough of the current quote intake, Epicor re-keying, and manager approval handoff.', updated: 'Today, 10:04', summaryStatus: 'ready' },
+  'sample-rfq-email.pdf': { summary: 'A representative customer RFQ showing the product, quantity, due-date, and delivery details sales receives.', updated: 'Today, 10:06', summaryStatus: 'ready' },
+  'discount-matrix.xlsx': { summary: 'Discount thresholds and the approval owner required for each customer and margin band.', updated: 'Today, 10:08', summaryStatus: 'pending' },
+  'standard-pricing.xlsx': { summary: 'The organization-wide standard price book used as the baseline for quote calculations.', updated: 'Mar 12', summaryStatus: 'ready' },
+  'line-card.pdf': { summary: 'Product lines and manufacturers Acme can quote, organized by category.', updated: 'Jan 8', summaryStatus: 'ready' },
+  'credit-policy.docx': { summary: 'Credit limits, payment terms, and escalation rules for new or high-risk accounts.', updated: 'Feb 2', summaryStatus: 'ready' },
+  'terms-and-conditions.pdf': { summary: 'The legal terms that accompany a customer quote and approved order.', updated: 'Nov 4', summaryStatus: 'ready' },
+  'brand-guidelines.pdf': { summary: 'Approved logo use, typography, colors, and document presentation rules.', updated: 'Sep 1', summaryStatus: 'ready' },
+  'rfq-sop.pdf': { summary: 'The prior summary is still available, but its latest refresh failed after this file changed.', updated: 'Apr 19', summaryStatus: 'failed' },
+};
+
+const SOURCE_DIRECTORIES = {
+  root: {
+    id: 'root', name: 'Files', scope: 'Virtual overview', virtual: true, status: 'Needs refresh', refreshed: 'Last ready 2 minutes ago',
+    summary: 'The last complete overview organizes source material into project-only evidence and reusable organization knowledge. Pricing is re-indexing and the policies branch has a failed refresh, so agents see the incomplete coverage before choosing a subtree.',
+    routes: ['current quoting workflow', 'pricing and approval rules', 'product catalog', 'company policies'],
+    dirs: ['project', 'organization'], files: [], recent: ['sample-rfq-email.pdf', 'discount-matrix.xlsx', 'standard-pricing.xlsx'],
+  },
+  project: {
+    id: 'project', parent: 'root', name: 'Project files', scope: 'Project', status: 'Needs refresh', refreshed: 'Last ready 2 minutes ago',
+    summary: 'The last complete summary covers the process recording, representative RFQ, and discount matrix. The pricing branch is re-indexing, so agents verify that file before relying on its rules.',
+    routes: ['how quotes work today', 'real RFQ input shape', 'when approval is required'],
+    dirs: ['process', 'pricing'], files: [],
+  },
+  process: {
+    id: 'process', parent: 'project', name: 'Process & examples', scope: 'Project', status: 'Ready', refreshed: 'Updated 4 minutes ago',
+    summary: 'The clearest evidence of the current sales workflow. The walkthrough shows the end-to-end handoffs; the sample RFQ captures the customer input that starts the process.',
+    routes: ['map the current workflow', 'inspect an inbound RFQ', 'identify manual handoffs'],
+    dirs: [], files: ['process-walkthrough.mp4', 'sample-rfq-email.pdf'],
+  },
+  pricing: {
+    id: 'pricing', parent: 'project', name: 'Pricing & approvals', scope: 'Project', status: 'Needs refresh', refreshed: 'Last ready 3 minutes ago',
+    summary: 'The last successful summary covers project-specific discount bands and approval ownership. discount-matrix.xlsx is being re-indexed, so agents see this summary as stale until refresh completes.',
+    routes: ['discount thresholds', 'approval ownership', 'margin exceptions'],
+    dirs: [], files: ['discount-matrix.xlsx'],
+  },
+  organization: {
+    id: 'organization', parent: 'root', name: 'Organization knowledge', scope: 'Org-wide', status: 'Failed', refreshed: 'Last ready Mar 12',
+    summary: 'The last complete summary covers Acme catalog data, standard prices, policies, legal terms, and brand rules. The policies branch failed its latest refresh, so agents see that its coverage may be incomplete.',
+    routes: ['standard product and price data', 'company-wide operating rules', 'legal or brand requirements'],
+    dirs: ['catalog', 'policies'], files: [],
+  },
+  catalog: {
+    id: 'catalog', parent: 'organization', name: 'Catalog & price book', scope: 'Org-wide', status: 'Summarizing', refreshed: 'Last ready Mar 12',
+    summary: 'Canonical product and standard-pricing references. Agents should query this directory for carried manufacturers, product categories, SKUs, and baseline prices.',
+    routes: ['available products', 'standard prices', 'manufacturers and categories'],
+    dirs: [], files: ['standard-pricing.xlsx', 'line-card.pdf'],
+  },
+  policies: {
+    id: 'policies', parent: 'organization', name: 'Policies & brand', scope: 'Org-wide', status: 'Failed', refreshed: 'Last ready Apr 19',
+    summary: 'The last successful summary covers the RFQ procedure, credit policy, customer terms, and brand rules. The latest rfq-sop.pdf refresh failed, so agents are told that this coverage may be incomplete.',
+    routes: ['RFQ procedure', 'credit and payment rules', 'quote terms', 'brand presentation'],
+    dirs: [], files: ['credit-policy.docx', 'terms-and-conditions.pdf', 'brand-guidelines.pdf', 'rfq-sop.pdf'],
+  },
+};
+
+function sourceFile(name) {
+  const source = [...PROJ_MATERIALS, ...ORG_DOCS].find((f) => f.name === name) || { name, kind: 'doc', size: '' };
+  return { id: `blob-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, ...source, ...(SOURCE_FILE_META[name] || {}) };
+}
+
+function staleSummaryAncestors(directories, startId) {
+  const next = { ...directories };
+  let id = startId;
+  while (id) {
+    const dir = next[id];
+    if (!dir) break;
+    const lastReady = dir.refreshed.replace(/^Updated |^Last ready /, '');
+    next[id] = { ...dir, status: dir.status === 'Failed' ? 'Failed' : 'Needs refresh', refreshed: `Last ready ${lastReady}` };
+    id = dir.parent;
+  }
+  return next;
+}
+
+const DIRECTORY_SUMMARY_STATUS = {
+  Ready: { color: T.success, tone: 'success' },
+  Summarizing: { color: T.warning, tone: 'warning' },
+  'Needs refresh': { color: T.warning, tone: 'warning' },
+  Failed: { color: T.danger, tone: 'danger' },
+};
+const FILE_SUMMARY_STATUS = {
+  ready: { label: 'Ingested', color: T.success, tone: 'success' },
+  pending: { label: 'Processing', color: T.warning, tone: 'warning' },
+  failed: { label: 'Failed', color: T.danger, tone: 'danger' },
+};
+
+function SourceFolderIcon({ scope = 'Project', size = 48 }) {
+  const org = scope === 'Org-wide';
+  return <svg width={size} height={Math.round(size * .78)} viewBox="0 0 64 50" aria-hidden="true" style={{ flexShrink: 0, filter: 'drop-shadow(0 4px 5px rgba(24,24,27,.08))' }}>
+    <path d="M4 12a6 6 0 0 1 6-6h15l6 7h23a6 6 0 0 1 6 6v5H4V12z" fill={org ? '#B9D6FF' : '#A9CDFD'} />
+    <path d="M4 20h56v21a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6V20z" fill={org ? '#DCEAFF' : '#CFE3FF'} stroke={org ? '#8AB9F8' : '#91BFFB'} />
+    <path d="M11 27h22" stroke="#fff" strokeWidth="3" strokeLinecap="round" opacity=".9" />
+  </svg>;
+}
+
+function SourceFileIcon({ kind = 'doc', size = 52 }) {
+  const styles = {
+    pdf: ['#FBE3E3', '#C0392F', 'PDF'], xlsx: ['#E4F8EF', '#1F8A5B', 'XLS'], csv: ['#E4F8EF', '#1F8A5B', 'CSV'],
+    doc: ['#E8F1FF', '#1A7BFF', 'DOC'], video: ['#F3E9FB', '#7A3EA8', 'MP4'], img: ['#FBEFDC', '#B06F12', 'IMG'],
+  };
+  const k = styles[kind] || styles.doc;
+  return <svg width={size} height={Math.round(size * 1.18)} viewBox="0 0 52 62" aria-hidden="true" style={{ flexShrink: 0, filter: 'drop-shadow(0 5px 6px rgba(24,24,27,.09))' }}>
+    <path d="M7 2h25l13 13v40a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z" fill="#fff" stroke="#D4D4D8" />
+    <path d="M32 2v10a3 3 0 0 0 3 3h10" fill={k[0]} stroke="#D4D4D8" />
+    <rect x="8" y="34" width="36" height="18" rx="4" fill={k[0]} />
+    {kind === 'video' && <path d="M21 16l12 7-12 7V16z" fill={k[1]} />}
+    {kind !== 'video' && <><path d="M10 18h17M10 24h22M10 29h14" stroke={k[1]} strokeWidth="2" strokeLinecap="round" opacity=".72" /></>}
+    <text x="26" y="46" textAnchor="middle" fontFamily="JetBrains Mono, monospace" fontSize="8.5" fontWeight="700" fill={k[1]}>{k[2]}</text>
+  </svg>;
+}
+
+function DirectoryTreeRow({ dir, current, depth, onOpen }) {
+  const active = current === dir.id;
+  return <button onClick={() => onOpen(dir.id)} style={{ width: '100%', height: 34, display: 'flex', alignItems: 'center', gap: 8, padding: `0 8px 0 ${9 + depth * 15}px`, border: 0, borderRadius: T.rMd, background: active ? T.brandSoft : 'transparent', color: active ? T.brandDeep : T.secondary, cursor: 'pointer', textAlign: 'left', font: `${active ? 600 : 500} 11.5px/1 ${T.sans}` }}>
+    <SourceFolderIcon scope={dir.scope} size={21} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir.name}</span><span style={{ marginLeft: 'auto', color: T.tertiary, font: `500 9px/1 ${T.mono}` }}>{dir.dirs.length + dir.files.length}</span>
+  </button>;
+}
+
+function SourceFolderCard({ dir, onOpen }) {
+  const state = DIRECTORY_SUMMARY_STATUS[dir.status] || DIRECTORY_SUMMARY_STATUS.Ready;
+  return <button onClick={() => onOpen(dir.id)} className="sf-artchip" style={{ minWidth: 0, textAlign: 'left', cursor: 'pointer', background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, padding: '14px 15px', boxShadow: T.shadowXs, display: 'grid', gridTemplateColumns: '54px minmax(0, 1fr)', gap: 12, alignItems: 'center' }}>
+    <SourceFolderIcon scope={dir.scope} size={52} />
+    <span style={{ minWidth: 0 }}><span style={{ display: 'flex', alignItems: 'center', gap: 7 }}><b style={{ font: `650 13px/1.2 ${T.sans}`, color: T.fg, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir.name}</b><Icon name="chevronRight" size={12} color={T.tertiary} /></span><span style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, font: `400 10.5px/1.35 ${T.sans}`, color: T.tertiary }}><span>{dir.dirs.length + dir.files.length} items · {dir.scope}</span><span style={{ width: 5, height: 5, borderRadius: '50%', background: state.color }} /><span style={{ color: state.color }}>{dir.status}</span></span><span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: 7, font: `400 11px/1.38 ${T.sans}`, color: T.secondary }}>{dir.summary}</span></span>
+  </button>;
+}
+
+function SourceFileCard({ file, selected, onSelect }) {
+  const state = FILE_SUMMARY_STATUS[file.summaryStatus] || FILE_SUMMARY_STATUS.ready;
+  return <button onClick={() => onSelect(file)} style={{ minWidth: 0, textAlign: 'center', cursor: 'pointer', background: selected ? T.brandSoft + '99' : 'transparent', border: `1px solid ${selected ? T.brand + '66' : 'transparent'}`, borderRadius: T.rLg, padding: '13px 9px 11px', display: 'flex', flexDirection: 'column', alignItems: 'center', transition: 'background .12s, border-color .12s' }}>
+    <SourceFileIcon kind={file.kind} />
+    <b style={{ width: '100%', marginTop: 9, font: `600 11.5px/1.3 ${T.sans}`, color: T.fg, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</b>
+    <span style={{ marginTop: 4, font: `400 9.5px/1 ${T.mono}`, color: T.tertiary }}>{file.size}{file.used ? ` · ${file.used}` : ''}</span><span style={{ marginTop: 4, font: `400 9px/1 ${T.mono}`, color: T.tertiary }}>{file.updated}</span><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, color: state.color, font: `500 9px/1 ${T.sans}` }}><span style={{ width: 5, height: 5, borderRadius: '50%', background: state.color }} />{state.label}</span>
+  </button>;
+}
+
+function DirectorySummary({ dir }) {
+  const state = DIRECTORY_SUMMARY_STATUS[dir.status] || DIRECTORY_SUMMARY_STATUS.Ready;
+  return <section style={{ position: 'relative', overflow: 'hidden', background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rXl, boxShadow: T.shadowXs, padding: '16px 18px 15px 20px' }}>
+    <span style={{ position: 'absolute', inset: '0 auto 0 0', width: 3, background: state.color }} />
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}><div style={{ display: 'flex', alignItems: 'center', gap: 7 }}><Sparkle size={11} color={T.brand} /><CategoryLabel tone="brand">{dir.virtual ? 'Generated source overview' : 'Generated directory summary'}</CategoryLabel></div><span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, font: `500 9.5px/1 ${T.mono}`, color: state.color }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: state.color }} />{dir.status} · {dir.refreshed}</span></div>
+    <p style={{ font: `400 12.5px/1.55 ${T.sans}`, color: T.secondary, margin: '10px 0 12px' }}>{dir.summary}</p>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}><span style={{ font: `600 10px/1 ${T.sans}`, color: T.tertiary }}>Agents query this directory for</span>{dir.routes.map((route) => <span key={route} style={{ padding: '5px 8px', borderRadius: 999, background: T.sunken, color: T.secondary, font: `500 10px/1 ${T.sans}` }}>{route}</span>)}</div>
+  </section>;
+}
+
+function DirectoryTreeBranch({ id, directories, current, depth = 0, onOpen }) {
+  const dir = directories[id];
+  if (!dir) return null;
+  return <React.Fragment><DirectoryTreeRow dir={dir} current={current} depth={depth} onOpen={onOpen} />{dir.dirs.map((childId) => <DirectoryTreeBranch key={childId} id={childId} directories={directories} current={current} depth={depth + 1} onOpen={onOpen} />)}</React.Fragment>;
+}
+
+function ProjectFilesView({ onSelected }) {
+  const [directories, setDirectories] = React.useState(() => Object.fromEntries(Object.entries(SOURCE_DIRECTORIES).map(([id, dir]) => [id, { ...dir, dirs: [...dir.dirs], files: [...dir.files] }])));
+  const [currentId, setCurrentId] = React.useState('root');
+  const [selectedFile, setSelectedFile] = React.useState(null);
+  const [query, setQuery] = React.useState('');
+  const [extraFiles, setExtraFiles] = React.useState({});
+  const [creatingFolder, setCreatingFolder] = React.useState(false);
+  const [folderName, setFolderName] = React.useState('');
+  const uploadRef = React.useRef(null);
+  const current = directories[currentId];
+  const openDir = (id) => { setCurrentId(id); setSelectedFile(null); setQuery(''); setCreatingFolder(false); };
+  const ancestors = [];
+  let cursor = current;
+  while (cursor) { ancestors.unshift(cursor); cursor = cursor.parent ? directories[cursor.parent] : null; }
+  const context = selectedFile ? { type: 'file', id: selectedFile.id, scope: current.scope, name: selectedFile.name, summary_md: selectedFile.summary, summary_status: selectedFile.summaryStatus }
+    : { type: current.virtual ? 'overview' : 'directory', id: current.virtual ? null : current.id, scope: current.scope, name: current.name, summary_md: current.summary, summary_status: current.status };
+  React.useEffect(() => { onSelected && onSelected(context); }, [currentId, selectedFile, current.status]);
+  const needle = query.trim().toLowerCase();
+  const listedNames = current.virtual ? current.recent : current.files;
+  const files = [...listedNames.map(sourceFile), ...(extraFiles[currentId] || [])].filter((file) => !needle || `${file.name} ${file.summary}`.toLowerCase().includes(needle));
+  const dirs = current.dirs.map((id) => directories[id]).filter((dir) => !needle || `${dir.name} ${dir.summary}`.toLowerCase().includes(needle));
+  const folderNameTaken = current.dirs.some((id) => directories[id].name.toLowerCase() === folderName.trim().toLowerCase());
+  const createFolder = () => {
+    const name = folderName.trim();
+    if (!name || current.virtual || folderNameTaken) return;
+    const id = `folder-${Date.now()}`;
+    const dir = { id, parent: currentId, name, scope: current.scope, status: 'Summarizing', refreshed: 'No completed summary yet', summary: 'This directory contains no indexed material yet. Its generated summary will appear after a file is added or moved here.', routes: [], dirs: [], files: [] };
+    setDirectories((all) => staleSummaryAncestors({ ...all, [id]: dir, [currentId]: { ...all[currentId], dirs: [...all[currentId].dirs, id] } }, currentId));
+    setFolderName(''); setCreatingFolder(false);
+  };
+  const addFiles = (list) => {
+    if (!list || !list.length || current.virtual) return;
+    const next = Array.from(list).map((file) => { const ext = (file.name.split('.').pop() || 'doc').toLowerCase(); const kind = ext === 'mp4' || ext === 'mov' ? 'video' : ext === 'xls' || ext === 'xlsx' ? 'xlsx' : ext === 'pdf' ? 'pdf' : ext === 'png' || ext === 'jpg' || ext === 'jpeg' ? 'img' : 'doc'; return { name: file.name, kind, size: file.size > 1048576 ? `${(file.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`, updated: 'Just now', summary: 'Processing this file. The directory summary will refresh after ingestion completes.', summaryStatus: 'pending' }; });
+    setExtraFiles((all) => ({ ...all, [currentId]: [...(all[currentId] || []), ...next] }));
+    setDirectories((all) => staleSummaryAncestors(all, currentId));
+    setSelectedFile(next[0]);
+  };
+  return <div style={{ height: '100%', display: 'grid', gridTemplateColumns: '210px minmax(0, 1fr)', background: T.bg }}>
+    <nav style={{ borderRight: `1px solid ${T.borderSubtle}`, background: '#F8FAFD', padding: '19px 11px', overflow: 'auto' }}>
+      <div style={{ padding: '0 8px 12px' }}><h2 style={{ font: `700 16px/1.2 ${T.display}`, color: T.fg, margin: 0 }}>Files</h2><p style={{ font: `400 10.8px/1.4 ${T.sans}`, color: T.tertiary, margin: '4px 0 0' }}>Directories help people and agents find the right source.</p></div>
+      <CategoryLabel style={{ margin: '5px 8px 7px' }}>Directory tree</CategoryLabel>
+      <DirectoryTreeBranch id="root" directories={directories} current={currentId} onOpen={openDir} />
+      <div style={{ margin: '15px 8px 0', padding: '11px', borderRadius: T.rLg, background: T.brandSoft + '80', border: `1px solid ${T.brand}22` }}><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Sparkle size={10} color={T.brand} /><b style={{ font: `600 10.5px/1 ${T.sans}`, color: T.brandDeep }}>Agent retrieval</b></div><p style={{ margin: '6px 0 0', font: `400 10.5px/1.42 ${T.sans}`, color: T.secondary }}>Agents read these summaries first, then search only the directory most likely to answer the question.</p></div>
+    </nav>
+    <main style={{ minWidth: 0, overflow: 'auto', padding: '22px 26px 55px' }}><div style={{ maxWidth: 980, margin: '0 auto' }}>
+      <input ref={uploadRef} type="file" multiple style={{ display: 'none' }} onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18, marginBottom: 15 }}>
+        <div><div style={{ display: 'flex', alignItems: 'center', gap: 5, minHeight: 18 }}>{ancestors.map((dir, i) => <React.Fragment key={dir.id}><button onClick={() => openDir(dir.id)} style={{ border: 0, background: 'none', padding: 0, cursor: 'pointer', color: i === ancestors.length - 1 ? T.fg : T.brandDeep, font: `${i === ancestors.length - 1 ? 600 : 500} 10.5px/1 ${T.mono}` }}>{dir.name}</button>{i < ancestors.length - 1 && <Icon name="chevronRight" size={11} color={T.tertiary} />}</React.Fragment>)}</div><h1 style={{ font: `700 24px/1.2 ${T.display}`, letterSpacing: '-.02em', margin: '6px 0 3px', color: T.fg }}>{current.name}</h1><span style={{ font: `400 11.5px/1.4 ${T.sans}`, color: T.tertiary }}>{current.virtual ? `${current.dirs.length} scoped roots · recent files are linked, not duplicated` : `${current.scope} · ${current.dirs.length} folders · ${current.files.length + (extraFiles[currentId] || []).length} files`}</span></div>
+        <div style={{ display: 'flex', gap: 7 }}><label style={{ height: 32, width: 190, display: 'flex', alignItems: 'center', gap: 7, padding: '0 9px', background: T.raised, border: `1px solid ${T.borderDefault}`, borderRadius: T.rMd }}><Icon name="search" size={13} color={T.tertiary} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search this directory" style={{ minWidth: 0, flex: 1, border: 0, outline: 0, background: 'transparent', color: T.fg, font: `500 11px/1 ${T.sans}` }} /></label>{!current.virtual && <><KnowledgeButton onClick={() => setCreatingFolder(true)}><SourceFolderIcon scope={current.scope} size={19} /> New folder</KnowledgeButton><KnowledgeButton primary onClick={() => uploadRef.current && uploadRef.current.click()}><Icon name="plus" size={13} color="#fff" /> Add file</KnowledgeButton></>}</div>
+      </div>
+      {creatingFolder && <div style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '-3px 0 12px', padding: 10, borderRadius: T.rLg, border: `1px solid ${T.brand}44`, background: T.brandSoft + '66' }}><SourceFolderIcon scope={current.scope} size={25} /><span style={{ flex: 1 }}><input autoFocus value={folderName} onChange={(e) => setFolderName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createFolder()} placeholder="Folder name" style={{ width: '100%', height: 30, boxSizing: 'border-box', border: `1px solid ${folderNameTaken ? T.danger : T.borderDefault}`, borderRadius: T.rMd, padding: '0 9px', outline: 0, font: `500 11.5px/1 ${T.sans}` }} />{folderNameTaken && <span style={{ display: 'block', marginTop: 4, color: T.danger, font: `500 9.5px/1 ${T.sans}` }}>A folder with this name already exists here.</span>}</span><KnowledgeButton onClick={() => { setCreatingFolder(false); setFolderName(''); }}>Cancel</KnowledgeButton><KnowledgeButton primary disabled={!folderName.trim() || folderNameTaken} onClick={createFolder}>Create folder</KnowledgeButton></div>}
+      <DirectorySummary dir={current} />
+      <div style={{ display: 'grid', gridTemplateColumns: selectedFile ? 'minmax(0, 1fr) 270px' : 'minmax(0, 1fr)', gap: 16, marginTop: 19, alignItems: 'start' }}>
+        <div style={{ minWidth: 0 }}>
+          {!!dirs.length && <section style={{ marginBottom: 23 }}><div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 9 }}><h2 style={{ font: `650 12.5px/1 ${T.sans}`, color: T.fg, margin: 0 }}>Folders</h2><span style={{ font: `500 9.5px/1 ${T.mono}`, color: T.tertiary }}>{dirs.length}</span></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>{dirs.map((dir) => <SourceFolderCard key={dir.id} dir={dir} onOpen={openDir} />)}</div></section>}
+          {!!files.length && <section><div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}><h2 style={{ font: `650 12.5px/1 ${T.sans}`, color: T.fg, margin: 0 }}>{current.virtual ? 'Recently used files' : 'Files'}</h2><span style={{ font: `500 9.5px/1 ${T.mono}`, color: T.tertiary }}>{files.length}</span></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(125px, 1fr))', gap: 4 }}>{files.map((file) => <SourceFileCard key={file.name} file={file} selected={selectedFile?.name === file.name} onSelect={setSelectedFile} />)}</div></section>}
+        </div>
+        {selectedFile && (() => { const state = FILE_SUMMARY_STATUS[selectedFile.summaryStatus] || FILE_SUMMARY_STATUS.ready; return <aside style={{ position: 'sticky', top: 0, background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rXl, boxShadow: T.shadowSm, padding: '17px' }}><div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}><SourceFileIcon kind={selectedFile.kind} size={43} /><button onClick={() => setSelectedFile(null)} title="Close file details" style={{ width: 26, height: 26, display: 'grid', placeItems: 'center', border: 0, borderRadius: T.rMd, background: T.sunken, cursor: 'pointer' }}><Icon name="x" size={13} color={T.tertiary} /></button></div><h3 style={{ font: `700 15px/1.3 ${T.display}`, color: T.fg, margin: '13px 0 5px', wordBreak: 'break-word' }}>{selectedFile.name}</h3><span style={{ font: `500 9.5px/1.3 ${T.mono}`, color: T.tertiary }}>{selectedFile.size} · {selectedFile.updated}</span><div style={{ marginTop: 15, paddingTop: 13, borderTop: `1px solid ${T.borderSubtle}` }}><CategoryLabel>Document summary</CategoryLabel><p style={{ margin: '7px 0 14px', font: `400 11.5px/1.5 ${T.sans}`, color: T.secondary }}>{selectedFile.summary}</p><StatusPill tone={state.tone}>{state.label}</StatusPill></div><p style={{ margin: '13px 0 0', font: `400 10.5px/1.45 ${T.sans}`, color: T.tertiary }}>This summary contributes to its generated directory summary and is available to agent retrieval.</p></aside>; })()}
+      </div>
+    </div></main>
+  </div>;
 }
 
 function ProjectMaintenanceView() {
@@ -202,6 +409,7 @@ function ProjectKnowledgeDashboard({ project, tab, onTab, onBack, onOpenBuild, o
   const artifacts = groups.flatMap((g) => g.items.map((a) => ({ ...a, agent: g.agent, nodeLabel: g.nodeLabel })));
   const [selectedBriefHeading, setSelectedBriefHeading] = React.useState('Project overview');
   const [selectedOutput, setSelectedOutput] = React.useState(artifacts.find((a) => a.id === 'prd') || artifacts[0]);
+  const [selectedSource, setSelectedSource] = React.useState({ type: 'overview', id: null, scope: 'Virtual overview', name: 'Files', summary_md: 'Project and organization source material.', summary_status: 'Needs refresh' });
   const context = tab === 'brief' ? 'brief' : tab === 'outputs' ? 'outputs' : tab === 'files' ? 'files' : tab === 'maintenance' ? 'maintenance' : ingesting ? 'ingesting' : 'overview';
   return <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: T.bg, fontFamily: T.sans }}>
     <header style={{ background: T.raised, borderBottom: `1px solid ${T.borderSubtle}`, flexShrink: 0 }}>
@@ -210,9 +418,9 @@ function ProjectKnowledgeDashboard({ project, tab, onTab, onBack, onOpenBuild, o
     </header>
     <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex' }}>
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', backgroundImage: tab === 'overview' ? `radial-gradient(circle, ${T.borderSubtle} 1px, transparent 1px)` : 'none', backgroundSize: '22px 22px' }}>
-        {loading ? <div style={{ padding: 24 }}><ProjectDashboardSkel tab={tab === 'files' ? 'docs' : 'overview'} /></div> : tab === 'brief' ? <ProductBriefView onSelected={setSelectedBriefHeading} /> : tab === 'outputs' ? <FactoryOutputsView onSelected={setSelectedOutput} /> : tab === 'files' ? <ProjectFilesView /> : tab === 'maintenance' && isDone ? <ProjectMaintenanceView /> : <ProjectOverview project={p} onTab={onTab} onOpenBuild={onOpenBuild} onResume={onResumeInterview || onResume} budget={cap} onBudgetChange={onBudgetChange} ingesting={ingesting} />}
+        {loading ? <div style={{ padding: 24 }}><ProjectDashboardSkel tab={tab === 'files' ? 'docs' : 'overview'} /></div> : tab === 'brief' ? <ProductBriefView onSelected={setSelectedBriefHeading} /> : tab === 'outputs' ? <FactoryOutputsView onSelected={setSelectedOutput} /> : tab === 'files' ? <ProjectFilesView onSelected={setSelectedSource} /> : tab === 'maintenance' && isDone ? <ProjectMaintenanceView /> : <ProjectOverview project={p} onTab={onTab} onOpenBuild={onOpenBuild} onResume={onResumeInterview || onResume} budget={cap} onBudgetChange={onBudgetChange} ingesting={ingesting} />}
       </div>
-      <ProjectConcierge context={context} onOpen={(a) => openArtifact(a)} docChips={context === 'files' ? ['What’s in the walkthrough?', 'Summarize the RFQ example', 'What does the discount matrix say?'] : undefined} selectedLabel={tab === 'brief' ? selectedBriefHeading : tab === 'outputs' ? selectedOutput?.label : undefined} collapsed={conciergeCollapsed} onCollapsedChange={onConciergeCollapsedChange} />
+      <ProjectConcierge context={context} onOpen={(a) => openArtifact(a)} docChips={context === 'files' ? [`What is in ${selectedSource.name}?`, 'Which directory covers approvals?', 'Where should an agent look first?'] : undefined} selectedLabel={tab === 'brief' ? selectedBriefHeading : tab === 'outputs' ? selectedOutput?.label : tab === 'files' ? selectedSource.name : undefined} sourceContext={tab === 'files' ? selectedSource : undefined} collapsed={conciergeCollapsed} onCollapsedChange={onConciergeCollapsedChange} />
     </div>
   </div>;
 }

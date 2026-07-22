@@ -306,7 +306,7 @@ function FactoryActivity({ onOpen, actions }) {
   </section>;
 }
 
-function conciergeSeed(context, build) {
+function conciergeSeed(context, build, sourceContext) {
   if (context === 'build') {
     return build && build.allDone
       ? [{ who: 'agent', time: '12:35', text: `All ${build.total} tickets are green and the app is deployed. Want me to walk you through the live build?` }]
@@ -322,7 +322,7 @@ function conciergeSeed(context, build) {
     return [{ who: 'agent', text: 'These are the factory’s real outputs, organized by the stage that produced them. Pick one and I can explain the decision, connect it back to the brief, or help you steer what happens next.' }];
   }
   if (context === 'files' || context === 'docs') {
-    return [{ who: 'agent', text: 'These are the source files the factory is working from — your uploads and reusable organization knowledge. Ask me what any file contributed to the project.' }];
+    return [{ who: 'agent', text: 'These are the source directories and files the factory works from. I read the generated directory summaries first, then narrow retrieval to the smallest relevant subtree before opening individual documents.' }];
   }
   if (context === 'maintenance') {
     return [{ who: 'agent', text: 'The product has shipped. I’m still here to help you understand what is running, describe a change, or start the next maintenance task.' }];
@@ -332,21 +332,28 @@ function conciergeSeed(context, build) {
   }
   return [{ who: 'agent', text: 'I’m watching this project for you — 5 of 11 tickets done, 3 agents working, $4.20 spent. Ask me about progress, scope, or anything in your documents.' }];
 }
-function conciergeReply(context, text) {
+function conciergeReply(context, text, sourceContext) {
   const t = text.toLowerCase();
-  const docs = (window.PROJ_MATERIALS || []).map((m) => m.name);
-  const hit = docs.find((n) => t.includes(n.split('.')[0].split('-')[0]) || t.includes(n.toLowerCase()));
-  if (hit) return `From ${hit}: that’s covered there. I’ll cite the exact section once document citations ship — for now I can summarize what it contains.`;
+  if (context === 'files' || context === 'docs') {
+    if (sourceContext) {
+      const source = sourceContext.type === 'file' ? sourceContext.name : sourceContext.type === 'directory' ? `the generated ${sourceContext.name} directory summary` : 'the generated source overview';
+      const coverage = sourceContext.summary_status === 'Failed' || sourceContext.summary_status === 'failed' ? ' Its latest refresh failed, so I would keep the incomplete coverage visible rather than treating this as current.' : sourceContext.summary_status === 'Needs refresh' || sourceContext.summary_status === 'pending' ? ' It is awaiting refresh, so I would verify the underlying file before relying on it.' : '';
+      return `From ${source}: ${sourceContext.summary_md}${coverage}`;
+    }
+    const docs = (window.PROJ_MATERIALS || []).map((m) => m.name);
+    const hit = docs.find((n) => t.includes(n.split('.')[0].split('-')[0]) || t.includes(n.toLowerCase()));
+    if (hit) return `From ${hit}: that’s covered there. I’ll cite the exact section once document citations ship — for now I can summarize what it contains.`;
+    return 'I’ll start from the source overview, choose the most relevant directory summary, then narrow the search to that subtree.';
+  }
   if (context === 'build') return 'On it — I’ve relayed that to the build team and flagged it on the board. I’ll surface any change here as the agents pick it up.';
   if (context === 'brief') return 'I can revise that in the Product Brief. Tell me the outcome you want, and I’ll keep the rest of the document consistent with it.';
   if (context === 'outputs') return 'I’ll relate that output to the Product Brief and the stage that produced it, then show you what would change downstream.';
-  if (context === 'files' || context === 'docs') return 'I can answer from the selected source file. Inline citations are coming soon — for now I’ll name the file I used and summarize the relevant part.';
   if (context === 'maintenance') return 'Tell me what should change in the delivered product, and I’ll turn it into a maintenance task without losing the project context.';
   return 'Got it. I’ll keep an eye on the build and surface anything relevant here.';
 }
 
-function ProjectConcierge({ context = 'overview', build, onOpen, docChips, selectedLabel, collapsed, onCollapsedChange }) {
-  const chat = useConciergeChat(conciergeSeed(context, build), (text) => conciergeReply(context, text));
+function ProjectConcierge({ context = 'overview', build, onOpen, docChips, selectedLabel, sourceContext, collapsed, onCollapsedChange }) {
+  const chat = useConciergeChat(conciergeSeed(context, build, sourceContext), (text) => conciergeReply(context, text, sourceContext));
   const [localCollapsed, setLocalCollapsed] = React.useState(false);
   const savedScroll = React.useRef(0);
   const isCollapsed = typeof collapsed === 'boolean' ? collapsed : localCollapsed;
@@ -358,7 +365,7 @@ function ProjectConcierge({ context = 'overview', build, onOpen, docChips, selec
   React.useEffect(() => {
     if (priorContext.current === context) return;
     priorContext.current = context;
-    const next = conciergeSeed(context, build)[0];
+    const next = conciergeSeed(context, build, sourceContext)[0];
     if (next) chat.push(next);
   }, [context]);
   const subtitle = context === 'build' ? (build && build.allDone ? 'Build complete' : 'Relaying the build')
@@ -385,7 +392,7 @@ function ProjectConcierge({ context = 'overview', build, onOpen, docChips, selec
         {chat.messages.map((m, i) => m.kind === 'event' ? <SystemEvent key={m.event.id} event={m.event} compact onOpen={onOpen} /> : <Message key={i} who={m.who} text={m.text} confidence={m.confidence} time={m.time} anim={i >= 1} />)}
         {!chat.thinking && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            <CategoryLabel>{context === 'files' || context === 'docs' ? 'Ask about a source file' : selectedLabel ? `Ask about ${selectedLabel}` : 'Try asking'}</CategoryLabel>
+            <CategoryLabel>{selectedLabel ? `Ask about ${selectedLabel}` : context === 'files' || context === 'docs' ? 'Ask about source material' : 'Try asking'}</CategoryLabel>
             <QuickReplies options={suggestions} onPick={(o) => chat.sendText(o)} />
           </div>
         )}
@@ -398,7 +405,7 @@ function ProjectConcierge({ context = 'overview', build, onOpen, docChips, selec
         {chat.thinking && <TypingIndicator label={chat.thinking} />}
       </div>
       <div style={{ flexShrink: 0, padding: '12px 16px', borderTop: `1px solid ${T.borderSubtle}` }}>
-        <Composer placeholder={context === 'build' ? 'Ask or steer the build team…' : context === 'brief' ? 'Ask or revise the brief…' : context === 'outputs' ? 'Ask about this factory output…' : context === 'files' || context === 'docs' ? 'Ask about your source files…' : 'Ask the Concierge…'} value={chat.draft} onChange={chat.setDraft} onSend={() => chat.sendText()} />
+        <Composer placeholder={context === 'build' ? 'Ask or steer the build team…' : context === 'brief' ? 'Ask or revise the brief…' : context === 'outputs' ? 'Ask about this factory output…' : context === 'files' || context === 'docs' ? 'Ask about this directory or file…' : 'Ask the Concierge…'} value={chat.draft} onChange={chat.setDraft} onSend={() => chat.sendText()} />
       </div>
     </div>
   );
