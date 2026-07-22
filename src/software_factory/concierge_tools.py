@@ -6,7 +6,7 @@ the tools the agent may call:
   · pipeline       — check_project_status (returns live state so the agent reasons about progress)
   · company research — exa_search (quick) / fusion_search (deep), from research.py; enrich_company
     (CBT-4) is the CBT-1 wow-prefill lookup specifically — same quick-mode call, name-or-website
-    input, "sources only" result the concierge is instructed to present honestly (default_prompt.py)
+    input, "sources only" result the concierge is instructed to present honestly (concierge prompt)
   · document reading (SOF-62) — search_document_summaries (coarse, pick 2-3 relevant documents) /
     fetch_document_markdown (read one in full)
   · product brief (SOF-137, Minimum Machinery) — finalize_product_brief (writes the brief MD to

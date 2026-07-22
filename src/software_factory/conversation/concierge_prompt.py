@@ -5,10 +5,7 @@ import logging
 import time
 from typing import Callable
 
-from software_factory.constants import (
-    CONCIERGE_CONTEXTS,
-    CONCIERGE_PROMPT_CACHE_TTL_SECONDS,
-)
+from ..constants import CONCIERGE_CONTEXTS, CONCIERGE_PROMPT_CACHE_TTL_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +30,6 @@ _TAGGED_REPLY_FORMAT = (
     "before, with no tags involved in a tool call."
 )
 
-# Per-context framing appended to the base prompt. Same identity/voice; only the focus changes.
 _CONTEXT_FRAMING = {
     "intake": "You are running first-time project intake — capture the company (first-time users "
               "only) and then this project, saving durable facts as you go." + _TAGGED_REPLY_FORMAT,
@@ -64,12 +60,12 @@ class _ConciergePromptCache:
         try:
             # Deferred import: SystemAgentStore touches the DB, so importing it at module load would
             # couple this prompt module to a live connection (kept function-local on purpose).
-            from software_factory.system_agents import SystemAgentStore
+            from ..system_agents import SystemAgentStore
             row = SystemAgentStore().get("CONCIERGE")
         except Exception:
             # DB error (e.g. connection blip): keep serving the last-known-good DB prompt if one has
             # loaded this process — but NEVER fall back to a hardcoded prompt. With no cache, re-raise.
-            logger.exception("[default_prompt] failed to read CONCIERGE prompt from system_agents")
+            logger.exception("[concierge-prompt] failed to read CONCIERGE prompt from system_agents")
             if self._prompt is not None:
                 return self._prompt
             raise
@@ -77,10 +73,11 @@ class _ConciergePromptCache:
         if not prompt.strip():
             raise RuntimeError(
                 "No CONCIERGE prompt configured in system_agents — the DB is the sole source; "
-                "seed/set it via the Agents screen")
+                "seed/set it via the Agents screen"
+            )
         self._prompt = prompt
         self._expires_at = now + self._ttl_seconds
-        return self._prompt
+        return prompt
 
     def reset(self) -> None:
         self._prompt = None
@@ -91,7 +88,7 @@ _CONCIERGE_PROMPT_CACHE = _ConciergePromptCache(CONCIERGE_PROMPT_CACHE_TTL_SECON
 
 
 def resolve_concierge_instructions() -> str:
-    """The concierge system prompt from the DB (`system_agents` CONCIERGE.prompt), short-cached.
+    """The concierge system prompt from the DB (`system_agents.CONCIERGE.prompt`), short-cached.
     Raises if no CONCIERGE row exists or its prompt is empty — the DB is the sole source, there is
     no code default."""
     return _CONCIERGE_PROMPT_CACHE.get()

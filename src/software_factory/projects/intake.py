@@ -114,7 +114,17 @@ class ProjectIntake:
         return None
 
     def attach_to_draft(self, project_id: str, files: list) -> list[str]:
-        """Persist onboarding materials and record their readable context artifacts."""
+        """Persist + extract files attached during the interview into the draft's input/ (PDF/DOCX
+        -> Markdown[+images], wireframes survive). Records .md extractions as context artifacts;
+        original PDF/DOCX binaries are kept on disk for the caller to push to blob storage.
+        The draft stays invisible to the poller (is_pipeline_project excludes drafts).
+        Returns paths written (includes original binaries for PDF/DOCX so callers can blob-record).
+
+        SOF-56: `tolerate_extract_failures=True` — a text-free/malformed attachment here must not
+        500 the whole request (same failure-isolation principle SOF-32 applied to memory
+        ingestion); unlike Stage-1 input, a mid-interview attachment failing to convert to Markdown
+        does not mean the request itself failed — the original still gets blob-recorded and
+        separately ingested (memory/ingest.py has its own graceful parse-failure handling)."""
         if not files:
             return []
         paths = self._paths(project_id)

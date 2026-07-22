@@ -3,7 +3,7 @@ into a `ConciergeTurn`.
 
 With `ToolStrategy(ConciergeTurn)` dropped (see `chat_agent.ChatAgent(use_tagged_output=True)`),
 the model's final user-facing turn is plain content instead of forced tool-call JSON — prompted
-(see `default_prompt._CONTEXT_FRAMING["intake"]`) to wrap it as:
+(see `conversation.concierge_prompt`'s intake framing) to wrap it as:
 
     <say>Got it — what timeline are you working to?</say>
     <option type="single">This quarter</option>

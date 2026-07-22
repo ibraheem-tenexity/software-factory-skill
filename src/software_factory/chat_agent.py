@@ -1,8 +1,8 @@
 """Factory Concierge = a database-backed system prompt + a LangChain agent + real tools.
 
 Everything else lives where it belongs: output DTOs in `data_transfer_objects/chat_agent.py`,
-DB prompt resolution and context composition in `default_prompt.py`, model/context constants in
-`constants.py`, and the tool belt in `concierge_tools.py`.
+DB prompt resolution and context composition in `conversation/concierge_prompt.py`, model/context
+constants in `constants.py`, and the tool belt in `concierge_tools.py`.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from software_factory.constants import (
     OPENROUTER_BASE_URL,
 )
 from software_factory.data_transfer_objects.chat_agent import ConciergeTurn
-from software_factory.default_prompt import build_system_prompt
+from software_factory.conversation.concierge_prompt import build_system_prompt
 from software_factory.tagged_reply import TaggedReplyParser
 
 # Model type → chat model class. Kimi (Moonshot) speaks the OpenAI wire protocol, so it's the same
@@ -116,7 +116,7 @@ class ChatAgent:
     `context` sets the focus (same identity everywhere). `tools`/`model` are injectable — pass a
     per-project belt from `concierge_tools.build_project_tools`, or a fake model in tests.
     `first_turn_context` (SOF-62) is baked into the system prompt at construction — see
-    `default_prompt.build_system_prompt`'s docstring for why this is construction-time, not per-run.
+    `conversation.concierge_prompt.build_system_prompt` for why this is construction-time, not per-run.
     """
 
     def __init__(self, context: str = "intake", tools: list | None = None, model=None,
@@ -124,7 +124,7 @@ class ChatAgent:
         """`use_tagged_output` (SOF-154): drop the forced `ToolStrategy(ConciergeTurn)` structured
         output entirely and let the final turn stream as plain content instead, formatted per the
         `<say>`/`<option>` tag contract (`tagged_reply.py`) the `context`'s prompt framing must
-        already instruct — today that's ONLY `default_prompt._CONTEXT_FRAMING["intake"]`. This is a
+        already instruct — today that's ONLY `conversation.concierge_prompt`'s intake framing. This is a
         construction-time choice (`response_format` is bound once, at `create_agent`), so a caller
         that wants the old one-shot structured-JSON behavior (the dock) simply never passes it."""
         self.last_usage: dict = {}   # set by run()/astream_turn(): {model, provider, tokens, cost_usd}

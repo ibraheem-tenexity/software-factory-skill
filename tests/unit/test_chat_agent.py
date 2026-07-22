@@ -4,7 +4,7 @@ SOF-35: the OpenAI Agents SDK runtime (`Agent`/`Runner`) and its 14 tools (`make
 `ChatAgentRunner`) are removed — no ported behavior. Tests for
 the removed tools/runner are deleted, not adapted; the LangChain rebuild (T2.1/T2.2) ships with
 its own tests against the new architecture. The concierge system prompt + override cache now
-live in `default_prompt.py` (see test_default_prompt_sof62.py) and `check_and_notify` no longer
+live in `conversation/concierge_prompt.py` (see test_default_prompt_sof62.py) and `check_and_notify` no longer
 exists in the codebase.
 """
 from unittest.mock import MagicMock
