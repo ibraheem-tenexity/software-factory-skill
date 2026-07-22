@@ -103,14 +103,17 @@ The following are refactor targets, not permission to change behavior:
 
 | Current area | Direction |
 | --- | --- |
-| `software_factory.console.Console` | Retain as a temporary compatibility facade while moving project lifecycle/drafts/queries, stage execution, and cleanup into their owning contexts. |
-| `projects/intake.py` | Own draft creation, intake updates, material attachment, product-brief reads, BYOK credential references, repository-access projection, and project path composition. Production callers use the explicit `Console.intake` owner until application composition moves out of `Console`. |
+| `software_factory.console` | Compatibility exports only. Production composition imports `ExecutionService` from `execution/service.py`; preserve this path for active operator scripts and external callers until they migrate. |
+| `execution/{prompts,process,service}.py` | Stage request/prompt construction and OS launch mechanics are separate from the current execution owner: lifecycle, recovery, budget enforcement, provision, promotion, gates, dependency handoff, and run status. `service.py` is a deliberate intermediate consolidation, not a new catch-all: project queries/mutations move to `projects`, and teardown/reapers move to `cleanup` in subsequent coherent slices. |
+| `workers/supervisor.py` | The autonomy loop: boot sweep, run supervision, auto-advance, recovery/reaper ticks, log flush, health, and ASGI lifespan. It reads the application singleton at call time, but no longer belongs to the HTTP console package. |
+| `conversation/dock.py`, `conversation/persistence.py` | The project chat dock and its durable conversation history/tool-trace persistence. `console/chat_dock.py` and `console/chat_persistence.py` are compatibility exports only. |
+| `projects/intake.py` | Own draft creation, intake updates, material attachment, product-brief reads, BYOK credential references, repository-access projection, and project path composition. Production callers use the explicit `ExecutionService.intake` owner until application composition moves out of the execution service. |
 | `projects/materials.py` | Own project-material persistence, document projection, ingestion kickoff/regeneration, and deletion across storage, blobs, memory, input files, and artifact records. The router retains wire validation and HTTP error translation only. |
-| `projects/records.py` | Own coherent read-only projections over project state, tickets, agents, artifacts, deployments, and activity. Production callers use the explicit `Console.records` owner while execution compatibility methods remain. |
+| `projects/records.py` | Own coherent read-only projections over project state, tickets, agents, artifacts, deployments, and activity. Production callers use the explicit `ExecutionService.records` owner while execution compatibility methods remain. |
 | `conversation/concierge_prompt.py` | Own editable concierge prompt retrieval, short-lived cache, and context-specific framing. The prompt text itself remains in `system_agents.CONCIERGE`; there is no code default. |
 | `console/routers/projects.py` | Extract project/material workflows before dividing the router into capability routes. |
-| `console/poller.py` | Move run supervision, recovery, reapers, health, and boot coordination into `workers/` and application services; leave lifespan wiring in `api/`. |
-| `console/chat_dock.py`, `console/chat_persistence.py`, `services/conversation.py` | Consolidate shared turn preparation and persistence. Keep wire encoding at the API edge. |
+| `execution/service.py` project query, archive, graph, artifact, and reaper methods | Continue moving read/mutation workflows to `projects/` and teardown policy to `cleanup/`; do not add unrelated behavior to the execution service. |
+| `services/conversation.py` | Consolidate onboarding and dock turn preparation around the shared `conversation/` persistence boundary. Keep wire encoding at the API edge. |
 | `repositories/_exec.py` | Replace `PathExec` and `GlobalExec` with one executor and an explicit connection/transaction strategy. |
 | Store/repository pairs for system agents, eval scores, and autopsy | Collapse pairs that only delegate. Keep rich repository-plus-policy boundaries such as recipes, tickets, and runtime agents. |
 | `artifacts.py`, PDF/DOCX extraction, material upload paths | Group artifact policy and extraction by capability; remove duplicate conversion and storage choreography. |

@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 import console.state as state
 from console.deps import viewer, _staff_session
-from console.poller import _health
+from software_factory.workers.supervisor import _health
 
 router = APIRouter()
 _SPA_HTML_HEADERS = {"Cache-Control": "no-cache, max-age=0, must-revalidate"}

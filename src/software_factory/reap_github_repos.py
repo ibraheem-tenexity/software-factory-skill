@@ -26,8 +26,8 @@ def _projects_dir() -> str:
 
 
 def _run_sweep(org: str, dry_run: bool) -> dict:
-    from .console import Console
-    return Console(_projects_dir()).reap_github_repos(org, dry_run=dry_run)
+    from .execution.service import ExecutionService
+    return ExecutionService(_projects_dir()).reap_github_repos(org, dry_run=dry_run)
 
 
 def main(argv: list[str]) -> int:

@@ -1,4 +1,4 @@
-"""FastAPI shell around software_factory.console (Phase 2 of docs/plans/fastapi-db-replacement.md).
+"""FastAPI shell around the factory application (Phase 2 of docs/plans/fastapi-db-replacement.md).
 
 Modularized: this file is now ONLY the FastAPI app + access-log middleware + lifespan + the static
 mounts + router includes. The pieces live in sibling modules:
@@ -7,8 +7,8 @@ mounts + router includes. The pieces live in sibling modules:
   console/deps.py             — auth dependencies (viewer/require_authed/authorize_project/require_admin/
                                 _staff_session/require_staff)
   console/schemas.py          — all Pydantic request bodies
-  console/poller.py           — the background poller (_poll_transitions/_auto_advance/_narrate*/_boot)
-                                + _health + the lifespan
+  software_factory/workers/   — the background supervisor (_poll_transitions/_auto_advance/
+                                _narrate*/_boot) + _health + the lifespan
   console/routers/open_routes — /, /index.html, /admin (gated), /api/health
   console/routers/auth        — /api/auth/*, /api/me, /api/users
   console/routers/org         — /api/org* (organization + Org Admin §2.3)
@@ -53,7 +53,7 @@ import console.state as state  # noqa: E402  (also: app_mod.state is the patch h
 # importantly re-seeding the bootstrap admin AFTER conftest's per-test TRUNCATE.
 state.reset()
 
-from console.poller import lifespan as _poller_lifespan  # noqa: E402
+from software_factory.workers.supervisor import lifespan as _poller_lifespan  # noqa: E402
 from console.routers import open_routes, auth, org, admin_os, projects, chat, research  # noqa: E402
 from software_factory.memory.mcp_server import memory_asgi_app, memory_mcp_lifespan  # noqa: E402
 

@@ -9,7 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from software_factory.data_transfer_objects.chat_agent import ChatMessage
-from console.chat_persistence import chat_history as _chat_history, persist_chat_turn as _persist_chat_turn
+from software_factory.conversation.persistence import (
+    chat_history as _chat_history,
+    persist_chat_turn as _persist_chat_turn,
+)
 from software_factory.deps import extract_env_creds
 from software_factory.transcription import transcribe_audio, TranscriptionError
 
@@ -25,7 +28,7 @@ router = APIRouter()
 _CHAT_TIMEOUT = 120
 
 
-# /api/chat persistence + history now live on the `conversation` table via console.chat_persistence
+# /api/chat persistence + history now live on the `conversation` table via conversation.persistence
 # (imported above as _persist_chat_turn / _chat_history). The legacy chat.jsonl/ChatStore and its
 # SF_CHAT_JSONL_MIRROR / SF_CONVERSATION_DB flags are retired — the table is the single store.
 

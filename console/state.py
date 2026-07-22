@@ -18,7 +18,7 @@ import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from software_factory.console import Console  # noqa: E402
+from software_factory.execution.service import ExecutionService  # noqa: E402
 from software_factory.users import UserStore  # noqa: E402
 from software_factory.blobs import BlobStore  # noqa: E402
 from software_factory.system_agents import SystemAgentStore  # noqa: E402
@@ -34,7 +34,7 @@ from software_factory.repositories.conversation import ConversationRepository  #
 from software_factory.services.files import doc_kind as _doc_kind  # noqa: E402,F401
 
 from console.throttle import LoginThrottle  # noqa: E402
-from console.chat_dock import ChatDock  # noqa: E402
+from software_factory.conversation.dock import ChatDock  # noqa: E402
 
 HERE = os.path.dirname(__file__)
 # The React SPA (console/web/dist) is the console — the only console. Built at image time
@@ -73,7 +73,7 @@ def reset():
     global _ingest_sse_clients, _ingest_sse_lock
 
     PROJECTS_DIR = os.environ.get("SF_PROJECTS_DIR", os.path.join(HERE, "..", ".projects"))
-    console = Console(PROJECTS_DIR)
+    console = ExecutionService(PROJECTS_DIR)
     # User directory + RBAC + orgs — the SINGLE source of truth for who can access (status invited/
     # active/disabled). No env allowlist: the cold-start admin is seeded from SF_BOOTSTRAP_ADMIN_EMAIL
     # inside UserStore.__init__, and all access thereafter is managed via Team & access (no redeploy).
@@ -96,7 +96,7 @@ def reset():
                                  ConversationRepository(GlobalExec()))
     # The concierge runs on OpenAI or OpenRouter (Kimi) — either key enables chat.
     _has_chat_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY"))
-    # The /api/chat dock: ChatAgent behind ChatDock (console/chat_dock.py), history + persistence
+    # The /api/chat dock: ChatAgent behind ChatDock (conversation/dock.py), history + persistence
     # on the conversation table (chat.jsonl/ChatStore retired).
     _chat_runner = ChatDock(console, users) if _has_chat_key else None
     _ingest_sse_clients = {}
@@ -132,5 +132,3 @@ def _admin_html() -> bytes:
 def _artifact_viewer_html() -> bytes:
     with open(os.path.join(_REACT_DIST, "ArtifactViewer.html"), "rb") as f:
         return f.read()
-
-

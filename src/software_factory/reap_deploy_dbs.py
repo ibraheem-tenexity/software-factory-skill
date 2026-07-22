@@ -25,8 +25,8 @@ def _projects_dir() -> str:
 
 
 def _run_sweep(dry_run: bool) -> dict:
-    from .console import Console
-    return Console(_projects_dir()).reap_deploy_dbs(dry_run=dry_run)
+    from .execution.service import ExecutionService
+    return ExecutionService(_projects_dir()).reap_deploy_dbs(dry_run=dry_run)
 
 
 def main(argv: list[str]) -> int:

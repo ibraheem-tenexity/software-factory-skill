@@ -421,3 +421,6 @@ KNOWN FOLLOW-UP (backend, non-blocking): POST /api/auth/password (in the queued 
 1. Removed `default_prompt.py`: it was not a default prompt and only cached the editable `system_agents.CONCIERGE` row plus context framing.
 2. `conversation/concierge_prompt.py` now owns that retrieval, cache, and framing; `chat_agent.py` imports it directly.
 3. Historic migrations and planning documents retain old-name references as historical records; production code has none.
+# backend-structure-refactor Update at Time: 22:07:2026:00:00:00.000
+1. PR #430 now extends beyond the initial `projects`/prompt extraction: `execution/{prompts,process,service}.py` owns the former Console implementation, `workers/supervisor.py` owns the poller, and `conversation/{dock,persistence}.py` owns project chat runtime/history. `software_factory.console` and the old `console/chat_*`/`console/poller` paths are documented compatibility exports only.
+2. The canonical structure map records this as an intermediate execution consolidation: move remaining project projections/mutations to `projects/` and teardown policy to `cleanup/`; do not add new behavior to `ExecutionService` outside stage execution.
