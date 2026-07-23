@@ -118,9 +118,9 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
   useEffect(() => {
     let live = true;
     loadHistory();
-    // Persisted run activity for the timeline. Chronological (oldest→newest) so buildTimeline sorts
-    // cleanly; the last ~40 events are enough for the dock's rolling conversation.
-    const tick = () => api.events(projectId).then((d) => live && setEvents((d.events || []).slice(-40))).catch(() => {});
+    // Persisted run activity for the timeline. SOF-247 AC: do NOT truncate at the Concierge boundary
+    // — render every persisted event the API returns; buildTimeline orders them and the feed scrolls.
+    const tick = () => api.events(projectId).then((d) => live && setEvents(d.events || [])).catch(() => {});
     tick();
     const h = setInterval(tick, 4000);
     return () => { live = false; clearInterval(h); };
