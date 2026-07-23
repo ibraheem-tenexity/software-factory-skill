@@ -21,7 +21,7 @@ import { T, Icon, Btn, StatusPill, Wordmark, TextInput } from "../onboarding/des
 import { AccountMenu } from "../AccountMenu";
 import { OverviewTab } from "./OverviewTab";
 import { FactoryOutputsPeer } from "./FactoryOutputsPeer";
-import { DocumentsTab } from "./DocumentsTab";
+import { FilesPeer } from "./FilesPeer";
 import { MaintenanceTab } from "./MaintenanceTab";
 import { FactoryBoard } from "../factory/FactoryBoard";
 import { Concierge } from "../factory/Concierge";
@@ -238,7 +238,7 @@ export function ProjectConsole({ projectId, onBack, onResume, onOpen }: {
           {view === "brief" && <BriefPeer artifacts={artifacts} goal={status?.goal || status?.description || ""} onOpen={openRef} />}
           {view === "outputs" && <FactoryOutputsPeer projectId={projectId} />}
           {view === "factory" && <FactoryBoard projectId={projectId} status={status || ({} as Status)} tickets={tickets} graph={graph} loaded={loaded} onStatus={(s) => setStatus(s)} />}
-          {view === "files" && <DocumentsTab projectId={projectId} />}
+          {view === "files" && <FilesPeer projectId={projectId} />}
           {view === "maintenance" && isDone && <MaintenanceTab projectId={projectId} enabled={!!status?.maintenance_enabled} onToggle={doToggleMaintenance} />}
         </div>
 
