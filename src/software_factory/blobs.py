@@ -21,17 +21,20 @@ class BlobStore:
                name: str | None = None, tag: str | None = None,
                content_type: str | None = None, size_bytes: int | None = None,
                sha256: str | None = None, source_blob_id: int | None = None,
-               source_page: int | None = None, provenance: dict | None = None) -> int:
+               source_page: int | None = None, provenance: dict | None = None,
+               directory_id: str | None = None) -> int:
         """Record one stored blob and return its id. `scope` is 'project' or 'org'; `name`/`tag` are
         the display filename + category shown in the org knowledge base. `source_blob_id`/
         `source_page`/`provenance` (SOF-32) are set only when this blob is itself an asset
         extracted FROM another blob (e.g. an image pulled out of a document page) — leave unset
-        for an original upload."""
+        for an original upload. `directory_id` (SOF-253) files the blob under a Files-tree directory
+        of the SAME scope in the same insert; leave None for an unfiled blob."""
         if scope not in ("project", "org"):
             raise ValueError(f"blob scope must be 'project' or 'org', got {scope!r}")
         return self._repo.insert(scope, scope_id, kind, name, tag, storage_key, content_type,
                                  size_bytes, sha256, source_blob_id=source_blob_id,
-                                 source_page=source_page, provenance=provenance)
+                                 source_page=source_page, provenance=provenance,
+                                 directory_id=directory_id)
 
     def list_for(self, scope: str, scope_id: str) -> list[dict]:
         return [dict(r) for r in self._repo.list_for(scope, scope_id)]
@@ -84,3 +87,43 @@ class BlobStore:
 
     def delete(self, blob_id: int) -> None:
         self._repo.delete(blob_id)
+
+    # -- source-directory tree (SOF-251/SOF-253) ----------------------------------------
+    def list_directories(self, scope: str, scope_id: str) -> list[dict]:
+        """Every directory row in one scope (roots first). The caller derives the tree + counts."""
+        return [dict(r) for r in self._repo.list_directories(scope, scope_id)]
+
+    def get_directory(self, directory_id: str) -> dict | None:
+        row = self._repo.directory_by_id(directory_id)
+        return dict(row) if row else None
+
+    def ensure_root(self, scope: str, scope_id: str, name: str) -> dict:
+        """Return the persisted per-scope root, creating it if the scope owns no tree yet. Idempotent
+        and matches the migration's backfill (one NULL-parent root per scope), so the Files browser
+        always has a real root id to hang folders under even for a scope that gained its first blob
+        after 0034 ran."""
+        if scope not in ("project", "org"):
+            raise ValueError(f"directory scope must be 'project' or 'org', got {scope!r}")
+        row = self._repo.find_root(scope, scope_id)
+        if row:
+            return dict(row)
+        self._repo.insert_directory(scope, scope_id, None, name or scope_id)
+        return dict(self._repo.find_root(scope, scope_id))
+
+    def create_directory(self, scope: str, scope_id: str, parent_id: str, name: str) -> str:
+        """Create a child directory under a real same-scope parent and return its id. Scope match is
+        enforced by the composite parent FK; sibling-name uniqueness is validated by the caller."""
+        if scope not in ("project", "org"):
+            raise ValueError(f"directory scope must be 'project' or 'org', got {scope!r}")
+        return self._repo.insert_directory(scope, scope_id, parent_id, name)
+
+    def sibling_name_exists(self, scope: str, scope_id: str, parent_id: str, name: str) -> bool:
+        return self._repo.sibling_name_exists(scope, scope_id, parent_id, name)
+
+    def assign_directory(self, blob_id: int, directory_id: str | None) -> None:
+        """Re-home a blob to a directory (or None to unfile). Caller validates same-scope first."""
+        self._repo.set_directory(blob_id, directory_id)
+
+    def touch_directory(self, directory_id: str) -> None:
+        """Flag a directory's rollup summary stale after its member set changed."""
+        self._repo.touch_directory(directory_id)

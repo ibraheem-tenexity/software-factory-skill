@@ -130,6 +130,87 @@ def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None,
     return {"uploaded": uploaded, "produced": produced, "org": org}
 
 
+def _files_scope(scope: str, scope_id: str, directory_rows: list | None,
+                 blob_rows: list | None, doc_summaries: dict | None):
+    """Shape one persisted scope (project or org) into (directory rows, file rows).
+
+    Only top-level source blobs (`source_blob_id` IS NULL) are tree members — extracted-child
+    assets stay provenance via source_blob_id, never a directory entry (mirrors the 0034 backfill
+    and the NULL `directory_id` those children keep). Per directory we derive its live child-dir
+    count (blobs.directory_id … via parent_id) and member-file count without an extra query, since
+    the whole scope is already loaded."""
+    doc_summaries = doc_summaries or {}
+    members_by_dir: dict = {}
+    files = []
+    for b in blob_rows or []:
+        if b.get("source_blob_id") is not None:
+            continue
+        did = b.get("directory_id")
+        name = b.get("name") or os.path.basename(b.get("storage_key") or "") or ""
+        ds = doc_summaries.get(b.get("id")) or {}
+        files.append({"id": b.get("id"), "directory_id": did, "scope": scope, "scope_id": scope_id,
+                      "name": name, "kind": _kind_for(name), "tag": b.get("tag"),
+                      "size_bytes": b.get("size_bytes"), "content_type": b.get("content_type"),
+                      "sha256": b.get("sha256"), "created_at": b.get("created_at"),
+                      "summary": ds.get("summary_md"), "ingest_status": ds.get("status"),
+                      "summary_status": ds.get("status")})
+        members_by_dir[did] = members_by_dir.get(did, 0) + 1
+    child_counts: dict = {}
+    for d in directory_rows or []:
+        pid = d.get("parent_id")
+        child_counts[pid] = child_counts.get(pid, 0) + 1
+    dirs = []
+    for d in directory_rows or []:
+        did = d.get("id")
+        dirs.append({"id": did, "parent_id": d.get("parent_id"), "scope": scope,
+                     "scope_id": scope_id, "name": d.get("name"),
+                     "summary_status": d.get("summary_status"), "summary_md": d.get("summary_md"),
+                     "last_successful_summary_at": d.get("last_successful_summary_at"),
+                     "created_at": d.get("created_at"), "updated_at": d.get("updated_at"),
+                     "child_dir_count": child_counts.get(did, 0),
+                     "member_file_count": members_by_dir.get(did, 0)})
+    return dirs, files
+
+
+def files_tree(scopes: list) -> dict:
+    """Files browser read model (SOF-253). `scopes` is an ordered list of persisted scope bundles
+    `{scope, scope_id, directories, blobs, doc_summaries}` — the project's own project scope first,
+    then the owner-organization scope (if any); a scope the project may not read is simply not in
+    the list, so the payload can never leak another project/org.
+
+    Returns:
+      * `root`  — a SYNTHESIZED virtual combined root (mixed-scope, `is_virtual`, `id: null`); it is
+                  NEVER a database row and never a mutation target.
+      * `roots` — the persisted per-scope root identities (the NULL-parent directory of each scope).
+      * `directories` — every directory row across the readable scopes, each with parent, scope,
+                  child-dir/member-file counts, and truthful summary state + timestamps.
+      * `files` — stable blob memberships: blob id, its directory id, scope, type, size, sha, ingest
+                  + summary status, and the document summary. A top-level blob with a NULL
+                  `directory_id` sits at its scope root.
+      * `recent` — references (blob id + directory + scope) INTO `files`, not duplicated membership.
+    """
+    all_dirs: list = []
+    all_files: list = []
+    for s in scopes or []:
+        dirs, files = _files_scope(s["scope"], s["scope_id"], s.get("directories"),
+                                   s.get("blobs"), s.get("doc_summaries"))
+        all_dirs.extend(dirs)
+        all_files.extend(files)
+    roots = [d for d in all_dirs if d["parent_id"] is None]
+    recent = sorted(all_files, key=lambda f: f.get("created_at") or 0.0, reverse=True)[:10]
+    recent_refs = [{"id": f["id"], "directory_id": f["directory_id"], "scope": f["scope"],
+                    "name": f["name"], "created_at": f["created_at"]} for f in recent]
+    return {
+        "root": {"id": None, "parent_id": None, "name": "Files", "scope": "combined",
+                 "is_virtual": True, "child_dir_count": len(roots),
+                 "member_file_count": len(all_files)},
+        "roots": roots,
+        "directories": all_dirs,
+        "files": all_files,
+        "recent": recent_refs,
+    }
+
+
 def brief_block(project: dict, status: dict, created) -> dict:
     """Project brief: name/goal/scope from the draft projection, owner/phase/stage from status."""
     return {

@@ -78,6 +78,11 @@ class ProjectRecords:
     def project_owner(self, project_id: str) -> str:
         return (self._state(project_id).owner or "").lower()
 
+    def project_name(self, project_id: str) -> str:
+        """Operator-chosen display label (falls back to the project_id key). Used to name the
+        source-directory root when a scope's tree is created lazily (SOF-253)."""
+        return (self._state(project_id).name or "").strip() or project_id
+
     def project_links(self, project_id: str) -> dict:
         repo = live = None
         for artifact in self.artifacts(project_id):

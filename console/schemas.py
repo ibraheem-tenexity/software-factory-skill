@@ -137,6 +137,28 @@ class MaterialScopeIn(BaseModel):
     scope: str = "project"     # "project" | "org"
 
 
+# ── Files browser (SOF-253): directory-aware source-tree mutations ────────────────────────────
+class DirectoryCreateIn(BaseModel):
+    parent_id: str = ""            # a real scoped directory (root or folder); the virtual root is rejected
+    name: str = ""
+
+
+class FileUploadIn(BaseModel):
+    name: str = ""
+    tag: str | None = None
+    content_type: str | None = None
+    data_b64: str = ""
+    directory_id: str | None = None    # a project-scoped folder; omit => the project root
+
+
+class FileMoveIn(BaseModel):
+    # Omit `scope` for a within-scope move (just re-home under `directory_id`); set it to
+    # "project"/"org" for a cross-scope move (existing scope-change policy + re-home under the
+    # destination directory, or the destination scope root when `directory_id` is omitted).
+    directory_id: str | None = None
+    scope: str | None = None
+
+
 class MaintenanceToggleIn(BaseModel):
     enabled: bool = False      # SOF-94: no-op maintenance-agent placeholder preference
 

@@ -16,7 +16,8 @@ from console.deps import require_authed, authorize_project, _can_see, project_vi
 
 from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, MaintenanceToggleIn,
                              OrgDocIn, DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
-                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, RepoAccessIn)
+                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, RepoAccessIn,
+                             DirectoryCreateIn, FileUploadIn, FileMoveIn)
 
 router = APIRouter()
 
@@ -250,16 +251,18 @@ def project_material_upload(pid: str, body: OrgDocIn, v: tuple = Depends(authori
         raw = base64.b64decode(body.data_b64 or "", validate=True)
     except Exception:
         raise HTTPException(status_code=400, detail="data_b64 must be valid base64")
-    return _materials().upload(pid, body.name, raw, body.tag, body.content_type)
+    m = _materials()
+    m.upload(pid, body.name, raw, body.tag, body.content_type)
+    return m.documents(pid)
 
 
 @router.delete("/api/projects/{pid}/materials/{material_id}")
 def project_material_delete(pid: str, material_id: int, v: tuple = Depends(authorize_project)):
     """Delete an uploaded material plus storage, memory chunks/summary, and source artifact."""
-    documents = _materials().delete(pid, material_id)
-    if documents is None:
+    m = _materials()
+    if m.delete(pid, material_id) is None:
         raise HTTPException(status_code=404, detail="material not found")
-    return documents
+    return m.documents(pid)
 
 
 @router.post("/api/projects/{pid}/documents/{blob_id}/summarize")
@@ -342,15 +345,66 @@ def project_maintenance_toggle(pid: str, body: MaintenanceToggleIn,
 def project_material_scope(pid: str, material_id: int, body: MaterialScopeIn,
                            v: tuple = Depends(authorize_project)):
     """Move an uploaded material between project-scope and org-wide (PRD §2.4). →org puts it in the
-    org knowledge base (appears in /api/org/docs); →project moves it back to this project."""
-    status, documents = _materials().set_scope(pid, material_id, body.scope)
-    if status == "not_found":
-        raise HTTPException(status_code=404, detail="material not found")
-    if status == "no_org":
-        raise HTTPException(status_code=409, detail="project owner has no org on file")
-    if status == "invalid_scope":
-        raise HTTPException(status_code=400, detail="scope must be 'project' or 'org'")
-    return documents
+    org knowledge base (appears in /api/org/docs); →project moves it back to this project. The moved
+    blob is re-homed under the destination scope's tree (SOF-253). Refusals raise a ServiceError
+    mapped centrally in console/app.py."""
+    m = _materials()
+    m.set_scope(pid, material_id, body.scope)
+    return m.documents(pid)
+
+
+# ── Files browser (SOF-253): directory-aware source tree ──────────────────────────────────────
+@router.get("/api/projects/{pid}/files")
+def project_files(pid: str, v: tuple = Depends(authorize_project)):
+    """The Files browser read model: virtual combined root, persisted project + org roots, the
+    directory tree with child/member counts + summary state, stable file memberships, and recent
+    references. Exposes only this project's scope + its owner org — never another tenant."""
+    return _materials().files(pid)
+
+
+@router.post("/api/projects/{pid}/directories")
+def project_directory_create(pid: str, body: DirectoryCreateIn, v: tuple = Depends(authorize_project)):
+    """Create a folder under a real scoped parent (a scope root or a folder within it). The virtual
+    Files root is rejected; duplicate sibling names return a precise 409. Returns the Files tree."""
+    return _materials().create_directory(pid, body.parent_id, body.name)
+
+
+@router.post("/api/projects/{pid}/files")
+def project_file_upload(pid: str, body: FileUploadIn, v: tuple = Depends(authorize_project)):
+    """Upload a source file into a real project directory (defaults to the project root). Storage +
+    blob metadata + directory membership are written together (no successful orphan). Returns the
+    Files tree."""
+    if not (body.name or "").strip():
+        raise HTTPException(status_code=400, detail="name required")
+    try:
+        raw = base64.b64decode(body.data_b64 or "", validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="data_b64 must be valid base64")
+    m = _materials()
+    m.upload(pid, body.name, raw, body.tag, body.content_type, directory_id=body.directory_id)
+    return m.files(pid)
+
+
+@router.patch("/api/projects/{pid}/files/{blob_id}")
+def project_file_move(pid: str, blob_id: int, body: FileMoveIn, v: tuple = Depends(authorize_project)):
+    """Move a source file. Omit `scope` to move WITHIN its scope (re-home under `directory_id`);
+    set `scope` to "project"/"org" for a cross-scope move (existing scope-change policy + re-home
+    under `directory_id`, or the destination scope root if omitted). Returns the Files tree."""
+    m = _materials()
+    if body.scope:
+        m.set_scope(pid, blob_id, body.scope, directory_id=body.directory_id)
+        return m.files(pid)
+    return m.move_file(pid, blob_id, body.directory_id)
+
+
+@router.delete("/api/projects/{pid}/files/{blob_id}")
+def project_file_delete(pid: str, blob_id: int, v: tuple = Depends(authorize_project)):
+    """Delete a source file (storage + derived memory + source artifacts), same cleanup as the
+    materials delete. Returns the Files tree."""
+    m = _materials()
+    if m.delete(pid, blob_id) is None:
+        raise HTTPException(status_code=404, detail="file not found")
+    return m.files(pid)
 
 
 # ── Run-scoped actions ──────────────────────────────────────────────────────────────────────
