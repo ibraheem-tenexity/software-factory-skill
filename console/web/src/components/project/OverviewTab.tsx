@@ -80,11 +80,24 @@ function deriveSnapshot(
       cta: { label: "Open factory console", onClick: routes.factory, primary: true },
     };
   }
-  if (st?.held || phase === "stopped") {
+  // A crashed run (dead stage / OOM) must NOT read as healthy progress — surface the fault + the
+  // real recovery action (RecoveryBar: retry / resume / rewind) at the exact moment action is needed.
+  if (phase === "crashed" || st?.crashed_at_node) {
+    const node = st?.crashed_at_node;
+    return {
+      tone: "danger", icon: "zap",
+      title: node ? `The build hit an error at "${node}" and stopped.` : "The build hit an error and stopped.",
+      detail: "Open the factory console to retry, resume, or rewind from where it stopped.",
+      cta: { label: "Open factory console", onClick: routes.factory, primary: true },
+    };
+  }
+  if (st?.held || phase === "paused" || phase === "stopped") {
+    const node = st?.paused_at_node;
     return {
       tone: "warning", icon: "pause",
       title: "The build is paused and waiting on you.",
-      detail: "Open the factory console to review what it needs and resume when you're ready.",
+      detail: node ? `Paused at "${node}". Open the factory console to review what it needs and resume when you're ready.`
+                   : "Open the factory console to review what it needs and resume when you're ready.",
       cta: { label: "Open factory console", onClick: routes.factory, primary: true },
     };
   }
@@ -265,9 +278,9 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onOpenB
     );
   }
 
-  const bannerBorder = snap.tone === "warning" ? T.warning : snap.tone === "success" ? T.success : T.brand;
-  const bannerBg = snap.tone === "warning" ? T.warningSoft : snap.tone === "success" ? (T.successSoft || T.brandSoft) : T.brandSoft;
-  const bannerIconColor = snap.tone === "warning" ? T.warning : snap.tone === "success" ? T.success : T.brand;
+  const bannerBorder = snap.tone === "danger" ? T.danger : snap.tone === "warning" ? T.warning : snap.tone === "success" ? T.success : T.brand;
+  const bannerBg = snap.tone === "danger" ? T.dangerSoft : snap.tone === "warning" ? T.warningSoft : snap.tone === "success" ? T.successSoft : T.brandSoft;
+  const bannerIconColor = snap.tone === "danger" ? T.danger : snap.tone === "warning" ? T.warning : snap.tone === "success" ? T.success : T.brand;
 
   return (
     <div style={{ flex: 1, overflow: "auto", backgroundImage: `radial-gradient(circle, ${T.borderSubtle} 1px, transparent 1px)`, backgroundSize: "22px 22px" }}>
@@ -329,7 +342,7 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onOpenB
                 <div style={{ display: "flex", flexDirection: "column", gap: 9, padding: "11px 0", borderTop: `1px solid ${T.borderSubtle}`, borderBottom: `1px solid ${T.borderSubtle}` }}>
                   {([
                     ["Project brief", !!(brief.goal || brief.description)],
-                    ["Scope of work", !!(brief.scope && brief.scope.length)],
+                    ["Scope", !!(brief.scope && brief.scope.length)],
                     [`Build engine · ${brief.runtime === "opencode" ? "OpenCode" : brief.runtime === "codex" ? "Codex" : "Claude"}`, true],
                     ["Materials (optional)", (docs?.uploaded?.length || 0) > 0],
                   ] as [string, boolean][]).map(([k, ok]) => (
