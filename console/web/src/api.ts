@@ -73,6 +73,15 @@ export type Assumption = { fact: string; document_blob_id: number; section_path:
 // storage; both null until finalized).
 export type BriefResponse = { brief_markdown: string | null; brief_url: string | null; assumptions: Assumption[] };
 
+// SOF-244: the CANONICAL Product Brief as a versioned document (distinct from BriefResponse's
+// goal/scope projection). Each version is an immutable kind='product_brief' artifact; `origin`
+// is 'user' (direct edit) or 'agent' (Concierge finalization, agent='concierge'). `artifact_id`
+// is the stable version id used as the optimistic base_version_id on save.
+export type ProductBriefVersion = {
+  artifact_id: number; ts: number; origin: string; agent: string | null; title: string;
+};
+export type ProductBriefDoc = ProductBriefVersion & { markdown: string | null };
+
 export type Me = { email: string; role: string; auth: boolean; name?: string; is_internal?: boolean };
 
 // GET /api/projects/{id}/deps → console.stage2_artifacts(). `tokens` are the architecture-derived
@@ -424,6 +433,18 @@ export const api = {
   // Thin goal/scope editor (post-promote "Edit brief"); returns the draft-projection shape.
   putBrief: (id: string, brief: { goals?: string; scope?: string[] }) =>
     send<{ name: string; goal: string; scope: string[]; description: string }>(`/api/projects/${id}/brief`, "PUT", brief),
+  // SOF-244: versioned canonical Product Brief document (reader/editor — SOF-242/243).
+  productBrief: (id: string) =>
+    get<{ latest: ProductBriefDoc | null }>(`/api/projects/${id}/product-brief`),
+  productBriefVersions: (id: string) =>
+    get<{ versions: ProductBriefVersion[] }>(`/api/projects/${id}/product-brief/versions`),
+  productBriefVersion: (id: string, artifactId: number) =>
+    get<ProductBriefDoc>(`/api/projects/${id}/product-brief/versions/${artifactId}`),
+  // Save a new version from complete markdown; baseVersionId is the loaded version (null on first).
+  // A stale base rejects 409 with { detail: { message, latest } }.
+  saveProductBrief: (id: string, markdown: string, baseVersionId: number | null) =>
+    send<ProductBriefDoc>(`/api/projects/${id}/product-brief/versions`, "POST",
+      { markdown, base_version_id: baseVersionId }),
   chat: (body: Record<string, unknown>, signal?: AbortSignal) =>
     send<{ project_id: string; messages: any[] }>("/api/chat", "POST", body, signal),
   // Onboarding Concierge conversation turn: one user message -> the agent's ConciergeTurn reply

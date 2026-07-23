@@ -193,6 +193,14 @@ class PromoteIn(BaseModel):
     target: str = "railway"
 
 
+class BriefVersionIn(BaseModel):
+    # SOF-244: a complete Product Brief markdown body + the artifact id the editor loaded
+    # (base_version_id). base_version_id is null only for the very first version; a stale base
+    # (someone else saved meanwhile) returns 409 with the current latest.
+    markdown: str
+    base_version_id: int | None = None
+
+
 # ── Tenexity OS (§3) admin bodies ───────────────────────────────────────────────────────────────
 class DemoIn(BaseModel):
     is_demo: bool = False
