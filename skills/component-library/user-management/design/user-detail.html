@@ -1,0 +1,86 @@
+<!doctype html>
+<!-- SOF-109 component-library · user-management · screen: user-detail (archetype Zone 7 — Admin/Settings).
+     Token-authentic static mockup on the Tenexity design system. Pairs with users-list.html. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ana Ríos · User</title>
+<style>
+  :root{
+    --background:0 0% 98%; --foreground:240 6% 10%; --raised:0 0% 100%; --sunken:240 5% 96%;
+    --text-secondary:240 4% 34%; --text-tertiary:240 4% 56%;
+    --border-subtle:240 5% 91%; --border-default:240 5% 84%;
+    --brand:214 100% 55%; --brand-foreground:0 0% 100%; --brand-soft:214 100% 95%; --brand-deep:214 91% 41%;
+    --success:159 94% 30%; --success-soft:152 76% 94%;
+    --danger:0 74% 50%; --danger-soft:0 86% 95%;
+    --r:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:hsl(var(--background));color:hsl(var(--foreground));
+    font:400 14px/1.5 "Hanken Grotesk",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:760px;margin:0 auto;padding:28px 24px}
+  a.back{display:inline-flex;align-items:center;gap:6px;color:hsl(var(--text-secondary));text-decoration:none;font-size:13px;margin-bottom:18px}
+  a.back:hover{color:hsl(var(--foreground))}
+  .card{background:hsl(var(--raised));border:1px solid hsl(var(--border-subtle));border-radius:var(--r);box-shadow:0 1px 2px hsl(240 6% 10% / .04)}
+  .hd{display:flex;align-items:center;gap:14px;padding:20px;border-bottom:1px solid hsl(var(--border-subtle))}
+  .av{width:52px;height:52px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;font:600 18px/1 inherit;color:hsl(var(--brand-deep));background:hsl(var(--brand-soft))}
+  .hd h1{margin:0;font:600 19px/1.2 Georgia,serif;letter-spacing:-.01em}
+  .hd .email{color:hsl(var(--text-tertiary));font-size:13px;margin-top:2px}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font:600 11.5px/1 inherit}
+  .dot{width:6px;height:6px;border-radius:50%}
+  .st-active{background:hsl(var(--success-soft));color:hsl(var(--success))}
+  .st-active .dot{background:hsl(var(--success))}
+  .body{padding:20px;display:flex;flex-direction:column;gap:18px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:14px}
+  .lbl{font:600 11px/1 inherit;letter-spacing:.06em;text-transform:uppercase;color:hsl(var(--text-tertiary))}
+  .val{color:hsl(var(--foreground));font-size:14px}
+  .val.muted{color:hsl(var(--text-tertiary))}
+  select{height:34px;border:1px solid hsl(var(--border-default));border-radius:8px;background:hsl(var(--raised));color:hsl(var(--foreground));font:inherit;padding:0 30px 0 11px;cursor:pointer;appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238A8A92' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");background-repeat:no-repeat;background-position:right 9px center}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .field{background:hsl(var(--sunken));border-radius:8px;padding:11px 13px}
+  .field .lbl{margin-bottom:5px}
+  hr{border:0;border-top:1px solid hsl(var(--border-subtle));margin:2px 0}
+  .actions{display:flex;gap:9px;flex-wrap:wrap}
+  .btn{appearance:none;border:1px solid transparent;border-radius:8px;padding:9px 13px;font:600 13px/1 inherit;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+  .btn-ghost{background:hsl(var(--raised));color:hsl(var(--text-secondary));border-color:hsl(var(--border-default))}
+  .btn-ghost:hover{background:hsl(var(--sunken))}
+  .btn-danger{background:hsl(var(--danger-soft));color:hsl(var(--danger));border-color:transparent}
+  .btn-danger:hover{background:hsl(0 86% 92%)}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="users-list.html"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg> Users</a>
+    <div class="card">
+      <div class="hd">
+        <div class="av">AR</div>
+        <div style="flex:1">
+          <h1>Ana Ríos</h1>
+          <div class="email">ana@acme.co</div>
+        </div>
+        <span class="pill st-active"><span class="dot"></span>Active</span>
+      </div>
+      <div class="body">
+        <div class="row">
+          <div><div class="lbl">Role</div><div class="val" style="margin-top:6px">Controls what Ana can see and do.</div></div>
+          <select><option>Admin</option><option>Member</option><option>Viewer</option></select>
+        </div>
+        <hr/>
+        <div class="grid">
+          <div class="field"><div class="lbl">Last active</div><div class="val">2 hours ago</div></div>
+          <div class="field"><div class="lbl">Member since</div><div class="val">Mar 4, 2026</div></div>
+          <div class="field"><div class="lbl">Invited by</div><div class="val">jordan@acme.co</div></div>
+          <div class="field"><div class="lbl">Auth</div><div class="val">Google SSO</div></div>
+        </div>
+        <hr/>
+        <div class="actions">
+          <button class="btn btn-ghost"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg> Reset password</button>
+          <button class="btn btn-danger"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12h8"/></svg> Deactivate user</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

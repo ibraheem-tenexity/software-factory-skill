@@ -1,0 +1,33 @@
+{
+  "id": "access-roles",
+  "version": "0.1.0",
+  "name": "Access & roles",
+  "archetype_zones": ["admin-settings"],
+  "capabilities": ["define role", "edit role permissions", "assign role to user"],
+  "screens": [
+    { "screen_id": "roles-list", "mockup": "design/roles-list.html", "template": "template/RolesList" }
+  ],
+  "data_interface": {
+    "entities": [
+      "Role { id, name, description, member_count, is_system }",
+      "Permission { key, group, label }",
+      "RolePermission { role_id, permission_key, allowed: boolean }"
+    ],
+    "operations": [
+      "listRoles() -> Role[]",
+      "listPermissions() -> Permission[]",
+      "getRolePermissions(role_id) -> RolePermission[]",
+      "setRolePermission(role_id, permission_key, allowed) -> void",
+      "createRole({ name, description }) -> Role"
+    ]
+  },
+  "permissions": ["admin"],
+  "tokens": "required",
+  "customization_points": [
+    "the permission catalog (defaults to the app's own capability set)",
+    "whether roles are fixed (system) or customer-editable",
+    "role→user assignment lives here or on the user-management detail screen"
+  ],
+  "status": "draft",
+  "notes": "v0.1: manifest + roles-list/permission-matrix design mockup. Code template pending SOF-109's template-framework decision. Pairs with user-management (assign-role can live on either); see docs/design/component-library.md."
+}
