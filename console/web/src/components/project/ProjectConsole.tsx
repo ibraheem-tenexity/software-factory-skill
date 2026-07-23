@@ -54,7 +54,14 @@ function writeView(v: Peer, push: boolean) {
 
 function statusOf(s: Status): { label: string; tone: Tone } {
   if (s.deploy_url || s.done || s.phase === "done") return { label: "Deployed", tone: "success" };
-  if (s.budget_stopped || s.credential_stopped || s.held) return { label: "Needs input", tone: "warning" };
+  // A crashed run must NEVER read "Building" — that false-healthy pill hides the exact moment the
+  // customer needs to act. Crashed → danger; operator-halted (paused/stopped/held) → neutral, not
+  // an in-flight "Building". budget/credential blocks stay the actionable "Needs input" warning.
+  if (s.phase === "crashed" || s.crashed_at_node) return { label: "Crashed", tone: "danger" };
+  if (s.budget_stopped || s.credential_stopped) return { label: "Needs input", tone: "warning" };
+  if (s.phase === "paused") return { label: "Paused", tone: "neutral" };
+  if (s.phase === "stopped") return { label: "Stopped", tone: "neutral" };
+  if (s.held) return { label: "On hold", tone: "neutral" };
   if (s.phase === "draft") return { label: "Draft", tone: "neutral" };
   if ((s.phase || "").toLowerCase().includes("research")) return { label: "Researching", tone: "brand" };
   return { label: "Building", tone: "info" };
