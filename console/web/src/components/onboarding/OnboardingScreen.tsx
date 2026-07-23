@@ -303,13 +303,13 @@ function BudgetPicker({ value, onChange }: { value: number | null; onChange: (v:
       {isCustom && (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ font: `500 14px/1 ${T.mono}`, color: T.secondary }}>$</span>
-          <input value={customVal} onChange={(e) => { setCustomVal(e.target.value); const n = parseFloat(e.target.value); onChange(!isNaN(n) && n > 0 ? n : null); }}
-            placeholder="e.g. 200" type="number" min={1}
+          <input value={customVal} onChange={(e) => { setCustomVal(e.target.value); const n = parseFloat(e.target.value); onChange(!isNaN(n) && n > 5 ? n : null); }}
+            placeholder="e.g. 200" type="number" min={5} step="any"
             style={{ width: 120, font: `500 13px/1 ${T.mono}`, color: T.fg, background: T.bg, border: `1.5px solid ${T.borderDefault}`, borderRadius: T.rMd, padding: "8px 10px", outline: "none" }} autoFocus />
         </div>
       )}
       <p style={{ margin: 0, font: `400 11.5px/1.4 ${T.sans}`, color: T.tertiary }}>
-        {value != null ? `Factory stops and notifies you when spend reaches $${value}.` : "Choose a total project cap to continue."}
+        {value != null ? `Factory stops and notifies you when spend reaches $${value}.` : "Enter a project cap greater than $5 to continue."}
       </p>
     </div>
   );
@@ -658,7 +658,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
       if (fresh) await saveCompanyFresh();                                    // flush company
       await api.patchDraft(draftId, { name: p.name, goal: p.goal, scope: p.scope, github_username: githubUsername }).catch(() => {}); // flush project
       await api.patchDraft(draftId, { runtime: engine.provider, model: engine.model, keySource: engine.keySource, key: engine.key }).catch(() => {}); // flush engine
-      if (budget != null) await api.patchDraft(draftId, { budget }).catch(() => {});  // flush budget cap
+      if (budget != null) await api.patchDraft(draftId, { budget });  // flush budget cap; a failed save stops handoff
       if (engine.keySource === "byok" && engine.key.trim()) {                 // flush BYOK key → Vault
         const keyName = engine.provider === "claude" ? "ANTHROPIC_API_KEY"
           : engine.provider === "codex" ? "CODEX_API_KEY" : "OPENROUTER_API_KEY";
@@ -808,7 +808,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <Field label="What are you building?" hint="One or two sentences on the outcome you want.">
                         <TextArea rows={3} value={p.goal} onChange={(v) => setProj("goal", v)} placeholder="e.g. Replace the manual quoting spreadsheet and write won quotes back to Epicor…" />
                       </Field>
-                      <Field label="Budget cap" hint="Required total spend ceiling for this project.">
+                      <Field label="Budget cap" hint="Required total spend ceiling for this project. Must be more than $5.">
                         <BudgetPicker value={budget} onChange={setBudget} />
                       </Field>
                       <Field label="GitHub username" optional hint="We'll invite this account to the project repository after it is created.">
@@ -911,7 +911,7 @@ export function OnboardingScreen({ onComplete, onBack, resumeProjectId }: { onCo
                       <Field label="What are you building?" hint="One or two sentences on the outcome you want.">
                         <TextArea rows={3} value={p.goal} onChange={(v) => setProj("goal", v)} placeholder="e.g. Replace the manual quoting spreadsheet…" />
                       </Field>
-                      <Field label="Budget cap" hint="Required total spend ceiling for this project.">
+                      <Field label="Budget cap" hint="Required total spend ceiling for this project. Must be more than $5.">
                         <BudgetPicker value={budget} onChange={setBudget} />
                       </Field>
                       <Field label="GitHub username" optional hint="We'll invite this account to the project repository after it is created.">
