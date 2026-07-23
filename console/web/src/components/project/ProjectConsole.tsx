@@ -20,6 +20,7 @@ import { api, ProjectSummary, Graph, Ticket } from "../../api";
 import { T, Icon, Btn, StatusPill, Wordmark, TextInput, Sparkle } from "../onboarding/design";
 import { AccountMenu } from "../AccountMenu";
 import { OverviewTab } from "./OverviewTab";
+import { ProductBriefPeer } from "./ProductBriefPeer";
 import { FactoryOutputsPeer } from "./FactoryOutputsPeer";
 import { FilesPeer } from "./FilesPeer";
 import { MaintenanceTab } from "./MaintenanceTab";
@@ -240,7 +241,7 @@ export function ProjectConsole({ projectId, onBack, onResume, onOpen }: {
             /* SOF-241 swaps OverviewTab → OverviewPeer at THIS one line. Keep the mount obvious. */
             <OverviewTab projectId={projectId} onOpenFactory={() => go("factory")} onOpenBrief={() => go("brief")} onOpenOutputs={() => go("outputs")} onOpenDocuments={() => go("files")} onResume={onResume} onDiscard={isDraft ? doArchive : undefined} />
           )}
-          {view === "brief" && <BriefPeer artifacts={artifacts} goal={status?.goal || status?.description || ""} onOpen={openRef} />}
+          {view === "brief" && <ProductBriefPeer projectId={projectId} />}
           {view === "outputs" && <FactoryOutputsPeer projectId={projectId} />}
           {view === "factory" && <FactoryBoard projectId={projectId} status={status || ({} as Status)} tickets={tickets} graph={graph} loaded={loaded} onStatus={(s) => setStatus(s)} />}
           {view === "files" && <FilesPeer projectId={projectId} />}
@@ -285,27 +286,6 @@ export function ProjectConsole({ projectId, onBack, onResume, onOpen }: {
 // ── Placeholder peer bodies — honest + functional, NOT dead affordances. Each is the mount the
 // named child ticket replaces; until then it renders real, useful content from data the shell
 // already has (no mocks, no fake state). ────────────────────────────────────────────────────────
-
-// Product brief peer (SOF-242 replaces with the heading-derived reader + editor). For now: the goal
-// and a real route into the canonical brief artifact if one exists.
-function BriefPeer({ artifacts, goal, onOpen }: { artifacts: ArtifactRef[]; goal: string; onOpen: (a: ArtifactRef) => void }) {
-  const brief = artifacts.find((a) => /brief/i.test(a.label) || /brief/i.test(a.kind || ""));
-  return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "28px 24px" }}>
-      <div style={{ maxWidth: 760, margin: "0 auto" }}>
-        <h2 style={{ font: `700 18px/1.2 ${T.display}`, margin: "0 0 4px", color: T.fg }}>Product brief</h2>
-        <p style={{ font: `400 12.5px/1.5 ${T.sans}`, color: T.tertiary, margin: "0 0 18px" }}>What you asked the factory to build.</p>
-        {goal ? <p style={{ font: `400 14px/1.6 ${T.sans}`, color: T.fg, whiteSpace: "pre-wrap" }}>{goal}</p>
-          : <p style={{ font: `400 13px/1.5 ${T.sans}`, color: T.tertiary }}>The product brief appears here once intake finalizes it.</p>}
-        {brief && (
-          <Btn variant="primary" size="sm" onClick={() => onOpen(brief)} style={{ marginTop: 18 }}>
-            Open full brief <Icon name="arrowRight" size={13} color="#fff" />
-          </Btn>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // Factory outputs peer (SOF-245 replaces with the stage-grouped workspace). For now: the real
 // produced artifacts as a flat clickable list opening the artifact viewer.
