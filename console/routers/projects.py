@@ -17,7 +17,7 @@ from console.deps import require_authed, authorize_project, _can_see, project_vi
 from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, MaintenanceToggleIn,
                              OrgDocIn, DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
                              RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, RepoAccessIn,
-                             DirectoryCreateIn, FileUploadIn, FileMoveIn)
+                             DirectoryCreateIn, FileUploadIn, FileMoveIn, BriefVersionIn)
 
 router = APIRouter()
 
@@ -130,6 +130,38 @@ def update_project_brief(pid: str, body: dict, v: tuple = Depends(authorize_proj
     return state.console.intake.set_draft_project(
         pid, goal=body.get("goals"), scope=body.get("scope"),
     )
+
+
+# ── Product Brief: versioned document read/write + history (SOF-244) ─────────────────────────
+# Distinct from PUT /brief above (the thin goal/scope projection). These edit the CANONICAL
+# kind='product_brief' artifact as a versioned document, converging direct edits with Concierge
+# finalization on one newest-wins, immutable-history stream. Invalid/NotFound/Conflict raised by
+# state.console.briefs are mapped to 400/404/409 by app.py's ServiceError handler.
+@router.get("/api/projects/{pid}/product-brief")
+def product_brief_latest(pid: str, v: tuple = Depends(authorize_project)):
+    """Newest canonical Product Brief (metadata + markdown), or {"latest": null} if none yet."""
+    return {"latest": state.console.briefs.latest(pid)}
+
+
+@router.get("/api/projects/{pid}/product-brief/versions")
+def product_brief_versions(pid: str, v: tuple = Depends(authorize_project)):
+    """Every version newest-first — stable artifact ids, timestamps, provenance; no bodies."""
+    return {"versions": state.console.briefs.versions(pid)}
+
+
+@router.get("/api/projects/{pid}/product-brief/versions/{artifact_id}")
+def product_brief_version(pid: str, artifact_id: int, v: tuple = Depends(authorize_project)):
+    """One historical version by artifact id, authorized to this project (read-only).
+    404 if unknown, not a product_brief, or owned by another project."""
+    return state.console.briefs.version(pid, artifact_id)
+
+
+@router.post("/api/projects/{pid}/product-brief/versions")
+def product_brief_save(pid: str, body: BriefVersionIn, v: tuple = Depends(authorize_project)):
+    """Create a new immutable version from complete markdown (direct document edit). Optimistic:
+    a stale base_version_id returns 409 with the current latest; empty markdown returns 400.
+    Never mutates a prior version; provenance is origin='user'."""
+    return state.console.briefs.save(pid, body.markdown, body.base_version_id, agent=v[0] or "user")
 
 
 @router.get("/api/projects/{pid}/events")

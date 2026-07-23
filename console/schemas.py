@@ -1,5 +1,10 @@
 """Pydantic request bodies for the console API. Pure data shapes — no logic, no app imports."""
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import BaseModel, Field
+
+
+BudgetAmount = Annotated[float, Field(gt=5)]
 
 
 class GoogleLoginIn(BaseModel):
@@ -164,7 +169,7 @@ class MaintenanceToggleIn(BaseModel):
 
 
 class BudgetIn(BaseModel):
-    ceiling: float | None = None
+    ceiling: BudgetAmount
 
 
 class RetryNodeIn(BaseModel):
@@ -183,7 +188,7 @@ class DraftCreateIn(BaseModel):
     planning_model: str = ""
     impl_model: str = ""
     model: str = ""   # opencode model alias: "kimi"|"glm"
-    budget: float | None = None  # per-project spend ceiling ($); None → SF_COST_CEILING default
+    budget: BudgetAmount | None = None  # incomplete drafts may omit it; supplied caps must exceed $5
     github_username: str = ""
 
 
@@ -193,7 +198,7 @@ class DraftPatchIn(BaseModel):
     scope: list | None = None
     runtime: str | None = None   # "claude"|"opencode"|"codex" — lets the Build-engine card update the draft after eager create
     model: str | None = None     # opencode model alias: "kimi"|"glm"
-    budget: float | None = None  # update the spend ceiling
+    budget: BudgetAmount | None = None  # update the spend ceiling; supplied caps must exceed $5
     recipe_id: str | None = None  # CBT-9: the picked recipe id (must name a published recipe), or "" to clear
     github_username: str | None = None
 
@@ -213,6 +218,14 @@ class AttachIn(BaseModel):
 class PromoteIn(BaseModel):
     description: str = ""
     target: str = "railway"
+
+
+class BriefVersionIn(BaseModel):
+    # SOF-244: a complete Product Brief markdown body + the artifact id the editor loaded
+    # (base_version_id). base_version_id is null only for the very first version; a stale base
+    # (someone else saved meanwhile) returns 409 with the current latest.
+    markdown: str
+    base_version_id: int | None = None
 
 
 # ── Tenexity OS (§3) admin bodies ───────────────────────────────────────────────────────────────

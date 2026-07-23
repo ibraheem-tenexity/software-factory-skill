@@ -58,6 +58,10 @@ artifacts = Table(
     Column("content", Text),
     Column("source_blob_id", Integer, ForeignKey("blobs.id", ondelete="CASCADE")),
     Column("origin", Text, nullable=False, server_default="agent"),  # 'agent' | 'user'
+    # SOF-78: the pipeline stage that produced this artifact (0=intake/concierge, 1/2/3=stages),
+    # stamped at record_artifact() time from the run's current ProjectState.stage. Nullable —
+    # pre-SOF-78 rows and any record path that can't resolve a stage stay NULL.
+    Column("stage", Integer),
 )
 
 blockers = Table(

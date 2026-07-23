@@ -167,8 +167,12 @@ def build_project_tools(console: ExecutionService, project_id: str) -> list:
             return "markdown is empty — nothing saved"
         url = storage.put(project_id, "product-brief.md", md.encode())
         paths = console._paths(project_id)
+        # SOF-244: inline `content=md` so THIS version is immutable in its own row. The storage key
+        # is fixed, so every finalize overwrites the same blob — without inline content, older
+        # versions in the shared history would all resolve to the latest blob. Direct edits
+        # (projects/product_brief.py) inline content the same way; both converge on one stream.
         ProjectStore(paths["db"]).record_artifact(
-            "Product Brief", url, kind="product_brief", agent="concierge")
+            "Product Brief", url, kind="product_brief", agent="concierge", content=md)
         return "saved"
 
     @tool

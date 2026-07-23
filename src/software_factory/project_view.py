@@ -115,7 +115,8 @@ def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None,
     # (unlike SOF-60's user-deposited markdown) and slipped past the origin-only filter above.
     # kind='product_brief' is the same category (SOF-199) — see INPUT_ONLY_KINDS.
     produced = [{"id": a.get("id"), "title": a.get("title", ""), "path": a.get("path", ""),
-                 "kind": a.get("kind", ""), "agent": a.get("agent", ""), "ts": a.get("ts")}
+                 "kind": a.get("kind", ""), "agent": a.get("agent", ""), "ts": a.get("ts"),
+                 "stage": a.get("stage")}  # SOF-78: producing stage (nullable) for the tile label
                 for a in (artifacts or [])
                 if a.get("origin") != "user" and a.get("kind") not in INPUT_ONLY_KINDS]
     # Org knowledge base surfaced on the project Documents tab (design #32 / PRD §2.5b). Each row
