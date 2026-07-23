@@ -95,13 +95,15 @@ function synthBubbles(args: { buildDone?: boolean; deployed?: boolean; ticketsDo
 
 export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, isBuilding,
   ticketsDone, ticketsTotal, buildDone, deployed, phase,
-  context = "build", selectedLabel, docChips }:
+  context = "build", selectedLabel, docChips, onMinimize }:
   { projectId: string; projectName?: string; artifacts: ArtifactRef[];
     onOpenArtifact: (a: ArtifactRef) => void; isBuilding?: boolean;
     ticketsDone?: number; ticketsTotal?: number; buildDone?: boolean; deployed?: boolean; phase?: string;
     // SOF-246: the active Project Console peer drives copy + display grounding. `selectedLabel` is the
     // selected heading/artifact/file when a peer has one; `docChips` overrides the Files chips.
-    context?: Ctx; selectedLabel?: string; docChips?: string[] }) {
+    // SOF-248: the shell owns the minimize preference; `onMinimize` collapses the dock. When set,
+    // the header shows one labelled Minimize control.
+    context?: Ctx; selectedLabel?: string; docChips?: string[]; onMinimize?: () => void }) {
   const ctx = CTX[context];
   const subtitle = context === "build" && buildDone ? "Build complete" : ctx.subtitle;
   const chips = context === "files" && docChips && docChips.length ? docChips : ctx.chips;
@@ -205,6 +207,13 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
           {selectedLabel && <span style={{ display: "block", marginTop: 2, font: `500 10px/1.2 ${T.mono}`, color: T.brandDeep, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>◆ {selectedLabel}</span>}
         </div>
         {sending ? <WorkingPill label="Thinking" /> : isBuilding ? <WorkingPill /> : <StatusPill tone="success">online</StatusPill>}
+        {onMinimize && (
+          <button onClick={onMinimize} aria-label="Minimize Concierge" title="Minimize Concierge"
+            style={{ display: "grid", placeItems: "center", width: 26, height: 26, borderRadius: T.rMd, flexShrink: 0,
+              border: `1px solid ${T.borderSubtle}`, background: T.raised, cursor: "pointer", color: T.secondary }}>
+            <Icon name="chevronRight" size={14} color={T.secondary} />
+          </button>
+        )}
       </div>
 
       {/* Feed / Tray / Latest toggle */}

@@ -17,7 +17,7 @@
 //   maintenance → <MaintenanceTab> (conditional; completed/deployed projects only)
 import { useEffect, useRef, useState } from "react";
 import { api, ProjectSummary, Graph, Ticket } from "../../api";
-import { T, Icon, Btn, StatusPill, Wordmark, TextInput } from "../onboarding/design";
+import { T, Icon, Btn, StatusPill, Wordmark, TextInput, Sparkle } from "../onboarding/design";
 import { AccountMenu } from "../AccountMenu";
 import { OverviewTab } from "./OverviewTab";
 import { FactoryOutputsPeer } from "./FactoryOutputsPeer";
@@ -78,6 +78,9 @@ export function ProjectConsole({ projectId, onBack, onResume, onOpen }: {
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [menu, setMenu] = useState(false);
+  // SOF-248: the Concierge minimize preference lives HERE (once), so it persists across peer
+  // switches for this project visit and is never reimplemented per peer. Reset on project change.
+  const [conciergeMin, setConciergeMin] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [relaunchError, setRelaunchError] = useState<string | null>(null);
@@ -104,6 +107,7 @@ export function ProjectConsole({ projectId, onBack, onResume, onOpen }: {
     if (prevProject.current === projectId) return;
     prevProject.current = projectId;
     setView("overview"); writeView("overview", false);
+    setConciergeMin(false);   // SOF-248: a fresh project visit opens the dock; never leak the prior visit's pref
   }, [projectId]);
 
   // Browser back/forward: mirror the URL's ?view into state (AC: back/forward walks the peers).
@@ -115,6 +119,7 @@ export function ProjectConsole({ projectId, onBack, onResume, onOpen }: {
 
   const isDraft = status?.phase === "draft";
   const isDone = !!(status && (status.done || status.phase === "done" || status.deploy_url));
+  const buildingNow = !!status && !status.done && status.phase !== "draft" && status.phase !== "stopped";
   const canRelaunch = status?.phase === "stopped" || status?.phase === "done";
   const ingesting = false; // SOF-239: no ingest signal wired yet; SOF-246 threads the real one.
 
@@ -250,14 +255,29 @@ export function ProjectConsole({ projectId, onBack, onResume, onOpen }: {
             context-aware dock and feeds it `conciergeContext`, and SOF-248 hangs minimize off this
             same block. Do not move the mount inside the peer switch.
            ───────────────────────────────────────────────────────────────────────────────────── */}
-        <aside style={{ width: 340, flexShrink: 0, borderLeft: `1px solid ${T.borderSubtle}`, background: T.raised, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <aside style={{ width: 340, flexShrink: 0, borderLeft: `1px solid ${T.borderSubtle}`, background: T.raised,
+          display: conciergeMin ? "none" : "flex", flexDirection: "column", minHeight: 0 }}>
           <Concierge projectId={projectId} projectName={name} artifacts={artifacts}
-            onOpenArtifact={openRef} context={conciergeContext}
-            isBuilding={!!status && !status.done && status.phase !== "draft" && status.phase !== "stopped"}
+            onOpenArtifact={openRef} context={conciergeContext} onMinimize={() => setConciergeMin(true)}
+            isBuilding={buildingNow}
             ticketsDone={doneTickets} ticketsTotal={tickets.length}
             buildDone={!!status?.done} deployed={!!status?.deploy_url} phase={status?.phase} />
         </aside>
       </div>
+
+      {/* SOF-248: minimized → the dock is display:none (zero layout width/border/padding, so the
+          peer gets the full content width) but stays MOUNTED, preserving transcript/draft/scroll/
+          in-flight state. This 44px floating sparkle restores it; a working dot shows while the
+          build is active. */}
+      {conciergeMin && (
+        <button aria-label="Open Concierge" title="Open Concierge" onClick={() => setConciergeMin(false)}
+          style={{ position: "fixed", right: 20, bottom: 20, width: 44, height: 44, borderRadius: "50%",
+            border: `1px solid ${T.brand}33`, background: T.brandSoft, color: T.brand, cursor: "pointer",
+            display: "grid", placeItems: "center", boxShadow: T.shadowMd, zIndex: 20 }}>
+          <Sparkle size={18} color={T.brand} />
+          {buildingNow && <span aria-hidden style={{ position: "absolute", top: 3, right: 3, width: 10, height: 10, borderRadius: "50%", background: T.brand, boxShadow: `0 0 0 2px ${T.bg}` }} />}
+        </button>
+      )}
     </div>
   );
 }
