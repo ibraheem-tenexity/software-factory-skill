@@ -93,15 +93,30 @@ function ActivityRow({ it, anchor, selected, artifacts, onOpenArtifact, rowRef }
 // stage-triggered action (Wait-for-deps) the board hands down; it renders at the chronological tail
 // (it is the current gate) and — because it lives INSIDE this mode — leaving Activity removes it from
 // layout, so it can never push another selected view below the viewport.
-export function FactoryActivity({ projectId, artifacts, onOpenArtifact, selectedEventId, depsPanel }: {
+export function FactoryActivity({ projectId, artifacts, onOpenArtifact, selectedEventId, depsPanel, focusDeps, onFocusHandled }: {
   projectId: string; artifacts: ArtifactRef[]; onOpenArtifact: (a: ArtifactRef) => void;
   selectedEventId?: string | null; depsPanel?: ReactNode;
+  focusDeps?: boolean; onFocusHandled?: () => void;
 }) {
   const [events, setEvents] = useState<ProjectEvent[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [revealed, setRevealed] = useState(0); // 0 ⇒ not yet initialized
   const prevTotal = useRef(0);
   const rowEls = useRef<Record<string, HTMLDivElement | null>>({});
+  const depsRef = useRef<HTMLDivElement | null>(null);
+
+  // SOF-250: the StageRail's "wait for deps" pill lives outside this mode; clicking it switches to
+  // Activity and raises `focusDeps`. Wait for the events to load (they render ABOVE this tail panel and
+  // would push it below the fold if we scrolled first), then defer past the reveal commit's paint via
+  // double-rAF before scrolling — and clear the one-shot only AFTER scrolling, so the reset can't cancel it.
+  useEffect(() => {
+    if (!focusDeps || !loaded) return;
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => {
+      depsRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      onFocusHandled?.();
+    }));
+    return () => cancelAnimationFrame(id);
+  }, [focusDeps, loaded, onFocusHandled]);
 
   useEffect(() => {
     let live = true;
@@ -198,8 +213,9 @@ export function FactoryActivity({ projectId, artifacts, onOpenArtifact, selected
       )}
 
       {/* Stage-triggered action panel renders at the chronological tail (the current live gate),
-          INSIDE Activity only — selecting Kanban/Tree/Map removes it from layout entirely. */}
-      {depsPanel}
+          INSIDE Activity only — selecting Kanban/Tree/Map removes it from layout entirely. The ref is
+          the scroll target for the StageRail's wait-for-deps pill (SOF-250 cross-mode click-through). */}
+      {depsPanel && <div ref={depsRef}>{depsPanel}</div>}
     </div>
   );
 }
