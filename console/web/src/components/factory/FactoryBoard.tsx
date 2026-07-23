@@ -16,10 +16,11 @@ import { BuildBoard } from "./BuildBoard";
 import { TreeView, MapView } from "./NodeMap";
 import { DocViewer, artifactsFromGraph, ArtifactRef, openArtifact } from "./Artifacts";
 import { RecoveryBar } from "./RecoveryBar";
+import { FactoryActivity } from "./FactoryActivity";
 import { KanbanCardSkel } from "../skeleton";
 
 type Status = ProjectSummary & Record<string, any>;
-type View = "kanban" | "tree" | "map";
+type View = "activity" | "kanban" | "tree" | "map";
 type Doc = { label: string; path?: string; content?: string; id?: number; url?: string | null; agent?: string; kind?: string } | null;
 
 // SOF-100: render the full ticket detail (goal/acceptance/dod/design_refs/deps/notes/decision-log)
@@ -62,11 +63,18 @@ function ticketDetailMarkdown(t: Ticket, projectId: string): string {
 }
 
 const VIEWS: { id: View; label: string; icon: string }[] = [
+  { id: "activity", label: "Activity", icon: "activity" },
   { id: "kanban", label: "Kanban", icon: "kanban" },
   { id: "tree", label: "Tree", icon: "tree" },
   { id: "map", label: "Map", icon: "map" },
 ];
-const VIEW_TITLE: Record<View, string> = { kanban: "Build board", tree: "Process tree", map: "Process graph" };
+const VIEW_TITLE: Record<View, string> = { activity: "Activity", kanban: "Build board", tree: "Process tree", map: "Process graph" };
+const VALID_VIEWS: View[] = ["activity", "kanban", "tree", "map"];
+
+// Last console mode, remembered ONLY for the current project visit (SOF-249 AC): an in-memory map,
+// so switching to another peer and back restores the mode, but a full reload / fresh entry falls
+// back to the Kanban default unless the URL (an alert deep-link) directs otherwise. Not persisted.
+const lastModeByProject: Record<string, View> = {};
 
 function phaseTone(phase?: string): "success" | "warning" | "danger" | "neutral" {
   const halted = toneForHaltedPhase(phase);
@@ -88,14 +96,23 @@ export function FactoryBoard({ projectId, status, tickets, graph, loaded, onStat
   projectId: string; status: Status; tickets: Ticket[]; graph: Graph; loaded: boolean;
   onStatus: (s: Status) => void;
 }) {
+  // Mode precedence (SOF-249): URL ?fview (an alert deep-link / reload) wins, then the mode remembered
+  // for this project visit, then the Kanban default for an ordinary first entry.
   const [view, setView] = useState<View>(() => {
-    const v = new URLSearchParams(location.search).get("fview");
-    return (["tree", "map"].includes(v || "") ? v : "kanban") as View;
+    const v = new URLSearchParams(location.search).get("fview") || "";
+    if ((VALID_VIEWS as string[]).includes(v)) return v as View;
+    return lastModeByProject[projectId] || "kanban";
   });
+  // The event an alert asked us to focus (?fevent) — Activity selects + scrolls to it. Read once at
+  // mount: an alert navigates via the shell (?view=factory), which remounts this board fresh.
+  const [selectedEventId] = useState<string | null>(() => new URLSearchParams(location.search).get("fevent"));
   const [doc, setDoc] = useState<Doc>(null);
   const [previewDoc, setPreviewDoc] = useState<Doc>(null);
 
-  useEffect(() => { setFview(view === "kanban" ? null : view); }, [view]);
+  useEffect(() => {
+    lastModeByProject[projectId] = view;
+    setFview(view === "kanban" ? null : view);
+  }, [view, projectId]);
 
   const phaseStates: Record<string, PhaseStatus> = phaseStatesFromGraph(graph.nodes);
   const artifacts: ArtifactRef[] = artifactsFromGraph(graph);
@@ -176,8 +193,6 @@ export function FactoryBoard({ projectId, status, tickets, graph, loaded, onStat
             haltedNode={haltedNode} doneNodes={doneNodes} onUpdate={(s) => onStatus(s as Status)} />
         )}
 
-        {showDeps && <WaitForDeps projectId={projectId} onResolved={() => api.status(projectId).then((s) => onStatus(s as Status)).catch(() => {})} />}
-
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ font: `700 16px/1 ${T.display}`, letterSpacing: "-0.015em", color: T.fg }}>{VIEW_TITLE[view]}</span>
@@ -189,6 +204,13 @@ export function FactoryBoard({ projectId, status, tickets, graph, loaded, onStat
           <Segmented value={view} onChange={(v) => setView(v as View)} options={VIEWS} />
         </div>
 
+        {view === "activity" && (
+          <FactoryActivity projectId={projectId} artifacts={artifacts} onOpenArtifact={openDocFromRef}
+            selectedEventId={selectedEventId}
+            depsPanel={showDeps
+              ? <WaitForDeps projectId={projectId} onResolved={() => api.status(projectId).then((s) => onStatus(s as Status)).catch(() => {})} />
+              : undefined} />
+        )}
         {view === "kanban" && !loaded && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, alignItems: "start" }}>
             {[0, 1, 2, 3, 4].map((i) => (
