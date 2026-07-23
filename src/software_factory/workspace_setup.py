@@ -353,6 +353,44 @@ def _clone_recipe_seed(repo_url: str, dest: str) -> None:
             f"could not clone recipe seed {repo_url}: {(r.stderr or r.stdout).strip()[-500:]}")
 
 
+# SOF-233: default factory git identity for stage commits. A resumed stage subprocess (seen on
+# codex after a post-redeploy auto-resume) otherwise inherits NO user.name/user.email and NO
+# credential helper, so `git commit` hits "Author identity unknown" and `git push` "could not read
+# Username" — the run only advanced because the agent improvised. Env-overridable.
+_GIT_AUTHOR_NAME = os.environ.get("SF_GIT_AUTHOR_NAME", "Software Factory")
+_GIT_AUTHOR_EMAIL = os.environ.get("SF_GIT_AUTHOR_EMAIL", "factory@tenexity.ai")
+
+
+def _ensure_git_plumbing() -> None:
+    """Make git identity + GitHub push credential DETERMINISTIC for every stage subprocess (all
+    runtimes, fresh launch AND resume — every path reaches _launch_stage → prepare_workspace), so
+    nothing relies on the agent improvising `git config` or a credential path (SOF-233). Idempotent
+    and best-effort: a failure degrades to the prior improvise-or-block behavior — it never blocks a
+    launch — and the full traceback is logged (CLAUDE.md).
+
+    - `git config --global` user.name/user.email — set ONLY when unset. A fresh prod container has no
+      identity → gets the factory bot identity (the fix); a machine that already has one (a developer
+      running the console locally) keeps theirs — we never clobber a real person's git identity.
+    - `gh auth setup-git` wires git's credential helper to `gh`, which authenticates from the
+      allow-listed GH_TOKEN (see env.py), so an https github remote pushes without a token embedded
+      in the URL. Skipped when no token is present (dev/local), where `gh` is unauthenticated anyway."""
+    try:
+        for key, val in (("user.name", _GIT_AUTHOR_NAME), ("user.email", _GIT_AUTHOR_EMAIL)):
+            existing = subprocess.run(["git", "config", "--global", "--get", key],
+                                      check=False, capture_output=True, text=True, timeout=15)
+            if not (existing.stdout or "").strip():  # set-if-unset: never clobber an existing identity
+                subprocess.run(["git", "config", "--global", key, val],
+                               check=False, capture_output=True, text=True, timeout=15)
+        if os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"):
+            r = subprocess.run(["gh", "auth", "setup-git"],
+                               check=False, capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                logger.warning("[workspace] `gh auth setup-git` failed (rc=%s): %s",
+                               r.returncode, (r.stderr or r.stdout or "").strip()[:300])
+    except Exception:
+        logger.exception("[workspace] git plumbing setup failed (non-fatal; agent may need to improvise)")
+
+
 def prepare_workspace(
     projects_dir: str,
     project_id: str,
@@ -365,6 +403,10 @@ def prepare_workspace(
     stage_env: dict | None = None,
 ) -> str:
     ws = workspace.create(projects_dir, project_id)
+
+    # SOF-233: deterministic git identity + push credential for the stage subprocess, so no runtime
+    # (and no resumed shell, the codex failure case) has to improvise `git config`/a credential path.
+    _ensure_git_plumbing()
 
     # .mcp.json is written for BOTH runtimes: mcp_health.check_mcp reads exactly this shape
     # and _launch_stage hard-gates on it before any launch.
