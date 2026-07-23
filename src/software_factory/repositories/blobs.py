@@ -36,8 +36,12 @@ class BlobRepository:
                                 .order_by(blobs.c.id))
 
     def set_scope(self, blob_id, scope, scope_id) -> None:
+        # Clearing directory_id is required, not cosmetic: a blob's directory FK pins
+        # (directory_id, scope, scope_id) to a same-scope directory, so carrying the old
+        # scope's directory into the new scope would violate that FK. The moved blob lands
+        # unfiled in its new scope; SOF-253 re-homes it under the new scope's tree.
         self._x.execute(update(blobs).where(blobs.c.id == blob_id)
-                        .values(scope=scope, scope_id=scope_id))
+                        .values(scope=scope, scope_id=scope_id, directory_id=None))
 
     def list_org_docs(self, org_id) -> list:
         j = blobs.outerjoin(blob_uses, blob_uses.c.blob_id == blobs.c.id)

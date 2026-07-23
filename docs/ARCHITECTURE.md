@@ -205,8 +205,23 @@ parity review because those two schema construction paths can drift.
 - `blobs` — manifest for durable file storage (scope **`project`**|`org`, scope_id, kind, **`name`**
   display filename, **`tag`** category, storage_key, content_type, size, sha256, and **provenance**
   — `source_blob_id`/`source_page`/`provenance` jsonb, set when a blob is itself an asset extracted
-  FROM another blob, e.g. an image pulled out of a document page); see §6. The org knowledge base
+  FROM another blob, e.g. an image pulled out of a document page); see §6. A nullable
+  **`directory_id`** files a blob under a `directories` row (below). The org knowledge base
   (PRD §2.3) is the `scope='org'` rows.
+- **Source directories / Files browser (SOF-251):** `directories` (PK `id` uuid) — the persisted
+  folder tree owned by the source-material/memory capability. `scope`/`scope_id` mirror `blobs`; a
+  nullable `parent_id` builds the tree (NULL = a per-scope **root**; the top-level Files screen is
+  virtual/mixed-scope and is NEVER stored as a row). Database-enforced invariants: a composite FK
+  `(parent_id, scope, scope_id) → (id, scope, scope_id)` forces parent and child to share a scope;
+  `blobs`' composite FK `(directory_id, scope, scope_id) → (id, scope, scope_id)` forces a blob into
+  a directory of its own scope; both FKs are `ON DELETE RESTRICT`, so a directory that still owns
+  descendants or member blobs cannot be silently dropped or orphaned; two partial unique indexes
+  keep sibling names unique within a parent and within roots. `summary_md`/`summary_status`
+  (`summarizing|ready|needs_refresh|failed`)/`summary_source_hash`/`last_successful_summary_at` back
+  the truthful Files UI state. The 0034 migration files every existing top-level source blob under
+  one persisted per-scope root (extracted-child assets stay provenance-linked via `source_blob_id`,
+  not directory membership) without changing any blob ID, storage key, hash, summary, chunk, use, or
+  scope. Directory read projections/APIs are SOF-253.
 - `blob_uses` (`blob_id`, `project_id`) — one row per project that imported an org knowledge-base doc;
   the doc's "used by N projects" count is `COUNT(DISTINCT project_id)`.
 - **Project Memory (SOF-26):** `doc_summary` (PK `blob_id`→`blobs.id` cascade) — the per-document
