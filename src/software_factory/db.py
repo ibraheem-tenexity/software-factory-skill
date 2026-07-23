@@ -129,12 +129,16 @@ class ProjectStore:
                                    stage=stage)
 
     def _current_stage(self) -> Optional[int]:
-        """The run's current pipeline stage (0=intake, 1/2/3), for stamping the producing stage on
-        artifacts (SOF-78). Best-effort: a state-read hiccup logs the traceback and returns None so
-        recording an artifact never fails on it."""
+        """The run's current pipeline stage (1/2/3), for stamping the producing stage on artifacts
+        (SOF-78). A DRAFT run has no producing stage — ProjectState.stage defaults to 1, so return
+        None for draft-phase records instead of mislabeling concierge/intake output as Stage 1
+        (the migration's "draft output stays NULL" contract; SOF-245 groups outputs by this stage).
+        Best-effort: a state-read hiccup logs the traceback and returns None so recording an
+        artifact never fails on it."""
         try:
             from .projectstate import ProjectState
-            return ProjectState.load(self._project_id, self).stage
+            state = ProjectState.load(self._project_id, self)
+            return None if state.phase == "draft" else state.stage
         except Exception:
             logger.exception("[record_artifact] could not resolve current stage for %s",
                              self._project_id)
