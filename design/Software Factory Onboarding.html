@@ -107,6 +107,7 @@
 <script type="text/babel" src="buildprogress.jsx"></script>
 <script type="text/babel" src="optionC.jsx"></script>
 <script type="text/babel" src="orgproject.jsx"></script>
+<script type="text/babel" src="projectknowledge.jsx"></script>
 <script type="text/babel" src="dashboard.jsx"></script>
 <script type="text/babel" src="login.jsx"></script>
 <script type="text/babel" src="admin.jsx"></script>
@@ -123,7 +124,10 @@
           <DCArtboard id="login" label="Login · entry (connected)" width={W} height={H}><AppRoot /></DCArtboard>
           <DCArtboard id="dash" label="Dashboard · login landing" width={W} height={H}><FactoryApp /></DCArtboard>
           <DCArtboard id="console" label="Factory console · build board (the core screen)" width={1440} height={H}><ProjectViewStandalone initialTab="build" /></DCArtboard>
-          <DCArtboard id="projdash" label="Project dashboard ⇄ factory console" width={W} height={H}><ProjectViewStandalone /></DCArtboard>
+          <DCArtboard id="projdash" label="Project overview · clear project snapshot" width={W} height={H}><ProjectViewStandalone /></DCArtboard>
+          <DCArtboard id="projectbrief" label="Product brief · readable, directly editable, Concierge-aware" width={W} height={H}><ProjectViewStandalone initialTab="brief" /></DCArtboard>
+          <DCArtboard id="factoryoutputs" label="Factory outputs · real artifacts in the project shell" width={W} height={H}><ProjectViewStandalone initialTab="outputs" /></DCArtboard>
+          <DCArtboard id="projectfiles" label="Files · hierarchical source browser" width={W} height={H}><ProjectViewStandalone initialTab="files" /></DCArtboard>
           <DCArtboard id="orgadmin" label="Organization admin · context & documents" width={W} height={H}><OrgAdmin /></DCArtboard>
           <DCArtboard id="explore" label="Explore · recipe inspiration gallery · WAVE 2 (future)" width={W} height={H}><ExploreRecipes onBack={() => {}} /></DCArtboard>
         </DCSection>

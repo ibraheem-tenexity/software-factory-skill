@@ -318,28 +318,79 @@ The interview is one full-height Concierge conversation, not a scripted question
 - When the Concierge tool hands off, the completed turn carries `handed_off: true`; when the button
   hands off, the promote response carries the project id. Both open the Factory Console.
 
+#### Product Brief content contract
+
+The Concierge writes the Product Brief as detailed, readable Markdown in the newest
+`kind='product_brief'` artifact. It must communicate enough for the factory and customer to share
+an unambiguous understanding of the business problem, intended users and their needs, desired
+outcome, and first-release scope. Constraints, assumptions, and unresolved questions appear when
+they are relevant to that project.
+
+This is a semantic minimum, not a section schema. The Concierge chooses the headings and depth that
+best fit the project; neither the prompt nor application code requires an eight-, eleven-, or any
+other fixed-part template. The project UI derives its contents navigation from the headings that
+actually exist. Readiness remains Concierge judgment, with only the factual artifact-exists gate in
+code (§2.4a).
+
+The live `system_agents(callsign='CONCIERGE').prompt` must instruct the Concierge to draft, read back,
+and revise this brief with the user before handoff, preserving the user's language and distinguishing
+source-backed facts from questions. This requirement belongs in the operator-editable database prompt;
+do not add a code-default prompt, section validator, readiness tracker, or new state machine.
+
 ---
 
 ### 2.4b The persistent Concierge — `ProjectConcierge`  (`concierge.jsx`)
 
 **The one rule:** there is **one** Concierge, and it looks and behaves the same everywhere.
-The factory console + project overview + documents screen together are the **"Project
-Console,"** and `ProjectConcierge` is the always-visible dock (`width: 340`, right-hand,
-`borderLeft`) that appears on **all three**. Same shell (`ConciergeHeader` + scrolling message
-list + suggestion chips + `Composer`); only the **context** changes.
+The project home, Product Brief, Factory outputs, Factory console, Files, and conditional
+post-delivery Maintenance view together are the **"Project Console,"** and `ProjectConcierge` is
+the shared dock (`width: 340`, right-hand, `borderLeft`) on every view. Same full shell
+(`ConciergeHeader` + scrolling detailed message history + working/tool activity + contextual
+material + suggestion chips + unrestricted `Composer`); only the **context** changes.
+
+The open conversation is primary. Suggested prompts and document actions accelerate common work;
+they never replace free text, hide the transcript, or reduce the Concierge to an About panel or
+shortcut list.
+
+**Minimize without reserving space:** the header has one **Minimize Concierge** control. Minimized
+state removes the 340px dock from layout entirely and leaves a 44px floating sparkle button over the
+bottom-right edge of the current project view. Working or unread activity is a status dot on this
+button. Reopening restores the same transcript, unsent draft, selected context, and scroll position;
+switching peer views preserves the minimized preference for that project visit. The floating button
+is not a narrow rail and consumes no permanent content width.
+
+**One chronological conversation:** customer messages, Concierge messages, and meaningful system
+events share one ordered timeline. Routine lifecycle events are compact neutral rows with time,
+icon, and label. Attention and failure events add a restrained warning/danger marker and expandable
+truthful detail. Artifact-created events have **Open output**. Consecutive retries may be summarized
+as one entry only when their individual timestamps remain available. There is no detached **Recent
+activity** block and no Feed / Tray / Latest switch inside the conversation.
 
 **Single prop drives everything:** `context` is one of:
 - `'overview'` — project home. Subtitle "Watching this project"; suggestions are progress
-  questions ("How's the build going?", "What's left to do?", "Any blockers?").
+  questions ("How's the build going?", "What's left to do?", "Any blockers?"). It can relate
+  the current status to the Product Brief or the factory output that best explains it.
+- `'brief'` — Product Brief. Subtitle "Working from your brief"; receives the selected heading
+  and current brief version as context. The open composer supports explanation and revision in the
+  user's own words. Direct edits and Concierge edits target the same canonical artifact.
+- `'outputs'` — Factory outputs. Subtitle "Across the factory's work"; receives the selected
+  artifact and producing stage. It explains decisions, relates an output back to the brief, and
+  accepts steering requests without replacing the artifact reader.
 - `'build'` — factory console. Subtitle "Relaying the build"; shows a **"Steer the build"**
-  helper card and the `ConciergeArtifacts` list (artifacts produced by completed nodes); a
-  `WorkingPill` shows while the build runs. Takes a `build={{done,total,allDone}}` prop and an
-  `onOpen` callback to open an artifact in the Artifact Viewer.
-- `'docs'` — documents screen. Subtitle "Across every document"; suggestion chips ask about
-  specific uploaded files (passed via the `docChips` prop). **Document Q&A with citations is
-  a later feature** — the groundwork is here (`conciergeReply` matches a question against the
-  `window.PROJ_MATERIALS` file list and answers from it) but inline source citations are
-  explicitly deferred, and the copy says so.
+  helper card and interleaves relevant system events with the conversation; a `WorkingPill` shows
+  while the build runs. Takes a `build={{done,total,allDone}}` prop and an `onOpen` callback for
+  artifact-created events.
+- `'files'` — source files and directories. Subtitle "Across your source material"; receives the
+  selected directory or file as display context and suggestion chips ask about what the user is
+  viewing (`docChips`). **Explicit Phase 1 exception (operator decision, 2026-07-22):** the live
+  Concierge continues using the existing flat semantic search across all project-readable memory.
+  Selecting a directory does not constrain retrieval, and the UI must not claim that it does.
+  Structured `sourceContext` and directory-scoped Concierge retrieval are deferred to SOF-237 and
+  do not block the Files browser, real directories, or generated directory summaries. **Document
+  Q&A with inline citations is also outside this increment** — current replies must not fabricate
+  section-level citations.
+- `'maintenance'` — post-delivery maintenance. Preserves the existing delivered-project context
+  and open composer; this information-architecture change does not redesign that workflow.
 - `'ingesting'` — shown on the project home while uploads process in the background. Subtitle
   "Processing in background."
 
@@ -348,8 +399,9 @@ list + suggestion chips + `Composer`); only the **context** changes.
   `<ProjectConcierge context="build" build={{…}} onOpen={…} />` on the right. (The old
   left-hand `ConciergeRail` was replaced by this right-hand dock so the assistant is in the
   same place on every screen.)
-- Project home / documents: `orgproject.jsx` (`ProjectDashboard`) renders
-  `<ProjectConcierge context={tab==='docs' ? 'docs' : (ingesting ? 'ingesting' : 'overview')} … />`.
+- Project home / Product Brief / Factory outputs / Files: `projectknowledge.jsx` extends the
+  existing `orgproject.jsx` `ProjectDashboard` entrypoint, maps the active peer view to the matching
+  context, and passes the selected heading, artifact, or file when one is active.
 
 **Shared chat engine:** all Concierge surfaces (interview rail + persistent dock) use the
 `useConciergeChat(seed, replyFor)` hook in `concierge.jsx`. It owns the message list, the
@@ -376,50 +428,153 @@ strips markdown to a single ellipsised line instead (regex strip in `dashboard.j
 > `GoalMarkdown` to avoid the collision (which previously broke the page when both defined a
 > global `Markdown`).
 
-### 2.5 Project view: Overview + Factory console + Documents  (`orgproject.jsx` → `ProjectDashboard`; standalone wrapper `ProjectViewStandalone`)
-The project has **peer views** switched by a tab strip (Overview · Factory
-console · Documents). Neither is nested under the other; shared **← Projects** exit.
-The **Factory console is a tab within this shell, not a separate destination** — opening it (from a project row, the dashboard, or a standalone entry) renders the same `ProjectViewStandalone` shell with the tab strip intact, simply landing on the **Factory console** tab (`initialTab="build"`). The tabs stay live so the user can switch back to Overview / Documents in place.
+### 2.5 Project view: project knowledge shell  (`orgproject.jsx` + `projectknowledge.jsx` → `ProjectDashboard`; standalone wrapper `ProjectViewStandalone`) · **DESIGN TARGET**
 
-**2.5a Overview (canvas):** mission-control board of zone panels over a dotted canvas:
-- **Draft resolution:** when the project is still a **draft** (hasn't been handed off), the Overview leads with a **"Finish setup to start building"** banner and the Build-status panel becomes a setup checklist (Brief / Scope / Build engine / Materials) with a primary **"Complete setup & start building"** action that resumes intake (§2.4) → Hand off to factory. Services / agents / produced-docs panels show empty states until the build starts.
-- **Project brief** (goal, scope chips, owner/created/phase).
-- **Build status** (% complete, tickets done, agents, spend) + **Open factory console**. The **budget cap** (project-wide total spend ceiling) is shown here as `spend / $<cap>` and is **editable in place** — a `$<cap> total` chip with an edit (pencil) affordance opens an inline editor (presets + custom) so the cap can be updated any time after creation. Updates propagate to the factory-console header.
-- **Services at work** (Epicor/OpenAI/Supabase/Playwright/Vercel with live status + metric).
-- **Agents on this project** (who + current task + live dot).
-- **Uploaded materials** (project files).
-- **Produced documents** (artifact chips → open in the **Artifact Viewer**, new tab — §2.7).
-- **Inherited org context** (reused-from-org summary).
+The shipping shell currently has Overview, Factory console, and Documents. The design target keeps
+that shell and extends it into five core peer views: **Overview · Product brief · Factory outputs ·
+Factory console · Files**. A completed project also retains the conditional **Maintenance** peer.
+None is nested under another; all share **← Projects** and the persistent detailed Concierge.
 
-**2.5b Documents tab:** all project documents in three groups — **"Uploaded by you"** (project materials) + **"From your organization"** (the org knowledge-base docs, `ORG_DOCS`, reused across projects) + **"Produced by the factory"** (artifacts) — as file tiles; produced ones open in the **Artifact Viewer** (new tab — §2.7). The header count includes all three groups.
+The **Factory console remains the existing real component**, not a copied board. Opening it renders
+the same `ProjectViewStandalone` shell, landing on `initialTab="build"`; its peer tabs return to the
+other project views through the existing callback.
+
+**2.5a Overview:** an understandable snapshot, not an inventory of every subsystem:
+- One plain-language status sentence states what finished, what is happening, and the next useful
+  event or requested input. It is derived from real run state, never filler.
+- Product Brief preview: the project goal, current version/source note, and **Open brief**.
+- Build status: percentage, current phase, tickets, agents, spend/cap, and **Open factory console**.
+  Existing editable budget behavior remains part of the implemented surface.
+- Project knowledge: a short preview of useful brief sections and newest factory outputs with clear
+  routes into their full views.
+- Services, individual agents, uploads, and inherited organization context are not equal Overview
+  panels. Operational detail belongs in Factory console; source material belongs in Files.
+- Draft projects retain the honest setup/resume path from §2.4a. Missing outputs use one explanatory
+  state saying which factory stage will create them, not a grid of empty cards.
+
+**2.5b Product Brief:** renders the canonical newest `product_brief` inside the project shell. A
+compact contents rail is derived from the Markdown headings that actually exist; there is no fixed
+section count. The center is a readable document, and the full Concierge remains present in `brief`
+context.
+
+**Edit document** is a document-first editor for headings, paragraphs, lists, and links, with a
+compact formatting toolbar and visible Saving / Saved / Save failed state. It is a **target
+extension** of the canonical artifact path: implementation must add an authenticated write that
+creates a new `product_brief` artifact version. It must not reuse the current `PUT /brief` goal/scope
+projection as if that endpoint edited the artifact. **Add section** inserts another heading in the
+same Markdown document. **History** lists real artifact versions; viewing an older version is
+read-only, while restore—when implemented—creates a new latest version rather than mutating history.
+The Concierge's `finalize_product_brief` remains the conversational edit path. Both paths converge
+on the same newest-wins artifact.
+
+**2.5c Factory outputs:** factory-produced artifacts grouped by their real producing stage with
+customer-readable titles. Selecting one renders it inside the project shell through the existing
+Markdown/typed artifact body. The underlying id, kind, path, agent, and stage are unchanged. The
+standalone Artifact Viewer remains available through **Open in new tab**.
+
+**2.5d Files:** a hierarchical source-material browser. Factory outputs do not appear here, and the
+Product Brief is not duplicated as a source file. The existing project-vs-organization scope remains
+real: every persisted directory belongs to exactly one scope and all descendants inherit that
+scope. The top-level **Files** screen is a virtual presentation that combines the project and
+organization roots; it is not a mixed-scope directory and has no directory id. Its recent-file
+section links to files in their real scoped directories rather than containing duplicate blob
+memberships. Moving a document across the two persisted roots performs the existing scope change;
+it is not a cosmetic drag between labels.
+
+The default Files surface is recognizable as a file browser rather than a grid of blank cards:
+
+- a directory tree and breadcrumbs expose the current path;
+- folders use folder silhouettes, counts, scope, and a short summary preview;
+- PDF, spreadsheet, document, image, and video files use large typed file icons, with the filename,
+  size/duration, updated time, and ingest status as secondary information;
+- selecting a source file exposes its existing document summary and actions without treating it as a
+  factory artifact; and
+- **New folder** creates a real directory in the current scoped root, while uploads and existing
+  files may be assigned or moved to a real directory. Empty directories say that they contain no
+  indexed material; no plausible summary is fabricated. Rename and directory deletion are not part
+  of this design increment.
+
+**Generated directory summaries are read-only.** Each directory has a generated Markdown summary
+derived from the current summaries of every document and child directory in its subtree. It states
+what the directory contains, which questions it can help answer, and the notable files an agent may
+need. There is no manual edit action and no parallel user-authored folder note. Adding, removing,
+moving, or re-ingesting a descendant mechanically makes ancestor summaries stale; the background
+ingestion path regenerates affected summaries bottom-up. The UI exposes the truthful state
+**Summarizing**, **Ready**, **Needs refresh**, or **Failed**, plus the last successful refresh. A
+failed child document does not disappear: the directory summary names the incomplete coverage and
+the UI retains the child's failure state.
+
+**Phase 1 agent retrieval contract:** the Files hierarchy and summaries help people understand and
+navigate the source collection, but agents continue using the existing flat semantic search across
+all project-readable memory. Selecting a directory is display context only: it does not filter a
+memory query, and neither the UI nor the Concierge may claim that the answer came only from that
+subtree. Search results retain their existing source document id and path. Direct file selection
+remains available when the agent already knows the source.
+
+**Deferred — SOF-237:** structured `sourceContext` and optional directory-scoped retrieval will later
+allow the Concierge to start from directory summaries and search a selected subtree. This is the one
+operator-approved Phase 1 deferral in the Project Console epic and blocks none of the directory,
+summary, Files UI, or other Project Console work.
+
+**Required backend/database extension (not present in the current flat document API):** add a scoped
+directory relation with `id`, `scope`, `scope_id`, nullable `parent_id`, `name`, `summary_md`,
+`summary_status`, `summary_source_hash`, and timestamps; add nullable `directory_id` to source blobs.
+The database enforces that parent and child directories share a scope and that sibling names are
+unique. The project documents projection returns a directory tree plus file rows rather than three
+flat arrays. Authenticated mutations create a scoped directory, upload a material into a directory,
+and reassign an existing blob's `directory_id`; a cross-scope reassignment uses the existing scope
+change and validates the destination belongs to the new scope. The memory/query tools accept an
+optional directory id that filters to its subtree **only when deferred issue SOF-237 is implemented**;
+the initial directory work does not change the existing flat retrieval behavior. SOF-237 also owns
+passing structured `sourceContext` (`type`, `id`, `scope`, `name`, `summary_md`, `summary_status`) to
+the Files Concierge. Existing project and org documents migrate into their corresponding scope roots
+without changing their blob ids, summaries, storage keys, or access rules. The initial Files work is
+deliberately a material backend, database, ingestion, and API change; the design must not imply that
+directory-scoped agent retrieval already ships.
+
+**2.5e Maintenance:** preserves the implemented post-delivery Maintenance tab and lifecycle. It is
+conditional on a completed/deployed project and is not redesigned by this information architecture.
 
 ### 2.6 Factory console (build board) — THE CORE SCREEN  (`buildprogress.jsx` → `BuildProgress`; `buildboard.jsx`, `nodemap.jsx`, `artifacts.jsx`)
 **Purpose:** show and steer the agent pipeline building the project. Most
 important screen in the product.
 **Top bar:** ← Projects · wordmark · project name · phase pill · spend/cap. Peer tab strip when opened from a project. The `spend / $<cap> cap` reflects the project's editable **budget cap** (total spend ceiling, §2.4 / §2.5a).
-**Right: persistent Concierge dock** (`ProjectConcierge context="build"`, §2.4b) — the
-same always-visible assistant that appears on every Project Console screen. Relays live build
-updates (e.g. "Playwright caught a tax-rounding bug, Sonnet's fixing it"), shows a **"steer
-the build"** helper card and the **Artifacts produced** list, and has a composer to **steer
-the build team**. (This replaced the former *left*-hand `ConciergeRail` so the Concierge sits
-in the same spot — right side — on the overview, console, and documents screens alike.)
+**Right: persistent Concierge dock** (`ProjectConcierge context="build"`, §2.4b) — the same
+assistant that appears on every Project Console screen and can be minimized without reserving
+layout width. It interleaves relevant operational events with messages, shows a **"steer the
+build"** helper card, and has a composer to **steer the build team**. Factory outputs remain in
+their project view; the exhaustive event record lives in Activity below.
 **Main column:**
 - **Pipeline stage-rail** — the full pipeline as chips with Stage gates (diamonds): `extract → provision → research → [Stage 1] → architect → design(NEW) → tickets → [Stage 2] → wait-for-deps → build → test → deploy`. Done = checked, active = pulsing, deps = amber.
 - **Crash / pause recovery** — each completed node writes **immutable checkpoint artifacts** (the files in the Artifact Viewer); the run's durable state is the set of completed checkpoints, not in-memory progress. When a run **crashes** (node failure) or is **paused**, the stage-rail marks the halt node (red / amber) and downstream nodes fade to `queued`, and a **Recovery bar** appears: **Resume from `<node>`** (re-runs the halt node onward, reusing every upstream checkpoint — no re-research/re-architecting), **Retry `<node>`** (re-run just the halt node, e.g. after a transient failure or a now-provided key), or **Rewind to…** an earlier checkpoint (click any completed node, or pick from the dropdown — that node + downstream are invalidated and recomputed, upstream reused). The build Kanban is idempotent per-ticket, so a resumed build picks up only the not-done tickets. Header shows `run crashed` / `run paused`; the **Pause** control drives the paused state in the demo (a crash sets the same recovery flow at runtime).
-- **Wait-for-deps bar** — **stage-triggered**: appears *only after* the build reaches the wait-for-deps stage (not shown the rest of the run), marked with a `STAGE-TRIGGERED` badge and copy explaining why it surfaced now. The dependency set is **derived from the project's architecture**, so the **count varies per project** (factory + app design); the layout is an auto-wrapping grid that **scales to any number** of dependencies. Header tracks `resolved / total` and flips to "Dependencies resolved — build unblocked" when complete. Each dependency offers **3 resolution options**: **Get from MCP**, **Mock it**, or **Input key**. Build is gated until all are resolved. **Input key** additionally offers **Import from org secrets** (§2.3): a picker of the organization vault (`ORG_SECRETS`) with the best name/kind match badged `MATCH`; choosing one wires the dependency to that secret **by reference** (`org:<NAME>`) — the raw value is never shown — or the operator can still paste a key manually.
-- **Design review bar** (`DesignReviewBar`, `buildprogress.jsx`) · **WAVE 2 — designed, not yet shipping** — **stage-triggered** like the deps bar: surfaces only once the **design** node has completed. The design node (Kimi K3) generates high-fidelity screens from the PRD + the org's brand theme (§2.3 Brand & theme), then waits for the customer. The bar shows the generated screens as clickable mockup tiles (each opens the `screens` fig artifact in the Artifact Viewer), header `design · Kimi K3 · on your brand theme`, and copy explaining the two paths: **Approve & continue** locks the look (bar flips to a green "Design locked — tickets and the build proceed from these N screens", with **Re-open review**) — or **iterate via the Concierge** ("denser quote table", "approvals first"), which re-generates only the affected screens. Rendered between the stage-rail/Recovery bar and the wait-for-deps bar (design precedes deps in the pipeline).
-- **View toggle: Kanban · Tree · Map**
+- **Wait-for-deps action** — **stage-triggered inside Activity**: appears *only after* the build reaches the wait-for-deps stage (not shown the rest of the run), marked with a `STAGE-TRIGGERED` badge and copy explaining why it surfaced now. The dependency set is **derived from the project's architecture**, so the **count varies per project** (factory + app design); the layout is an auto-wrapping grid that **scales to any number** of dependencies. Header tracks `resolved / total` and flips to "Dependencies resolved — build unblocked" when complete. Each dependency offers **3 resolution options**: **Get from MCP**, **Mock it**, or **Input key**. Build is gated until all are resolved. **Input key** additionally offers **Import from org secrets** (§2.3): a picker of the organization vault (`ORG_SECRETS`) with the best name/kind match badged `MATCH`; choosing one wires the dependency to that secret **by reference** (`org:<NAME>`) — the raw value is never shown — or the operator can still paste a key manually.
+- **Design review action** (`DesignReviewBar`, `buildprogress.jsx`) · **WAVE 2 — designed, not yet shipping** — **stage-triggered inside Activity** like the deps action: surfaces only once the **design** node has completed. The design node (Kimi K3) generates high-fidelity screens from the PRD + the org's brand theme (§2.3 Brand & theme), then waits for the customer. The action shows the generated screens as clickable mockup tiles (each opens the `screens` fig artifact in the Artifact Viewer), header `design · Kimi K3 · on your brand theme`, and copy explaining the two paths: **Approve & continue** locks the look (action flips to a green "Design locked — tickets and the build proceed from these N screens", with **Re-open review**) — or **iterate via the Concierge** ("denser quote table", "approvals first"), which re-generates only the affected screens.
+- **View toggle: Activity · Kanban · Tree · Map**
+  - **Activity** (`concierge.jsx` → `FactoryActivity`): the exhaustive chronological operational
+    record for stage transitions, agent actions, retries, interventions, failures, and produced
+    artifacts. It uses the same event records rendered in the Concierge conversation. Opening the
+    console from an alert selects Activity and scrolls to that event; ordinary entry remembers the
+    user's last console mode during the current project visit. First entry retains the existing
+    Kanban default. Activity is a mode, not a permanent split rail. Design review and wait-for-deps
+    action panels render inside Activity so they never push the switcher or another selected view
+    below the viewport.
   - **Kanban**: columns Backlog → Claimed → Building (WIP cap) → Testing → Done; ticket cards show id, title, assigned agent (avatar), tags (bug / needs-key / e2e). "Run agents" advances the live sim; bugs in Testing loop back to Building.
   - **Tree**: process tree — orchestrator root → each pipeline node → its spawned sub-agent → the artifacts it produced (clickable).
   - **Map**: force-graph layout of the same pipeline with curved edges, the active path highlighted, satellites for sub-agents/deps.
 - **Delivery footer**: when 100%, deploy unlocks → Repository + Open live app.
 **Artifacts (`artifacts.jsx`, `artifactviewer.jsx`):** nodes produce real documents — research `.md` files,
 **PRD.md** (product council), **architecture.svg** (architect), screen designs
-(design step), the **GitHub repo** (provision). **Any artifact / `.md` file, at any stage, opens in the Artifact Viewer in a new browser tab** (§2.7) via `openArtifact(id)`.
+(design step), the **GitHub repo** (provision). In the design target, customer project links select
+the artifact in Factory outputs; **Open in new tab**, Tenexity OS, and external deep links use the
+standalone Artifact Viewer (§2.7).
 The Concierge surfaces them as an "Artifacts produced" list with open-links.
 
 ### 2.7 Artifact Viewer  (`ArtifactViewer.html` → `ArtifactViewer`; `artifactviewer.jsx`)
-**Purpose:** a standalone, full-page file viewer for everything the factory produces or operators author. Opened in a **new browser tab** from anywhere a file is clickable (project docs, console tree/map/concierge, OS Artifacts index, recipe editor) via `openArtifact(id)` → `ArtifactViewer.html?doc=<id>`.
+**Purpose:** the existing standalone, full-page viewer remains the authoritative cross-project and
+deep-link presentation for everything the factory produces or operators author. The project shell's
+Product Brief and Factory outputs views reuse its typed body behavior as an in-project presentation;
+they do not introduce another artifact format or parser. Standalone entry remains
+`openArtifact(id)` → `ArtifactViewer.html?doc=<id>`.
 **Layout:** left **file rail** (all artifacts, grouped by project, searchable) + topbar (breadcrumb project ▸ node, file name, type badge, updated, Copy / Download) + typed body.
 **Supported types** (`ART` registry): **md** → real markdown renderer (`Markdown`) in a reading column with an **"On this page" TOC** (recipe descriptions register as `md`); **svg** → architecture diagram; **code** → line-numbered source (sql/bash/etc.); **fig** → frame grid; **image**. **Current vs future (SOF-224):** the shipping app's viewer renders **json / csv / repo** through the generic `<pre>` — the typed **json** tree, **csv** table, and **repo** file-tree views below are the *designed* target, labeled future until implemented. Selecting a file in the rail updates the URL so it's linkable.
 **Markdown renderer** (`Markdown`, exported): headings, lists (ordered/unordered), tables, fenced code, blockquotes, rules, inline bold/italic/code/links. Reused by the recipe editor's live preview.
@@ -662,9 +817,9 @@ screen (`ProcessingScreen`, ingest progress bar + live log + ETA) → live Conci
 Hand off to factory.** The current gate and the two valid handoff initiators are defined only in
 §2.4a; the former fixed-question completion gate is superseded. Large uploads can be sent to the
 **background** (project home with a live "processing" banner + **Resume interview**). One
-persistent `ProjectConcierge` dock (right side, `width 340`) now appears on all three Project
-Console surfaces — overview / factory console / documents — driven by a `context` prop
-(`overview` / `build` / `docs` / `ingesting`). Files: `concierge.jsx` (new), `optionC.jsx`
+persistent `ProjectConcierge` dock (right side, `width 340` when open) now appears across the
+Project Console and can be minimized without reserving width. It is driven by the current project
+view's `context` prop. Files: `concierge.jsx`, `optionC.jsx`
 (state machine + `InterviewView`), `orgproject.jsx` (dock + background banner),
 `buildprogress.jsx` (dock on console). Document Q&A with **citations is a later feature** —
 groundwork only.
@@ -926,8 +1081,8 @@ text ramp, radii `T.rMd`/`T.rLg`/`T.rXl`, `T.shadowXs`, fonts `T.sans` (Hanken G
   board with stage progress, crash recovery, dependency resolution (§2.6); the
   persistent Concierge (§2.4b); basic cross-tenant visibility + sign-in management
   (§3.2/§3.4a).
-- **P1 (complete, not just functional):** org shared context & knowledge base (§2.3);
-  projects dashboard w/ archive/delete (§2.2); project overview (§2.5a); Artifact
+- **P1 (complete, not just functional):** org shared context & hierarchical knowledge base
+  (§2.3, §2.5d); projects dashboard w/ archive/delete (§2.2); project overview (§2.5a); Artifact
   Viewer (§2.7); extra build-board views; agent roster (§3.5); tools registry (§3.6).
 - **P2 (high value, can trail):** the full produced-files index (§3.4c); markdown
   polish in the goal field.
@@ -975,6 +1130,8 @@ text ramp, radii `T.rMd`/`T.rLg`/`T.rXl`, `T.shadowXs`, fonts `T.sans` (Hanken G
 | 10 | Artifact Viewer promised typed json/csv/repo; app uses generic `<pre>` | Typed views = designed/future; current = generic renderer | Spec'd §2.7 |
 | 11 | Future artboards (Explore, Brand & theme, Dev conventions) looked current | Labeled **WAVE 2 — designed, not yet shipping** (§2.3, §2.8, canvas labels); prefill/discovery/engines labeled **WAVE 1 — shipping** | DONE here |
 | 12 | This archive was missing `TICKETS.md`, §2.8, entries 33–41 referenced by the Wave-1 doc | Landed via PR #379 (design archive now tracked in git) | DONE |
+| 13 | Project overview mixed user direction, source files, factory outputs, services, and agents as equal cards | Keep one project shell; separate Product Brief, Factory outputs, Factory console, and Files; preserve the full Concierge; fixed brief templates are forbidden | Designed §2.4a–§2.7; app implementation → WEB |
+| 14 | The source-material API and Files screen are flat, so neither people nor agents can narrow retrieval by directory | Add real scoped directories, read-only generated subtree summaries, directory-first agent retrieval, and an icon-led browser; this requires database, ingestion, API, tool, and frontend work | Designed §2.5d; app implementation → WEB |
 
 **Docs disposition:** completed product specs, Concierge/project-memory designs, and Wave-1
 implementation plans were consolidated into this PRD and `docs/ARCHITECTURE.md`, then deleted.

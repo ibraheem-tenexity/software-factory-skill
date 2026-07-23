@@ -4,11 +4,14 @@
 //   • InterviewRail      — the docked Concierge as an ACTIVE Q&A the user must
 //                          complete before handoff (replaces the passive checklist
 //                          rail during the interview phase).
-//   • ProjectConcierge   — the persistent, always-visible dock shared by the
-//                          Factory console + Project overview + Documents (together
-//                          the "Project Console"). Context-aware, same shell everywhere.
+//   • ProjectConcierge   — the persistent, minimizable dock shared by every
+//                          Project Console view. Context-aware, same shell everywhere.
 
 // ---- shared typing simulation hook -------------------------------------------
+function conciergeClock() {
+  return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
 function useConciergeChat(seed, replyFor) {
   const [messages, setMessages] = React.useState(seed);
   const [draft, setDraft] = React.useState('');
@@ -21,13 +24,13 @@ function useConciergeChat(seed, replyFor) {
   const push = (m) => setMessages((x) => [...x, m]);
   const sendText = (text) => {
     const t = (text != null ? text : draft).trim(); if (!t || thinking) return;
-    push({ who: 'user', text: t }); setDraft('');
+    push({ who: 'user', text: t, time: conciergeClock() }); setDraft('');
     let i = 0; setThinking(LABELS[0]);
     const rot = setInterval(() => { i = (i + 1) % LABELS.length; setThinking(LABELS[i]); }, 850);
     timers.current.push(rot);
     const done = setTimeout(() => {
       clearInterval(rot); setThinking(null);
-      push({ who: 'agent', text: replyFor ? replyFor(t) : 'On it — I’ve noted that and I’ll surface anything relevant here.' });
+      push({ who: 'agent', text: replyFor ? replyFor(t) : 'On it — I’ve noted that and I’ll surface anything relevant here.', time: conciergeClock() });
     }, 1900);
     timers.current.push(done);
   };
@@ -35,7 +38,7 @@ function useConciergeChat(seed, replyFor) {
 }
 
 // Consistent header used by every Concierge surface — this sameness IS the point.
-function ConciergeHeader({ subtitle, live = true, working, label = 'Concierge' }) {
+function ConciergeHeader({ subtitle, live = true, working, label = 'Concierge', onCollapse }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '14px 18px', borderBottom: `1px solid ${T.borderSubtle}`, flexShrink: 0 }}>
       <span style={{ position: 'relative', width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center', background: T.brandSoft, color: T.brand, boxShadow: `inset 0 0 0 1px ${T.brand}33` }}>
@@ -46,6 +49,7 @@ function ConciergeHeader({ subtitle, live = true, working, label = 'Concierge' }
         <span style={{ display: 'block', font: `600 13px/1.2 ${T.sans}`, color: T.fg }}>{label}</span>
         <CategoryLabel style={{ fontSize: 10 }}>{subtitle}</CategoryLabel>
       </div>
+      {onCollapse && <button onClick={onCollapse} title="Minimize Concierge" aria-label="Minimize Concierge" style={{ width: 28, height: 28, display: 'grid', placeItems: 'center', border: `1px solid ${T.borderSubtle}`, borderRadius: T.rMd, background: T.raised, color: T.tertiary, cursor: 'pointer' }}><Icon name="chevronRight" size={14} color={T.tertiary} /></button>}
       {working ? <WorkingPill label={typeof working === 'string' ? working : 'Working'} /> : <StatusPill tone="success">online</StatusPill>}
     </div>
   );
@@ -260,53 +264,126 @@ function InterviewRail({ onComplete }) {
 }
 
 // ====== PERSISTENT PROJECT CONCIERGE =========================================
-// One always-visible dock, identical shell everywhere, shared by the three
-// surfaces of the Project Console (overview · factory console · documents).
-function conciergeSeed(context, build) {
+// One shared dock across the Project Console. It can leave the layout entirely
+// while its floating restore control keeps the same transcript and draft alive.
+const FACTORY_ACTIVITY = [
+  { id: 'plan-done', time: '12:17', kind: 'stage', tone: 'success', label: 'Plan stage completed', detail: 'The planner produced 11 build tickets and handed them to the build stage.' },
+  { id: 'build-active', time: '12:18', kind: 'stage', tone: 'neutral', label: 'Build stage started', detail: 'Two implementation agents claimed the first available tickets.' },
+  { id: 'retry-started', time: '12:21', kind: 'retry', tone: 'neutral', label: 'Build retry started', meta: 'attempt 3' },
+  { id: 'silent-stage', time: '12:24', kind: 'attention', tone: 'warning', label: 'Stage silent for about 90 seconds', detail: 'Flagged for review. No action was taken automatically.' },
+  { id: 'build-blocked', time: '12:27', kind: 'attention', tone: 'danger', label: 'Build blocked by the deployment database', detail: 'Provisioning returned no service id. A prior marker points to a possible orphaned Postgres instance that needs reconciliation.' },
+  { id: 'build-resumed', time: '12:29', kind: 'stage', tone: 'success', label: 'Build resumed', detail: 'The affected ticket returned to Building after the dependency was reconciled.' },
+  { id: 'design-produced', time: '12:32', kind: 'artifact', tone: 'neutral', label: 'design-spec.md produced', detail: 'The Design agent recorded the approved screen behavior for the build agents.', artifactId: 'designspec' },
+];
+
+function SystemEvent({ event, compact = false, onOpen }) {
+  const important = event.tone === 'danger' || event.tone === 'warning';
+  const [expanded, setExpanded] = React.useState(important);
+  const tone = event.tone === 'danger' ? T.danger : event.tone === 'warning' ? T.warning : event.tone === 'success' ? T.success : T.tertiary;
+  const soft = event.tone === 'danger' ? T.dangerSoft : event.tone === 'warning' ? T.warningSoft : event.tone === 'success' ? T.successSoft : T.sunken;
+  const icon = event.kind === 'artifact' ? 'file' : event.kind === 'retry' ? 'refresh' : important ? 'alert' : 'layers';
+  return <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: '18px minmax(0, 1fr)', gap: compact ? 7 : 10, padding: compact ? '7px 8px' : '11px 12px', borderRadius: T.rMd, border: `1px solid ${important ? tone + '44' : T.borderSubtle}`, background: important ? soft + '88' : T.sunken }}>
+    <span style={{ width: 18, height: 18, borderRadius: '50%', display: 'grid', placeItems: 'center', background: important ? soft : T.raised, border: `1px solid ${tone}44` }}><Icon name={icon} size={10} color={tone} /></span>
+    <div style={{ minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}><span style={{ font: `500 ${compact ? 9 : 10}px/1 ${T.mono}`, color: T.tertiary }}>{event.time}</span><b style={{ flex: 1, font: `600 ${compact ? 11.5 : 12.5}px/1.35 ${T.sans}`, color: T.fg }}>{event.label}</b>{event.meta && <span style={{ font: `500 9px/1 ${T.mono}`, color: T.tertiary }}>{event.meta}</span>}</div>
+      {expanded && event.detail && <p style={{ margin: '5px 0 0', font: `400 ${compact ? 11 : 12}px/1.45 ${T.sans}`, color: T.secondary }}>{event.detail}</p>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: event.detail || event.artifactId ? 6 : 0 }}>
+        {event.detail && <button onClick={() => setExpanded((v) => !v)} style={{ border: 0, background: 'none', padding: 0, color: T.brandDeep, cursor: 'pointer', font: `600 10px/1 ${T.sans}` }}>{expanded ? 'Hide details' : 'Details'}</button>}
+        {event.artifactId && <button onClick={() => onOpen && onOpen(event.artifactId)} style={{ border: 0, background: 'none', padding: 0, color: T.brandDeep, cursor: 'pointer', font: `600 10px/1 ${T.sans}` }}>Open output →</button>}
+      </div>
+    </div>
+  </div>;
+}
+
+function FactoryActivity({ onOpen, actions }) {
+  const attention = FACTORY_ACTIVITY.filter((event) => event.tone === 'warning' || event.tone === 'danger').length;
+  return <section style={{ height: '100%', overflow: 'auto', border: `1px solid ${T.borderSubtle}`, borderRadius: T.rLg, background: T.raised }}>
+    {actions && <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12, borderBottom: `1px solid ${T.borderSubtle}`, background: T.bg }}><CategoryLabel>Current action items</CategoryLabel>{actions}</div>}
+    <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: `1px solid ${T.borderSubtle}` }}><div><b style={{ display: 'block', font: `700 14px/1.2 ${T.display}`, color: T.fg }}>Run activity</b><span style={{ font: `400 11px/1.4 ${T.sans}`, color: T.tertiary }}>Every stage, retry, intervention, and output in occurrence order.</span></div><StatusPill tone="warning">{attention} need attention</StatusPill></header>
+    <div style={{ position: 'relative', maxWidth: 760, padding: '16px 18px 24px 42px' }}><span style={{ position: 'absolute', left: 26, top: 24, bottom: 30, width: 1, background: T.borderDefault }} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{FACTORY_ACTIVITY.map((event) => <div key={event.id} style={{ position: 'relative' }}><span style={{ position: 'absolute', left: -20, top: 16, width: 9, height: 9, borderRadius: '50%', background: event.tone === 'danger' ? T.danger : event.tone === 'warning' ? T.warning : event.tone === 'success' ? T.success : T.tertiary, boxShadow: `0 0 0 4px ${T.raised}` }} /><SystemEvent event={event} onOpen={onOpen} /></div>)}</div>
+    </div>
+  </section>;
+}
+
+function conciergeSeed(context, build, selectedLabel) {
   if (context === 'build') {
     return build && build.allDone
-      ? [{ who: 'agent', text: `All ${build.total} tickets are green and the app is deployed. Want me to walk you through the live build?` }]
-      : [{ who: 'agent', text: `Build is underway — ${build ? build.done : 5}/${build ? build.total : 11} tickets done. The Architect, Research, and Product agents have filed their work below.` },
-         { who: 'agent', text: 'Heads up: Playwright caught a tax-rounding bug on SF-11 — Sonnet pulled it back into Building to fix.' }];
+      ? [{ who: 'agent', time: '12:35', text: `All ${build.total} tickets are green and the app is deployed. Want me to walk you through the live build?` }]
+      : [{ who: 'agent', time: '12:16', text: `Build is underway — ${build ? build.done : 5}/${build ? build.total : 11} tickets done. I’ll keep the operational events in this conversation as they happen.` },
+         ...FACTORY_ACTIVITY.slice(0, 3).map((event) => ({ kind: 'event', event })),
+         { who: 'agent', time: '12:22', text: 'Playwright caught a tax-rounding bug on SF-11. Sonnet pulled it back into Building to fix.' },
+         ...FACTORY_ACTIVITY.slice(3).map((event) => ({ kind: 'event', event }))];
   }
-  if (context === 'docs') {
-    return [{ who: 'agent', text: 'This is everything on the project — what you uploaded and what the factory has produced. Ask me what’s in any of them and I’ll pull the answer with a reference.' }];
+  if (context === 'brief') {
+    return [{ who: 'agent', text: 'This is the Product Brief we created together. You can edit it directly, or tell me what you want changed in your own words — both paths update the same brief.' }];
+  }
+  if (context === 'outputs') {
+    return [{ who: 'agent', text: 'These are the factory’s real outputs, organized by the stage that produced them. Pick one and I can explain the decision, connect it back to the brief, or help you steer what happens next.' }];
+  }
+  if (context === 'files' || context === 'docs') {
+    return [{ who: 'agent', text: `These are the source directories and files the factory works from${selectedLabel ? ` — you are viewing ${selectedLabel}` : ''}. For this delivery I still search all project-readable source material semantically; selecting a directory helps you navigate but does not restrict my retrieval yet.` }];
+  }
+  if (context === 'maintenance') {
+    return [{ who: 'agent', text: 'The product has shipped. I’m still here to help you understand what is running, describe a change, or start the next maintenance task.' }];
   }
   if (context === 'ingesting') {
     return [{ who: 'agent', text: 'I’m still processing your uploads in the background — I’ll keep this page updating as results land. You can pick up the interview whenever you’re ready.' }];
   }
   return [{ who: 'agent', text: 'I’m watching this project for you — 5 of 11 tickets done, 3 agents working, $4.20 spent. Ask me about progress, scope, or anything in your documents.' }];
 }
-function conciergeReply(context, text) {
-  const t = text.toLowerCase();
-  const docs = (window.PROJ_MATERIALS || []).map((m) => m.name);
-  const hit = docs.find((n) => t.includes(n.split('.')[0].split('-')[0]) || t.includes(n.toLowerCase()));
-  if (hit) return `From ${hit}: that’s covered there. I’ll cite the exact section once document citations ship — for now I can summarize what it contains.`;
+function conciergeReply(context, _text, selectedLabel) {
+  if (context === 'files' || context === 'docs') {
+    return `I can search all project-readable source material using the current flat semantic search${selectedLabel ? ` while you are viewing ${selectedLabel}` : ''}. I will not claim the search was limited to this directory.`;
+  }
   if (context === 'build') return 'On it — I’ve relayed that to the build team and flagged it on the board. I’ll surface any change here as the agents pick it up.';
-  if (context === 'docs') return 'I can answer from any uploaded or produced file. Inline citations are coming soon — for now tell me which document and I’ll summarize it.';
+  if (context === 'brief') return 'I can revise that in the Product Brief. Tell me the outcome you want, and I’ll keep the rest of the document consistent with it.';
+  if (context === 'outputs') return 'I’ll relate that output to the Product Brief and the stage that produced it, then show you what would change downstream.';
+  if (context === 'maintenance') return 'Tell me what should change in the delivered product, and I’ll turn it into a maintenance task without losing the project context.';
   return 'Got it. I’ll keep an eye on the build and surface anything relevant here.';
 }
 
-function ProjectConcierge({ context = 'overview', build, onOpen, docChips }) {
-  const chat = useConciergeChat(conciergeSeed(context, build), (text) => conciergeReply(context, text));
+function ProjectConcierge({ context = 'overview', build, onOpen, docChips, selectedLabel, collapsed, onCollapsedChange }) {
+  const chat = useConciergeChat(conciergeSeed(context, build, selectedLabel), (text) => conciergeReply(context, text, selectedLabel));
+  const [localCollapsed, setLocalCollapsed] = React.useState(false);
+  const savedScroll = React.useRef(0);
+  const isCollapsed = typeof collapsed === 'boolean' ? collapsed : localCollapsed;
+  const setCollapsed = (next) => { setLocalCollapsed(next); onCollapsedChange && onCollapsedChange(next); };
+  React.useEffect(() => {
+    if (!isCollapsed) requestAnimationFrame(() => { if (chat.scroller.current) chat.scroller.current.scrollTop = savedScroll.current; });
+  }, [isCollapsed]);
+  const priorContext = React.useRef(context);
+  React.useEffect(() => {
+    if (priorContext.current === context) return;
+    priorContext.current = context;
+    const next = conciergeSeed(context, build, selectedLabel)[0];
+    if (next) chat.push(next);
+  }, [context]);
   const subtitle = context === 'build' ? (build && build.allDone ? 'Build complete' : 'Relaying the build')
-    : context === 'docs' ? 'Across every document'
+    : context === 'brief' ? 'Working from your brief'
+    : context === 'outputs' ? 'Across the factory’s work'
+    : context === 'files' || context === 'docs' ? 'Across your source material'
+    : context === 'maintenance' ? 'Supporting the shipped product'
     : context === 'ingesting' ? 'Processing in background'
     : 'Watching this project';
   const working = chat.thinking ? 'Thinking' : (context === 'build' && build && !build.allDone) ? 'Working' : (context === 'ingesting') ? 'Processing' : false;
   const suggestions = context === 'build' ? ['Summarize progress', 'What’s blocking the build?', 'Reprioritize a ticket']
-    : context === 'docs' ? (docChips && docChips.length ? docChips : ['What’s in the price book?', 'Summarize the SOP'])
+    : context === 'brief' ? ['What is missing?', 'Make this more concise', 'Revise the selected section']
+    : context === 'outputs' ? ['Explain this output', 'Relate it to the brief', 'What changed?']
+    : context === 'files' || context === 'docs' ? (docChips && docChips.length ? docChips : ['What’s in the price book?', 'Summarize the SOP'])
+    : context === 'maintenance' ? ['Summarize what shipped', 'Describe a change', 'Check current health']
     : ['How’s the build going?', 'What’s left to do?', 'Any blockers?'];
+
+  if (isCollapsed) return <button onClick={() => setCollapsed(false)} title="Open Concierge" aria-label="Open Concierge" style={{ position: 'absolute', right: 18, bottom: 18, zIndex: 30, width: 44, height: 44, display: 'grid', placeItems: 'center', borderRadius: '50%', border: `1px solid ${T.brand}55`, background: T.raised, boxShadow: T.shadowMd, cursor: 'pointer' }}><Sparkle size={16} color={T.brand} />{working && <span style={{ position: 'absolute', right: 2, top: 2, width: 9, height: 9, borderRadius: '50%', background: T.success, boxShadow: `0 0 0 2px ${T.raised}`, animation: 'sfPulse 1.5s ease-in-out infinite' }} />}</button>;
 
   return (
     <div style={{ width: 340, flexShrink: 0, borderLeft: `1px solid ${T.borderSubtle}`, background: T.raised, display: 'flex', flexDirection: 'column', minHeight: 0, alignSelf: 'stretch' }}>
-      <ConciergeHeader subtitle={subtitle} working={working} />
+      <ConciergeHeader subtitle={subtitle} working={working} onCollapse={() => { savedScroll.current = chat.scroller.current ? chat.scroller.current.scrollTop : 0; setCollapsed(true); }} />
       <div ref={chat.scroller} style={{ flex: 1, overflow: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {chat.messages.map((m, i) => <Message key={i} who={m.who} text={m.text} confidence={m.confidence} anim={i >= 1} />)}
-        {context === 'build' && typeof ConciergeArtifacts === 'function' && <ConciergeArtifacts onOpen={onOpen} />}
+        {chat.messages.map((m, i) => m.kind === 'event' ? <SystemEvent key={m.event.id} event={m.event} compact onOpen={onOpen} /> : <Message key={i} who={m.who} text={m.text} confidence={m.confidence} time={m.time} anim={i >= 1} />)}
         {!chat.thinking && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            <CategoryLabel>{context === 'docs' ? 'Ask about a document' : 'Try asking'}</CategoryLabel>
+            <CategoryLabel>{selectedLabel ? `Ask about ${selectedLabel}` : context === 'files' || context === 'docs' ? 'Ask about source material' : 'Try asking'}</CategoryLabel>
             <QuickReplies options={suggestions} onPick={(o) => chat.sendText(o)} />
           </div>
         )}
@@ -319,10 +396,10 @@ function ProjectConcierge({ context = 'overview', build, onOpen, docChips }) {
         {chat.thinking && <TypingIndicator label={chat.thinking} />}
       </div>
       <div style={{ flexShrink: 0, padding: '12px 16px', borderTop: `1px solid ${T.borderSubtle}` }}>
-        <Composer placeholder={context === 'build' ? 'Ask or steer the build team…' : context === 'docs' ? 'Ask about your documents…' : 'Ask the Concierge…'} value={chat.draft} onChange={chat.setDraft} onSend={() => chat.sendText()} />
+        <Composer placeholder={context === 'build' ? 'Ask or steer the build team…' : context === 'brief' ? 'Ask or revise the brief…' : context === 'outputs' ? 'Ask about this factory output…' : context === 'files' || context === 'docs' ? 'Ask about this directory or file…' : 'Ask the Concierge…'} value={chat.draft} onChange={chat.setDraft} onSend={() => chat.sendText()} />
       </div>
     </div>
   );
 }
 
-Object.assign(window, { useConciergeChat, ConciergeHeader, QuickReplies, ChoiceList, ProcessingScreen, InterviewRail, ProjectConcierge });
+Object.assign(window, { useConciergeChat, ConciergeHeader, QuickReplies, ChoiceList, ProcessingScreen, InterviewRail, ProjectConcierge, FACTORY_ACTIVITY, SystemEvent, FactoryActivity });

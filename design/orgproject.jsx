@@ -368,7 +368,7 @@ function ProjectDashboardSkel({ tab }) {
   );
 }
 
-function ProjectDashboard({ project, tab, onTab, onBack, onOpenBuild, onResume, budget, onBudgetChange, loading = false, ingesting = false, onResumeInterview }) {
+function LegacyProjectDashboard({ project, tab, onTab, onBack, onOpenBuild, onResume, budget, onBudgetChange, loading = false, ingesting = false, onResumeInterview }) {
   const [doc, setDoc] = React.useState(null);
   const p = project || PROJECTS[0];
   const isDraft = p.status === 'draft';
@@ -634,6 +634,11 @@ function ProjectDashboard({ project, tab, onTab, onBack, onOpenBuild, onResume, 
   );
 }
 
+function ProjectDashboard(props) {
+  const KnowledgeDashboard = window.ProjectKnowledgeDashboard;
+  return KnowledgeDashboard ? <KnowledgeDashboard {...props} /> : <LegacyProjectDashboard {...props} />;
+}
+
 Object.assign(window, { ORG, ORG_DOCS, ORG_SECRETS, OrgAdmin, ProjectDashboard, ProjectViewStandalone, FileTile, PROJ_SERVICES });
 
 // Self-contained wrapper for the showcase artboard: holds its own tab state
@@ -642,11 +647,13 @@ function ProjectViewStandalone({ ingesting = false, onResumeInterview, onBack, i
   const [tab, setTab] = React.useState(initialTab);
   const project = (typeof PROJECTS !== 'undefined' && PROJECTS[0]) || { name: 'Quote-to-Epicor automation', goal: '', status: 'building', phase: 'Build · stage 3', pct: 58, spend: '$4.20' };
   const [budget, setBudget] = React.useState(project.budget || 30);
+  const [conciergeCollapsed, setConciergeCollapsed] = React.useState(false);
+  const [consoleView, setConsoleView] = React.useState('kanban');
   if (tab === 'build') {
     return <BuildProgress projectName={`Acme Industrial · ${project.name}`} budget={budget}
-      peerTabs={{ onSwitch: (id) => setTab(id === 'build' ? 'build' : id === 'exit' ? 'overview' : id) }} />;
+      peerTabs={{ onSwitch: (id) => setTab(id === 'build' ? 'build' : id === 'exit' ? 'overview' : id) }} conciergeCollapsed={conciergeCollapsed} onConciergeCollapsedChange={setConciergeCollapsed} consoleView={consoleView} onConsoleViewChange={setConsoleView} />;
   }
-  return <ProjectDashboard project={project} tab={tab} onTab={setTab} onBack={onBack} onOpenBuild={() => setTab('build')} budget={budget} onBudgetChange={setBudget} ingesting={ingesting} onResumeInterview={onResumeInterview} />;
+  return <ProjectDashboard project={project} tab={tab} onTab={setTab} onBack={onBack} onOpenBuild={() => setTab('build')} budget={budget} onBudgetChange={setBudget} ingesting={ingesting} onResumeInterview={onResumeInterview} conciergeCollapsed={conciergeCollapsed} onConciergeCollapsedChange={setConciergeCollapsed} />;
 }
 window.ProjectViewStandalone = ProjectViewStandalone;
 
@@ -667,10 +674,12 @@ function AdminProjectView({ project, onBack }) {
   const [tab, setTab] = React.useState('overview');
   const p = React.useMemo(() => adminToProject(project), [project]);
   const [budget, setBudget] = React.useState(p.budget || 30);
+  const [conciergeCollapsed, setConciergeCollapsed] = React.useState(false);
+  const [consoleView, setConsoleView] = React.useState('kanban');
   if (tab === 'build') {
     return <BuildProgress projectName={`${p.org} · ${p.name}`} onBack={() => setTab('overview')} backLabel="Project" budget={budget}
-      peerTabs={{ onSwitch: (id) => setTab(id === 'build' ? 'build' : id === 'exit' ? 'overview' : id) }} />;
+      peerTabs={{ onSwitch: (id) => setTab(id === 'build' ? 'build' : id === 'exit' ? 'overview' : id) }} conciergeCollapsed={conciergeCollapsed} onConciergeCollapsedChange={setConciergeCollapsed} consoleView={consoleView} onConsoleViewChange={setConsoleView} />;
   }
-  return <ProjectDashboard project={p} tab={tab} onTab={setTab} onBack={onBack} onOpenBuild={() => setTab('build')} onResume={() => setTab('build')} budget={budget} onBudgetChange={setBudget} />;
+  return <ProjectDashboard project={p} tab={tab} onTab={setTab} onBack={onBack} onOpenBuild={() => setTab('build')} onResume={() => setTab('build')} budget={budget} onBudgetChange={setBudget} conciergeCollapsed={conciergeCollapsed} onConciergeCollapsedChange={setConciergeCollapsed} />;
 }
 window.AdminProjectView = AdminProjectView;
