@@ -44,12 +44,18 @@ class ProductBrief:
         return rows
 
     @staticmethod
-    def _content(row: dict) -> str | None:
-        """The version's markdown — the immutable inline `content` column, falling back to the
-        storage blob only for legacy rows written before content was inlined."""
+    def _content(row: dict, *, allow_storage_fallback: bool) -> str | None:
+        """The version's markdown. Prefer the immutable inline `content` column (every write inlines
+        it now). The storage-blob fallback is honest ONLY for the newest version: the brief's storage
+        key is fixed and each finalize overwrote it, so an OLDER content-less (pre-inline) row's blob
+        now holds a DIFFERENT, newer body — returning it would silently fake history. So older
+        content-less rows return None and the reader surfaces "content not preserved for this
+        version"; those old bodies are genuinely unrecoverable."""
         content = row.get("content")
         if content:
             return content
+        if not allow_storage_fallback:
+            return None
         url = row.get("path") or ""
         if not url:
             return None
@@ -69,14 +75,14 @@ class ProductBrief:
             "title": row.get("title") or "Product Brief",
         }
 
-    def _full(self, row: dict) -> dict:
-        return {**self._meta(row), "markdown": self._content(row)}
+    def _full(self, row: dict, *, is_latest: bool) -> dict:
+        return {**self._meta(row), "markdown": self._content(row, allow_storage_fallback=is_latest)}
 
     # ---- reads -------------------------------------------------------------------------
     def latest(self, project_id: str) -> dict | None:
         """Newest canonical brief (metadata + markdown), or None if the project has none yet."""
         rows = self._rows_newest_first(project_id)
-        return self._full(rows[0]) if rows else None
+        return self._full(rows[0], is_latest=True) if rows else None
 
     def versions(self, project_id: str) -> list[dict]:
         """Every version newest-first — stable artifact ids + timestamps, no bodies."""
@@ -87,9 +93,10 @@ class ProductBrief:
         is within the project's own product_brief rows, so an id from another project (or a
         non-brief artifact) is simply absent here — cross-project access is refused, not leaked,
         without an unscoped global fetch. Raises NotFound if the id is unknown."""
-        for row in self._rows_newest_first(project_id):
+        rows = self._rows_newest_first(project_id)
+        for index, row in enumerate(rows):
             if row["id"] == artifact_id:
-                return self._full(row)
+                return self._full(row, is_latest=(index == 0))
         raise NotFound("product brief version not found")
 
     # ---- write -------------------------------------------------------------------------
@@ -100,6 +107,12 @@ class ProductBrief:
         the current newest, raise Conflict carrying the current latest so the editor can reconcile
         — two editors can't silently overwrite each other. Durable content is written first; only
         then is the artifact recorded, so a storage failure never yields a phantom 'saved'.
+
+        The check-then-insert is not transactionally atomic: two writers that both pass the check on
+        the same base can both append. That is benign here — the stream is append-only and immutable
+        (neither clobbers the other; both survive in history and newest still wins), the window is
+        tiny, and a real editor almost never has a concurrent co-writer on one project. A row lock
+        would be machinery out of proportion to the risk.
         """
         md = (markdown or "").strip()
         if not md:
@@ -109,7 +122,7 @@ class ProductBrief:
         if base_artifact_id != current_id:
             raise Conflict({
                 "message": "product brief changed since you loaded it — reload the latest version",
-                "latest": self._full(rows[0]) if rows else None,
+                "latest": self._full(rows[0], is_latest=True) if rows else None,
             })
         # durable content first (raises on storage failure → no artifact row recorded), then record
         # the canonical artifact the same way Concierge finalization does, with the content inlined
@@ -118,4 +131,4 @@ class ProductBrief:
         self._store(project_id).record_artifact(
             "Product Brief", url, kind=_KIND, agent=agent, content=md, origin="user")
         new_rows = self._rows_newest_first(project_id)
-        return self._full(new_rows[0])
+        return self._full(new_rows[0], is_latest=True)
