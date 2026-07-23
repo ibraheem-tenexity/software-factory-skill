@@ -95,6 +95,10 @@ class ChatIn(BaseModel):
     impl_model: str = ""
     model: str = ""   # opencode model alias: "kimi"|"glm"
     project_name: str = ""
+    # SOF-245: what the customer is currently reading in the Factory Outputs peer (artifact + its
+    # producing stage), as one human-readable sentence. Injected into THIS turn's prompt only —
+    # never persisted and never used for memory retrieval.
+    display_context: str = ""
 
 
 class ConverseIn(BaseModel):

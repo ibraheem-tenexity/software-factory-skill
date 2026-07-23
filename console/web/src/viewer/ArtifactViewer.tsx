@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, ProjectArtifact } from "../api";
 import { T, Icon } from "../components/onboarding/design";
-import { MarkdownBody } from "../markdown";
+import { ArtifactBody, kindLabel, badgeTone, fmtDate } from "./ArtifactBody";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -21,119 +21,9 @@ type ArtifactDetail = {
   agent: string | null;
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function kindLabel(kind: string, path: string): string {
-  const ext = path.split(".").pop()?.toLowerCase() || "";
-  const MAP: Record<string, string> = { deploy: "Deploy", repo: "Repo", "demo-creds": "Creds",
-    context: "Context", md: "Markdown", svg: "SVG", code: "Code",
-    json: "JSON", csv: "CSV", image: "Image", fig: "Design", mockup: "Mockup", "flow-map": "Flow Map",
-    "decision-log": "Decision Log" };
-  return MAP[kind] || MAP[ext] || kind || "File";
-}
-
-function badgeTone(kind: string): { bg: string; color: string } {
-  if (kind === "deploy" || kind === "repo") return { bg: T.successSoft, color: T.success };
-  if (kind === "md") return { bg: T.brandSoft, color: T.brandDeep };
-  return { bg: T.sunken, color: T.secondary };
-}
-
-function fmtDate(epoch?: number): string {
-  if (!epoch) return "—";
-  return new Date(epoch * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
-
-function extOf(path: string): string {
-  return path.split(".").pop()?.toLowerCase() || "";
-}
-
-function isMd(kind: string, path: string): boolean {
-  return kind === "md" || ["md", "mdx"].includes(extOf(path));
-}
-function isSvg(kind: string, path: string): boolean {
-  return kind === "svg" || extOf(path) === "svg";
-}
-function isImage(kind: string, path: string): boolean {
-  return kind === "image" || ["png", "jpg", "jpeg", "gif", "webp"].includes(extOf(path));
-}
-function isCode(kind: string, path: string): boolean {
-  return ["code", "json", "csv", "repo"].includes(kind) || ["js", "ts", "tsx", "jsx", "py", "json", "csv", "sh", "yml", "yaml", "txt"].includes(extOf(path));
-}
-function isHtml(kind: string, path: string): boolean {
-  return kind === "mockup" || extOf(path) === "html";
-}
-
-// ── Content renderer ─────────────────────────────────────────────────────────
-
-function ContentBody({ artifact }: { artifact: ArtifactDetail }) {
-  const { kind, path, content } = artifact;
-
-  if (content === null) {
-    // SOF-139: don't conflate "external link", "binary", and "content is gone" — and never show a
-    // Download link that 404s. A URL artifact opens externally; anything else with no content is
-    // honestly unavailable (its file wasn't stored and the workspace was cleaned up — SOF-138).
-    const isUrl = path.startsWith("http");
-    return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, gap: 14, color: T.tertiary }}>
-        <Icon name="file" size={36} color={T.tertiary} />
-        <span style={{ font: `400 13.5px/1.5 ${T.sans}`, textAlign: "center", maxWidth: 380 }}>
-          {isUrl
-            ? "This artifact is an external link."
-            : "This file’s content is no longer available — it wasn’t stored and its workspace has been cleaned up."}
-        </span>
-        {isUrl && (
-          <a href={path} target="_blank" rel="noreferrer"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: T.rMd,
-              border: `1px solid ${T.borderDefault}`, background: T.raised, font: `500 13px/1 ${T.sans}`, color: T.fg, textDecoration: "none" }}>
-            <Icon name="external" size={14} color={T.secondary} /> Open link
-          </a>
-        )}
-      </div>
-    );
-  }
-
-  if (isSvg(kind, path)) {
-    return (
-      <div style={{ flex: 1, overflow: "auto", display: "grid", placeItems: "center", padding: 24 }}
-        dangerouslySetInnerHTML={{ __html: content }} />
-    );
-  }
-
-  if (isImage(kind, path)) {
-    const src = path.startsWith("http") ? path : `/api/projects/${artifact.project_id}/artifact?path=${encodeURIComponent(path)}`;
-    return (
-      <div style={{ flex: 1, overflow: "auto", display: "grid", placeItems: "center", padding: 24 }}>
-        <img src={src} alt={artifact.title || path} style={{ maxWidth: "100%", borderRadius: T.rMd, boxShadow: T.shadowMd }} />
-      </div>
-    );
-  }
-
-  if (isMd(kind, path)) {
-    return (
-      <div style={{ flex: 1, overflow: "auto", padding: "24px 28px" }}>
-        <MarkdownBody content={content} showToc />
-      </div>
-    );
-  }
-
-  if (isHtml(kind, path)) {
-    // SOF-99: mockups are agent-generated static HTML — sandbox with NO allow-scripts, since
-    // they're meant to be static and a script (even benign) should never execute here.
-    return (
-      <iframe title={artifact.title || path} srcDoc={content} sandbox=""
-        style={{ flex: 1, border: "none", background: "#fff" }} />
-    );
-  }
-
-  // code / json / csv / plain text
-  return (
-    <div style={{ flex: 1, overflow: "auto", padding: "20px 24px" }}>
-      <pre style={{ margin: 0, font: `400 12.5px/1.6 ${T.mono}`, color: T.fg, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-        {content}
-      </pre>
-    </div>
-  );
-}
+// The typed body renderer + its kind/label/date helpers now live in the shared ArtifactBody
+// module (SOF-245) so the standalone viewer, the in-shell Factory Outputs reader, and the Factory
+// Console preview all render off one implementation.
 
 // ── Main viewer ───────────────────────────────────────────────────────────────
 
@@ -357,7 +247,7 @@ export function ArtifactViewer() {
         {/* content area */}
         {overrideLoading
           ? <div style={{ flex: 1, display: "grid", placeItems: "center" }}><span style={{ font: `400 13px/1 ${T.sans}`, color: T.tertiary }}>Loading…</span></div>
-          : displayArtifact && <ContentBody artifact={displayArtifact as ArtifactDetail} />
+          : displayArtifact && <ArtifactBody data={displayArtifact as ArtifactDetail} />
         }
       </div>
     </div>

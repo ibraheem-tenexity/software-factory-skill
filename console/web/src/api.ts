@@ -114,7 +114,10 @@ export type Artifact = { path: string; content?: string; error?: string };
 // Project view (§2.5) — Overview rollup + Documents, per tjyb5gmy's LOCKED shapes (PR #13).
 // Callers degrade to empty until live.
 export type ProjectMaterial = { id?: string; name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number; scope?: "project" | "org"; tag?: string; used_count?: number; summary?: string; summary_status?: "pending" | "ready" | "failed" };
-export type ProjectArtifact = { id?: number; title: string; path?: string; kind?: string; agent?: string; ts?: number };
+// `stage` (SOF-78 / #441): the pipeline stage that produced this artifact — 1/2/3, or null for
+// draft/intake output and any row whose producing stage couldn't be resolved. SOF-245 groups the
+// Factory Outputs peer by it; null/unknown falls into an honest "Other factory outputs" bucket.
+export type ProjectArtifact = { id?: number; title: string; path?: string; kind?: string; agent?: string; ts?: number; stage?: number | null };
 export type ProjectOverview = {
   brief?: { name?: string; description?: string; goal?: string; scope?: string[]; owner?: string; phase?: string; stage?: number; created?: number | string; runtime?: string; created_by?: string };
   build?: { pct?: number; tickets_done?: number; tickets_total?: number; agents_working?: number; spent_usd?: number; budget_ceiling?: number; done?: boolean; deploy_url?: string };

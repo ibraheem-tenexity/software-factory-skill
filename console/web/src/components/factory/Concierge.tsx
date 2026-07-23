@@ -16,6 +16,10 @@ import { api, ProjectEvent } from "../../api";
 // SOF-168: bare URLs in activity-feed lines render as clickable links (React-node split, no HTML).
 import { linkify } from "../../linkify";
 import { ArtifactList, ArtifactRef } from "./Artifacts";
+// SOF-245: the Factory Outputs peer publishes the artifact/stage the customer is currently reading;
+// the concierge relays it as ephemeral display context for the next turn (never persisted, never
+// alters memory retrieval).
+import { useDisplayContext } from "./displayContext";
 
 type ChatMsg = { role: string; content: string; ts: number; msg_type?: string };
 type Rail = "feed" | "tray" | "latest";
@@ -73,6 +77,9 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
   const [sendErr, setSendErr] = useState("");
   const [rail, setRail] = useState<Rail>("feed");
   const feedRef = useRef<HTMLDivElement>(null);
+  // Only relay display context for THIS project (the store is app-global).
+  const dc = useDisplayContext();
+  const displayCtx = dc && dc.projectId === projectId ? dc : null;
 
   // SOF-90: the concierge now persists its real tool-call trace, and /api/chat/{id}/history returns
   // it (rows tagged msg_type "tool_call"/"tool_result") so the model can ground its self-reports.
@@ -105,7 +112,8 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
     const timer = setTimeout(() => ctrl.abort(), 90_000);
     try {
       const resp = await api.chatStream(
-        { project_id: projectId, project_name: projectName || "", message: msg },
+        { project_id: projectId, project_name: projectName || "", message: msg,
+          ...(displayCtx ? { display_context: displayCtx.summary } : {}) },
         ctrl.signal,
       );
       const reader = resp.body!.getReader();
@@ -247,6 +255,17 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
 
       {/* ── composer band ── */}
       <div style={{ flexShrink: 0, padding: "12px 16px", borderTop: `1px solid ${T.borderSubtle}` }}>
+        {/* SOF-245: show the customer that the concierge can see what they're reading — so asking
+            "explain this" is grounded, and the context relay is a visible affordance, not silent. */}
+        {displayCtx && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 7, padding: "5px 9px",
+            borderRadius: T.rMd, background: T.brandSoft + "66", border: `1px solid ${T.brand}33` }}>
+            <Icon name="file" size={12} color={T.brandDeep} />
+            <span style={{ font: `400 11px/1.35 ${T.sans}`, color: T.secondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              Viewing <strong style={{ color: T.fg }}>{displayCtx.title}</strong> · {displayCtx.stageLabel}
+            </span>
+          </div>
+        )}
         {sendErr && <span style={{ display: "block", marginBottom: 6, font: `400 11.5px/1.4 ${T.sans}`, color: T.danger }}>{sendErr}</span>}
         <Composer placeholder="Ask or steer the build team…" value={draft} onChange={setDraft} onSend={() => steer()} loading={sending} />
       </div>
