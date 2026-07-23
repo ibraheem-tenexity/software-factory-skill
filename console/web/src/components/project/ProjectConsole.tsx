@@ -251,7 +251,7 @@ export function ProjectConsole({ projectId, onBack, onResume, onOpen }: {
            ───────────────────────────────────────────────────────────────────────────────────── */}
         <aside style={{ width: 340, flexShrink: 0, borderLeft: `1px solid ${T.borderSubtle}`, background: T.raised, display: "flex", flexDirection: "column", minHeight: 0 }}>
           <Concierge projectId={projectId} projectName={name} artifacts={artifacts}
-            onOpenArtifact={openRef}
+            onOpenArtifact={openRef} context={conciergeContext}
             isBuilding={!!status && !status.done && status.phase !== "draft" && status.phase !== "stopped"}
             ticketsDone={doneTickets} ticketsTotal={tickets.length}
             buildDone={!!status?.done} deployed={!!status?.deploy_url} phase={status?.phase} />
