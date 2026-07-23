@@ -32,6 +32,11 @@ export function ArtifactViewer() {
   const docId = params.get("doc");
   const blobId = params.get("blob");
   const blobName = params.get("name") || "";
+  // SOF-255: a Files-browser row opens as ?blob=<id>&name=<file>&pid=<project>. When `pid` is
+  // present, read content through the project-relative Files route (authorize_project-gated, serves
+  // both project- and owner-org-scope blobs, #448) instead of the org KB route. Same content shape
+  // → same render path, no new branch.
+  const filesPid = params.get("pid");
 
   const [artifact, setArtifact] = useState<ArtifactDetail | null>(null);
   const [railItems, setRailItems] = useState<ProjectArtifact[]>([]);
@@ -44,13 +49,15 @@ export function ArtifactViewer() {
 
   useEffect(() => {
     if (blobId) {
-      // Org-scope KB blob mode (e.g. codebase-discovery's generated docs) — a different
-      // table/id-space from `artifacts`, no project rail to load, a synthesized ArtifactDetail, same shape as project artifacts.
-      api.orgDocContent(Number(blobId))
+      // Blob mode: a synthesized ArtifactDetail, no project rail. Content comes from the
+      // project-relative Files route when a Files-browser `pid` is present (SOF-255/#448), else the
+      // org KB route (e.g. codebase-discovery's generated docs) — a different table/id-space from
+      // `artifacts`. Both return `{content}`, so the render path below is unchanged.
+      (filesPid ? api.fileContent(filesPid, Number(blobId)) : api.orgDocContent(Number(blobId)))
         .then((r) => {
           setArtifact({
             id: Number(blobId),
-            project_id: `org-doc-${blobId}`,
+            project_id: filesPid || `org-doc-${blobId}`,
             title: blobName || null,
             kind: "md",
             path: blobName || `org-doc-${blobId}.md`,
@@ -81,7 +88,7 @@ export function ArtifactViewer() {
         const detail = (e as ApiError)?.detail;
         setError(typeof detail === "string" && detail ? detail : "This artifact couldn't be loaded.");
       });
-  }, [docId, blobId, blobName]);
+  }, [docId, blobId, blobName, filesPid]);
 
   const displayArtifact = artifact
     ? (override

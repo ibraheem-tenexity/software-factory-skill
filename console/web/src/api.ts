@@ -545,6 +545,12 @@ export const api = {
     send<FilesTree>(`/api/projects/${id}/files/${blobId}`, "PATCH", body),
   deleteFile: (id: string, blobId: number) =>
     send<FilesTree>(`/api/projects/${id}/files/${blobId}`, "DELETE"),
+  // Read a Files-browser blob's content through the single project-relative route (#448, gyogcl1y):
+  // authorize_project-gated, serves BOTH project- and owner-org-scope blobs, content-negotiation
+  // mirrors the org route. Used for EVERY Files row (project & org) — never /api/org/docs/{id}/content,
+  // which stays reserved for the admin/org KB surfaces.
+  fileContent: (id: string, blobId: number) =>
+    get<{ content: string | null }>(`/api/projects/${id}/files/${blobId}/content`),
   getOrg: () => get<{ org: Org | null }>("/api/org"),
   createOrg: (body: OrgInput) => send<{ org: Org }>("/api/org", "POST", body),
   patchOrg: (body: Partial<Org>) => send<{ org: Org }>("/api/org", "PATCH", body),

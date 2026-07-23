@@ -32,6 +32,13 @@ export function openOrgDoc(id: number | string, name: string) {
   window.open(`/ArtifactViewer.html?blob=${id}&name=${encodeURIComponent(name)}`, "_blank");
 }
 
+// Open a Files-browser source blob (SOF-255) in the shared viewer. Threads the project id so the
+// viewer reads content through the project-relative Files route (#448) — which serves BOTH project-
+// and owner-org-scope blobs — rather than the org-only KB route above.
+export function openProjectFile(projectId: string, id: number | string, name: string) {
+  window.open(`/ArtifactViewer.html?blob=${id}&name=${encodeURIComponent(name)}&pid=${encodeURIComponent(projectId)}`, "_blank");
+}
+
 // Badge kind from the artifact's path/url (design KIND_BADGE keys; unknown ⇒ the raw extension).
 export function artifactKind(path: string, url?: string | null): string {
   const p = (path || "").toLowerCase();

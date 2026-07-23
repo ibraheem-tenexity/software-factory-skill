@@ -14,7 +14,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   api, ApiError, FilesTree, FilesDirectory, FilesFile, FilesRecent, DirScope, SummaryStatus,
 } from "../../api";
-import { openOrgDoc } from "../factory/Artifacts";
+import { openProjectFile } from "../factory/Artifacts";
 import { T, Icon, Btn, StatusPill, CategoryLabel } from "../onboarding/design";
 import { MarkdownBody } from "../../markdown";
 import { Spinner, Skel } from "../skeleton";
@@ -307,6 +307,7 @@ export function FilesPeer({ projectId, onSelect }: { projectId: string; onSelect
                   onCancelMove={() => setMovingId(null)}
                   onMove={(target) => doMove(selectedFile, target)}
                   onDelete={() => doDelete(selectedFile)}
+                  onOpen={() => openProjectFile(projectId, selectedFile.id, selectedFile.name)}
                   onClose={() => setSelectedFileId(null)}
                   busy={busy}
                 />
@@ -513,10 +514,10 @@ function FileCard({ file, selected, onSelect }: { file: FilesFile; selected: boo
 }
 
 // ── File details / summary panel (source-file actions only — never artifact-only actions). ──
-function FileDetails({ file, directories, moving, onStartMove, onCancelMove, onMove, onDelete, onClose, busy }: {
+function FileDetails({ file, directories, moving, onStartMove, onCancelMove, onMove, onDelete, onOpen, onClose, busy }: {
   file: FilesFile; directories: FilesDirectory[]; moving: boolean;
   onStartMove: () => void; onCancelMove: () => void; onMove: (target: FilesDirectory) => void;
-  onDelete: () => void; onClose: () => void; busy: boolean;
+  onDelete: () => void; onOpen: () => void; onClose: () => void; busy: boolean;
 }) {
   const v = visualFor(file);
   return (
@@ -556,7 +557,7 @@ function FileDetails({ file, directories, moving, onStartMove, onCancelMove, onM
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: `1px solid ${T.borderSubtle}`, paddingTop: 12 }}>
-        <Btn size="sm" variant="secondary" full onClick={() => openOrgDoc(file.id, file.name)}>
+        <Btn size="sm" variant="secondary" full onClick={onOpen}>
           <Icon name="external" size={13} color={T.secondary} /> Open in viewer
         </Btn>
         {moving ? (
