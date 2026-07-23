@@ -20,6 +20,7 @@ import { api, ProjectSummary, Graph, Ticket } from "../../api";
 import { T, Icon, Btn, StatusPill, Wordmark, TextInput } from "../onboarding/design";
 import { AccountMenu } from "../AccountMenu";
 import { OverviewTab } from "./OverviewTab";
+import { FactoryOutputsPeer } from "./FactoryOutputsPeer";
 import { DocumentsTab } from "./DocumentsTab";
 import { MaintenanceTab } from "./MaintenanceTab";
 import { FactoryBoard } from "../factory/FactoryBoard";
@@ -235,7 +236,7 @@ export function ProjectConsole({ projectId, onBack, onResume, onOpen }: {
             <OverviewTab projectId={projectId} onOpenFactory={() => go("factory")} onOpenBrief={() => go("brief")} onOpenOutputs={() => go("outputs")} onOpenDocuments={() => go("files")} onResume={onResume} onDiscard={isDraft ? doArchive : undefined} />
           )}
           {view === "brief" && <BriefPeer artifacts={artifacts} goal={status?.goal || status?.description || ""} onOpen={openRef} />}
-          {view === "outputs" && <OutputsPeer artifacts={artifacts} onOpen={openRef} />}
+          {view === "outputs" && <FactoryOutputsPeer projectId={projectId} />}
           {view === "factory" && <FactoryBoard projectId={projectId} status={status || ({} as Status)} tickets={tickets} graph={graph} loaded={loaded} onStatus={(s) => setStatus(s)} />}
           {view === "files" && <DocumentsTab projectId={projectId} />}
           {view === "maintenance" && isDone && <MaintenanceTab projectId={projectId} enabled={!!status?.maintenance_enabled} onToggle={doToggleMaintenance} />}
@@ -288,30 +289,3 @@ function BriefPeer({ artifacts, goal, onOpen }: { artifacts: ArtifactRef[]; goal
 
 // Factory outputs peer (SOF-245 replaces with the stage-grouped workspace). For now: the real
 // produced artifacts as a flat clickable list opening the artifact viewer.
-function OutputsPeer({ artifacts, onOpen }: { artifacts: ArtifactRef[]; onOpen: (a: ArtifactRef) => void }) {
-  return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "28px 24px" }}>
-      <div style={{ maxWidth: 760, margin: "0 auto" }}>
-        <h2 style={{ font: `700 18px/1.2 ${T.display}`, margin: "0 0 4px", color: T.fg }}>Factory outputs</h2>
-        <p style={{ font: `400 12.5px/1.5 ${T.sans}`, color: T.tertiary, margin: "0 0 18px" }}>Everything the factory has produced so far.</p>
-        {artifacts.length === 0 ? (
-          <p style={{ font: `400 13px/1.5 ${T.sans}`, color: T.tertiary }}>Outputs begin after handoff — research, plans, architecture, designs, and build records appear here as the factory completes them.</p>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            {artifacts.map((a, i) => (
-              <button key={a.id ?? a.path ?? i} onClick={() => onOpen(a)} className="sf-artchip"
-                style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", textAlign: "left", padding: "12px 4px", background: "none", border: "none", borderTop: i ? `1px solid ${T.borderSubtle}` : "none", cursor: "pointer" }}>
-                <Icon name="layers" size={16} color={T.brand} />
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <b style={{ display: "block", font: `600 13px/1.3 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.label}</b>
-                  {a.agent && <span style={{ font: `400 11px/1.3 ${T.sans}`, color: T.tertiary }}>Produced by {a.agent}</span>}
-                </span>
-                <Icon name="arrowRight" size={13} color={T.tertiary} />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
