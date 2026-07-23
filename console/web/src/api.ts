@@ -109,6 +109,24 @@ export type DepsSubmitResponse = {
 export type ProvideDepResponse = { ok: boolean; detail?: string; name?: string; disposition?: string; vault_saved?: boolean };
 
 export type ProjectEvent = { ts: number; type: string; payload: Record<string, any> };
+
+// SOF-252 — the customer design-review action, derived from real graph/artifact records. `screens`
+// is one entry per stored `mockup` artifact (count varies per project, never hardcoded); `model` is
+// the recorded producing model; `theme` is null when the org has no real brand-theme record (brand
+// & theme is Wave-2/not-shipping — we never fabricate an "on your brand theme" claim).
+export type DesignScreen = {
+  id: string; title: string; path: string; artifact_id?: number | null;
+  agent?: string | null; ts?: number; version?: number;
+};
+export type DesignReview = {
+  available: boolean; design_done: boolean; status: "review" | "locked";
+  version: number; approved_version: number | null;
+  screens: DesignScreen[]; screen_count: number; model: string; theme: string | null;
+  decisions: Record<string, any>[];
+  ok?: boolean; detail?: string;
+  continuation?: { continued: boolean; via: string; detail: string };
+  revision?: { affected: string[]; version: number; regenerating: boolean; detail: string };
+};
 export type Artifact = { path: string; content?: string; error?: string };
 
 // Project view (§2.5) — Overview rollup + Documents, per tjyb5gmy's LOCKED shapes (PR #13).
@@ -524,6 +542,14 @@ export const api = {
   provideDep: (id: string, name: string, value: string) =>
     send<ProvideDepResponse>(`/api/projects/${id}/deps/provide`, "POST", { name, value }),
   events: (id: string) => get<{ events: ProjectEvent[] }>(`/api/projects/${id}/events`),
+  // SOF-252 design-review action (Activity-only). GET derives the state from real records; the
+  // three POSTs are the customer actions. reviseDesign shares the backend function the Concierge
+  // `request_design_revision` tool calls, so the button and the agent tool surface identical results.
+  designReview: (id: string) => get<DesignReview>(`/api/projects/${id}/design-review`),
+  approveDesign: (id: string) => send<DesignReview>(`/api/projects/${id}/design-review/approve`, "POST"),
+  reopenDesign: (id: string) => send<DesignReview>(`/api/projects/${id}/design-review/reopen`, "POST"),
+  reviseDesign: (id: string, screen_ids: string[], instructions: string) =>
+    send<DesignReview>(`/api/projects/${id}/design-review/revise`, "POST", { screen_ids, instructions }),
   artifact: (id: string, path: string) =>
     get<Artifact>(`/api/projects/${id}/artifact?path=${encodeURIComponent(path)}`),
   getArtifact: (id: string | number) => get<Record<string, any>>(`/api/artifacts/${id}`),

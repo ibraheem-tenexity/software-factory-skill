@@ -19,7 +19,10 @@ _DONE_TICKET_STATES = {"done", "deployed", "approved"}
 # (the brief has no DB-inlined content and no source_blob_id, so it renders as a bare external link
 # while the real PRD renders natively — same conceptual role, two different broken-feeling
 # experiences). It stays reachable via the Overview tab's own dedicated brief link either way.
-INPUT_ONLY_KINDS = {"context", "product_brief"}
+# "design_review" (SOF-252) is an append-only customer design DECISION record, not a produced
+# output — keep it out of the produced-artifact graph nodes and the Documents tab. It still
+# projects into the event timeline (see projects/records.events).
+INPUT_ONLY_KINDS = {"context", "product_brief", "design_review"}
 
 _EXT_KIND = {"pdf": "pdf", "xlsx": "xlsx", "xls": "xlsx", "csv": "csv", "doc": "doc", "docx": "doc",
              "mp4": "video", "mov": "video", "png": "img", "jpg": "img", "jpeg": "img"}

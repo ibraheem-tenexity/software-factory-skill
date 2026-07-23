@@ -1,11 +1,16 @@
 """Read-only projections over one project's durable factory records."""
 from __future__ import annotations
 
+import json
+import logging
+
 from ..db import ProjectStore
 from ..projectstate import ProjectState
 from ..runtime_agents import AgentRegistry
 from ..tickets import TicketStore
 from .intake import project_paths
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectRecords:
@@ -109,6 +114,18 @@ class ProjectRecords:
             items.append({"ts": phase["ts"], "type": "phase",
                           "payload": {"name": phase["name"], "status": phase["status"]}})
         for artifact in db.artifacts():
+            # SOF-252: a design-review DECISION (approve/reopen/iterate) is a customer-visible
+            # process event, not a produced output — project it as a dedicated "design_review"
+            # event carrying the decoded decision payload, not a generic "Produced …" artifact row.
+            if (artifact.get("kind") or "").lower() == "design_review":
+                payload = {"title": artifact["title"], "path": artifact["path"]}
+                try:
+                    payload.update(json.loads(artifact.get("content") or "{}"))
+                except (ValueError, TypeError):
+                    logger.exception("[records] undecodable design_review content on artifact %s",
+                                     artifact.get("id"))
+                items.append({"ts": artifact["ts"], "type": "design_review", "payload": payload})
+                continue
             items.append({"ts": artifact["ts"], "type": "artifact",
                           "payload": {"title": artifact["title"], "path": artifact["path"]}})
         for blocker in db.blockers():

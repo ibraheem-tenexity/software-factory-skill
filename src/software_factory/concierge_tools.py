@@ -184,6 +184,26 @@ def build_project_tools(console: ExecutionService, project_id: str) -> list:
         return brief if brief else "no product brief exists yet — call finalize_product_brief first"
 
     @tool
+    def get_design_review() -> str:
+        """Read the current design-review state for THIS project (SOF-252): the generated screens
+        (IDs, titles, stored artifact paths), the producing model, the review version, and whether
+        the design is still in review or already locked. Call this to ground a design revision
+        request in the REAL screen identities before asking to revise anything."""
+        return json.dumps(console.design_review(project_id), default=str)
+
+    @tool
+    def request_design_revision(screen_ids: str, instructions: str) -> str:
+        """Iterate on the design — the SAME action as the customer's 'Iterate' button in the
+        design-review action (calls the identical ExecutionService.request_design_revision). Use
+        it when the user asks to change generated screens (e.g. 'denser quote table',
+        'approvals first'). `screen_ids` is a comma-separated list of the affected screen IDs from
+        get_design_review (empty ⇒ all screens); `instructions` is what to change. Records a new
+        design version grounded in those screens and re-runs the existing design workflow. Returns
+        the real outcome, including an honest refusal (e.g. a stage already running)."""
+        ids = [s.strip() for s in (screen_ids or "").split(",") if s.strip()]
+        return json.dumps(console.request_design_revision(project_id, ids, instructions), default=str)
+
+    @tool
     def hand_off_to_factory() -> str:
         """Promote this project into the factory and launch Stage 1 — the SAME action the user's
         "Hand off to the factory" button performs (calls the identical ExecutionService.promote_draft).
@@ -199,4 +219,4 @@ def build_project_tools(console: ExecutionService, project_id: str) -> list:
     return [write_to_project_memory, get_from_project_memory, create_project_summary,
             check_project_status, exa_search, fusion_search, enrich_company,
             search_document_summaries, fetch_document_markdown, finalize_product_brief,
-            read_product_brief, hand_off_to_factory]
+            read_product_brief, get_design_review, request_design_revision, hand_off_to_factory]

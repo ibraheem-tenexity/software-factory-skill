@@ -93,9 +93,9 @@ function ActivityRow({ it, anchor, selected, artifacts, onOpenArtifact, rowRef }
 // stage-triggered action (Wait-for-deps) the board hands down; it renders at the chronological tail
 // (it is the current gate) and — because it lives INSIDE this mode — leaving Activity removes it from
 // layout, so it can never push another selected view below the viewport.
-export function FactoryActivity({ projectId, artifacts, onOpenArtifact, selectedEventId, depsPanel, focusDeps, onFocusHandled }: {
+export function FactoryActivity({ projectId, artifacts, onOpenArtifact, selectedEventId, designPanel, depsPanel, focusDeps, onFocusHandled }: {
   projectId: string; artifacts: ArtifactRef[]; onOpenArtifact: (a: ArtifactRef) => void;
-  selectedEventId?: string | null; depsPanel?: ReactNode;
+  selectedEventId?: string | null; designPanel?: ReactNode; depsPanel?: ReactNode;
   focusDeps?: boolean; onFocusHandled?: () => void;
 }) {
   const [events, setEvents] = useState<ProjectEvent[]>([]);
@@ -212,9 +212,12 @@ export function FactoryActivity({ projectId, artifacts, onOpenArtifact, selected
         </div>
       )}
 
-      {/* Stage-triggered action panel renders at the chronological tail (the current live gate),
-          INSIDE Activity only — selecting Kanban/Tree/Map removes it from layout entirely. The ref is
-          the scroll target for the StageRail's wait-for-deps pill (SOF-250 cross-mode click-through). */}
+      {/* Stage-triggered action panels render at the chronological tail (the current live gates),
+          INSIDE Activity only — selecting Kanban/Tree/Map removes them from layout entirely. Design
+          review (the design gate, Stage 2) precedes wait-for-deps (the Stage 2→3 boundary); each
+          self-gates and shows only when it is the live gate. The depsRef wrapper is the scroll target
+          for the StageRail's wait-for-deps pill (SOF-250 cross-mode click-through). */}
+      {designPanel}
       {depsPanel && <div ref={depsRef}>{depsPanel}</div>}
     </div>
   );
