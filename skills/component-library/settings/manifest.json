@@ -1,0 +1,33 @@
+{
+  "id": "settings",
+  "version": "0.1.0",
+  "name": "Settings",
+  "archetype_zones": ["admin-settings"],
+  "capabilities": ["edit workspace settings", "manage integrations", "manage data sources", "set notification preferences"],
+  "screens": [
+    { "screen_id": "settings", "mockup": "design/settings.html", "template": "template/Settings" }
+  ],
+  "data_interface": {
+    "entities": [
+      "SettingGroup { key, label }",
+      "Setting { key, group, label, description, type: 'text'|'toggle'|'select'|'secret', value }",
+      "Integration { key, name, connected: boolean, detail }"
+    ],
+    "operations": [
+      "listSettings() -> { groups: SettingGroup[], settings: Setting[] }",
+      "setSetting(key, value) -> Setting",
+      "listIntegrations() -> Integration[]",
+      "connectIntegration(key) -> Integration",
+      "disconnectIntegration(key) -> void"
+    ]
+  },
+  "permissions": ["admin"],
+  "tokens": "required",
+  "customization_points": [
+    "the set of setting groups + fields (app-specific)",
+    "which integrations are offered",
+    "whether secrets are stored server-side (vault) or write-only"
+  ],
+  "status": "draft",
+  "notes": "v0.1: manifest + settings design mockup (grouped sections: general / integrations / notifications). Code template pending SOF-109's template-framework decision. Secrets should ride the app's existing vault path, never plaintext in a setting value; see docs/design/component-library.md."
+}
