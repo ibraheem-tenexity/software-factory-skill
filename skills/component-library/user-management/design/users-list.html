@@ -1,0 +1,134 @@
+<!doctype html>
+<!-- SOF-109 component-library · user-management · screen: users-list (archetype Zone 7 — Admin/Settings).
+     Token-authentic static mockup on the Tenexity design system (tokens.css values inlined so it renders
+     standalone). Same shape Stage-3 consumes at context/mockups/<screen_id>.html (SOF-99/100). -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Users · Admin</title>
+<style>
+  :root{
+    --background:0 0% 98%; --foreground:240 6% 10%; --raised:0 0% 100%; --sunken:240 5% 96%;
+    --text-secondary:240 4% 34%; --text-tertiary:240 4% 56%;
+    --border-subtle:240 5% 91%; --border-default:240 5% 84%;
+    --brand:214 100% 55%; --brand-foreground:0 0% 100%; --brand-soft:214 100% 95%; --brand-deep:214 91% 41%;
+    --success:159 94% 30%; --success-soft:152 76% 94%;
+    --warning:27 96% 43%; --warning-soft:38 92% 92%;
+    --danger:0 74% 50%; --danger-soft:0 86% 95%;
+    --r:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:hsl(var(--background));color:hsl(var(--foreground));
+    font:400 14px/1.5 "Hanken Grotesk",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1040px;margin:0 auto;padding:32px 24px}
+  /* header */
+  .head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:20px}
+  h1{margin:0;font:600 22px/1.2 Georgia,"Times New Roman",serif;letter-spacing:-.01em}
+  .sub{margin:4px 0 0;color:hsl(var(--text-secondary));font-size:13px}
+  .btn{appearance:none;border:1px solid transparent;border-radius:8px;padding:9px 14px;font:600 13px/1 inherit;
+    cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+  .btn-primary{background:hsl(var(--brand));color:hsl(var(--brand-foreground))}
+  .btn-primary:hover{background:hsl(var(--brand-deep))}
+  .btn-ghost{background:hsl(var(--raised));color:hsl(var(--text-secondary));border-color:hsl(var(--border-default))}
+  /* toolbar */
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .search{flex:1;min-width:220px;display:flex;align-items:center;gap:8px;background:hsl(var(--raised));
+    border:1px solid hsl(var(--border-default));border-radius:8px;padding:0 11px;height:36px}
+  .search input{border:0;outline:0;background:transparent;flex:1;font:inherit;color:inherit}
+  .search svg{flex:0 0 auto;color:hsl(var(--text-tertiary))}
+  select{height:36px;border:1px solid hsl(var(--border-default));border-radius:8px;background:hsl(var(--raised));
+    color:hsl(var(--foreground));font:inherit;padding:0 30px 0 11px;cursor:pointer;
+    appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238A8A92' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat:no-repeat;background-position:right 9px center}
+  /* card + table */
+  .card{background:hsl(var(--raised));border:1px solid hsl(var(--border-subtle));border-radius:var(--r);
+    overflow:hidden;box-shadow:0 1px 2px hsl(240 6% 10% / .04)}
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font:600 11px/1 inherit;letter-spacing:.06em;text-transform:uppercase;
+    color:hsl(var(--text-tertiary));padding:12px 16px;background:hsl(var(--sunken));border-bottom:1px solid hsl(var(--border-subtle))}
+  td{padding:13px 16px;border-bottom:1px solid hsl(var(--border-subtle));vertical-align:middle}
+  tr:last-child td{border-bottom:0}
+  tr:hover td{background:hsl(var(--brand-soft) / .35)}
+  .user{display:flex;align-items:center;gap:11px}
+  .av{width:32px;height:32px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;
+    font:600 12px/1 inherit;color:hsl(var(--brand-deep));background:hsl(var(--brand-soft))}
+  .name{font-weight:600}
+  .email{color:hsl(var(--text-tertiary));font-size:12.5px}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font:600 11.5px/1 inherit}
+  .dot{width:6px;height:6px;border-radius:50%}
+  .role{background:hsl(var(--sunken));color:hsl(var(--text-secondary))}
+  .st-active{background:hsl(var(--success-soft));color:hsl(var(--success))}
+  .st-active .dot{background:hsl(var(--success))}
+  .st-invited{background:hsl(var(--warning-soft));color:hsl(var(--warning))}
+  .st-invited .dot{background:hsl(var(--warning))}
+  .st-disabled{background:hsl(var(--danger-soft));color:hsl(var(--danger))}
+  .st-disabled .dot{background:hsl(var(--danger))}
+  .muted{color:hsl(var(--text-tertiary))}
+  .kebab{border:0;background:transparent;color:hsl(var(--text-tertiary));cursor:pointer;padding:6px;border-radius:6px;line-height:0}
+  .kebab:hover{background:hsl(var(--sunken));color:hsl(var(--foreground))}
+  .foot{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;color:hsl(var(--text-tertiary));font-size:12.5px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <div>
+        <h1>Users</h1>
+        <p class="sub">Manage who can access this workspace and what they can do.</p>
+      </div>
+      <button class="btn btn-primary">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
+        Invite user
+      </button>
+    </div>
+
+    <div class="toolbar">
+      <label class="search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input placeholder="Search name or email" />
+      </label>
+      <select><option>All roles</option><option>Admin</option><option>Member</option><option>Viewer</option></select>
+      <select><option>All statuses</option><option>Active</option><option>Invited</option><option>Disabled</option></select>
+    </div>
+
+    <div class="card">
+      <table>
+        <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Last active</th><th style="width:44px"></th></tr></thead>
+        <tbody>
+          <tr>
+            <td><div class="user"><div class="av">AR</div><div><div class="name">Ana Ríos</div><div class="email">ana@acme.co</div></div></div></td>
+            <td><span class="pill role">Admin</span></td>
+            <td><span class="pill st-active"><span class="dot"></span>Active</span></td>
+            <td class="muted">2 hours ago</td>
+            <td><button class="kebab" aria-label="Row actions"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></td>
+          </tr>
+          <tr>
+            <td><div class="user"><div class="av">JC</div><div><div class="name">Jordan Cole</div><div class="email">jordan@acme.co</div></div></div></td>
+            <td><span class="pill role">Member</span></td>
+            <td><span class="pill st-active"><span class="dot"></span>Active</span></td>
+            <td class="muted">Yesterday</td>
+            <td><button class="kebab" aria-label="Row actions"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></td>
+          </tr>
+          <tr>
+            <td><div class="user"><div class="av">PW</div><div><div class="name">Priya Wen</div><div class="email">priya@acme.co</div></div></div></td>
+            <td><span class="pill role">Viewer</span></td>
+            <td><span class="pill st-invited"><span class="dot"></span>Invited</span></td>
+            <td class="muted">—</td>
+            <td><button class="kebab" aria-label="Row actions"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></td>
+          </tr>
+          <tr>
+            <td><div class="user"><div class="av">DM</div><div><div class="name">Dev Malik</div><div class="email">dev@acme.co</div></div></div></td>
+            <td><span class="pill role">Member</span></td>
+            <td><span class="pill st-disabled"><span class="dot"></span>Disabled</span></td>
+            <td class="muted">3 weeks ago</td>
+            <td><button class="kebab" aria-label="Row actions"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="foot"><span>4 users · 1 invite pending</span><span>admin-only surface</span></div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "id": "user-management",
+  "version": "0.1.0",
+  "name": "User management",
+  "archetype_zones": ["admin-settings"],
+  "capabilities": ["invite user", "deactivate / reactivate user", "reset password", "change role"],
+  "screens": [
+    { "screen_id": "users-list", "mockup": "design/users-list.html", "template": "template/UsersList" },
+    { "screen_id": "user-detail", "mockup": "design/user-detail.html", "template": "template/UserDetail" }
+  ],
+  "data_interface": {
+    "entities": [
+      "User { id, email, name, role, status: 'active'|'invited'|'disabled', last_active_at, created_at }"
+    ],
+    "operations": [
+      "listUsers({ query?, role?, status? }) -> User[]",
+      "inviteUser({ email, role }) -> User",
+      "setUserStatus(id, status) -> User",
+      "setUserRole(id, role) -> User",
+      "resetPassword(id) -> void"
+    ]
+  },
+  "permissions": ["admin"],
+  "tokens": "required",
+  "customization_points": [
+    "extra profile fields on the detail screen",
+    "the role set (defaults to admin/member/viewer)",
+    "SSO / invite-email copy",
+    "whether deactivate is soft (disabled) or hard delete"
+  ],
+  "status": "draft",
+  "notes": "v0.1 ships the format-validating pieces (manifest + users-list design mockup). Code template + user-detail follow once SOF-109's storage + template-framework decisions land — see docs/design/component-library.md 'Open decisions'."
+}
