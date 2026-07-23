@@ -6,9 +6,9 @@
 // once and passes them here, so this component is presentational + owns only its board-local view
 // state (?fview) and its DocViewer modals. A compact factory sub-header keeps the factory-specific
 // controls (engine · spend/cap · Pause) that the minimal shell header does not carry.
-import { useEffect, useState } from "react";
-import { T, Icon, StatusPill, Btn, Segmented } from "../onboarding/design";
-import { api, phaseIsStale, ProjectSummary, Graph, Ticket } from "../../api";
+import { useEffect, useState, type ReactNode } from "react";
+import { T, Icon, StatusPill, Btn, Segmented, TextInput, CategoryLabel } from "../onboarding/design";
+import { api, phaseIsStale, ProjectSummary, Graph, Ticket, RepoAccess, DepsResponse } from "../../api";
 import { phaseStatesFromGraph, atWaitForDeps, PhaseStatus, toneForHaltedPhase } from "./pipeline";
 import { StageRail } from "./StageRail";
 import { WaitForDeps } from "./WaitForDeps";
@@ -84,6 +84,169 @@ function setFview(value: string | null) {
 // The factory peer body. Shared run data (status/tickets/graph/loaded) is polled ONCE by the shell
 // and passed down; `onStatus` lets a board action (pause/rewind/deps-resolved) push a fresh status
 // back up so the whole shell (header, Concierge) stays consistent.
+// ── Ops panels re-homed from the former FactoryConsole (SOF-239 shell delete + SOF-250 finalize) ──
+// #443's SOF-241 review (1b91fbc) parked these two in FactoryConsole "temporary — SOF-250 finalizes
+// placement"; the shell deletes FactoryConsole, so they live here now. Self-contained (own fetch/state),
+// both surface the server's real status/detail/refusal text — never a dead control.
+function ConsolePanel({ title, count, children, action }:
+  { title: string; count?: number; children: ReactNode; action?: ReactNode }) {
+  return (
+    <section style={{ background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rXl, boxShadow: T.shadowXs, overflow: "hidden" }}>
+      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: `1px solid ${T.borderSubtle}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <CategoryLabel>{title}</CategoryLabel>
+          {count != null && <span style={{ font: `500 10px/1 ${T.mono}`, color: T.tertiary, background: T.sunken, borderRadius: 9, padding: "2px 6px" }}>{count}</span>}
+        </div>
+        {action}
+      </header>
+      <div style={{ padding: 16 }}>{children}</div>
+    </section>
+  );
+}
+
+// Repository access — the GitHub-invite flow for this project's build repo. Owner enters/updates a
+// GitHub username and requests an invite; the server's real status/detail is surfaced verbatim.
+function RepositoryAccessPanel({ projectId }: { projectId: string }) {
+  const [repoAccess, setRepoAccess] = useState<RepoAccess | null>(null);
+  const [githubUsername, setGithubUsername] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const load = () => api.repoAccess(projectId).then((a) => {
+    setRepoAccess(a); setGithubUsername(a.github_username || "");
+  }).catch(() => setRepoAccess(null));
+  useEffect(() => { load(); }, [projectId]);
+
+  const normalized = githubUsername.trim().replace(/^@/, "");
+  const stored = repoAccess?.github_username || "";
+  const needsRequest = repoAccess?.status !== "invited" || normalized !== stored;
+  const request = async () => {
+    if (!normalized || submitting) return;
+    setSubmitting(true); setError("");
+    try {
+      const a = await api.requestRepoAccess(projectId, normalized);
+      setRepoAccess(a); setGithubUsername(a.github_username || normalized);
+    } catch (e: any) {
+      setError(typeof e?.detail === "string" ? e.detail : "Could not request repository access.");
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <ConsolePanel title="Repository access">
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {repoAccess?.repo_url && (
+          <a href={repoAccess.repo_url} target="_blank" rel="noopener noreferrer"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, width: "fit-content", font: `500 12px/1.2 ${T.sans}`, color: T.brandDeep, textDecoration: "none" }}>
+            <Icon name="github" size={14} color={T.brandDeep} /> Open repository <Icon name="external" size={11} color={T.brandDeep} />
+          </a>
+        )}
+        <div>
+          <CategoryLabel style={{ display: "block", marginBottom: 6 }}>GitHub username</CategoryLabel>
+          <TextInput value={githubUsername} onChange={setGithubUsername} placeholder="e.g. octocat" />
+        </div>
+        {repoAccess && (
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
+            <StatusPill tone={repoAccess.status === "invited" ? "success" : repoAccess.status === "failed" ? "danger" : "neutral"}>
+              {repoAccess.status === "invited" ? "Invited" : repoAccess.status === "failed" ? "Invite failed" : repoAccess.status === "waiting_for_repo" ? "Waiting for repo" : "Not invited"}
+            </StatusPill>
+            <span style={{ flex: 1, font: `400 11.5px/1.4 ${T.sans}`, color: repoAccess.status === "failed" ? T.danger : T.tertiary, overflowWrap: "anywhere" }}>{repoAccess.detail}</span>
+          </div>
+        )}
+        {error && <span style={{ font: `500 11.5px/1.3 ${T.sans}`, color: T.danger }}>{error}</span>}
+        {needsRequest && <Btn variant="secondary" size="sm" full disabled={!normalized || submitting} onClick={request}>
+          {submitting ? "Requesting…" : repoAccess?.status === "failed" ? "Retry invitation" : "Request invitation"}
+        </Btn>}
+      </div>
+    </ConsolePanel>
+  );
+}
+
+// #107 post-deploy "provide your own key": a mocked provider dep (e.g. OPENROUTER_API_KEY) swapped for
+// a real value AFTER the fact, pushed onto the LIVE app's Railway service (redeploy) via POST /deps/provide.
+// Only meaningful post-deploy, so the caller gates on status.done.
+const DISPOSITION_PILL: Record<string, ["neutral" | "success" | "warning" | "info", string]> = {
+  mock: ["warning", "Mocked ⚠️"],
+  provide: ["success", "Provided ✓"],
+  mcp: ["info", "Self-handled ✓"],
+  "deploy-db": ["info", "Factory-provided ✓"],
+};
+
+function DependenciesPanel({ projectId }: { projectId: string }) {
+  const [deps, setDeps] = useState<DepsResponse | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [value, setValue] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [warnings, setWarnings] = useState<Record<string, string>>({});
+  const load = () => api.deps(projectId).then(setDeps).catch(() => setDeps(null));
+  useEffect(() => { load(); }, [projectId]);
+
+  if (!deps || !deps.deps_required.length) return null;
+
+  const submit = async (name: string) => {
+    if (!value.trim()) return;
+    setSubmitting(true);
+    try {
+      const r = await api.provideDep(projectId, name, value);
+      if (r.ok) {
+        setEditing(null); setValue("");
+        setErrors((e) => ({ ...e, [name]: "" }));
+        setWarnings((w) => ({ ...w, [name]: r.vault_saved === false
+          ? "Applied to your app — it's using the new key now — but it wasn't saved to your vault. You'll need to re-enter it if you replace it again." : "" }));
+        load();
+      } else {
+        setErrors((e) => ({ ...e, [name]: r.detail || "Failed to apply key" }));
+      }
+    } catch {
+      setErrors((e) => ({ ...e, [name]: "Failed to apply key" }));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ConsolePanel title="Dependencies" count={deps.deps_required.length}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {deps.deps_required.map((name) => {
+          const disp = deps.disposition[name] || "mock";
+          const [tone, label] = DISPOSITION_PILL[disp] || ["neutral", disp];
+          const canReplace = disp === "mock" || disp === "provide";
+          return (
+            <div key={name} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "9px 11px", borderRadius: T.rLg, border: `1px solid ${T.borderSubtle}`, background: T.bg }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ font: `500 12px/1.2 ${T.mono}`, color: T.fg, wordBreak: "break-all" }}>{name}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <StatusPill tone={tone}>{label}</StatusPill>
+                  {canReplace && editing !== name && (
+                    <button onClick={() => { setEditing(name); setValue(""); }}
+                      style={{ font: `500 11.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>
+                      {disp === "mock" ? "Provide key" : "Replace"}
+                    </button>
+                  )}
+                </div>
+              </div>
+              {disp === "mock" && (
+                <p style={{ margin: 0, font: `400 11.5px/1.4 ${T.sans}`, color: T.tertiary }}>
+                  Using a placeholder — provide your key to enable live AI.
+                </p>
+              )}
+              {editing === name && (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input type="password" value={value} onChange={(e) => setValue(e.target.value)} placeholder="paste your real key"
+                    style={{ flex: 1, height: 30, padding: "0 9px", borderRadius: T.rMd, border: `1px solid ${T.borderDefault}`, background: T.raised, color: T.fg, font: `400 12px/1 ${T.mono}`, outline: "none" }} />
+                  <Btn size="sm" variant="primary" disabled={!value.trim() || submitting} onClick={() => submit(name)}>{submitting ? "Applying…" : "Apply"}</Btn>
+                  <Btn size="sm" variant="ghost" onClick={() => { setEditing(null); setValue(""); }}>Cancel</Btn>
+                </div>
+              )}
+              {errors[name] && <span style={{ font: `500 11.5px/1.3 ${T.sans}`, color: T.danger }}>{errors[name]}</span>}
+              {warnings[name] && <span style={{ font: `500 11.5px/1.3 ${T.sans}`, color: T.warning }}>{warnings[name]}</span>}
+            </div>
+          );
+        })}
+      </div>
+    </ConsolePanel>
+  );
+}
+
 export function FactoryBoard({ projectId, status, tickets, graph, loaded, onStatus }: {
   projectId: string; status: Status; tickets: Ticket[]; graph: Graph; loaded: boolean;
   onStatus: (s: Status) => void;
@@ -225,6 +388,14 @@ export function FactoryBoard({ projectId, status, tickets, graph, loaded, onStat
               <span style={{ font: `500 11px/1 ${T.mono}`, color: T.tertiary }}>deploy unlocks at 100%</span>
             </>
           )}
+        </div>
+
+        {/* Ops panels re-homed from FactoryConsole (panel-carry; #443 1b91fbc parked them there
+            "temporary — SOF-250 finalizes placement"): repo access (always) + #107 post-deploy key
+            replacement (post-deploy → gated on status.done). No live capability lost on the delete. */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
+          <RepositoryAccessPanel projectId={projectId} />
+          {status.done && <DependenciesPanel projectId={projectId} />}
         </div>
       </main>
 

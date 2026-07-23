@@ -232,7 +232,7 @@ export function ProjectConsole({ projectId, onBack, onResume, onOpen }: {
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
           {view === "overview" && (
             /* SOF-241 swaps OverviewTab → OverviewPeer at THIS one line. Keep the mount obvious. */
-            <OverviewTab projectId={projectId} onOpenFactory={() => go("factory")} onOpenDocuments={() => go("files")} onResume={onResume} onDiscard={isDraft ? doArchive : undefined} />
+            <OverviewTab projectId={projectId} onOpenFactory={() => go("factory")} onOpenBrief={() => go("brief")} onOpenOutputs={() => go("outputs")} onOpenDocuments={() => go("files")} onResume={onResume} onDiscard={isDraft ? doArchive : undefined} />
           )}
           {view === "brief" && <BriefPeer artifacts={artifacts} goal={status?.goal || status?.description || ""} onOpen={openRef} />}
           {view === "outputs" && <OutputsPeer artifacts={artifacts} onOpen={openRef} />}
