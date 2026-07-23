@@ -1,68 +1,145 @@
-// OverviewTab.tsx — Project view §2.5 Overview: a mission-control board of zone panels over a
-// dotted canvas (design orgproject.jsx → ProjectDashboard Overview). Driven by tjyb5gmy's locked
-// endpoints (PR #13): GET /api/projects/{id}/overview (brief/build/services/agents/org + counts) and
-// GET /api/projects/{id}/documents (the materials + produced LISTS). Every panel degrades to an
-// empty/"—" state until the data is live.
-import { useEffect, useRef, useState } from "react";
-import { api, ProjectOverview, ProjectDocuments, ProjectMaterial, ProjectArtifact, DepsResponse, RepoAccess } from "../../api";
+// OverviewTab.tsx — Project view §2.5a Overview: an understandable project SNAPSHOT, not an
+// inventory of every subsystem (design projectknowledge.jsx → ProjectOverview / PRD §2.5a). It
+// answers, from REAL run state only: what the project is, what has finished, what is happening now,
+// what needs attention, and the next useful checkpoint. Services, individual agents, uploads, and
+// inherited org context leave Overview — operational detail lives in Factory console, source
+// material in Files. Sourced from GET /overview (brief/build), /status (blockers/phase), /brief
+// (canonical product brief + headings), /documents (newest factory outputs). Nothing is fabricated:
+// the status sentence is derived here from live fields, never a stored narrative flag.
+import { useEffect, useState } from "react";
+import {
+  api, ProjectOverview, ProjectDocuments, ProjectArtifact, ProjectSummary, BriefResponse, phaseIsStale,
+} from "../../api";
 import { openArtifact } from "../factory/Artifacts";
-import { T, Icon, Sparkle, CategoryLabel, Btn, StatusPill, Avatar, TextInput, TextArea, Markdown, ArtifactChip } from "../onboarding/design";
+import { T, Icon, Sparkle, CategoryLabel, Btn, Markdown } from "../onboarding/design";
 import { PanelBodySkel } from "../skeleton";
-
-const fileToB64 = (file: File): Promise<string> => new Promise((resolve) => {
-  const r = new FileReader();
-  r.onload = () => resolve(String(r.result || "").split(",")[1] || "");
-  r.onerror = () => resolve("");
-  r.readAsDataURL(file);
-});
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info" | "brand";
 
-const FILE_KIND: Record<string, [string, string, string]> = {
-  pdf: ["PDF", "#fbe3e3", "#c0392f"], xlsx: ["XLS", "#e4f8ef", "#1f8a5b"], csv: ["CSV", "#e4f8ef", "#1f8a5b"],
-  doc: ["DOC", "#e8f1ff", "#1A7BFF"], md: ["MD", "#e8f1ff", "#1A7BFF"], svg: ["SVG", "#f3e9fb", "#7a3ea8"],
-  video: ["MP4", "#f3e9fb", "#7a3ea8"], img: ["IMG", "#fbefdc", "#b06f12"],
-};
 const money = (v?: number) => (v != null ? `$${v.toFixed(2)}` : "—");
+
 function fmtDate(v?: number | string): string {
   if (v == null || v === "") return "—";
   const n = typeof v === "number" ? v : Number(v);
   if (!isNaN(n) && n > 0) return new Date(n * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   return String(v);
 }
-function fmtBytes(n?: number): string {
-  if (!n) return "";
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-// Derive a pill tone from a free-text service/agent status (backend sends real status strings).
-function statusTone(s?: string): Tone {
-  const v = (s || "").toLowerCase();
-  if (/fail|error|blocked/.test(v)) return "danger";
-  if (/pending|idle|queued|waiting/.test(v)) return "neutral";
-  if (/run|sync|active|live|deploy|done|connected/.test(v)) return "success";
-  return "info";
-}
-// Avatar tone by role FAMILY (design orgproject.jsx:356 AGENTS: opus→brand, sonnet→warning,
-// qa→success): planners/architects → brand, builders → warning, QA/verification → success.
-// Unknown roles return undefined so Avatar keeps its hash-tone fallback.
-function agentTone(role?: string): "brand" | "warning" | "success" | undefined {
-  const v = (role || "").toLowerCase();
-  if (/qa|test|verif|playwright/.test(v)) return "success";
-  if (/architect|pm|lead|plan|synth|research|orchestr|concierge/.test(v)) return "brand";
-  if (/build|impl|dev|engineer|swarm|ticket|code/.test(v)) return "warning";
-  return undefined;
-}
-// The PRD is THE primary produced artifact (stage 1 records it as title "PRD", kind "prd") —
-// it gets the brand-variant chip per orgproject.jsx:384-388.
+
+// The PRD is THE primary produced artifact — it gets the brand chip in the outputs preview.
 const isPrd = (d: ProjectArtifact) =>
   (d.kind || "").toLowerCase() === "prd" || d.title.trim().toLowerCase() === "prd";
 
-function Panel({ title, count, children, span = 1, accent, action }:
-  { title: string; count?: number; children: React.ReactNode; span?: number; accent?: boolean; action?: React.ReactNode }) {
+// Human phase label for the Build-status "current phase" row. When the recorded phase belongs to a
+// different stage than the current one, it's stale (a new stage stamped its number before its agent
+// emitted the first set-phase) — show "Stage N · starting" instead of the misleading prior name.
+function phaseLabel(phase?: string, stage?: number): string {
+  if (phaseIsStale(phase, stage)) return `Stage ${stage} · starting`;
+  const p = (phase || "").trim();
+  const named = p ? p.charAt(0).toUpperCase() + p.slice(1) : "";
+  if (stage && named) return `Stage ${stage} · ${named}`;
+  return named || (stage ? `Stage ${stage}` : "—");
+}
+
+// The plain-language status sentence + next checkpoint/action, DERIVED from real run state
+// (blockers, done/deploy, stage/phase, tickets) — PRD §2.5a. Attention states win over progress.
+type Snapshot = { tone: Tone; icon: string; title: string; detail: string;
+  cta?: { label: string; onClick: () => void; primary?: boolean } };
+function deriveSnapshot(
+  st: (ProjectSummary & Record<string, any>) | null,
+  build: NonNullable<ProjectOverview["build"]>,
+  phase: string,
+  stage: number,
+  ticketsDone: number,
+  ticketsTotal: number,
+  routes: { resume?: () => void; factory: () => void; outputs: () => void },
+): Snapshot {
+  const deployUrl = st?.deploy_url || build.deploy_url || "";
+  const done = !!(st?.done || build.done || deployUrl);
+
+  if (phase === "draft") {
+    return {
+      tone: "warning", icon: "pencil",
+      title: "Finish the project conversation before the factory starts.",
+      detail: "Return to the Concierge to refine the brief, review what it learned, and hand off when you agree.",
+      cta: routes.resume ? { label: "Resume conversation", onClick: routes.resume, primary: true } : undefined,
+    };
+  }
+  if (st?.budget_stopped) {
+    return {
+      tone: "warning", icon: "pause",
+      title: "The build paused at your budget cap.",
+      detail: "Raise the cap in Build status below to let the factory keep going, or open the console to review the spend.",
+      cta: { label: "Open factory console", onClick: routes.factory, primary: true },
+    };
+  }
+  if (st?.credential_stopped) {
+    return {
+      tone: "warning", icon: "lock",
+      title: "The build needs a credential before it can continue.",
+      detail: "Provide the required key in the factory console to unblock the run.",
+      cta: { label: "Open factory console", onClick: routes.factory, primary: true },
+    };
+  }
+  if (st?.held || phase === "stopped") {
+    return {
+      tone: "warning", icon: "pause",
+      title: "The build is paused and waiting on you.",
+      detail: "Open the factory console to review what it needs and resume when you're ready.",
+      cta: { label: "Open factory console", onClick: routes.factory, primary: true },
+    };
+  }
+  if (done) {
+    return {
+      tone: "success", icon: "check",
+      title: deployUrl ? "Your app is built and deployed." : "The build is complete.",
+      detail: deployUrl ? "It's live — open it to try it out, or review everything the factory produced." : "Review what the factory produced, or open the console for the full delivery record.",
+      cta: deployUrl
+        ? { label: "Open the app", onClick: () => window.open(deployUrl, "_blank"), primary: true }
+        : { label: "See what the factory produced", onClick: routes.outputs },
+    };
+  }
+  // Active build — describe what has finished, what's happening, and the next checkpoint by stage.
+  const active: Record<number, { title: string; detail: string }> = {
+    1: {
+      title: "Research and setup are underway.",
+      detail: "The Concierge's brief is being turned into a product plan. The product plan (PRD) is the next output.",
+    },
+    2: {
+      title: "Research is complete — the product plan and architecture are being prepared.",
+      detail: "Architecture and the ticket plan come next, then the factory starts building.",
+    },
+    3: {
+      title: ticketsTotal
+        ? `The factory is building your app — ${ticketsDone} of ${ticketsTotal} tickets delivered.`
+        : "The factory is building your app.",
+      detail: "Building and testing are in progress. Deployment is the next checkpoint.",
+    },
+  };
+  const a = active[stage] || {
+    title: phase ? `The factory is working — ${phaseLabel(phase, stage).toLowerCase()}.` : "The factory is working on your project.",
+    detail: "Open the console to watch the build, or see what it has produced so far.",
+  };
+  return {
+    tone: "brand", icon: "zap", title: a.title, detail: a.detail,
+    cta: { label: "See what the factory produced", onClick: routes.outputs },
+  };
+}
+
+// Level-2/3 Markdown headings from the canonical product brief — a real contents preview, no fixed
+// section count (PRD §2.5b). Falls back to H1s when the brief has no sub-headings.
+function briefHeadings(md?: string | null): string[] {
+  if (!md) return [];
+  const lines = md.split("\n");
+  const grab = (re: RegExp) => lines.map((l) => l.match(re)).filter(Boolean).map((m) => (m as RegExpMatchArray)[1].trim());
+  const sub = grab(/^#{2,3}\s+(.+?)\s*#*$/);
+  const pick = sub.length ? sub : grab(/^#\s+(.+?)\s*#*$/);
+  return pick.slice(0, 4);
+}
+
+function Panel({ title, count, children, accent, action }:
+  { title: string; count?: number; children: React.ReactNode; accent?: boolean; action?: React.ReactNode }) {
   return (
-    <section style={{ gridColumn: `span ${span}`, background: T.raised, border: `1px solid ${accent ? T.brand + "44" : T.borderSubtle}`, borderRadius: T.rXl, boxShadow: T.shadowXs, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <section style={{ background: T.raised, border: `1px solid ${accent ? T.brand + "44" : T.borderSubtle}`, borderRadius: T.rXl, boxShadow: T.shadowXs, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: `1px solid ${T.borderSubtle}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <CategoryLabel tone={accent ? "brand" : "tertiary"}>{title}</CategoryLabel>
@@ -75,227 +152,111 @@ function Panel({ title, count, children, span = 1, accent, action }:
   );
 }
 
-function FileRow({ label, kind, sub, onOpen }: { label: string; kind?: string; sub?: string; onOpen?: () => void }) {
-  const k = FILE_KIND[kind || "doc"] || FILE_KIND.doc;
+// A tappable row (brief heading / factory output) with a leading badge and a chevron affordance.
+function LinkRow({ badge, badgeTone, title, sub, first, onClick }:
+  { badge: string; badgeTone?: "brand" | "neutral"; title: string; sub: string; first: boolean; onClick?: () => void }) {
+  const brand = badgeTone === "brand";
   return (
-    <button onClick={onOpen} disabled={!onOpen} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", background: "none", border: "none", padding: 0, cursor: onOpen ? "pointer" : "default" }}>
-      <span style={{ font: `700 9px/1 ${T.mono}`, color: k[2], background: k[1], padding: "4px 5px", borderRadius: 4, flexShrink: 0 }}>{k[0]}</span>
-      <span style={{ flex: 1, minWidth: 0, font: `500 12.5px/1.3 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
-      {sub && <span style={{ font: `400 11px/1 ${T.mono}`, color: T.tertiary, flexShrink: 0 }}>{sub}</span>}
+    <button onClick={onClick} disabled={!onClick} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 0", border: 0, borderTop: first ? "none" : `1px solid ${T.borderSubtle}`, background: "none", cursor: onClick ? "pointer" : "default", textAlign: "left" }}>
+      <span style={{ minWidth: 30, height: 30, padding: "0 5px", borderRadius: 7, display: "grid", placeItems: "center", background: brand ? T.brandSoft : T.sunken, color: brand ? T.brandDeep : T.secondary, font: `700 9px/1 ${T.mono}`, letterSpacing: "0.04em" }}>{badge}</span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: "block", font: `600 12.5px/1.25 ${T.sans}`, color: T.fg, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</span>
+        <span style={{ display: "block", font: `400 11px/1.35 ${T.sans}`, color: T.tertiary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</span>
+      </span>
+      {onClick && <Icon name="chevronRight" size={13} color={T.tertiary} />}
     </button>
   );
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
-  return <div style={{ font: `400 12px/1.4 ${T.sans}`, color: T.tertiary }}>{children}</div>;
-}
-
-// Designed panel empty state — dashed inset placeholder (BuildBoard's empty treatment) with an
-// icon + short explainer, and a CTA only where a REAL action exists (no fake affordances).
-function EmptyState({ icon, title, detail, cta }:
-  { icon: string; title: string; detail: string; cta?: React.ReactNode }) {
+// Honest empty/unavailable state — icon + short explainer that NAMES the real reason (which stage
+// produces the missing thing, or which projection failed to load). Never a dead affordance.
+function Note({ icon, title, detail }: { icon: string; title: string; detail: string }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "20px 16px", textAlign: "center",
-      background: T.raised, border: `1px dashed ${T.borderDefault}`, borderRadius: T.rLg }}>
-      <span style={{ width: 30, height: 30, borderRadius: 8, display: "grid", placeItems: "center", background: T.sunken, border: `1px solid ${T.borderSubtle}` }}>
-        <Icon name={icon} size={15} color={T.tertiary} />
-      </span>
+    <div style={{ minHeight: 96, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, padding: "16px 12px", textAlign: "center" }}>
+      <Icon name={icon} size={20} color={T.tertiary} />
       <span style={{ font: `600 12.5px/1.3 ${T.sans}`, color: T.secondary }}>{title}</span>
-      <span style={{ font: `400 12px/1.45 ${T.sans}`, color: T.tertiary, maxWidth: 320 }}>{detail}</span>
-      {cta && <span style={{ marginTop: 4 }}>{cta}</span>}
+      <span style={{ font: `400 11.5px/1.45 ${T.sans}`, color: T.tertiary, maxWidth: 320 }}>{detail}</span>
     </div>
   );
 }
 
-// #107 — post-deploy "provide your own key": a mocked provider dep (e.g. OPENROUTER_API_KEY)
-// is visible here (it never pauses the build — SPEC §3 zero-touch), so the operator can find
-// out AFTER the fact and swap in their own real value; that pushes onto the LIVE app's Railway
-// service (server-side, triggers a redeploy) via POST /api/projects/{id}/deps/provide.
-const DISPOSITION_PILL: Record<string, [Tone, string]> = {
-  mock: ["warning", "Mocked ⚠️"],
-  provide: ["success", "Provided ✓"],
-  mcp: ["info", "Self-handled ✓"],
-  "deploy-db": ["info", "Factory-provided ✓"],
-};
-
-function DependenciesPanel({ projectId, deps, onProvided }:
-  { projectId: string; deps: DepsResponse; onProvided: () => void }) {
-  const [editing, setEditing] = useState<string | null>(null);
-  const [value, setValue] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  // Soft (non-error) note: the key WAS applied to the live app (it works) but the vault write
-  // failed, so it wasn't recorded — a later replace would need it re-entered.
-  const [warnings, setWarnings] = useState<Record<string, string>>({});
-
-  if (!deps.deps_required.length) return null;
-
-  const submit = async (name: string) => {
-    if (!value.trim()) return;
-    setSubmitting(true);
-    try {
-      const r = await api.provideDep(projectId, name, value);
-      if (r.ok) {
-        setEditing(null); setValue("");
-        setErrors((e) => ({ ...e, [name]: "" }));
-        setWarnings((w) => ({ ...w, [name]: r.vault_saved === false
-          ? "Applied to your app — it's using the new key now — but it wasn't saved to your vault. You'll need to re-enter it if you replace it again." : "" }));
-        onProvided();
-      } else {
-        setErrors((e) => ({ ...e, [name]: r.detail || "Failed to apply key" }));
-      }
-    } catch {
-      setErrors((e) => ({ ...e, [name]: "Failed to apply key" }));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <Panel title="Dependencies" count={deps.deps_required.length} span={2}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {deps.deps_required.map((name) => {
-          const disp = deps.disposition[name] || "mock";
-          const [tone, label] = DISPOSITION_PILL[disp] || ["neutral", disp];
-          const canReplace = disp === "mock" || disp === "provide";
-          return (
-            <div key={name} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "9px 11px", borderRadius: T.rLg, border: `1px solid ${T.borderSubtle}`, background: T.bg }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ font: `500 12px/1.2 ${T.mono}`, color: T.fg, wordBreak: "break-all" }}>{name}</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <StatusPill tone={tone}>{label}</StatusPill>
-                  {canReplace && editing !== name && (
-                    <button onClick={() => { setEditing(name); setValue(""); }}
-                      style={{ font: `500 11.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>
-                      {disp === "mock" ? "Provide key" : "Replace"}
-                    </button>
-                  )}
-                </div>
-              </div>
-              {disp === "mock" && (
-                <p style={{ margin: 0, font: `400 11.5px/1.4 ${T.sans}`, color: T.tertiary }}>
-                  Using a placeholder — provide your key to enable live AI.
-                </p>
-              )}
-              {editing === name && (
-                <div style={{ display: "flex", gap: 6 }}>
-                  <input type="password" value={value} onChange={(e) => setValue(e.target.value)} placeholder="paste your real key"
-                    style={{ flex: 1, height: 30, padding: "0 9px", borderRadius: T.rMd, border: `1px solid ${T.borderDefault}`, background: T.raised, color: T.fg, font: `400 12px/1 ${T.mono}`, outline: "none" }} />
-                  <Btn size="sm" variant="primary" disabled={!value.trim() || submitting} onClick={() => submit(name)}>{submitting ? "Applying…" : "Apply"}</Btn>
-                  <Btn size="sm" variant="ghost" onClick={() => { setEditing(null); setValue(""); }}>Cancel</Btn>
-                </div>
-              )}
-              {errors[name] && <span style={{ font: `500 11.5px/1.3 ${T.sans}`, color: T.danger }}>{errors[name]}</span>}
-              {warnings[name] && <span style={{ font: `500 11.5px/1.3 ${T.sans}`, color: T.warning }}>{warnings[name]}</span>}
-            </div>
-          );
-        })}
-      </div>
-    </Panel>
-  );
-}
-
-export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResume, onDiscard }:
-  { projectId: string; onOpenFactory: () => void; onOpenDocuments?: () => void; onResume?: () => void; onDiscard?: () => void }) {
+export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onOpenBrief, onOpenOutputs, onResume, onDiscard }:
+  { projectId: string; onOpenFactory: () => void; onOpenDocuments?: () => void;
+    onOpenBrief?: () => void; onOpenOutputs?: () => void; onResume?: () => void; onDiscard?: () => void }) {
   const [ov, setOv] = useState<ProjectOverview | null>(null);
+  const [ovErr, setOvErr] = useState(false);
+  const [st, setSt] = useState<(ProjectSummary & Record<string, any>) | null>(null);
+  const [briefResp, setBriefResp] = useState<BriefResponse | null>(null);
+  const [briefErr, setBriefErr] = useState(false);
   const [docs, setDocs] = useState<ProjectDocuments | null>(null);
-  const [deps, setDeps] = useState<DepsResponse | null>(null);
-  const [repoAccess, setRepoAccess] = useState<RepoAccess | null>(null);
-  const [githubUsername, setGithubUsername] = useState("");
-  const [repoSubmitting, setRepoSubmitting] = useState(false);
-  const [repoError, setRepoError] = useState("");
+  const [docsErr, setDocsErr] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
-  const [goalDraft, setGoalDraft] = useState("");
-  const [scopeDraft, setScopeDraft] = useState("");
+  // Budget cap inline edit — same PUT /budget flow; the server's ACTUAL refusal is surfaced (never
+  // swallowed) so a lower-than-spent rejection or transport error reads honestly (PRD §2.5a).
   const [capEditing, setCapEditing] = useState(false);
   const [capInput, setCapInput] = useState("");
-  // The concierge's finalized product brief (SOF-137: a real MD file in storage) — distinct from
-  // `brief` below, which is the intake-composed goal/scope/phase projection from GET /overview.
-  const [productBriefUrl, setProductBriefUrl] = useState<string | null>(null);
-  const addInputRef = useRef<HTMLInputElement | null>(null);
+  const [capError, setCapError] = useState("");
 
-  const loadDocs = () => api.documents(projectId).then(setDocs).catch(() => setDocs(null));
-  const loadOverview = () => api.overview(projectId).then(setOv).catch(() => setOv(null));
-  const loadDeps = () => api.deps(projectId).then(setDeps).catch(() => setDeps(null));
-  const loadRepoAccess = () => api.repoAccess(projectId).then((access) => {
-    setRepoAccess(access);
-    setGithubUsername(access.github_username || "");
-  }).catch(() => setRepoAccess(null));
+  const loadOverview = () => api.overview(projectId).then((o) => { setOv(o); setOvErr(false); }).catch(() => { setOv(null); setOvErr(true); });
+
   useEffect(() => {
     setLoading(true);
+    setOvErr(false); setBriefErr(false); setDocsErr(false);
     Promise.allSettled([
-      api.overview(projectId).then(setOv).catch(() => setOv(null)),       // backend pending → graceful empty
-      api.documents(projectId).then(setDocs).catch(() => setDocs(null)),  // materials + produced lists
-      loadRepoAccess(),
+      loadOverview(),
+      api.status(projectId).then(setSt).catch(() => setSt(null)),
+      api.brief(projectId).then((b) => { setBriefResp(b); setBriefErr(false); }).catch(() => { setBriefResp(null); setBriefErr(true); }),
+      api.documents(projectId).then((d) => { setDocs(d); setDocsErr(false); }).catch(() => { setDocs(null); setDocsErr(true); }),
     ]).finally(() => setLoading(false));
-    api.brief(projectId).then((b) => setProductBriefUrl(b.brief_url)).catch(() => setProductBriefUrl(null));
   }, [projectId]);
 
   const brief = ov?.brief || {};
   const build = ov?.build || {};
-  // Dependencies panel (#107) is a post-deploy concern — only fetch/show once the build is done.
-  useEffect(() => { if (build.done) loadDeps(); }, [projectId, build.done]);
-  const services = ov?.services || [];
-  const agents = ov?.agents || [];
-  const org = ov?.org || {};
-  const materials: ProjectMaterial[] = docs?.uploaded || [];
-  const produced: ProjectArtifact[] = docs?.produced || [];
+  const phase = (st?.phase ?? brief.phase ?? "").toLowerCase();
+  const stage = st?.stage ?? brief.stage ?? 0;
+  const isDraft = phase === "draft";
   const pct = build.pct ?? 0;
-  // A draft = onboarding intake not yet handed off (factory hasn't started). Drives the whole
-  // "finish setup" treatment instead of the build-oriented overview.
-  const isDraft = (brief.phase || "").toLowerCase() === "draft";
-  const normalizedGithubUsername = githubUsername.trim().replace(/^@/, "");
-  const storedGithubUsername = repoAccess?.github_username || "";
-  const needsRepoRequest = repoAccess?.status !== "invited"
-    || normalizedGithubUsername !== storedGithubUsername;
+  const briefUrl = briefResp?.brief_url || null;
+  const headings = briefHeadings(briefResp?.brief_markdown);
+  const produced: ProjectArtifact[] = [...(docs?.produced || [])].sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  const newest = produced.slice(0, 3);
 
-  const requestRepoAccess = async () => {
-    if (!normalizedGithubUsername || repoSubmitting) return;
-    setRepoSubmitting(true);
-    setRepoError("");
-    try {
-      const access = await api.requestRepoAccess(projectId, normalizedGithubUsername);
-      setRepoAccess(access);
-      setGithubUsername(access.github_username || normalizedGithubUsername);
-    } catch (e: any) {
-      setRepoError(typeof e?.detail === "string" ? e.detail : "Could not request repository access.");
-    } finally {
-      setRepoSubmitting(false);
-    }
-  };
+  // Routes to full peer views. onOpenBrief/onOpenOutputs are the SOF-239 shell's dedicated peers;
+  // until wired, fall back to a real destination that exists today — the finalized brief document
+  // (new tab) and the Documents tab — so every route lands somewhere real, never a dead control.
+  const openBrief = onOpenBrief || (briefUrl ? () => window.open(briefUrl, "_blank") : onOpenDocuments);
+  const openOutputs = onOpenOutputs || onOpenDocuments;
 
-  // "+ Add" on Uploaded materials → attach a real file via POST /api/projects/{id}/materials, refetch.
-  const addMaterials = async (list: FileList | null) => {
-    if (!list || !list.length) return;
-    for (const file of Array.from(list)) {
-      try { await api.uploadMaterial(projectId, { name: file.name, content_type: file.type || undefined, data_b64: await fileToB64(file) }); }
-      catch { /* endpoint not live yet — degrade silently */ }
-    }
-    await loadDocs();
-  };
+  const snap = deriveSnapshot(st, build, phase, stage,
+    build.tickets_done ?? 0, build.tickets_total ?? 0,
+    { resume: onResume, factory: onOpenFactory, outputs: () => (openOutputs ? openOutputs() : onOpenFactory()) });
 
-  // Edit the project brief post-promote: goal via PUT /api/projects/{id}/brief (live); scope via
-  // PATCH /api/projects/{id} {scope} (graceful until tjyb5gmy ships it).
-  const startEdit = () => { setGoalDraft(brief.goal || brief.description || ""); setScopeDraft((brief.scope || []).join(", ")); setEditing(true); };
-  const saveBrief = async () => {
-    const goal = goalDraft.trim();
-    const scope = scopeDraft.split(",").map((s) => s.trim()).filter(Boolean);
-    try { if (goal) await api.putBrief(projectId, { goals: goal }); } catch { /* ignore */ }
-    try { await api.patchProject(projectId, { scope }); } catch { /* scope endpoint not live yet */ }
-    await loadOverview();
-    setEditing(false);
+  const saveCap = () => {
+    const n = parseFloat(capInput);
+    if (isNaN(n) || n <= 0) { setCapError("Enter a dollar amount greater than 0."); return; }
+    api.putBudget(projectId, n)
+      .then(() => { setCapError(""); setCapEditing(false); return loadOverview(); })
+      .catch((e: any) => setCapError(typeof e?.detail === "string" ? e.detail : e?.message || "Couldn't update the budget cap."));
   };
 
   if (loading) {
     return (
       <div style={{ flex: 1, overflow: "auto", backgroundImage: `radial-gradient(circle, ${T.borderSubtle} 1px, transparent 1px)`, backgroundSize: "22px 22px" }}>
-        <div style={{ padding: "22px 24px 36px" }}>
-          <div style={{ maxWidth: 1080, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, alignItems: "start" }}>
-            {[{ span: 2, rows: 5 }, { span: 1, rows: 3 }, { span: 1, rows: 3 }, { span: 1, rows: 3 }, { span: 1, rows: 3 }].map(({ span, rows }, i) => (
-              <section key={i} style={{ gridColumn: `span ${span}`, background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rXl, overflow: "hidden" }}>
+        <div style={{ maxWidth: 1060, margin: "0 auto", padding: "22px 24px 38px" }}>
+          <section style={{ marginBottom: 14, padding: "16px 18px", borderRadius: T.rXl, border: `1px solid ${T.borderSubtle}`, background: T.raised, boxShadow: T.shadowXs }}><PanelBodySkel rows={2} /></section>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.55fr) minmax(260px, .75fr)", gap: 14 }}>
+            {[5, 5].map((r, i) => (
+              <section key={i} style={{ background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rXl, overflow: "hidden" }}>
                 <div style={{ padding: "12px 16px", borderBottom: `1px solid ${T.borderSubtle}` }}><PanelBodySkel rows={1} /></div>
-                <div style={{ padding: 16 }}><PanelBodySkel rows={rows} /></div>
+                <div style={{ padding: 16 }}><PanelBodySkel rows={r} /></div>
+              </section>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+            {[3, 3].map((r, i) => (
+              <section key={i} style={{ background: T.raised, border: `1px solid ${T.borderSubtle}`, borderRadius: T.rXl, overflow: "hidden" }}>
+                <div style={{ padding: "12px 16px", borderBottom: `1px solid ${T.borderSubtle}` }}><PanelBodySkel rows={1} /></div>
+                <div style={{ padding: 16 }}><PanelBodySkel rows={r} /></div>
               </section>
             ))}
           </div>
@@ -304,279 +265,163 @@ export function OverviewTab({ projectId, onOpenFactory, onOpenDocuments, onResum
     );
   }
 
+  const bannerBorder = snap.tone === "warning" ? T.warning : snap.tone === "success" ? T.success : T.brand;
+  const bannerBg = snap.tone === "warning" ? T.warningSoft : snap.tone === "success" ? (T.successSoft || T.brandSoft) : T.brandSoft;
+  const bannerIconColor = snap.tone === "warning" ? T.warning : snap.tone === "success" ? T.success : T.brand;
+
   return (
     <div style={{ flex: 1, overflow: "auto", backgroundImage: `radial-gradient(circle, ${T.borderSubtle} 1px, transparent 1px)`, backgroundSize: "22px 22px" }}>
-      <div style={{ padding: "22px 24px 36px" }}>
-        <div style={{ maxWidth: 1080, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, alignItems: "start" }}>
+      <div style={{ maxWidth: 1060, margin: "0 auto", padding: "22px 24px 38px" }}>
 
-          {/* draft banner — the factory hasn't started; finish intake to kick it off */}
-          {isDraft && (
-            <section style={{ gridColumn: "1 / -1", display: "flex", alignItems: "center", gap: 16, padding: "16px 20px", borderRadius: T.rXl, border: `1px solid ${T.warning}`, background: T.warningSoft, boxShadow: T.shadowXs }}>
-              <span style={{ width: 13, height: 13, background: T.warning, transform: "rotate(45deg)", borderRadius: 2, flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ font: `700 15px/1.2 ${T.display}`, letterSpacing: "-0.01em", color: T.fg }}>Finish setup to start building</div>
-                <p style={{ margin: "4px 0 0", font: `400 12.5px/1.5 ${T.sans}`, color: T.secondary }}>This project is still a draft — the factory hasn't started. Complete the brief and scope, then hand off to kick off the pipeline.</p>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
-                {onResume && <Btn variant="primary" onClick={onResume}>Complete setup &amp; start building <Icon name="arrowRight" size={14} color="#fff" /></Btn>}
-                {onDiscard && <button onClick={onDiscard} style={{ background: "none", border: "none", cursor: "pointer", font: `500 12px/1 ${"'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif"}`, color: T.danger, padding: "4px 0" }}>Discard draft</button>}
-              </div>
-            </section>
+        {/* ── Plain-language status sentence + next checkpoint/action (derived, never stored filler) ── */}
+        <section style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14, padding: "13px 15px", borderRadius: T.rXl, border: `1px solid ${bannerBorder}44`, background: bannerBg + "88", boxShadow: T.shadowXs }}>
+          <span style={{ width: 30, height: 30, flexShrink: 0, borderRadius: "50%", background: T.raised, border: `1px solid ${bannerBorder}44`, display: "grid", placeItems: "center" }}>
+            {snap.tone === "brand" ? <Sparkle size={13} color={T.brand} /> : <Icon name={snap.icon} size={13} color={bannerIconColor} />}
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ font: `700 14px/1.25 ${T.display}`, color: T.fg }}>{snap.title}</div>
+            <div style={{ font: `400 12px/1.45 ${T.sans}`, color: T.secondary, marginTop: 3 }}>{snap.detail}</div>
+          </div>
+          {snap.cta && (
+            <Btn variant={snap.cta.primary ? "primary" : "secondary"} size="sm" onClick={snap.cta.onClick}>
+              {snap.cta.label} <Icon name="arrowRight" size={13} color={snap.cta.primary ? "#fff" : T.secondary} />
+            </Btn>
           )}
+        </section>
 
-          {/* project brief — edit affordance lives in the Panel header action slot (design Panel) */}
-          <Panel title="Project brief" span={2} accent
-            action={!isDraft ? (editing
-              ? <div style={{ display: "flex", gap: 8 }}><Btn variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Btn><Btn variant="primary" size="sm" onClick={saveBrief}>Save</Btn></div>
-              : <Btn variant="secondary" size="sm" onClick={startEdit}>Edit brief</Btn>) : undefined}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {editing ? (
-                <>
-                  <div>
-                    <CategoryLabel style={{ marginBottom: 6 }}>Goal</CategoryLabel>
-                    <TextArea rows={3} value={goalDraft} onChange={setGoalDraft} placeholder="What should this project do?" />
-                  </div>
-                  <div>
-                    <CategoryLabel style={{ marginBottom: 6 }}>Scope (comma-separated)</CategoryLabel>
-                    <TextInput value={scopeDraft} onChange={setScopeDraft} placeholder="Quoting / RFQ, Pricing & approvals" />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div>
-                    <CategoryLabel style={{ marginBottom: 6 }}>Goal</CategoryLabel>
-                    <div style={{ margin: 0, font: `400 14px/1.55 ${T.sans}`, color: T.fg }}><Markdown>{brief.goal || brief.description || ""}</Markdown>{!(brief.goal || brief.description) && <Empty>No goal captured yet.</Empty>}</div>
-                  </div>
-                  {productBriefUrl && (
-                    <div>
-                      <CategoryLabel style={{ marginBottom: 6 }}>Product brief</CategoryLabel>
-                      <a href={productBriefUrl} target="_blank" rel="noopener noreferrer"
-                         style={{ display: "inline-flex", alignItems: "center", gap: 6, font: `500 12.5px/1 ${T.sans}`, color: T.brandDeep, textDecoration: "none" }}>
-                        <Icon name="file" size={13} color={T.brandDeep} /> View the concierge's finalized brief <Icon name="external" size={11} color={T.brandDeep} />
-                      </a>
-                    </div>
-                  )}
-                  {!!(brief.scope && brief.scope.length) ? (
-                    <div>
-                      <CategoryLabel style={{ marginBottom: 7 }}>Scope</CategoryLabel>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-                        {brief.scope.map((s) => <span key={s} style={{ font: `500 12px/1 ${T.sans}`, color: T.brandDeep, background: T.brandSoft, padding: "6px 11px", borderRadius: 9999 }}>{s}</span>)}
-                      </div>
-                    </div>
-                  ) : isDraft ? (
-                    <div>
-                      <CategoryLabel style={{ marginBottom: 7 }}>Scope</CategoryLabel>
-                      <span style={{ font: `400 12.5px/1.4 ${T.sans}`, color: T.tertiary, fontStyle: "italic" }}>Defined during setup.</span>
-                    </div>
-                  ) : null}
-                </>
-              )}
-              {/* metadata — 3-col per orgproject.jsx:307-310; "Created by"/"Owner" merge into one
-                  cell when they're the same value (the common case); when they differ, minmax
-                  columns give long emails room to wrap instead of break-all chopping them. */}
-              {(() => {
-                const createdBy = brief.created_by || brief.owner;
-                const merged = !createdBy || !brief.owner || createdBy === brief.owner;
-                const cells: [string, string | undefined][] = merged
-                  ? [["Owner", brief.owner || createdBy], ["Created", fmtDate(brief.created)], ["Phase", brief.phase]]
-                  : [["Created by", createdBy], ["Owner", brief.owner], ["Created", fmtDate(brief.created)], ["Phase", brief.phase]];
-                return (
-                  <div style={{ display: "grid", gridTemplateColumns: merged ? "repeat(3, 1fr)" : "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, paddingTop: 4 }}>
-                    {cells.map(([k, v]) => (
-                      <div key={k} style={{ minWidth: 0 }}><CategoryLabel style={{ display: "block", marginBottom: 4 }}>{k}</CategoryLabel><span style={{ font: `500 12.5px/1.3 ${T.sans}`, color: T.fg, overflowWrap: "anywhere" }}>{v || "—"}</span></div>
-                    ))}
-                  </div>
-                );
-              })()}
+        {ovErr && (
+          <div style={{ marginBottom: 14, padding: "11px 14px", borderRadius: T.rLg, border: `1px solid ${T.danger}44`, background: T.raised, font: `500 12px/1.4 ${T.sans}`, color: T.danger }}>
+            Couldn't load the project overview (build status and brief details are unavailable right now).
+          </div>
+        )}
+
+        {/* ── Product brief preview + Build status ── */}
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.55fr) minmax(260px, .75fr)", gap: 14 }}>
+          <Panel title="Product brief" accent
+            action={<button onClick={() => openBrief && openBrief()} disabled={!openBrief} style={{ border: 0, background: "none", color: openBrief ? T.brandDeep : T.tertiary, cursor: openBrief ? "pointer" : "default", font: `600 11.5px/1 ${T.sans}` }}>Open brief →</button>}>
+            <CategoryLabel>What you asked the factory to build</CategoryLabel>
+            <div style={{ marginTop: 8, font: `400 14px/1.6 ${T.sans}`, color: T.fg }}>
+              {(brief.goal || brief.description)
+                ? <Markdown>{brief.goal || brief.description}</Markdown>
+                : <span style={{ color: T.tertiary }}>No goal captured yet — it's set with the Concierge during onboarding.</span>}
             </div>
+            {briefUrl ? (
+              <button onClick={() => openBrief && openBrief()} className="sf-artchip" style={{ width: "100%", marginTop: 14, display: "flex", alignItems: "center", gap: 11, textAlign: "left", padding: "11px 12px", borderRadius: T.rLg, border: `1px solid ${T.brand}33`, background: T.brandSoft + "55", cursor: "pointer" }}>
+                <span style={{ width: 34, height: 38, flexShrink: 0, display: "grid", placeItems: "center", borderRadius: 7, background: T.raised, color: T.brandDeep, font: `700 9px/1 ${T.mono}` }}>BRIEF</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <b style={{ display: "block", font: `600 13px/1.2 ${T.sans}`, color: T.fg }}>{brief.name || "Product brief"}</b>
+                  <span style={{ display: "block", marginTop: 3, font: `400 11px/1.3 ${T.sans}`, color: T.tertiary }}>Canonical Product Brief · created with the Concierge · newest version</span>
+                </span>
+                <Icon name="arrowRight" size={14} color={T.brandDeep} />
+              </button>
+            ) : briefErr ? (
+              <div style={{ marginTop: 14, font: `400 12px/1.45 ${T.sans}`, color: T.danger }}>Couldn't load the product brief right now.</div>
+            ) : (
+              <div style={{ marginTop: 14, font: `400 12px/1.45 ${T.sans}`, color: T.tertiary }}>The Concierge hasn't finalized a Product Brief for this project yet — it's written during the onboarding conversation.</div>
+            )}
           </Panel>
 
-          {/* build status — draft = setup checklist; live = progress + factory console */}
           <Panel title="Build status">
             {isDraft ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <span style={{ font: `700 24px/1.1 ${T.display}`, letterSpacing: "-0.01em", color: T.tertiary }}>Not started</span>
-                <p style={{ margin: 0, font: `400 12px/1.5 ${T.sans}`, color: T.secondary }}>The factory hasn't run yet. Finish setup and hand off — agents, tickets, and spend appear once the build starts.</p>
+                <span style={{ font: `700 26px/1 ${T.display}`, letterSpacing: "-0.01em", color: T.tertiary }}>Not started</span>
+                <p style={{ margin: 0, font: `400 12px/1.5 ${T.sans}`, color: T.secondary }}>The factory hasn't run yet. Finish setup and hand off — the plan, tickets, agents, and spend appear once the build starts.</p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 9, padding: "11px 0", borderTop: `1px solid ${T.borderSubtle}`, borderBottom: `1px solid ${T.borderSubtle}` }}>
                   {([
                     ["Project brief", !!(brief.goal || brief.description)],
                     ["Scope of work", !!(brief.scope && brief.scope.length)],
                     [`Build engine · ${brief.runtime === "opencode" ? "OpenCode" : brief.runtime === "codex" ? "Codex" : "Claude"}`, true],
-                    ["Materials (optional)", materials.length > 0],
-                  ] as [string, boolean][]).map(([k, done]) => (
+                    ["Materials (optional)", (docs?.uploaded?.length || 0) > 0],
+                  ] as [string, boolean][]).map(([k, ok]) => (
                     <div key={k} style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                      <span style={{ width: 16, height: 16, borderRadius: "50%", flexShrink: 0, display: "grid", placeItems: "center", background: done ? T.success : "transparent", border: `1.5px solid ${done ? T.success : T.borderDefault}` }}>{done && <Icon name="check" size={10} color="#fff" />}</span>
-                      <span style={{ font: `500 12.5px/1.2 ${T.sans}`, color: done ? T.fg : T.secondary }}>{k}</span>
+                      <span style={{ width: 16, height: 16, borderRadius: "50%", flexShrink: 0, display: "grid", placeItems: "center", background: ok ? T.success : "transparent", border: `1.5px solid ${ok ? T.success : T.borderDefault}` }}>{ok && <Icon name="check" size={10} color="#fff" />}</span>
+                      <span style={{ font: `500 12.5px/1.2 ${T.sans}`, color: ok ? T.fg : T.secondary }}>{k}</span>
                     </div>
                   ))}
                 </div>
                 {onResume && <Btn variant="primary" size="sm" full onClick={onResume}>Complete setup &amp; start building <Icon name="arrowRight" size={13} color="#fff" /></Btn>}
               </div>
             ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span style={{ font: `700 30px/1 ${T.display}`, color: T.brandDeep }}>{pct}%</span>
-                <span style={{ font: `500 12px/1 ${T.mono}`, color: T.tertiary }}>{build.done ? "deployed" : "complete"}</span>
-              </div>
-              <span style={{ height: 7, borderRadius: 4, background: T.sunken, overflow: "hidden" }}><span style={{ display: "block", height: "100%", width: pct + "%", background: build.done ? T.success : T.brand }} /></span>
-              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {([
-                  ["Tickets done", build.tickets_total != null ? `${build.tickets_done ?? 0} / ${build.tickets_total}` : "—"],
-                  ["Agents working", build.agents_working != null ? String(build.agents_working) : "—"],
-                ] as [string, string][]).map(([k, v]) => (
-                  <div key={k} style={{ display: "flex", justifyContent: "space-between" }}><span style={{ font: `400 12.5px/1 ${T.sans}`, color: T.secondary }}>{k}</span><span style={{ font: `500 12.5px/1 ${T.mono}`, color: T.fg }}>{v}</span></div>
-                ))}
-                {/* Spend — single `$spent / $cap` line (orgproject.jsx:324); the pencil edits the
-                    cap in place via the same PUT /budget flow (Enter/Escape, Save/Cancel). */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ font: `400 12.5px/1 ${T.sans}`, color: T.secondary }}>Spend</span>
-                  {capEditing ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <span style={{ font: `500 12px/1 ${T.mono}`, color: T.secondary }}>{money(build.spent_usd)} / $</span>
-                      <input value={capInput} onChange={(e) => setCapInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") { const n = parseFloat(capInput); if (!isNaN(n) && n > 0) { api.putBudget(projectId, n).then(loadOverview).catch(() => undefined); } setCapEditing(false); } if (e.key === "Escape") setCapEditing(false); }}
-                        style={{ width: 58, font: `500 12.5px/1 ${T.mono}`, color: T.fg, background: T.bg, border: `1px solid ${T.borderDefault}`, borderRadius: 4, padding: "2px 5px", outline: "none" }} autoFocus />
-                      <button onClick={() => { const n = parseFloat(capInput); if (!isNaN(n) && n > 0) { api.putBudget(projectId, n).then(loadOverview).catch(() => undefined); } setCapEditing(false); }}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: T.success, font: `600 11px/1 ${T.sans}`, padding: "0 2px" }}>Save</button>
-                      <button onClick={() => setCapEditing(false)}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: T.tertiary, font: `500 11px/1 ${T.sans}`, padding: "0 2px" }}>Cancel</button>
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ font: `500 12.5px/1 ${T.mono}`, color: T.fg }}>{money(build.spent_usd)} / {build.budget_ceiling != null ? money(build.budget_ceiling) : "—"}</span>
-                      <button onClick={() => { setCapInput(build.budget_ceiling != null ? String(build.budget_ceiling) : ""); setCapEditing(true); }}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: T.tertiary, padding: 0, lineHeight: 1, display: "inline-flex" }} title="Edit budget cap">
-                        <Icon name="pencil" size={11} color={T.tertiary} />
-                      </button>
-                    </div>
-                  )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <span style={{ font: `700 30px/1 ${T.display}`, color: build.done ? T.success : T.brandDeep }}>{pct}%</span>
+                  <span style={{ font: `500 11px/1 ${T.mono}`, color: T.tertiary }}>{build.done ? "deployed" : "complete"}</span>
                 </div>
+                <span style={{ display: "block", height: 7, borderRadius: 4, background: T.sunken, overflow: "hidden" }}><span style={{ display: "block", height: "100%", width: pct + "%", background: build.done ? T.success : T.brand }} /></span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 2 }}>
+                  {([
+                    ["Current phase", phaseLabel(phase, stage)],
+                    ["Tickets", build.tickets_total != null ? `${build.tickets_done ?? 0} / ${build.tickets_total}` : "—"],
+                    ["Agents working", build.agents_working != null ? String(build.agents_working) : "—"],
+                  ] as [string, string][]).map(([k, v]) => (
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between" }}><span style={{ font: `400 12px/1 ${T.sans}`, color: T.secondary }}>{k}</span><b style={{ font: `600 11.5px/1 ${T.mono}`, color: T.fg }}>{v}</b></div>
+                  ))}
+                  {/* Spend — `$spent / $cap`; the pencil edits the cap in place (PUT /budget). */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ font: `400 12px/1 ${T.sans}`, color: T.secondary }}>Spend</span>
+                    {capEditing ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ font: `500 11.5px/1 ${T.mono}`, color: T.secondary }}>{money(build.spent_usd)} / $</span>
+                        <input value={capInput} onChange={(e) => setCapInput(e.target.value)} autoFocus
+                          onKeyDown={(e) => { if (e.key === "Enter") saveCap(); if (e.key === "Escape") { setCapEditing(false); setCapError(""); } }}
+                          style={{ width: 58, font: `500 12px/1 ${T.mono}`, color: T.fg, background: T.bg, border: `1px solid ${T.borderDefault}`, borderRadius: 4, padding: "2px 5px", outline: "none" }} />
+                        <button onClick={saveCap} style={{ background: "none", border: "none", cursor: "pointer", color: T.success, font: `600 11px/1 ${T.sans}`, padding: "0 2px" }}>Save</button>
+                        <button onClick={() => { setCapEditing(false); setCapError(""); }} style={{ background: "none", border: "none", cursor: "pointer", color: T.tertiary, font: `500 11px/1 ${T.sans}`, padding: "0 2px" }}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <b style={{ font: `600 11.5px/1 ${T.mono}`, color: T.fg }}>{money(build.spent_usd)} / {build.budget_ceiling ? money(build.budget_ceiling) : "—"}</b>
+                        <button onClick={() => { setCapInput(build.budget_ceiling ? String(build.budget_ceiling) : ""); setCapError(""); setCapEditing(true); }} title="Edit budget cap" style={{ background: "none", border: "none", cursor: "pointer", color: T.tertiary, padding: 0, lineHeight: 1, display: "inline-flex" }}>
+                          <Icon name="pencil" size={11} color={T.tertiary} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {capError && <span style={{ font: `500 11px/1.3 ${T.sans}`, color: T.danger, textAlign: "right" }}>{capError}</span>}
+                </div>
+                <Btn variant="primary" size="sm" full onClick={onOpenFactory}>Open factory console <Icon name="arrowRight" size={13} color="#fff" /></Btn>
               </div>
-              <Btn variant="primary" size="sm" full onClick={onOpenFactory}>Open factory console <Icon name="arrowRight" size={13} color="#fff" /></Btn>
-            </div>
+            )}
+          </Panel>
+        </div>
+
+        {/* ── Project knowledge: brief section preview + newest factory outputs ── */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+          <Panel title="Inside the brief"
+            action={headings.length ? <button onClick={() => openBrief && openBrief()} style={{ border: 0, background: "none", color: T.brandDeep, cursor: "pointer", font: `600 11.5px/1 ${T.sans}` }}>Read the brief →</button> : undefined}>
+            {headings.length ? (
+              headings.map((h, i) => (
+                <LinkRow key={h + i} badge={String(i + 1).padStart(2, "0")} badgeTone="brand" title={h}
+                  sub="From the current Product Brief" first={i === 0} onClick={openBrief || undefined} />
+              ))
+            ) : briefErr ? (
+              <Note icon="file" title="Couldn't load the brief" detail="The product brief projection is unavailable right now — try reloading." />
+            ) : (
+              <Note icon="file" title="No brief sections yet" detail="The Concierge writes the Product Brief during onboarding; its sections appear here once it's finalized." />
             )}
           </Panel>
 
-          <Panel title="Repository access">
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {repoAccess?.repo_url && (
-                <a href={repoAccess.repo_url} target="_blank" rel="noopener noreferrer"
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6, width: "fit-content", font: `500 12px/1.2 ${T.sans}`, color: T.brandDeep, textDecoration: "none" }}>
-                  <Icon name="github" size={14} color={T.brandDeep} /> Open repository <Icon name="external" size={11} color={T.brandDeep} />
-                </a>
-              )}
-              <div>
-                <CategoryLabel style={{ display: "block", marginBottom: 6 }}>GitHub username</CategoryLabel>
-                <TextInput value={githubUsername} onChange={setGithubUsername} placeholder="e.g. octocat" />
-              </div>
-              {repoAccess && (
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
-                  <StatusPill tone={repoAccess.status === "invited" ? "success" : repoAccess.status === "failed" ? "danger" : "neutral"}>
-                    {repoAccess.status === "invited" ? "Invited" : repoAccess.status === "failed" ? "Invite failed" : repoAccess.status === "waiting_for_repo" ? "Waiting for repo" : "Not invited"}
-                  </StatusPill>
-                  <span style={{ flex: 1, font: `400 11.5px/1.4 ${T.sans}`, color: repoAccess.status === "failed" ? T.danger : T.tertiary, overflowWrap: "anywhere" }}>{repoAccess.detail}</span>
-                </div>
-              )}
-              {repoError && <span style={{ font: `500 11.5px/1.3 ${T.sans}`, color: T.danger }}>{repoError}</span>}
-              {needsRepoRequest && <Btn variant="secondary" size="sm" full disabled={!normalizedGithubUsername || repoSubmitting}
-                onClick={requestRepoAccess}>
-                {repoSubmitting ? "Requesting…" : repoAccess?.status === "failed" ? "Retry invitation" : "Request invitation"}
-              </Btn>}
-            </div>
+          <Panel title="Factory outputs" count={produced.length || undefined}
+            action={produced.length ? <button onClick={() => openOutputs && openOutputs()} style={{ border: 0, background: "none", color: T.brandDeep, cursor: "pointer", font: `600 11.5px/1 ${T.sans}` }}>View outputs →</button> : undefined}>
+            {newest.length ? (
+              newest.map((d, i) => (
+                <LinkRow key={d.title + i} badge={(d.kind || "doc").slice(0, 4).toUpperCase()} badgeTone={isPrd(d) ? "brand" : "neutral"}
+                  title={d.title} sub={d.agent ? `Produced by ${d.agent}` : "Factory artifact"} first={i === 0}
+                  onClick={d.id ? () => openArtifact(d.id!) : d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : (openOutputs || undefined)} />
+              ))
+            ) : docsErr ? (
+              <Note icon="layers" title="Couldn't load factory outputs" detail="The documents projection is unavailable right now — try reloading." />
+            ) : (
+              <Note icon="layers" title="No outputs yet" detail="Research reports, the product plan (PRD), architecture, and designs appear here as the factory completes each stage." />
+            )}
           </Panel>
-
-          {/* services at work */}
-          <Panel title="Services at work" count={services.length || undefined} span={2}>
-            {services.length ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
-                {services.map((s) => (
-                  <div key={s.label} style={{ display: "flex", gap: 11, padding: "11px 12px", borderRadius: T.rLg, border: `1px solid ${T.borderSubtle}`, background: T.bg }}>
-                    <span style={{ width: 32, height: 32, flexShrink: 0, borderRadius: 8, display: "grid", placeItems: "center", background: T.raised, border: `1px solid ${T.borderSubtle}`, color: T.secondary, font: `700 11px/1 ${T.mono}` }}>{s.label.slice(0, 2).toUpperCase()}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                        <span style={{ font: `600 13px/1.2 ${T.sans}`, color: T.fg }}>{s.label}</span>
-                        {s.kind && <CategoryLabel style={{ fontSize: 10 }}>{s.kind}</CategoryLabel>}
-                        {s.status && <StatusPill tone={statusTone(s.status)} dot>{s.status}</StatusPill>}
-                      </div>
-                      {(s.detail || s.url) && <p style={{ margin: "3px 0 0", font: `400 11.5px/1.4 ${T.sans}`, color: T.tertiary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.detail || s.url}</p>}
-                      {s.metric && <span style={{ font: `500 10.5px/1 ${T.mono}`, color: T.secondary }}>{s.metric}</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : <EmptyState icon="layers" title="No services connected"
-                  detail={isDraft ? "You'll link integrations and pick a build engine during setup — connected services show up here." : "Integrations, hosting, and testing services appear here as the factory puts them to work."} />}
-          </Panel>
-
-          {/* agents on this project */}
-          <Panel title="Agents on this project" count={agents.length || undefined}>
-            {agents.length ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                {agents.map((a, i) => (
-                  <div key={a.role + i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <Avatar name={a.role} size={26} tone={agentTone(a.role)} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: "block", font: `600 12.5px/1.2 ${T.sans}`, color: T.fg }}>{a.role}{a.model && <span style={{ color: T.tertiary, fontWeight: 400 }}> · {a.model}</span>}</span>
-                      {a.task && <span style={{ display: "block", font: `400 11px/1.3 ${T.sans}`, color: T.tertiary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.task}</span>}
-                    </div>
-                    {a.status === "running" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: T.success }} />}
-                  </div>
-                ))}
-              </div>
-            ) : <EmptyState icon="bot" title="No agents yet"
-                  detail={isDraft ? "Agents spin up when the build starts — finish setup to kick off the pipeline." : "No agents have worked this project yet — they appear here as the pipeline dispatches them."} />}
-          </Panel>
-
-          {/* uploaded materials — "+ Add" attaches a real file (POST /api/projects/{id}/materials) */}
-          <Panel title="Uploaded materials" count={materials.length || undefined}
-            action={<>
-              <input ref={addInputRef} type="file" multiple style={{ display: "none" }} onChange={(e) => { addMaterials(e.target.files); e.currentTarget.value = ""; }} />
-              <button onClick={() => addInputRef.current?.click()} style={{ font: `500 11.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>+ Add</button>
-            </>}>
-            {materials.length ? <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>{materials.map((d, i) => <FileRow key={d.name + i} label={d.name} kind={d.kind} sub={fmtBytes(d.size_bytes)} />)}</div>
-              : <EmptyState icon="paperclip" title="Nothing uploaded"
-                  detail="Attach specs, spreadsheets, or walkthroughs — agents read them while building."
-                  cta={<Btn variant="secondary" size="sm" onClick={() => addInputRef.current?.click()}>+ Add a file</Btn>} />}
-          </Panel>
-
-          {/* produced documents */}
-          <Panel title="Produced documents" count={produced.length || undefined} span={2}
-            action={!isDraft && onOpenDocuments ? <button onClick={onOpenDocuments} style={{ font: `500 11.5px/1 ${T.sans}`, color: T.brandDeep, background: "none", border: "none", cursor: "pointer" }}>View all →</button> : null}>
-            {produced.length ? (
-              /* 3-col ArtifactChip grid (orgproject.jsx:384-388) — kind badge + label + arrow;
-                 the PRD gets the brand `primary` variant. Same open behavior as before. */
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 9 }}>
-                {produced.map((d, i) => (
-                  <ArtifactChip key={d.title + i} small
-                    a={{ kind: d.kind, label: d.title, note: d.agent || undefined, primary: isPrd(d) }}
-                    onOpen={d.id ? () => openArtifact(d.id!) : d.path ? () => window.open(`/api/projects/${projectId}/artifact?path=${encodeURIComponent(d.path!)}&raw=1`, "_blank") : undefined} />
-                ))}
-              </div>
-            ) : <EmptyState icon="file" title="No documents produced yet"
-                  detail={isDraft ? "The factory produces PRDs, architecture, designs, and tickets here once the build starts." : "PRDs, architecture, designs, and tickets land here as the factory's stages complete."} />}
-          </Panel>
-
-          {/* dependencies — #107, post-deploy only: replace a mocked provider key with a real one */}
-          {build.done && deps && <DependenciesPanel projectId={projectId} deps={deps} onProvided={loadDeps} />}
-
-          {/* inherited org context — sparkle caption per orgproject.jsx:393-399; the price-book
-              row renders ONLY when the payload actually carries one (never fabricated) */}
-          <Panel title="Inherited org context">
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {([["Company", org.name], ["Industry", org.industry], ["Systems", org.connected_systems?.join(", ")],
-                 ...(org.price_book ? [["Price book", org.price_book]] : [])] as [string, string | undefined][]).map(([k, v]) => (
-                <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                  <CategoryLabel>{k}</CategoryLabel>
-                  <span style={{ font: `500 12px/1.3 ${T.sans}`, color: T.fg, textAlign: "right" }}>{v || "—"}</span>
-                </div>
-              ))}
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 2, font: `400 11px/1 ${T.sans}`, color: T.tertiary }}>
-                <Sparkle size={10} color={T.brand} /> reused from organization
-              </span>
-            </div>
-          </Panel>
-
         </div>
+
+        {onDiscard && isDraft && (
+          <div style={{ marginTop: 14, textAlign: "center" }}>
+            <button onClick={onDiscard} style={{ background: "none", border: "none", cursor: "pointer", font: `500 12px/1 ${T.sans}`, color: T.danger, padding: "4px 0" }}>Discard draft</button>
+          </div>
+        )}
       </div>
     </div>
   );
