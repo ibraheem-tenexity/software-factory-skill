@@ -342,7 +342,11 @@ class RecipeSeedError(Exception):
 # above; SKILL.md already carries this stage's contract (incl. the fork-and-extend block); phases/
 # and context/ are the factory's own prior-stage-artifact dirs; .claude/ is the factory's own
 # settings dir. A seed entry with one of these names is skipped during the flatten, never moved.
-_RESERVED_WORKSPACE_NAMES = {".mcp.json", "SKILL.md", "phases", "context", ".claude"}
+_RESERVED_WORKSPACE_NAMES = {".mcp.json", "SKILL.md", "phases", "context", ".claude",
+                             # SOF-210: the runtime config files prepare_workspace writes at ws root —
+                             # a recipe seed carrying either would shadow the factory's own (opencode
+                             # runs read opencode.json; claude reads claude-settings.json).
+                             "opencode.json", "claude-settings.json"}
 
 
 def _clone_recipe_seed(repo_url: str, dest: str) -> None:
@@ -424,6 +428,11 @@ def prepare_workspace(
             if not (os.path.exists(os.path.join(ws, "AGENTS.md"))
                     or os.path.exists(os.path.join(ws, "CLAUDE.md"))):
                 seed_dir = os.path.join(ws, "seed")
+                # SOF-210: a SIGKILL after a prior clone-into-seed but before the flatten below leaves
+                # a non-empty seed/; `git clone` into a non-empty dir then refuses, wedging the retry
+                # into an honest blocks="recipe" park. Clear any stale seed/ first so the retry re-clones
+                # cleanly. (The AGENTS.md/CLAUDE.md guard above only trips once the flatten succeeded.)
+                shutil.rmtree(seed_dir, ignore_errors=True)
                 _clone_recipe_seed(repo_url, seed_dir)
                 # Never let the seed overwrite/shadow factory control files the workspace already
                 # depends on (.mcp.json in particular feeds the MCP hard-gate above) — skip these
