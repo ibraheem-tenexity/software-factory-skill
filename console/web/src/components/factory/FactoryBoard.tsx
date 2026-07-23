@@ -12,6 +12,7 @@ import { api, phaseIsStale, ProjectSummary, Graph, Ticket } from "../../api";
 import { phaseStatesFromGraph, atWaitForDeps, PhaseStatus, toneForHaltedPhase } from "./pipeline";
 import { StageRail } from "./StageRail";
 import { WaitForDeps } from "./WaitForDeps";
+import { DesignReview } from "./DesignReview";
 import { BuildBoard } from "./BuildBoard";
 import { TreeView, MapView } from "./NodeMap";
 import { DocViewer, artifactsFromGraph, ArtifactRef, openArtifact } from "./Artifacts";
@@ -207,6 +208,8 @@ export function FactoryBoard({ projectId, status, tickets, graph, loaded, onStat
         {view === "activity" && (
           <FactoryActivity projectId={projectId} artifacts={artifacts} onOpenArtifact={openDocFromRef}
             selectedEventId={selectedEventId}
+            designPanel={<DesignReview projectId={projectId} onOpenArtifact={openDocFromRef}
+              onContinued={() => api.status(projectId).then((s) => onStatus(s as Status)).catch(() => {})} />}
             depsPanel={showDeps
               ? <WaitForDeps projectId={projectId} onResolved={() => api.status(projectId).then((s) => onStatus(s as Status)).catch(() => {})} />
               : undefined} />

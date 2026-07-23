@@ -16,7 +16,8 @@ from console.deps import require_authed, authorize_project, _can_see, project_vi
 
 from console.schemas import (DraftCreateIn, ProjectPatchIn, MaterialScopeIn, MaintenanceToggleIn,
                              OrgDocIn, DepsIn, ProvideDepIn, BudgetIn, RetryNodeIn,
-                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, RepoAccessIn)
+                             RewindIn, DraftPatchIn, AttachIn, PromoteIn, CredsIn, RepoAccessIn,
+                             DesignReviseIn)
 
 router = APIRouter()
 
@@ -363,6 +364,33 @@ def project_submit_deps(pid: str, body: DepsIn, v: tuple = Depends(authorize_pro
     if result.get("satisfied"):
         state.console.start_stage3(pid, extra_creds=extract_env_creds(body.deps))
     return result
+
+
+@router.get("/api/projects/{pid}/design-review")
+def project_design_review(pid: str, v: tuple = Depends(authorize_project)):
+    """SOF-252: the customer design-review action, derived entirely from real graph/artifact
+    records (design-node status, `mockup` artifacts, producing model, append-only decisions)."""
+    return state.console.design_review(pid)
+
+
+@router.post("/api/projects/{pid}/design-review/approve")
+def project_design_approve(pid: str, v: tuple = Depends(authorize_project)):
+    """Record approval of the exact design version + emit the canonical event, then let the
+    pipeline proceed via the existing lifecycle boundary (real refusal reported in `continuation`)."""
+    return state.console.approve_design(pid)
+
+
+@router.post("/api/projects/{pid}/design-review/reopen")
+def project_design_reopen(pid: str, v: tuple = Depends(authorize_project)):
+    """Reopen the latest approval — retains prior decisions, returns the latest version to review."""
+    return state.console.reopen_design(pid)
+
+
+@router.post("/api/projects/{pid}/design-review/revise")
+def project_design_revise(pid: str, body: DesignReviseIn, v: tuple = Depends(authorize_project)):
+    """Iterate: record a new-version revision grounded in the affected screens and ask the existing
+    design workflow to regenerate. Same code path as the Concierge `request_design_revision` tool."""
+    return state.console.request_design_revision(pid, body.screen_ids, body.instructions)
 
 
 @router.post("/api/projects/{pid}/deps/provide")

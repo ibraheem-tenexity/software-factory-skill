@@ -126,6 +126,13 @@ class ProvideDepIn(BaseModel):
     value: str = ""
 
 
+class DesignReviseIn(BaseModel):
+    # SOF-252: iterate on the design — the affected screen IDs (empty ⇒ all current screens) and
+    # the customer's revision instructions grounding the regeneration.
+    screen_ids: list = []
+    instructions: str = ""
+
+
 class ProjectPatchIn(BaseModel):
     name: str | None = None
     description: str | None = None

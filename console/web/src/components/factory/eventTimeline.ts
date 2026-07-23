@@ -38,6 +38,11 @@ export function normalizeEvent(e: ProjectEvent): {
     case "artifact": return { severity: "routine", label: `Produced ${p.title || p.path || "an output"}`,
       artifact: { title: p.title, path: p.path, url: p.url } };
     case "blocker": return { severity: "attention", label: "Blocked", detail: p.what };
+    // SOF-252 — a customer design decision (approve/reopen/iterate). The persisted title is already
+    // the human sentence ("Design approved — v1 (4 screens)"); the note (iterate instructions) is
+    // truthful expandable detail. Routine: it is factual process machinery, not a failure.
+    case "design_review": return { severity: "routine", label: p.title || `Design ${p.action ?? "decision"}`,
+      detail: p.note || undefined };
     case "done": return { severity: "routine", label: "Verified live", detail: p.url };
     default:
       // Unknown types default to routine; anything that reads as a failure is surfaced as one with
