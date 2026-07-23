@@ -300,3 +300,17 @@ class ProjectMaterials:
             if d:
                 self._blobs.touch_directory(d)
         return self.files(project_id)
+
+    def file_content(self, project_id: str, blob_id: int) -> dict:
+        """Raw text for the shared Artifact Viewer, served through the project's Files surface for
+        BOTH project- and owner-org-scope blobs (one project-relative route family — the browser
+        never touches the org content route). Authorized by the SAME read-model rule as every Files
+        mutation — own project OR owner org — so a project's Files surface reads exactly what its
+        read model exposes. Content negotiation mirrors GET /api/org/docs/{id}/content EXACTLY, so
+        the shared viewer needs no new branch: an out-of-scope blob is 403, an unknown one 404."""
+        blob = self._blobs.get_blob(blob_id)
+        if not blob:
+            raise NotFound("file not found")
+        self._authorize_scope(project_id, blob["scope"], blob["scope_id"])
+        raw = storage.get_by_path(blob["storage_key"])
+        return {"content": raw.decode("utf-8", errors="replace")}

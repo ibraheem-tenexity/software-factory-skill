@@ -205,6 +205,11 @@ def files_tree(scopes: list) -> dict:
     file row keeps `directory_id: null` — the consumer places it under the file's `scope` root.
     Every readable file therefore appears exactly once in the combined view and root counts never
     undercount unfiled-but-in-scope material.
+
+    File content: GET /api/projects/{pid}/files/{blob_id}/content serves any file in this read
+    model — project- OR owner-org-scope — through the one project-relative Files route family
+    (body/content-type identical to GET /api/org/docs/{id}/content, so the shared Artifact Viewer
+    needs no new branch); out-of-scope is 403, unknown is 404.
     """
     all_dirs: list = []
     all_files: list = []

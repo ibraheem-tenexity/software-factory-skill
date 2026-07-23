@@ -397,6 +397,15 @@ def project_file_move(pid: str, blob_id: int, body: FileMoveIn, v: tuple = Depen
     return m.move_file(pid, blob_id, body.directory_id)
 
 
+@router.get("/api/projects/{pid}/files/{blob_id}/content")
+def project_file_content(pid: str, blob_id: int, v: tuple = Depends(authorize_project)):
+    """Raw text for the shared Artifact Viewer — serves BOTH project- and owner-org-scope blobs
+    through the project's Files surface (the browser never calls the org content route). Authorized
+    by the same read-model rule as the other Files routes (own project OR owner org); out-of-scope
+    is 403, unknown is 404. Body/content-type mirror GET /api/org/docs/{id}/content exactly."""
+    return _materials().file_content(pid, blob_id)
+
+
 @router.delete("/api/projects/{pid}/files/{blob_id}")
 def project_file_delete(pid: str, blob_id: int, v: tuple = Depends(authorize_project)):
     """Delete a source file (storage + derived memory + source artifacts), same cleanup as the
