@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import (Boolean, CheckConstraint, Column, Computed, DateTime, Float,
-                        ForeignKey, Index, Integer, MetaData, Table, Text, UniqueConstraint, func, text)
+                        ForeignKey, ForeignKeyConstraint, Index, Integer, MetaData, Table, Text,
+                        UniqueConstraint, func, text)
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 
 metadata = MetaData()
@@ -260,7 +261,70 @@ blobs = Table(
     Column("source_blob_id", Integer, ForeignKey("blobs.id")),
     Column("source_page", Integer),             # 1-based source page/slide, when extracted
     Column("provenance", JSONB, server_default=text("'{}'::jsonb")),  # extractor, bbox, etc.
+    # Files browser (SOF-251): the persisted source-directory this blob belongs to. NULL = unfiled
+    # (a virtual/top-level position, or an extracted-child asset whose membership is provenance via
+    # source_blob_id, not a directory). The composite FK below targets directories(id, scope,
+    # scope_id) so a blob can only sit in a directory of its OWN scope/scope_id, and ON DELETE
+    # RESTRICT means a directory that still owns source material cannot be silently dropped.
+    Column("directory_id", _UUID),
+    ForeignKeyConstraint(
+        ["directory_id", "scope", "scope_id"],
+        ["directories.id", "directories.scope", "directories.scope_id"],
+        ondelete="RESTRICT", name="fk_blobs_directory_scope",
+    ),
 )
+
+# Source-directory tree for the Files browser (SOF-251), owned by the source-material/memory
+# capability. Roots (parent_id IS NULL) are per-scope; the top-level Files screen itself is virtual
+# and mixed-scope, so it is NEVER a stored row. Database-enforced invariants:
+#   * a directory's parent shares its scope/scope_id — the composite parent FK targets the
+#     (id, scope, scope_id) unique key, so a mismatched-scope parent is impossible.
+#   * sibling names are unique within their parent and scope, roots included — two partial unique
+#     indexes (parent present vs. NULL root) because SQL treats NULL parents as distinct.
+#   * a blob's directory shares the blob's scope/scope_id — enforced by the composite FK on `blobs`.
+#   * ON DELETE RESTRICT on both the self-parent and blob FKs means deleting a directory with
+#     descendants or member blobs is refused, never a silent cascade/orphan.
+# `summary_*` back the truthful Files UI state: `summary_status` is one of summarizing|ready|
+# needs_refresh|failed, `last_successful_summary_at` is the last time a rollup summary actually
+# succeeded, and `summary_source_hash` detects drift of the summarized source set.
+directories = Table(
+    "directories", metadata,
+    Column("id", _UUID, primary_key=True, server_default=text("gen_random_uuid()")),
+    Column("scope", Text, nullable=False),            # 'project' | 'org' (mirrors blobs)
+    Column("scope_id", Text, nullable=False),
+    Column("parent_id", _UUID),                       # NULL => scope root
+    Column("name", Text, nullable=False),
+    Column("summary_md", Text),
+    Column("summary_status", Text, nullable=False, server_default="needs_refresh"),
+    Column("summary_source_hash", Text),
+    Column("last_successful_summary_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    CheckConstraint("scope in ('project', 'org')", name="directories_scope_check"),
+    CheckConstraint(
+        "summary_status in ('summarizing', 'ready', 'needs_refresh', 'failed')",
+        name="directories_summary_status_check",
+    ),
+    # Composite-FK target: lets `blobs` and child directories pin (id, scope, scope_id) together.
+    UniqueConstraint("id", "scope", "scope_id", name="uq_directories_id_scope"),
+    # Parent must live in the same scope/scope_id; use_alter defers this self-FK past table create.
+    ForeignKeyConstraint(
+        ["parent_id", "scope", "scope_id"],
+        ["directories.id", "directories.scope", "directories.scope_id"],
+        ondelete="RESTRICT", name="fk_directories_parent_scope", use_alter=True,
+    ),
+    # Unique sibling names: children keyed by parent; roots (NULL parent) keyed by scope alone.
+    Index("uq_directories_sibling_name", "scope", "scope_id", "parent_id", "name",
+          unique=True, postgresql_where=text("parent_id IS NOT NULL")),
+    Index("uq_directories_root_name", "scope", "scope_id", "name",
+          unique=True, postgresql_where=text("parent_id IS NULL")),
+    # Traversal helpers: scope-root lookup, parent walk, and blob membership (on `blobs`).
+    Index("ix_directories_scope_roots", "scope", "scope_id",
+          postgresql_where=text("parent_id IS NULL")),
+    Index("ix_directories_parent", "parent_id"),
+)
+
+Index("ix_blobs_directory_id", blobs.c.directory_id)
 
 # Project Memory (SOF-26/T0.1): the per-document "2,000-ft view", keyed 1:1 on the document's
 # `blobs` row. `scope`/`scope_id` mirror `blobs` so project- and org-scoped memory share one
