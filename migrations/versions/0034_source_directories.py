@@ -17,7 +17,9 @@ The top-level Files screen is virtual and mixed-scope, so it is never a stored r
 
 Migration backfill:
   * For every (scope, scope_id) that owns a top-level source blob (`source_blob_id IS NULL`),
-    create or reuse exactly one root directory (name = project/org display name, else scope_id).
+    create or reuse exactly one root directory (name = project/org display name, or scope_id
+    when that name is NULL *or empty* — many staging projects have a blank name, and a root
+    literally named '' would surface as an empty label in the Files UI).
   * File each such top-level blob under that root. Extracted-child assets (`source_blob_id`
     NOT NULL) keep `directory_id` NULL — their membership stays provenance via source_blob_id.
   * Root summary state is initialized honestly: no directory-level rollup has ever been computed,
@@ -118,7 +120,7 @@ def upgrade() -> None:
             """
             INSERT INTO directories (scope, scope_id, parent_id, name, summary_status)
             SELECT DISTINCT b.scope, b.scope_id, NULL::uuid,
-                   COALESCE(ps.name, o.name, b.scope_id) AS name,
+                   COALESCE(NULLIF(ps.name, ''), NULLIF(o.name, ''), b.scope_id) AS name,
                    'needs_refresh'
             FROM blobs b
             LEFT JOIN projectstate ps ON b.scope = 'project' AND ps.project_id = b.scope_id
