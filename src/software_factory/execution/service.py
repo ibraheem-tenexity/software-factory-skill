@@ -31,6 +31,7 @@ from ..runtime_agents import AgentRegistry
 from ..input_pipeline import persist_and_compose
 from ..pdf_extract import extract_to_markdown
 from ..projects.intake import ProjectIntake, compose_description as _compose_description, project_paths
+from ..projects.product_brief import ProductBrief
 from ..projects.records import ProjectRecords
 from ..recipes.store import RecipeStore
 from .. import deps as deps_mod
@@ -107,6 +108,7 @@ class ExecutionService:
             skill_version=SKILL_VERSION,
         )
         self._records = ProjectRecords(projects_dir)
+        self._briefs = ProductBrief(projects_dir)
         self._procs: dict = {}   # project_id -> last launched stage process (SPEC §1 handoff guard)
         # project_id -> ((mtime_ns, size), cost): the full-log cost reparse on EVERY status/poll
         # was the console's dominant CPU+IO — two pollers × every run × multi-MB stream logs.
@@ -125,6 +127,11 @@ class ExecutionService:
     def records(self) -> ProjectRecords:
         """Project read-model owner composed with this execution facade."""
         return self._records
+
+    @property
+    def briefs(self) -> ProductBrief:
+        """Versioned Product Brief read/write owner (SOF-244) composed with this facade."""
+        return self._briefs
 
     # ---- SPEC §1: stage process lifecycle ------------------------------------------------
     def _stage_process_alive(self, project_id: str) -> bool:
