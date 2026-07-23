@@ -31,6 +31,7 @@ from ..runtime_agents import AgentRegistry
 from ..input_pipeline import persist_and_compose
 from ..pdf_extract import extract_to_markdown
 from ..projects.intake import ProjectIntake, compose_description as _compose_description, project_paths
+from ..projects.product_brief import ProductBrief
 from ..projects.records import ProjectRecords
 from ..recipes.store import RecipeStore
 from .. import deps as deps_mod
@@ -68,6 +69,12 @@ def _log_teardown_failures(result: dict | None, project_id: str = "") -> None:
 
 
 SKILL_VERSION = "0.0.1"
+
+# SOF-252: append-only artifact kind for a customer design-review DECISION (approve / reopen /
+# iterate). These rows are process machinery around explicit customer actions — never mutated,
+# never produced outputs — so they are kept out of the produced-artifact graph/Documents
+# (INPUT_ONLY_KINDS) but ARE projected into the event timeline as a "design_review" event.
+DESIGN_REVIEW_KIND = "design_review"
 
 PIPELINE_LABELS = {"wait-for-deps": "wait for deps"}
 
@@ -107,6 +114,7 @@ class ExecutionService:
             skill_version=SKILL_VERSION,
         )
         self._records = ProjectRecords(projects_dir)
+        self._briefs = ProductBrief(projects_dir)
         self._procs: dict = {}   # project_id -> last launched stage process (SPEC §1 handoff guard)
         # project_id -> ((mtime_ns, size), cost): the full-log cost reparse on EVERY status/poll
         # was the console's dominant CPU+IO — two pollers × every run × multi-MB stream logs.
@@ -125,6 +133,11 @@ class ExecutionService:
     def records(self) -> ProjectRecords:
         """Project read-model owner composed with this execution facade."""
         return self._records
+
+    @property
+    def briefs(self) -> ProductBrief:
+        """Versioned Product Brief read/write owner (SOF-244) composed with this facade."""
+        return self._briefs
 
     # ---- SPEC §1: stage process lifecycle ------------------------------------------------
     def _stage_process_alive(self, project_id: str) -> bool:
@@ -1814,6 +1827,228 @@ class ExecutionService:
             "missing": missing,
             "satisfied": state.deps_satisfied,
         }
+
+    # ── Design review (SOF-252) ───────────────────────────────────────────────────────────────
+    # A customer design-review action surfaced INSIDE Factory Activity. Every field below is
+    # derived from REAL records — the design-node status (derive_phases), the recorded `mockup`
+    # artifacts, the AgentRegistry model, and the append-only design-decision rows. Nothing here
+    # hardcodes a screen count or a successful output.
+
+    def _design_screens(self, artifacts_rows: list[dict]) -> list[dict]:
+        """The current design screens, one per stored `mockup` artifact. Mockups are recorded
+        append-only at `mockups/<SCREEN_ID>.html` (skills/stage-2-design), so a regeneration
+        inserts a NEW row at the same path — we keep the LATEST row per path and report how many
+        versions that path has. The screen count is len() of this list; never a fixed number."""
+        by_path: dict[str, list[dict]] = {}
+        for a in artifacts_rows:
+            if (a.get("kind") or "").lower() != "mockup":
+                continue
+            key = a.get("path") or a.get("title") or ""
+            by_path.setdefault(key, []).append(a)
+        screens = []
+        for key, rows in by_path.items():
+            rows.sort(key=lambda r: r.get("ts") or 0)
+            latest = rows[-1]
+            path = latest.get("path") or ""
+            base = os.path.splitext(os.path.basename(path))[0] if path else ""
+            sid = base or (latest.get("title") or key)
+            screens.append({
+                "id": sid,
+                "title": latest.get("title") or sid,
+                "path": path,
+                "artifact_id": latest.get("id"),
+                "agent": latest.get("agent"),
+                "ts": latest.get("ts"),
+                "version": len(rows),   # how many times this screen has been (re)generated
+            })
+        screens.sort(key=lambda s: (s.get("ts") or 0, s["id"]))
+        return screens
+
+    def _design_decisions(self, artifacts_rows: list[dict]) -> list[dict]:
+        """The append-only customer design decisions (approve / reopen / iterate), ts-ordered.
+        Decoded from the JSON content of each DESIGN_REVIEW_KIND artifact row."""
+        out = []
+        for a in artifacts_rows:
+            if (a.get("kind") or "").lower() != DESIGN_REVIEW_KIND:
+                continue
+            try:
+                payload = json.loads(a.get("content") or "{}")
+            except (ValueError, TypeError):
+                logger.exception("[design-review] undecodable decision content on artifact %s", a.get("id"))
+                payload = {}
+            payload["ts"] = a.get("ts")
+            out.append(payload)
+        out.sort(key=lambda d: d.get("ts") or 0)
+        return out
+
+    @staticmethod
+    def _design_version(decisions: list[dict]) -> int:
+        """Current review version: v1 initially, +1 for every iterate (regeneration round).
+        Reopen does not bump — it returns the SAME latest version to actionable review."""
+        return 1 + sum(1 for d in decisions if d.get("action") == "iterate")
+
+    @staticmethod
+    def _design_locked(decisions: list[dict], version: int) -> bool:
+        """Locked when the most recent decision that closes a version is an approval OF the current
+        version, with no later reopen/iterate. This is trigger condition (c): a later factual
+        design decision (reopen/iterate) re-opens the current review version."""
+        for d in reversed(decisions):
+            action = d.get("action")
+            if action == "approve":
+                return d.get("version") == version
+            if action in ("reopen", "iterate"):
+                return False
+        return False
+
+    def _design_model(self, project_id: str, agents_db: str) -> str:
+        """The model that produced the design, from the AgentRegistry design-phase agent (real
+        recorded model). Falls back to the run's pinned model/runtime — never a hardcoded 'Kimi K3'."""
+        try:
+            for rec in AgentRegistry(agents_db).agents_for(project_id):
+                if rec.phase == "design" and rec.model:
+                    return rec.model
+        except Exception:
+            logger.exception("[design-review] model lookup failed for %s — falling back to runtime", project_id)
+        state = self._load_state(project_id)
+        return state.impl_model or state.planning_model or state.opencode_model or state.runtime or ""
+
+    def design_review(self, project_id: str) -> dict:
+        """The customer design-review action payload, derived entirely from real records.
+
+        `available` is true only once (a) the design node is complete AND (b) at least one mockup
+        artifact exists. `status` is 'locked' when a later approval closed the current review
+        version (c), otherwise 'review' (actionable). Brand/theme is Wave-2/not-shipping, so there
+        is no real org theme record to cite — `theme` is honestly null rather than a fabricated
+        'on your brand theme' claim."""
+        paths = self._paths(project_id)
+        rows = ProjectStore(paths["db"]).artifacts()
+        design_done = self.derive_phases(project_id).get("design") == "done"
+        screens = self._design_screens(rows)
+        decisions = self._design_decisions(rows)
+        version = self._design_version(decisions)
+        locked = self._design_locked(decisions, version)
+        return {
+            "available": bool(design_done and screens),
+            "design_done": design_done,
+            "status": "locked" if locked else "review",
+            "version": version,
+            "approved_version": version if locked else None,
+            "screens": screens,
+            "screen_count": len(screens),
+            "model": self._design_model(project_id, paths["agents_db"]),
+            "theme": None,
+            "decisions": decisions,
+        }
+
+    def _record_design_decision(self, project_id: str, action: str, version: int,
+                                screen_ids: list[str], model: str, note: str = "") -> None:
+        """Append ONE immutable design decision to the artifacts table. Never mutates a prior row —
+        approve/reopen/iterate history all survives (AC: 'does not delete prior events')."""
+        payload = {"action": action, "version": version, "screen_ids": screen_ids,
+                   "screen_count": len(screen_ids), "model": model}
+        if note:
+            payload["note"] = note
+        n = len(screen_ids)
+        labels = {
+            "approve": f"Design approved — v{version} ({n} screen{'' if n == 1 else 's'})",
+            "reopen": f"Design review reopened — v{version}",
+            "iterate": f"Design revision requested — v{version} ({n} screen{'' if n == 1 else 's'})",
+        }
+        ProjectStore(self._paths(project_id)["db"]).record_artifact(
+            labels.get(action, f"Design {action} — v{version}"),
+            f"design-review/{action}-v{version}-{int(time.time() * 1000)}.json",
+            kind=DESIGN_REVIEW_KIND, agent="customer",
+            content=json.dumps(payload), origin="user")
+
+    def _continue_after_design(self, project_id: str) -> dict:
+        """Let the pipeline proceed past the design gate via the EXISTING lifecycle boundary —
+        no new gate is invented. If the run halted at design it resumes (recovery boundary); if it
+        is parked at wait-for-deps with deps satisfied it launches Stage 3 (the same call the deps
+        button makes); otherwise the pipeline is already advancing on its own. Reports the REAL
+        refusal (resume_failure_reason / a None launch) rather than a fabricated success."""
+        state = self._load_state(project_id)
+        if state.phase in ("paused", "crashed"):
+            if self.resume_project(project_id) is not None:
+                return {"continued": True, "via": "resume", "detail": "pipeline resumed from the design gate"}
+            return {"continued": False, "via": "resume",
+                    "detail": self.resume_failure_reason(project_id) or "resume was refused"}
+        if state.stage2_done and state.deps_satisfied:
+            if self.start_stage3(project_id) is not None:
+                return {"continued": True, "via": "stage3", "detail": "build launching from the design gate"}
+            return {"continued": False, "via": "stage3",
+                    "detail": "Stage 3 did not launch — the run is terminal or a stage is already running"}
+        return {"continued": True, "via": "in-progress",
+                "detail": "the pipeline is already advancing past the design node"}
+
+    def approve_design(self, project_id: str) -> dict:
+        """Record the customer's approval of the EXACT current design version, emit the canonical
+        customer-visible event (the append-only decision → a 'design_review' timeline event), then
+        let the existing pipeline proceed. The approval is a fact and is recorded even if
+        continuation refuses — the response carries the real continuation outcome alongside the
+        flipped 'locked' state."""
+        review = self.design_review(project_id)
+        if not review["available"]:
+            return {"ok": False, "detail": "no completed design with screen artifacts to approve"}
+        version = review["version"]
+        self._record_design_decision(project_id, "approve", version,
+                                      [s["id"] for s in review["screens"]], review["model"])
+        continuation = self._continue_after_design(project_id)
+        result = self.design_review(project_id)
+        result["ok"] = True
+        result["continuation"] = continuation
+        return result
+
+    def reopen_design(self, project_id: str) -> dict:
+        """Record that the customer reopened the latest approval and return the latest version to
+        actionable review state. Retains all prior approval/regeneration decisions (append-only)."""
+        review = self.design_review(project_id)
+        if not review["screens"]:
+            return {"ok": False, "detail": "no design screens on record to reopen"}
+        self._record_design_decision(project_id, "reopen", review["version"],
+                                     [s["id"] for s in review["screens"]], review["model"])
+        result = self.design_review(project_id)
+        result["ok"] = True
+        return result
+
+    def request_design_revision(self, project_id: str, screen_ids: list[str], instructions: str) -> dict:
+        """Iterate on the design: record a new-version revision decision grounded in the affected
+        screen identities, then ask the EXISTING design workflow to regenerate via the node-retry
+        lifecycle boundary (re-runs the design stage; it never mutates approved history — the
+        decision row and any regenerated mockups are NEW versions). Per-screen scoping is bounded
+        by what the design workflow supports; the affected IDs + instructions are the grounding.
+        Reports the real regeneration outcome (or refusal) — no fabricated success.
+
+        This is the SAME function the Concierge `request_design_revision` tool calls (a customer
+        button and the agent tool share one code path and surface the identical result)."""
+        review = self.design_review(project_id)
+        if not review["screens"]:
+            return {"ok": False, "detail": "no design screens on record to revise"}
+        if not (instructions or "").strip():
+            return {"ok": False, "detail": "revision instructions are required"}
+        known = {s["id"] for s in review["screens"]}
+        affected = [s for s in (screen_ids or []) if s in known] or [s["id"] for s in review["screens"]]
+        new_version = review["version"] + 1
+        self._record_design_decision(project_id, "iterate", new_version, affected,
+                                     review["model"], note=instructions)
+        outcome = self._regenerate_design(project_id)
+        result = self.design_review(project_id)
+        result["ok"] = True
+        result["revision"] = {"affected": affected, "version": new_version, **outcome}
+        return result
+
+    def _regenerate_design(self, project_id: str) -> dict:
+        """Re-run the design stage via the existing node-retry boundary. Reports the honest outcome:
+        a refusal (terminal run / a stage already running) or a launch failure both stay visible
+        with the actual reason; prior approved mockups remain available (append-only)."""
+        try:
+            result = self.retry_node(project_id, "design")
+        except Exception:
+            logger.exception("[design-review] design regeneration failed to launch for %s", project_id)
+            return {"regenerating": False, "detail": "design regeneration failed to launch — see server logs"}
+        if result is None:
+            return {"regenerating": False,
+                    "detail": "design regeneration refused — the run is terminal or a stage is already running"}
+        return {"regenerating": True, "detail": "the design workflow is re-running for the affected screens"}
 
     def provide_deployed_dep(self, project_id: str, name: str, value: str) -> dict:
         """#107 — a user REVISITING an already-deployed project replaces one mocked provider dep

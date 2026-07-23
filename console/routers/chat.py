@@ -87,6 +87,7 @@ async def chat(body: ChatIn, v: tuple = Depends(require_authed)):
                     runtime=body.runtime, planning_model=body.planning_model,
                     impl_model=body.impl_model, project_name=body.project_name,
                     owner=v[0] or "", role=v[1] or "member",
+                    display_context=body.display_context,
                 ):
                     yield line
         except asyncio.TimeoutError:

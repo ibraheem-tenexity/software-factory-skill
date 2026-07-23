@@ -19,7 +19,10 @@ _DONE_TICKET_STATES = {"done", "deployed", "approved"}
 # (the brief has no DB-inlined content and no source_blob_id, so it renders as a bare external link
 # while the real PRD renders natively — same conceptual role, two different broken-feeling
 # experiences). It stays reachable via the Overview tab's own dedicated brief link either way.
-INPUT_ONLY_KINDS = {"context", "product_brief"}
+# "design_review" (SOF-252) is an append-only customer design DECISION record, not a produced
+# output — keep it out of the produced-artifact graph nodes and the Documents tab. It still
+# projects into the event timeline (see projects/records.events).
+INPUT_ONLY_KINDS = {"context", "product_brief", "design_review"}
 
 _EXT_KIND = {"pdf": "pdf", "xlsx": "xlsx", "xls": "xlsx", "csv": "csv", "doc": "doc", "docx": "doc",
              "mp4": "video", "mov": "video", "png": "img", "jpg": "img", "jpeg": "img"}
@@ -115,7 +118,8 @@ def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None,
     # (unlike SOF-60's user-deposited markdown) and slipped past the origin-only filter above.
     # kind='product_brief' is the same category (SOF-199) — see INPUT_ONLY_KINDS.
     produced = [{"id": a.get("id"), "title": a.get("title", ""), "path": a.get("path", ""),
-                 "kind": a.get("kind", ""), "agent": a.get("agent", ""), "ts": a.get("ts")}
+                 "kind": a.get("kind", ""), "agent": a.get("agent", ""), "ts": a.get("ts"),
+                 "stage": a.get("stage")}  # SOF-78: producing stage (nullable) for the tile label
                 for a in (artifacts or [])
                 if a.get("origin") != "user" and a.get("kind") not in INPUT_ONLY_KINDS]
     # Org knowledge base surfaced on the project Documents tab (design #32 / PRD §2.5b). Each row
@@ -128,6 +132,109 @@ def documents(blobs: list, artifacts: list, doc_summaries: dict | None = None,
                     "size_bytes": b.get("size_bytes"), "content_type": b.get("content_type"),
                     "tag": b.get("tag"), "scope": "org", "used_count": b.get("used_count") or 0})
     return {"uploaded": uploaded, "produced": produced, "org": org}
+
+
+def _files_scope(scope: str, scope_id: str, directory_rows: list | None,
+                 blob_rows: list | None, doc_summaries: dict | None):
+    """Shape one persisted scope (project or org) into (directory rows, file rows).
+
+    Only top-level source blobs (`source_blob_id` IS NULL) are tree members — extracted-child
+    assets stay provenance via source_blob_id, never a directory entry (mirrors the 0034 backfill
+    and the NULL `directory_id` those children keep). Per directory we derive its live child-dir
+    count (blobs.directory_id … via parent_id) and member-file count without an extra query, since
+    the whole scope is already loaded.
+
+    A top-level source blob with a NULL `directory_id` (record paths that do not yet file the
+    blob — e.g. draft attachments, org-KB uploads) is attributed to its SCOPE ROOT: it renders at
+    the root and is counted in the root's `member_file_count`. So the root's count never undercounts
+    unfiled-but-in-scope material, and every readable file appears exactly once in the combined
+    view."""
+    doc_summaries = doc_summaries or {}
+    members_by_dir: dict = {}
+    files = []
+    for b in blob_rows or []:
+        if b.get("source_blob_id") is not None:
+            continue
+        did = b.get("directory_id")
+        name = b.get("name") or os.path.basename(b.get("storage_key") or "") or ""
+        ds = doc_summaries.get(b.get("id")) or {}
+        files.append({"id": b.get("id"), "directory_id": did, "scope": scope, "scope_id": scope_id,
+                      "name": name, "kind": _kind_for(name), "tag": b.get("tag"),
+                      "size_bytes": b.get("size_bytes"), "content_type": b.get("content_type"),
+                      "sha256": b.get("sha256"), "created_at": b.get("created_at"),
+                      "summary": ds.get("summary_md"), "ingest_status": ds.get("status"),
+                      "summary_status": ds.get("status")})
+        members_by_dir[did] = members_by_dir.get(did, 0) + 1
+    # In-scope files not filed under any folder (directory_id NULL) belong to the scope root — they
+    # render there and are counted there, so an unfiled record path can't undercount the root.
+    unfiled_members = members_by_dir.get(None, 0)
+    child_counts: dict = {}
+    for d in directory_rows or []:
+        pid = d.get("parent_id")
+        child_counts[pid] = child_counts.get(pid, 0) + 1
+    dirs = []
+    for d in directory_rows or []:
+        did = d.get("id")
+        member_count = members_by_dir.get(did, 0)
+        if d.get("parent_id") is None:          # scope root absorbs the unfiled in-scope files
+            member_count += unfiled_members
+        dirs.append({"id": did, "parent_id": d.get("parent_id"), "scope": scope,
+                     "scope_id": scope_id, "name": d.get("name"),
+                     "summary_status": d.get("summary_status"), "summary_md": d.get("summary_md"),
+                     "last_successful_summary_at": d.get("last_successful_summary_at"),
+                     "created_at": d.get("created_at"), "updated_at": d.get("updated_at"),
+                     "child_dir_count": child_counts.get(did, 0),
+                     "member_file_count": member_count})
+    return dirs, files
+
+
+def files_tree(scopes: list) -> dict:
+    """Files browser read model (SOF-253). `scopes` is an ordered list of persisted scope bundles
+    `{scope, scope_id, directories, blobs, doc_summaries}` — the project's own project scope first,
+    then the owner-organization scope (if any); a scope the project may not read is simply not in
+    the list, so the payload can never leak another project/org.
+
+    Returns:
+      * `root`  — a SYNTHESIZED virtual combined root (mixed-scope, `is_virtual`, `id: null`); it is
+                  NEVER a database row and never a mutation target.
+      * `roots` — the persisted per-scope root identities (the NULL-parent directory of each scope).
+      * `directories` — every directory row across the readable scopes, each with parent, scope,
+                  child-dir/member-file counts, and truthful summary state + timestamps.
+      * `files` — stable blob memberships: blob id, its directory id, scope, type, size, sha, ingest
+                  + summary status, and the document summary.
+      * `recent` — references (blob id + directory + scope) INTO `files`, not duplicated membership.
+
+    NULL-`directory_id` rule (contract for consumers, e.g. SOF-255): a top-level file with a NULL
+    `directory_id` LISTS AT ITS SCOPE ROOT and is COUNTED in that root's `member_file_count`. The
+    file row keeps `directory_id: null` — the consumer places it under the file's `scope` root.
+    Every readable file therefore appears exactly once in the combined view and root counts never
+    undercount unfiled-but-in-scope material.
+
+    File content: GET /api/projects/{pid}/files/{blob_id}/content serves any file in this read
+    model — project- OR owner-org-scope — through the one project-relative Files route family
+    (body/content-type identical to GET /api/org/docs/{id}/content, so the shared Artifact Viewer
+    needs no new branch); out-of-scope is 403, unknown is 404.
+    """
+    all_dirs: list = []
+    all_files: list = []
+    for s in scopes or []:
+        dirs, files = _files_scope(s["scope"], s["scope_id"], s.get("directories"),
+                                   s.get("blobs"), s.get("doc_summaries"))
+        all_dirs.extend(dirs)
+        all_files.extend(files)
+    roots = [d for d in all_dirs if d["parent_id"] is None]
+    recent = sorted(all_files, key=lambda f: f.get("created_at") or 0.0, reverse=True)[:10]
+    recent_refs = [{"id": f["id"], "directory_id": f["directory_id"], "scope": f["scope"],
+                    "name": f["name"], "created_at": f["created_at"]} for f in recent]
+    return {
+        "root": {"id": None, "parent_id": None, "name": "Files", "scope": "combined",
+                 "is_virtual": True, "child_dir_count": len(roots),
+                 "member_file_count": len(all_files)},
+        "roots": roots,
+        "directories": all_dirs,
+        "files": all_files,
+        "recent": recent_refs,
+    }
 
 
 def brief_block(project: dict, status: dict, created) -> dict:

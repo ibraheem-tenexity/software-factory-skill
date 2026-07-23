@@ -150,6 +150,20 @@ digraph SchemaERD {
       <tr><td align="left">storage_key, content_type</td></tr>
       <tr><td align="left">size_bytes, sha256, created_at</td></tr>
       <tr><td align="left"><b>FK</b> source_blob_id (self); source_page, provenance</td></tr>
+      <tr><td align="left"><b>FK</b> (directory_id, scope, scope_id) → directories (restrict)</td></tr>
+    </table>>];
+
+  // ---- Source directories / Files browser (SOF-251) ------------------------------------
+  directories [label=<
+    <table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="white">
+      <tr><td bgcolor="#ecfdf5" port="t"><b>directories</b></td></tr>
+      <tr><td align="left"><b>PK</b> id (uuid)</td></tr>
+      <tr><td align="left">scope : project | org, scope_id</td></tr>
+      <tr><td align="left"><b>FK</b> (parent_id, scope, scope_id) → self (restrict); NULL = root</td></tr>
+      <tr><td align="left">name — unique per (scope, scope_id, parent)</td></tr>
+      <tr><td align="left">summary_md, summary_status, summary_source_hash</td></tr>
+      <tr><td align="left">last_successful_summary_at, created_at, updated_at</td></tr>
+      <tr><td align="left"><font color="#64748b" point-size="10">Files-browser tree; top-level screen is virtual (no row)</font></td></tr>
     </table>>];
 
   blob_uses [label=<
@@ -286,6 +300,8 @@ digraph SchemaERD {
   users:t -> projectstate:t [style=dashed, color="#64748b", label=<<font point-size="9">owner (in JSON)</font>>];
 
   blobs:t -> blobs:t [style=dashed, color="#64748b", label=<<font point-size="9">source_blob_id</font>>];
+  blobs:t -> directories:t [label=<<font point-size="9">directory_id</font>>];
+  directories:t -> directories:t [style=dashed, color="#64748b", label=<<font point-size="9">parent_id</font>>];
   doc_summary:t -> blobs:t;
   chunk:t -> blobs:t;
   conversation:t -> users:t [label=<<font point-size="9">user_id</font>>];

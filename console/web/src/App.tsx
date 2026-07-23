@@ -5,15 +5,10 @@ import { Dashboard } from "./components/Dashboard";
 import { OrgAdminScreen } from "./components/OrgAdminScreen";
 import { OnboardingScreen } from "./components/onboarding/OnboardingScreen";
 import { LoginScreen } from "./components/LoginScreen";
-import { FactoryConsole } from "./components/factory/FactoryConsole";
-import { ProjectView } from "./components/project/ProjectView";
+import { ProjectConsole } from "./components/project/ProjectConsole";
 
 function readInitialProject(): string | null {
   return new URLSearchParams(location.search).get("run");
-}
-
-function readInitialView(): "project" | "factory" {
-  return new URLSearchParams(location.search).get("view") === "factory" ? "factory" : "project";
 }
 
 function readInitialShowOrg(): boolean {
@@ -31,38 +26,35 @@ export function App() {
   // Org admin route (dashboard org switcher / "Manage organization →"), synced to ?screen=org
   // (SOF-220) so a reload while in Org Admin doesn't drop back to the Dashboard.
   const [showOrg, setShowOrg] = useState<boolean>(readInitialShowOrg());
-  // Open-run peer view (§2.5): 'project' = ProjectView (Overview/Documents tabs); 'factory' = the
-  // Factory Console. The "Factory console" peer-tab flips this; FactoryConsole's back returns here.
-  const [openView, setOpenView] = useState<"project" | "factory">(readInitialView());
-
   const syncUrl = (run: string | null) => {
     const p = new URLSearchParams();
     if (run) p.set("run", run);
     history.replaceState(null, "", "?" + p.toString());
   };
 
-  // Sync openView → ?view= without clobbering ?run=
-  useEffect(() => {
-    const p = new URLSearchParams(location.search);
-    if (openView === "factory") p.set("view", "factory"); else p.delete("view");
-    history.replaceState(null, "", "?" + p.toString());
-  }, [openView]);
-
-  // Sync showOrg → ?screen=org (SOF-220), same pattern as openView above.
+  // Sync showOrg → ?screen=org (SOF-220).
   useEffect(() => {
     const p = new URLSearchParams(location.search);
     if (showOrg) p.set("screen", "org"); else p.delete("screen");
     history.replaceState(null, "", "?" + p.toString());
   }, [showOrg]);
 
-  const openProject = (id: string) => { setProjectId(id); setShowProjects(false); setShowOnboarding(false); setOpenView("project"); syncUrl(id); };
+  // Open a run in the unified Project Console shell. `initialView` deep-links a peer (a fresh
+  // handoff lands on the Factory console per §2.4a); the shell reads ?view on mount.
+  const openProject = (id: string, initialView?: string) => {
+    setProjectId(id); setShowProjects(false); setShowOnboarding(false);
+    const p = new URLSearchParams();
+    p.set("run", id);
+    if (initialView && initialView !== "overview") p.set("view", initialView);
+    history.replaceState(null, "", "?" + p.toString());
+  };
   const backToProjects = () => { setProjectId(null); setShowProjects(true); syncUrl(null); };
 
   // keep the SPA boot warm — discover runs once so a deep-linked ?run= resolves.
   useEffect(() => { if (!projectId) api.projects().catch(() => {}); }, [projectId]);
 
   if (showOnboarding) {
-    return <OnboardingScreen resumeProjectId={resumeProjectId} onComplete={(id) => { setResumeProjectId(null); openProject(id); setOpenView("factory"); }} onBack={() => { setShowOnboarding(false); setResumeProjectId(null); setShowProjects(true); syncUrl(null); }} />;
+    return <OnboardingScreen resumeProjectId={resumeProjectId} onComplete={(id) => { setResumeProjectId(null); openProject(id, "factory"); }} onBack={() => { setShowOnboarding(false); setResumeProjectId(null); setShowProjects(true); syncUrl(null); }} />;
   }
 
   if (showOrg) {
@@ -81,20 +73,9 @@ export function App() {
     );
   }
 
-  // Open run ⇒ the §2.5 Project View (Overview/Documents tabs) is the default; its "Factory console"
-  // peer-tab flips to the Factory Console (PRD §2.6), whose back returns to the Project View.
-  if (openView === "factory") {
-    // The console's peer-tab strip navigates back to the ProjectView with the chosen tab: seed the
-    // ?tab= param (ProjectView reads it on mount) then flip the open view.
-    const switchTab = (tab: "overview" | "documents") => {
-      const p = new URLSearchParams(location.search);
-      if (tab === "overview") p.delete("tab"); else p.set("tab", tab);
-      history.replaceState(null, "", "?" + p.toString());
-      setOpenView("project");
-    };
-    return <FactoryConsole projectId={projectId} onBack={() => setOpenView("project")} onSwitchTab={switchTab} />;
-  }
-  return <ProjectView projectId={projectId} onBack={backToProjects} onOpenFactory={() => setOpenView("factory")}
+  // Open run ⇒ the ONE unified Project Console shell (§2.5): Overview · Product brief · Factory
+  // outputs · Factory console · Files [· Maintenance]. The shell owns ?view=<peer> internally.
+  return <ProjectConsole projectId={projectId} onBack={backToProjects}
     onResume={() => { setResumeProjectId(projectId); setShowProjects(false); setShowOnboarding(true); }} onOpen={openProject} />;
 }
 

@@ -73,6 +73,15 @@ export type Assumption = { fact: string; document_blob_id: number; section_path:
 // storage; both null until finalized).
 export type BriefResponse = { brief_markdown: string | null; brief_url: string | null; assumptions: Assumption[] };
 
+// SOF-244: the CANONICAL Product Brief as a versioned document (distinct from BriefResponse's
+// goal/scope projection). Each version is an immutable kind='product_brief' artifact; `origin`
+// is 'user' (direct edit) or 'agent' (Concierge finalization, agent='concierge'). `artifact_id`
+// is the stable version id used as the optimistic base_version_id on save.
+export type ProductBriefVersion = {
+  artifact_id: number; ts: number; origin: string; agent: string | null; title: string;
+};
+export type ProductBriefDoc = ProductBriefVersion & { markdown: string | null };
+
 export type Me = { email: string; role: string; auth: boolean; name?: string; is_internal?: boolean };
 
 // GET /api/projects/{id}/deps → console.stage2_artifacts(). `tokens` are the architecture-derived
@@ -100,12 +109,33 @@ export type DepsSubmitResponse = {
 export type ProvideDepResponse = { ok: boolean; detail?: string; name?: string; disposition?: string; vault_saved?: boolean };
 
 export type ProjectEvent = { ts: number; type: string; payload: Record<string, any> };
+
+// SOF-252 — the customer design-review action, derived from real graph/artifact records. `screens`
+// is one entry per stored `mockup` artifact (count varies per project, never hardcoded); `model` is
+// the recorded producing model; `theme` is null when the org has no real brand-theme record (brand
+// & theme is Wave-2/not-shipping — we never fabricate an "on your brand theme" claim).
+export type DesignScreen = {
+  id: string; title: string; path: string; artifact_id?: number | null;
+  agent?: string | null; ts?: number; version?: number;
+};
+export type DesignReview = {
+  available: boolean; design_done: boolean; status: "review" | "locked";
+  version: number; approved_version: number | null;
+  screens: DesignScreen[]; screen_count: number; model: string; theme: string | null;
+  decisions: Record<string, any>[];
+  ok?: boolean; detail?: string;
+  continuation?: { continued: boolean; via: string; detail: string };
+  revision?: { affected: string[]; version: number; regenerating: boolean; detail: string };
+};
 export type Artifact = { path: string; content?: string; error?: string };
 
 // Project view (§2.5) — Overview rollup + Documents, per tjyb5gmy's LOCKED shapes (PR #13).
 // Callers degrade to empty until live.
 export type ProjectMaterial = { id?: string; name: string; kind?: string; size_bytes?: number; content_type?: string; storage_key?: string; created_at?: number; scope?: "project" | "org"; tag?: string; used_count?: number; summary?: string; summary_status?: "pending" | "ready" | "failed" };
-export type ProjectArtifact = { id?: number; title: string; path?: string; kind?: string; agent?: string; ts?: number };
+// `stage` (SOF-78 / #441): the pipeline stage that produced this artifact — 1/2/3, or null for
+// draft/intake output and any row whose producing stage couldn't be resolved. SOF-245 groups the
+// Factory Outputs peer by it; null/unknown falls into an honest "Other factory outputs" bucket.
+export type ProjectArtifact = { id?: number; title: string; path?: string; kind?: string; agent?: string; ts?: number; stage?: number | null };
 export type ProjectOverview = {
   brief?: { name?: string; description?: string; goal?: string; scope?: string[]; owner?: string; phase?: string; stage?: number; created?: number | string; runtime?: string; created_by?: string };
   build?: { pct?: number; tickets_done?: number; tickets_total?: number; agents_working?: number; spent_usd?: number; budget_ceiling?: number; done?: boolean; deploy_url?: string };
@@ -121,6 +151,39 @@ export type ProjectOverview = {
 };
 export type RepoAccess = { status: "not_requested" | "waiting_for_repo" | "ready" | "invited" | "failed"; detail: string; repo_url?: string; github_username?: string };
 export type ProjectDocuments = { uploaded: ProjectMaterial[]; produced: ProjectArtifact[]; org?: ProjectMaterial[] };
+
+// ── Files browser (§2.5d, SOF-255) — the hierarchical source-material tree served by SOF-253's
+// Files API (#448). Directory ids are UUID strings; a file `id` is the int blob id; timestamps are
+// epoch floats. A file with `directory_id:null` sits at its scope's persisted root. The `root` is a
+// VIRTUAL combined presentation (no id, not a mutation target); `roots` are the real per-scope roots.
+export type DirScope = "project" | "org";
+// Honest directory-summary lifecycle (SOF-254 generates them): never present a stale/absent summary
+// as fresh. `null` = no summary row generated yet.
+export type SummaryStatus = "summarizing" | "ready" | "needs_refresh" | "failed";
+export type FilesRootNode = {
+  id: null; parent_id: null; name: string; scope: "combined"; is_virtual: true;
+  child_dir_count: number; member_file_count: number;
+};
+export type FilesDirectory = {
+  id: string; parent_id: string | null; scope: DirScope; scope_id: string; name: string;
+  summary_status: SummaryStatus | null; summary_md: string | null;
+  last_successful_summary_at: number | null; created_at: number; updated_at: number;
+  child_dir_count: number; member_file_count: number;
+};
+export type FilesFile = {
+  id: number; directory_id: string | null; scope: DirScope; scope_id: string; name: string;
+  kind: string | null; tag: string | null; size_bytes: number | null; content_type: string | null;
+  sha256: string | null; created_at: number; summary: string | null;
+  ingest_status: string | null; summary_status: SummaryStatus | null;
+};
+export type FilesRecent = { id: number; directory_id: string | null; scope: DirScope; name: string; created_at: number };
+export type FilesTree = {
+  root: FilesRootNode;
+  roots: FilesDirectory[];
+  directories: FilesDirectory[];
+  files: FilesFile[];
+  recent: FilesRecent[];
+};
 
 // Org-admin (§2.3) — org-scoped, per the locked contract in docs/plans/org-admin-api.md.
 export type Member = { email: string; role: string; designation?: string; you?: boolean };
@@ -424,6 +487,18 @@ export const api = {
   // Thin goal/scope editor (post-promote "Edit brief"); returns the draft-projection shape.
   putBrief: (id: string, brief: { goals?: string; scope?: string[] }) =>
     send<{ name: string; goal: string; scope: string[]; description: string }>(`/api/projects/${id}/brief`, "PUT", brief),
+  // SOF-244: versioned canonical Product Brief document (reader/editor — SOF-242/243).
+  productBrief: (id: string) =>
+    get<{ latest: ProductBriefDoc | null }>(`/api/projects/${id}/product-brief`),
+  productBriefVersions: (id: string) =>
+    get<{ versions: ProductBriefVersion[] }>(`/api/projects/${id}/product-brief/versions`),
+  productBriefVersion: (id: string, artifactId: number) =>
+    get<ProductBriefDoc>(`/api/projects/${id}/product-brief/versions/${artifactId}`),
+  // Save a new version from complete markdown; baseVersionId is the loaded version (null on first).
+  // A stale base rejects 409 with { detail: { message, latest } }.
+  saveProductBrief: (id: string, markdown: string, baseVersionId: number | null) =>
+    send<ProductBriefDoc>(`/api/projects/${id}/product-brief/versions`, "POST",
+      { markdown, base_version_id: baseVersionId }),
   chat: (body: Record<string, unknown>, signal?: AbortSignal) =>
     send<{ project_id: string; messages: any[] }>("/api/chat", "POST", body, signal),
   // Onboarding Concierge conversation turn: one user message -> the agent's ConciergeTurn reply
@@ -467,12 +542,41 @@ export const api = {
   provideDep: (id: string, name: string, value: string) =>
     send<ProvideDepResponse>(`/api/projects/${id}/deps/provide`, "POST", { name, value }),
   events: (id: string) => get<{ events: ProjectEvent[] }>(`/api/projects/${id}/events`),
+  // SOF-252 design-review action (Activity-only). GET derives the state from real records; the
+  // three POSTs are the customer actions. reviseDesign shares the backend function the Concierge
+  // `request_design_revision` tool calls, so the button and the agent tool surface identical results.
+  designReview: (id: string) => get<DesignReview>(`/api/projects/${id}/design-review`),
+  approveDesign: (id: string) => send<DesignReview>(`/api/projects/${id}/design-review/approve`, "POST"),
+  reopenDesign: (id: string) => send<DesignReview>(`/api/projects/${id}/design-review/reopen`, "POST"),
+  reviseDesign: (id: string, screen_ids: string[], instructions: string) =>
+    send<DesignReview>(`/api/projects/${id}/design-review/revise`, "POST", { screen_ids, instructions }),
   artifact: (id: string, path: string) =>
     get<Artifact>(`/api/projects/${id}/artifact?path=${encodeURIComponent(path)}`),
   getArtifact: (id: string | number) => get<Record<string, any>>(`/api/artifacts/${id}`),
   // Project view (§2.5) — Overview rollup + Documents. Backend landing via #13; degrade to empty.
   overview: (id: string) => get<ProjectOverview>(`/api/projects/${id}/overview`),
   documents: (id: string) => get<ProjectDocuments>(`/api/projects/${id}/documents`),
+  // ── Files browser (SOF-255 → SOF-253's Files API #448). Every mutation returns the whole refreshed
+  // tree so the UI re-renders from server truth (never optimistic). Errors carry the server's real
+  // reason in `.detail` (409 duplicate sibling, 400 empty/virtual-parent, 404 unknown, 403 wrong
+  // scope) — surface it, never a guess.
+  files: (id: string) => get<FilesTree>(`/api/projects/${id}/files`),
+  createDirectory: (id: string, body: { parent_id: string | null; name: string }) =>
+    send<FilesTree>(`/api/projects/${id}/directories`, "POST", body),
+  uploadFile: (id: string, body: { name: string; data_b64: string; tag?: string; content_type?: string; directory_id?: string | null }) =>
+    send<FilesTree>(`/api/projects/${id}/files`, "POST", body),
+  // Move / assign a blob to a directory, and/or change its scope (cross-scope reassignment reuses
+  // the existing project↔org scope change; the destination must belong to the new scope).
+  moveFile: (id: string, blobId: number, body: { directory_id?: string | null; scope?: DirScope }) =>
+    send<FilesTree>(`/api/projects/${id}/files/${blobId}`, "PATCH", body),
+  deleteFile: (id: string, blobId: number) =>
+    send<FilesTree>(`/api/projects/${id}/files/${blobId}`, "DELETE"),
+  // Read a Files-browser blob's content through the single project-relative route (#448, gyogcl1y):
+  // authorize_project-gated, serves BOTH project- and owner-org-scope blobs, content-negotiation
+  // mirrors the org route. Used for EVERY Files row (project & org) — never /api/org/docs/{id}/content,
+  // which stays reserved for the admin/org KB surfaces.
+  fileContent: (id: string, blobId: number) =>
+    get<{ content: string | null }>(`/api/projects/${id}/files/${blobId}/content`),
   getOrg: () => get<{ org: Org | null }>("/api/org"),
   createOrg: (body: OrgInput) => send<{ org: Org }>("/api/org", "POST", body),
   patchOrg: (body: Partial<Org>) => send<{ org: Org }>("/api/org", "PATCH", body),
