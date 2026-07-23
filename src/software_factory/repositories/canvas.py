@@ -65,11 +65,11 @@ class ArtifactRepository:
     def __init__(self, exec_, project_id):
         self._x, self._pid = exec_, project_id
 
-    def insert(self, title, path, kind, agent, ts, *, content=None, source_blob_id=None, origin=None) -> None:
-        # SOF-62: content/source_blob_id/origin (SOF-60's additive columns) are keyword-only and
-        # omitted from the INSERT when not given, so `origin`'s server_default ('agent') still
-        # applies for every pre-SOF-62 call site — none of them pass these, so this is a pure
-        # capability add, not a behavior change for existing callers.
+    def insert(self, title, path, kind, agent, ts, *, content=None, source_blob_id=None, origin=None,
+               stage=None) -> None:
+        # SOF-62/78: content/source_blob_id/origin/stage are keyword-only additive columns, omitted
+        # from the INSERT when not given, so each column's server_default/NULL still applies for
+        # every pre-existing call site — a pure capability add, not a behavior change for callers.
         values = dict(project_id=self._pid(), title=title, path=path, kind=kind, agent=agent, ts=ts)
         if content is not None:
             values["content"] = content
@@ -77,6 +77,8 @@ class ArtifactRepository:
             values["source_blob_id"] = source_blob_id
         if origin is not None:
             values["origin"] = origin
+        if stage is not None:
+            values["stage"] = stage
         self._x.execute(insert(artifacts).values(**values))
 
     def all_for_project(self) -> list:

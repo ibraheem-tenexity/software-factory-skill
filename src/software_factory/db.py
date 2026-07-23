@@ -118,9 +118,31 @@ class ProjectStore:
 
     def record_artifact(self, title: str, path: str, kind: Optional[str] = None,
                         agent: Optional[str] = None, *, content: Optional[str] = None,
-                        source_blob_id: Optional[int] = None, origin: Optional[str] = None) -> None:
+                        source_blob_id: Optional[int] = None, origin: Optional[str] = None,
+                        stage: Optional[int] = None) -> None:
+        # SOF-78: stamp the producing stage. Callers may pass it explicitly; otherwise resolve the
+        # run's current pipeline stage (what `_launch_stage` set before this stage ran).
+        if stage is None:
+            stage = self._current_stage()
         self._artifact_repo.insert(title, path, kind, agent, time.time(),
-                                   content=content, source_blob_id=source_blob_id, origin=origin)
+                                   content=content, source_blob_id=source_blob_id, origin=origin,
+                                   stage=stage)
+
+    def _current_stage(self) -> Optional[int]:
+        """The run's current pipeline stage (1/2/3), for stamping the producing stage on artifacts
+        (SOF-78). A DRAFT run has no producing stage — ProjectState.stage defaults to 1, so return
+        None for draft-phase records instead of mislabeling concierge/intake output as Stage 1
+        (the migration's "draft output stays NULL" contract; SOF-245 groups outputs by this stage).
+        Best-effort: a state-read hiccup logs the traceback and returns None so recording an
+        artifact never fails on it."""
+        try:
+            from .projectstate import ProjectState
+            state = ProjectState.load(self._project_id, self)
+            return None if state.phase == "draft" else state.stage
+        except Exception:
+            logger.exception("[record_artifact] could not resolve current stage for %s",
+                             self._project_id)
+            return None
 
     def add_blocker(self, what: str, blocks: Optional[str] = None) -> None:
         self._blocker_repo.insert(what, blocks, time.time())
