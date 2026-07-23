@@ -142,9 +142,23 @@ export function FactoryBoard({ projectId, status, tickets, graph, loaded, onStat
 
   const running = !!status.phase && !status.deploy_url && !status.done
     && !["done", "draft", "stopped", "paused", "crashed"].includes(status.phase);
-  const pauseRun = async () => {
-    try { const s = await api.pauseProject(projectId); onStatus(s as Status); } catch { /* noop */ }
+  // Run-control actions (pause, rewind) surface the backend's real refusal reason — never a silent
+  // swallow (CLAUDE.md: honest errors reach the user, not just the logs). `.detail` is the honest
+  // message httpError attached; fall back to the thrown message.
+  const [actionErr, setActionErr] = useState("");
+  const [depsFocus, setDepsFocus] = useState(false);
+  const errText = (e: unknown): string => {
+    const x = e as { detail?: unknown; message?: string };
+    return (typeof x?.detail === "string" && x.detail) || x?.message || "Something went wrong — try again.";
   };
+  const pauseRun = async () => {
+    setActionErr("");
+    try { const s = await api.pauseProject(projectId); onStatus(s as Status); }
+    catch (e) { setActionErr(`Couldn't pause the run: ${errText(e)}`); }
+  };
+  // SOF-250 cross-mode entry: the StageRail's wait-for-deps pill lives outside Activity, so switch to
+  // Activity and raise a one-shot focus flag that FactoryActivity consumes to scroll the panel in.
+  const openDepsPanel = () => { setActionErr(""); setView("activity"); setDepsFocus(true); };
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: T.bg, color: T.fg, minHeight: 0 }}>
@@ -183,10 +197,23 @@ export function FactoryBoard({ projectId, status, tickets, graph, loaded, onStat
         )}
       </div>
 
+      {actionErr && (
+        <div role="alert" style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 20px",
+          background: "#FFF1F1", borderBottom: `1px solid ${T.danger}`, flexShrink: 0 }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.danger, flexShrink: 0 }} />
+          <span style={{ flex: 1, font: `500 12px/1.4 ${T.mono}`, color: T.danger }}>{actionErr}</span>
+          <button onClick={() => setActionErr("")} title="Dismiss"
+            style={{ display: "inline-flex", alignItems: "center", cursor: "pointer", border: "none", background: "transparent", padding: 2 }}>
+            <Icon name="x" size={13} color={T.danger} />
+          </button>
+        </div>
+      )}
+
       <main style={{ flex: 1, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}>
         <StageRail graph={graph} phaseStates={phaseStates} depsSatisfied={!!status.deps_satisfied} atDeps={showDeps}
           haltedNode={halted ? haltedNode : undefined}
-          onRewind={halted && haltedNode ? (node) => api.rewindTo(projectId, node).then((s) => onStatus(s as Status)).catch(() => {}) : undefined} />
+          onRewind={halted && haltedNode ? (node) => { setActionErr(""); api.rewindTo(projectId, node).then((s) => onStatus(s as Status)).catch((e) => setActionErr(`Couldn't rewind to ${node}: ${errText(e)}`)); } : undefined}
+          onOpenDeps={openDepsPanel} />
 
         {halted && haltedNode && (
           <RecoveryBar projectId={projectId} phase={status.phase as "paused" | "crashed"}
@@ -207,6 +234,7 @@ export function FactoryBoard({ projectId, status, tickets, graph, loaded, onStat
         {view === "activity" && (
           <FactoryActivity projectId={projectId} artifacts={artifacts} onOpenArtifact={openDocFromRef}
             selectedEventId={selectedEventId}
+            focusDeps={depsFocus} onFocusHandled={() => setDepsFocus(false)}
             depsPanel={showDeps
               ? <WaitForDeps projectId={projectId} onResolved={() => api.status(projectId).then((s) => onStatus(s as Status)).catch(() => {})} />
               : undefined} />

@@ -57,18 +57,25 @@ function PhasePill({ label, status, isNew, halted, faded, onClick }:
 // Three states — never amber unless the run is ACTUALLY at the deps gate (Stage 2 done, deps not yet
 // satisfied). A run that hasn't reached Stage 2 renders this as a neutral/pending step, not a warning,
 // so the rail can't claim "wait for deps" about a run stuck somewhere earlier.
-function DepsPill({ state }: { state: "satisfied" | "waiting" | "pending" }) {
+function DepsPill({ state, onClick }: { state: "satisfied" | "waiting" | "pending"; onClick?: () => void }) {
   const satisfied = state === "satisfied";
   const waiting = state === "waiting";
   const bg = satisfied ? T.successSoft : waiting ? T.warningSoft : T.sunken;
   const bd = satisfied ? T.success : waiting ? T.warning : T.borderSubtle;
   const col = satisfied ? T.success : waiting ? T.warning : T.tertiary;
+  // SOF-250: while the run is parked at the deps gate, this pill is the cross-mode entry point to the
+  // Wait-for-deps panel (which lives inside Activity) — one click switches to Activity and scrolls to it.
+  const clickable = waiting && !!onClick;
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 11px", borderRadius: T.rMd,
-      background: bg, border: `1px solid ${bd}`, flexShrink: 0 }}>
+    <span onClick={clickable ? onClick : undefined}
+      role={clickable ? "button" : undefined} tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick!(); } } : undefined}
+      title={clickable ? "Resolve dependencies — opens the panel in Activity" : undefined}
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 11px", borderRadius: T.rMd,
+        background: bg, border: `1px solid ${bd}`, flexShrink: 0, cursor: clickable ? "pointer" : "default" }}>
       {satisfied ? <Icon name="check" size={12} color={T.success} />
         : <span style={{ width: 6, height: 6, borderRadius: "50%", background: waiting ? T.warning : T.borderDefault }} />}
-      <span style={{ font: `500 12px/1 ${T.mono}`, color: col }}>wait for deps</span>
+      <span style={{ font: `500 12px/1 ${T.mono}`, color: col }}>wait for deps{clickable ? " →" : ""}</span>
     </span>
   );
 }
@@ -76,9 +83,9 @@ function DepsPill({ state }: { state: "satisfied" | "waiting" | "pending" }) {
 const PHASE_LABEL: Record<string, string> = Object.fromEntries(
   STAGES.flatMap((s) => s.phases.map((p) => [p.id, p.label.toLowerCase()])));
 
-export function StageRail({ graph, phaseStates, depsSatisfied, atDeps, haltedNode, onRewind }:
+export function StageRail({ graph, phaseStates, depsSatisfied, atDeps, haltedNode, onRewind, onOpenDeps }:
   { graph: Graph; phaseStates: Record<string, PhaseStatus>; depsSatisfied: boolean; atDeps: boolean;
-    haltedNode?: string; onRewind?: (node: string) => void }) {
+    haltedNode?: string; onRewind?: (node: string) => void; onOpenDeps?: () => void }) {
   const s1 = gatePassedFromGraph(graph.nodes, "gate:stage1");
   const s2 = gatePassedFromGraph(graph.nodes, "gate:stage2");
   // satisfied wins; amber "waiting" only when the run is truly at the deps gate (atWaitForDeps);
@@ -106,7 +113,7 @@ export function StageRail({ graph, phaseStates, depsSatisfied, atDeps, haltedNod
     } else if (id === "tickets") {
       const g2faded = !!haltedNode && isDownstreamOf("tickets", haltedNode);
       items.push(<Connector key="cg2" faded={g2faded} />, <GateDiamond key="g2" passed={s2} title="Stage 2 gate" faded={g2faded} />,
-        <Connector key="cd" faded={g2faded} />, <DepsPill key="deps" state={depsState} />);
+        <Connector key="cd" faded={g2faded} />, <DepsPill key="deps" state={depsState} onClick={atDeps ? onOpenDeps : undefined} />);
     }
   });
   return (
