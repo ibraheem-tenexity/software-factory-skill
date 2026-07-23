@@ -134,6 +134,39 @@ export type ProjectOverview = {
 export type RepoAccess = { status: "not_requested" | "waiting_for_repo" | "ready" | "invited" | "failed"; detail: string; repo_url?: string; github_username?: string };
 export type ProjectDocuments = { uploaded: ProjectMaterial[]; produced: ProjectArtifact[]; org?: ProjectMaterial[] };
 
+// ── Files browser (§2.5d, SOF-255) — the hierarchical source-material tree served by SOF-253's
+// Files API (#448). Directory ids are UUID strings; a file `id` is the int blob id; timestamps are
+// epoch floats. A file with `directory_id:null` sits at its scope's persisted root. The `root` is a
+// VIRTUAL combined presentation (no id, not a mutation target); `roots` are the real per-scope roots.
+export type DirScope = "project" | "org";
+// Honest directory-summary lifecycle (SOF-254 generates them): never present a stale/absent summary
+// as fresh. `null` = no summary row generated yet.
+export type SummaryStatus = "summarizing" | "ready" | "needs_refresh" | "failed";
+export type FilesRootNode = {
+  id: null; parent_id: null; name: string; scope: "combined"; is_virtual: true;
+  child_dir_count: number; member_file_count: number;
+};
+export type FilesDirectory = {
+  id: string; parent_id: string | null; scope: DirScope; scope_id: string; name: string;
+  summary_status: SummaryStatus | null; summary_md: string | null;
+  last_successful_summary_at: number | null; created_at: number; updated_at: number;
+  child_dir_count: number; member_file_count: number;
+};
+export type FilesFile = {
+  id: number; directory_id: string | null; scope: DirScope; scope_id: string; name: string;
+  kind: string | null; tag: string | null; size_bytes: number | null; content_type: string | null;
+  sha256: string | null; created_at: number; summary: string | null;
+  ingest_status: string | null; summary_status: SummaryStatus | null;
+};
+export type FilesRecent = { id: number; directory_id: string | null; scope: DirScope; name: string; created_at: number };
+export type FilesTree = {
+  root: FilesRootNode;
+  roots: FilesDirectory[];
+  directories: FilesDirectory[];
+  files: FilesFile[];
+  recent: FilesRecent[];
+};
+
 // Org-admin (§2.3) — org-scoped, per the locked contract in docs/plans/org-admin-api.md.
 export type Member = { email: string; role: string; designation?: string; you?: boolean };
 export type OrgDoc = { id: string; name: string; kind?: string; tag?: string; size_bytes?: number; content_type?: string; used_count?: number; updated?: number };
@@ -497,6 +530,21 @@ export const api = {
   // Project view (§2.5) — Overview rollup + Documents. Backend landing via #13; degrade to empty.
   overview: (id: string) => get<ProjectOverview>(`/api/projects/${id}/overview`),
   documents: (id: string) => get<ProjectDocuments>(`/api/projects/${id}/documents`),
+  // ── Files browser (SOF-255 → SOF-253's Files API #448). Every mutation returns the whole refreshed
+  // tree so the UI re-renders from server truth (never optimistic). Errors carry the server's real
+  // reason in `.detail` (409 duplicate sibling, 400 empty/virtual-parent, 404 unknown, 403 wrong
+  // scope) — surface it, never a guess.
+  files: (id: string) => get<FilesTree>(`/api/projects/${id}/files`),
+  createDirectory: (id: string, body: { parent_id: string | null; name: string }) =>
+    send<FilesTree>(`/api/projects/${id}/directories`, "POST", body),
+  uploadFile: (id: string, body: { name: string; data_b64: string; tag?: string; content_type?: string; directory_id?: string | null }) =>
+    send<FilesTree>(`/api/projects/${id}/files`, "POST", body),
+  // Move / assign a blob to a directory, and/or change its scope (cross-scope reassignment reuses
+  // the existing project↔org scope change; the destination must belong to the new scope).
+  moveFile: (id: string, blobId: number, body: { directory_id?: string | null; scope?: DirScope }) =>
+    send<FilesTree>(`/api/projects/${id}/files/${blobId}`, "PATCH", body),
+  deleteFile: (id: string, blobId: number) =>
+    send<FilesTree>(`/api/projects/${id}/files/${blobId}`, "DELETE"),
   getOrg: () => get<{ org: Org | null }>("/api/org"),
   createOrg: (body: OrgInput) => send<{ org: Org }>("/api/org", "POST", body),
   patchOrg: (body: Partial<Org>) => send<{ org: Org }>("/api/org", "PATCH", body),
