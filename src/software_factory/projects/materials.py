@@ -10,6 +10,7 @@ from .. import project_view, storage
 from ..db import ProjectStore
 from ..input_pipeline import make_prompt
 from ..log import get_logger
+from ..memory import directories as memory_directories
 from ..memory import ingest as memory_ingest
 from ..memory.ingest import maybe_ingest_async
 from ..memory.store import MemoryStore
@@ -77,7 +78,11 @@ class ProjectMaterials:
             sha256=storage.sha256(raw),
             directory_id=directory["id"],
         )
-        self._blobs.touch_directory(directory["id"])
+        # SOF-254: the new member makes the destination directory's rollup stale — invalidate its
+        # ancestor chain now (instant Files-UI state), but do NOT sweep here: the real rollup is
+        # regenerated once, at ingest-completion, when this document's own summary exists. Sweeping
+        # now would only burn a premature model call on a not-yet-summarized document.
+        memory_directories.invalidate_directories([directory["id"]])
         logger.info("[ingest] %s: material uploaded — blob %s (%s, %s bytes) in dir %s, ingestion queued",
                     project_id, blob_id, name, len(raw), directory["id"])
         maybe_ingest_async(blob_id, self._console, push_progress=self._push_ingest_progress)
@@ -122,9 +127,9 @@ class ProjectMaterials:
             storage.delete_by_path(row["storage_key"])
             memory.delete_document(row["id"])
         self._blobs.delete_tree(material_id)
-        if member_dir:
-            # the directory lost a member — its rollup summary is now stale (SOF-253)
-            self._blobs.touch_directory(member_dir)
+        # SOF-254: the directory lost a member — invalidate its ancestors so their rollup summaries
+        # drop it (and reflect any resulting incomplete/empty coverage), then regenerate bottom-up.
+        memory_directories.on_directories_changed([member_dir], self._console)
 
         input_dir = project_paths(self._projects_dir, project_id)["input_dir"]
         name = os.path.basename(root.get("name") or "")
@@ -199,9 +204,10 @@ class ProjectMaterials:
         old_dir = blob.get("directory_id")
         self._blobs.set_scope(material_id, dest_scope, dest_scope_id)   # NULLs directory_id
         self._blobs.assign_directory(material_id, dest_dir_id)
-        if old_dir:
-            self._blobs.touch_directory(old_dir)
-        self._blobs.touch_directory(dest_dir_id)
+        # SOF-254: a cross-scope move re-homes the blob, so BOTH the old directory (lost a member)
+        # and the destination directory (gained one) go stale — invalidate each one's ancestors and
+        # regenerate each affected scope bottom-up (on_directories_changed dedupes the sweep/scope).
+        memory_directories.on_directories_changed([old_dir, dest_dir_id], self._console)
         return blob
 
     # ── Files browser: directory-aware read model + mutations (SOF-253) ───────────────────────
@@ -296,9 +302,10 @@ class ProjectMaterials:
             raise Invalid("that folder is in a different scope — use a cross-scope move to change scope")
         old_dir = blob.get("directory_id")
         self._blobs.assign_directory(blob_id, dest["id"])
-        for d in {old_dir, dest["id"]}:
-            if d:
-                self._blobs.touch_directory(d)
+        # SOF-254: the file left old_dir and joined dest — both directories' rollups are now stale.
+        # Invalidate each one's ancestors; both live in the same scope, so the bottom-up regen runs
+        # once (on_directories_changed dedupes the sweep per scope).
+        memory_directories.on_directories_changed([old_dir, dest["id"]], self._console)
         return self.files(project_id)
 
     def file_content(self, project_id: str, blob_id: int) -> dict:
