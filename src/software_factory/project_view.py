@@ -138,7 +138,13 @@ def _files_scope(scope: str, scope_id: str, directory_rows: list | None,
     assets stay provenance via source_blob_id, never a directory entry (mirrors the 0034 backfill
     and the NULL `directory_id` those children keep). Per directory we derive its live child-dir
     count (blobs.directory_id … via parent_id) and member-file count without an extra query, since
-    the whole scope is already loaded."""
+    the whole scope is already loaded.
+
+    A top-level source blob with a NULL `directory_id` (record paths that do not yet file the
+    blob — e.g. draft attachments, org-KB uploads) is attributed to its SCOPE ROOT: it renders at
+    the root and is counted in the root's `member_file_count`. So the root's count never undercounts
+    unfiled-but-in-scope material, and every readable file appears exactly once in the combined
+    view."""
     doc_summaries = doc_summaries or {}
     members_by_dir: dict = {}
     files = []
@@ -155,6 +161,9 @@ def _files_scope(scope: str, scope_id: str, directory_rows: list | None,
                       "summary": ds.get("summary_md"), "ingest_status": ds.get("status"),
                       "summary_status": ds.get("status")})
         members_by_dir[did] = members_by_dir.get(did, 0) + 1
+    # In-scope files not filed under any folder (directory_id NULL) belong to the scope root — they
+    # render there and are counted there, so an unfiled record path can't undercount the root.
+    unfiled_members = members_by_dir.get(None, 0)
     child_counts: dict = {}
     for d in directory_rows or []:
         pid = d.get("parent_id")
@@ -162,13 +171,16 @@ def _files_scope(scope: str, scope_id: str, directory_rows: list | None,
     dirs = []
     for d in directory_rows or []:
         did = d.get("id")
+        member_count = members_by_dir.get(did, 0)
+        if d.get("parent_id") is None:          # scope root absorbs the unfiled in-scope files
+            member_count += unfiled_members
         dirs.append({"id": did, "parent_id": d.get("parent_id"), "scope": scope,
                      "scope_id": scope_id, "name": d.get("name"),
                      "summary_status": d.get("summary_status"), "summary_md": d.get("summary_md"),
                      "last_successful_summary_at": d.get("last_successful_summary_at"),
                      "created_at": d.get("created_at"), "updated_at": d.get("updated_at"),
                      "child_dir_count": child_counts.get(did, 0),
-                     "member_file_count": members_by_dir.get(did, 0)})
+                     "member_file_count": member_count})
     return dirs, files
 
 
@@ -185,9 +197,14 @@ def files_tree(scopes: list) -> dict:
       * `directories` — every directory row across the readable scopes, each with parent, scope,
                   child-dir/member-file counts, and truthful summary state + timestamps.
       * `files` — stable blob memberships: blob id, its directory id, scope, type, size, sha, ingest
-                  + summary status, and the document summary. A top-level blob with a NULL
-                  `directory_id` sits at its scope root.
+                  + summary status, and the document summary.
       * `recent` — references (blob id + directory + scope) INTO `files`, not duplicated membership.
+
+    NULL-`directory_id` rule (contract for consumers, e.g. SOF-255): a top-level file with a NULL
+    `directory_id` LISTS AT ITS SCOPE ROOT and is COUNTED in that root's `member_file_count`. The
+    file row keeps `directory_id: null` — the consumer places it under the file's `scope` root.
+    Every readable file therefore appears exactly once in the combined view and root counts never
+    undercount unfiled-but-in-scope material.
     """
     all_dirs: list = []
     all_files: list = []
