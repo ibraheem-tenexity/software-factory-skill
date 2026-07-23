@@ -417,6 +417,20 @@ class ExecutionService:
     def _load_state(self, project_id: str) -> ProjectState:
         return ProjectState.load(project_id, ProjectStore(self._paths(project_id)["db"]))
 
+    def _record_lifecycle(self, state: ProjectState, action: str, actor: str = "", reason: str = "") -> None:
+        """SOF-188: append a lifecycle-action entry (stop/pause/resume/auto-resume/archive/restore)
+        to the run's ProjectState audit trail so /events shows a COMPLETE account of operator/host
+        actions, not just agent-produced phase rows. Writes ProjectState.lifecycle (the JSON blob) —
+        NEVER the phases-canvas table, which stays pipeline-nodes-only (#326/#329/#332/#333 invariant).
+        The caller is responsible for the subsequent state.save() (this only mutates the in-memory list)."""
+        entry = {"ts": time.time(), "action": action, "actor": actor or "operator"}
+        if reason:
+            entry["reason"] = reason
+        log = list(getattr(state, "lifecycle", None) or [])
+        log.append(entry)
+        # Lifecycle actions are few per run; the cap is only a pathological-loop backstop on blob size.
+        state.lifecycle = log[-200:]
+
     def _load_states(self, project_ids: list[str]) -> dict[str, ProjectState]:
         """Batch-load ProjectState objects for many runs in one DB round-trip.
 
@@ -617,7 +631,7 @@ class ExecutionService:
             return pid
         return None
 
-    def stop_project(self, project_id: str) -> dict:
+    def stop_project(self, project_id: str, actor: str = "") -> dict:
         """Operator 'stop all progress': kill any live stage process + set phase=stopped (TERMINAL —
         the poller won't re-advance, relaunch, or re-enter deploy-db provision; a stopped run stays
         stopped, NOT budget-paused) + finalize orphaned agents so the canvas shows no ghost-running
@@ -627,6 +641,9 @@ class ExecutionService:
         if state.phase != "stopped":
             state.phase = "stopped"
             state.spent_usd = self._run_spend(project_id, state)
+            # SOF-188: record the operator kill in the lifecycle trail so /events isn't silent about it
+            # (recorded once, inside the not-already-stopped guard — no duplicate on a second stop).
+            self._record_lifecycle(state, "stop", actor)
             self._upload_project_log(project_id, state)
             state.save()
             AgentRegistry(self._paths(project_id)["agents_db"]).finalize_orphans(project_id, stage_ok=False)
@@ -732,6 +749,11 @@ class ExecutionService:
         if stage == 3:
             self._reset_stuck_tickets(project_id)
         state.auto_resume_count += 1
+        # SOF-188: record the HOST auto-resume so /events isn't silent about the relaunch — this is the
+        # exact action whose invisibility (status showed a stale phase while /events had moved on) the
+        # ticket reported. actor="host" distinguishes it from an operator-driven resume.
+        self._record_lifecycle(state, "auto-resume", actor="host",
+                               reason=f"dead stage {stage} (attempt {state.auto_resume_count}/{max_resumes})")
         state.save()
         logger.info("[auto-resume] %s relaunching dead stage %s (attempt %d/%d)",
                     project_id, stage, state.auto_resume_count, max_resumes)
@@ -779,7 +801,7 @@ class ExecutionService:
                                      evidence={"stage": stage, "auto_resume_count": getattr(state, "auto_resume_count", 0)})
         return True
 
-    def pause_project(self, project_id: str) -> dict:
+    def pause_project(self, project_id: str, actor: str = "") -> dict:
         """Operator 'pause': kill the live stage process and set phase='paused'.
         Unlike 'stop', pause is RESUMABLE — the run stays active and the Recovery bar
         allows the operator to resume, retry a node, or rewind. Returns current state."""
@@ -796,10 +818,11 @@ class ExecutionService:
         if state.phase not in ("done", "stopped"):  # don't overwrite a concurrent terminal
             state.paused_at_node = node
             state.phase = "paused"
+            self._record_lifecycle(state, "pause", actor, reason=f"at {node}" if node else "")  # SOF-188
             state.save()
         return {"project_id": project_id, "phase": "paused", "paused_at_node": node, "paused": True}
 
-    def resume_project(self, project_id: str) -> str | None:
+    def resume_project(self, project_id: str, actor: str = "") -> str | None:
         """Resume a paused or crashed run from where it left off.
         Determines the right stage from the recorded at-node and calls retry_stage.
         Clears the paused/crashed markers ONLY if retry_stage actually launches. Returns
@@ -818,6 +841,11 @@ class ExecutionService:
         state.crashed_at_node = ""
         state.auto_resume_count = 0  # SOF-116: explicit operator recovery — a fresh cap
         state.phase = resume_node or "provision"
+        # SOF-188: record the resume in the lifecycle trail — during a resume status.phase (the
+        # monotonic furthest node) can read AHEAD of the live node, so an explicit /events entry is
+        # what makes the transition visible rather than the run's history looking like it just ended.
+        self._record_lifecycle(state, "resume", actor,
+                               reason=f"from {resume_node}" if resume_node else f"from {original_phase}")
         state.save()
 
         def _restore_recovery_markers() -> None:
@@ -1956,6 +1984,13 @@ class ExecutionService:
         return budget, credential
 
     def status(self, project_id: str) -> dict:
+        """GET /api/projects/{pid}. AUTHORITATIVE-SOURCE CONTRACT (SOF-188): `phase` here is the
+        DERIVED current node from current_phase() — the furthest-progressed pipeline node (monotonic
+        forward) for a live run, or the trusted terminal scalar (done/stopped/paused/crashed/draft).
+        Because it is monotonic-forward, during a backward relaunch (a resume/auto-resume that re-enters
+        an earlier node) it can briefly read AHEAD of the live node. The `/events` stream is the
+        authoritative real-time account of node history AND lifecycle actions (stop/pause/resume/
+        auto-resume/archive) — consult it, not this scalar, for the live transition during a resume."""
         state = self._load_state(project_id)
         reg = AgentRegistry(self._paths(project_id)["agents_db"])
         # SOF-145/148: compute the stop flags the SAME way the list endpoint does, so the detail
@@ -2139,10 +2174,11 @@ class ExecutionService:
         state.save()
         return state.is_demo
 
-    def set_archived(self, project_id: str, archived: bool) -> bool:
+    def set_archived(self, project_id: str, archived: bool, actor: str = "") -> bool:
         """Soft-delete / restore a project (DELETE /api/projects/{id}). Archived projects vanish from lists."""
         state = self._load_state(project_id)
         state.archived = bool(archived)
+        self._record_lifecycle(state, "archive" if archived else "restore", actor)  # SOF-188
         state.save()
         if archived:
             vault_ids = getattr(state, "creds_vault_ids", {}) or {}
@@ -2386,9 +2422,15 @@ class ExecutionService:
                 "description": state.description, "summary": state.summary}
 
     def events(self, project_id: str) -> list:
-        """Recent run activity, projected from project store for the live activity feed. Shaped like the
-        old event records ({type, payload, ts}) so the frontend renders unchanged — but the DATASTORE
-        is the source of truth; there is no event log."""
+        """GET /api/projects/{pid}/events. Recent run activity, projected from the project store for
+        the live activity feed. Shaped like the old event records ({type, payload, ts}) so the frontend
+        renders unchanged — but the DATASTORE is the source of truth; there is no event log.
+
+        AUTHORITATIVE-SOURCE CONTRACT (SOF-188): this stream is the authoritative real-time account of
+        BOTH pipeline node history (phase/artifact/blocker/done items) AND lifecycle actions (the
+        `lifecycle` type: stop/pause/resume/auto-resume/archive/restore, with actor + reason). Unlike
+        status.phase (the monotonic furthest node — see `status`), it reflects backward relaunches, so
+        during a resume it shows the real transition rather than reading as if the run just ended."""
         return self._records.events(project_id)
 
     def _artifact_content(self, project_id: str, path: str) -> str | None:

@@ -112,5 +112,14 @@ class ProjectRecords:
         for verification in db.verifications():
             if verification["passed"]:
                 items.append({"ts": verification["ts"], "type": "done", "payload": {"url": verification["url"]}})
+        # SOF-188: lifecycle actions (stop/pause/resume/auto-resume/archive/restore) live on the
+        # ProjectState JSON blob (NOT the pipeline-only phases table), so /events is a complete
+        # account of the run's history — not silent about an operator kill or a host relaunch.
+        state = db.read(project_id) or {}
+        for entry in state.get("lifecycle") or []:
+            payload = {"action": entry.get("action"), "actor": entry.get("actor")}
+            if entry.get("reason"):
+                payload["reason"] = entry["reason"]
+            items.append({"ts": entry.get("ts", 0), "type": "lifecycle", "payload": payload})
         items.sort(key=lambda event: event["ts"])
         return items

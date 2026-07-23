@@ -315,13 +315,15 @@ def project_update(pid: str, body: ProjectPatchIn, v: tuple = Depends(authorize_
 @router.delete("/api/projects/{pid}")
 def project_delete(pid: str, v: tuple = Depends(authorize_project)):
     """Soft-delete (archive) a project — hidden from the default listing; discards a draft."""
-    return {"project_id": pid, "archived": state.console.set_archived(pid, True)}
+    email, _role, _ok = v  # SOF-188: actor for the lifecycle /events entry
+    return {"project_id": pid, "archived": state.console.set_archived(pid, True, actor=email)}
 
 
 @router.post("/api/projects/{pid}/restore")
 def project_restore(pid: str, v: tuple = Depends(authorize_project)):
     """Restore an archived project — un-archives it so it lists again."""
-    return {"project_id": pid, "archived": state.console.set_archived(pid, False)}
+    email, _role, _ok = v  # SOF-188: actor for the lifecycle /events entry
+    return {"project_id": pid, "archived": state.console.set_archived(pid, False, actor=email)}
 
 
 @router.delete("/api/projects/{pid}/permanent")
@@ -387,7 +389,8 @@ def project_budget(pid: str, body: BudgetIn, v: tuple = Depends(authorize_projec
 def project_stop(pid: str, v: tuple = Depends(authorize_project)):
     """Operator 'stop all progress': kill the live stage process + mark the run stopped (terminal —
     the poller won't re-advance or re-provision). Idempotent. Pairs with the dashboard Stop button."""
-    return state.console.stop_project(pid)
+    email, _role, _ok = v  # SOF-188: actor for the lifecycle /events entry
+    return state.console.stop_project(pid, actor=email)
 
 
 @router.post("/api/projects/{pid}/relaunch")
@@ -409,14 +412,16 @@ def project_relaunch(pid: str, v: tuple = Depends(authorize_project)):
 def project_pause(pid: str, v: tuple = Depends(authorize_project)):
     """Kill the live stage process and hold the run at phase='paused'. The Recovery bar
     resumes via /resume. Idempotent — pausing an already-paused run is a no-op."""
-    return state.console.pause_project(pid)
+    email, _role, _ok = v  # SOF-188: actor for the lifecycle /events entry
+    return state.console.pause_project(pid, actor=email)
 
 
 @router.post("/api/projects/{pid}/resume")
 def project_resume(pid: str, v: tuple = Depends(authorize_project)):
     """Resume a paused or crashed run from the last recorded node. Clears the pause/crash
     markers and relaunches the appropriate stage."""
-    result = state.console.resume_project(pid)
+    email, _role, _ok = v  # SOF-188: actor for the lifecycle /events entry
+    result = state.console.resume_project(pid, actor=email)
     if result:
         return {"project_id": result, "resumed": True}
     # SOF-150: resume_project restores paused_at_node/crashed_at_node on a failed attempt, so a

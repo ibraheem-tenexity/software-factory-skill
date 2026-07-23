@@ -28,7 +28,13 @@ const RAIL_TABS: { id: Rail; label: string }[] = [
 
 const SUGGESTIONS = ["Summarize progress", "What's blocking the build?", "Reprioritize a ticket"];
 
-const EVENT_ICON: Record<string, string> = { phase: "layers", artifact: "file", blocker: "x", done: "check" };
+const EVENT_ICON: Record<string, string> = { phase: "layers", artifact: "file", blocker: "x", done: "check", lifecycle: "activity" };
+// SOF-188: readable text for a lifecycle event ({action, actor, reason}). Verb tense per action so
+// the operator kill / host relaunch reads as an actual action in the feed, not a bare "lifecycle".
+const LIFECYCLE_VERB: Record<string, string> = {
+  stop: "stopped", pause: "paused", resume: "resumed", "auto-resume": "auto-resumed",
+  archive: "archived", restore: "restored",
+};
 function eventText(e: ProjectEvent): string {
   const p = e.payload || {};
   switch (e.type) {
@@ -36,6 +42,11 @@ function eventText(e: ProjectEvent): string {
     case "artifact": return `Produced ${p.title || p.path}`;
     case "blocker": return `Blocked: ${p.what}`;
     case "done": return `Verified live${p.url ? `: ${p.url}` : ""}`;
+    case "lifecycle": {
+      const action = LIFECYCLE_VERB[p.action] || p.action || "updated";
+      const who = p.actor && p.actor !== "operator" ? ` by ${p.actor}` : "";
+      return `Run ${action}${who}${p.reason ? ` — ${p.reason}` : ""}`;
+    }
     default: return e.type;
   }
 }

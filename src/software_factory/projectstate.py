@@ -60,6 +60,7 @@ _PERSISTED = {
     "prior_attempts_usd", "spend_seal_offset",
     "memory_overview",
     "concierge_notes",
+    "lifecycle",
     "recipe_id",
 }
 
@@ -94,6 +95,13 @@ class ProjectState:
     # Persisted into the same projectstate.data JSON blob as memory_overview — the "no third table"
     # pattern — and read back by get_from_project_memory.
     concierge_notes: list = field(default_factory=list)
+    # SOF-188: lifecycle-action audit trail — operator/host actions that change the run's lifecycle
+    # but are NOT pipeline nodes (stop, pause, resume, retry-stage, archive, restore). Each entry is
+    # {ts, action, actor, reason}. Persisted in this same projectstate.data JSON blob (the "no third
+    # table" pattern, like concierge_notes) — deliberately NOT the phases-canvas table, which stays
+    # pipeline-nodes-only (the #326/#329/#332/#333 invariant). ProjectStore.events() projects these
+    # so /events is a COMPLETE account of lifecycle actions, not just agent-produced phase rows.
+    lifecycle: list = field(default_factory=list)
     # SOF-63 NOTE: the Concierge's finalized product brief is NOT state — it's the
     # kind='product_brief' ARTIFACT (markdown in artifacts.content, newest row wins; written by
     # finalize_product_brief, read by Console.product_brief). At promote it supersedes
