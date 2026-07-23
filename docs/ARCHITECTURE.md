@@ -222,6 +222,24 @@ parity review because those two schema construction paths can drift.
   one persisted per-scope root (extracted-child assets stay provenance-linked via `source_blob_id`,
   not directory membership) without changing any blob ID, storage key, hash, summary, chunk, use, or
   scope. Directory read projections/APIs are SOF-253.
+- **Generated directory summaries (SOF-254):** `memory/directories.py` owns the read-only rollup
+  written into `directories.summary_*` (the only writer — there is no manual-edit path anywhere).
+  Each directory's `summary_md` rolls up its DIRECT child-file `doc_summary` text + its DIRECT
+  child-directory summaries, plus a code-computed incomplete-coverage note (a failed/pending child
+  is never silently dropped). A `summary_error` column (migration 0035) retains the real failure
+  reason alongside the last successful summary when a refresh fails. Lifecycle: every descendant
+  mutation funnels through the ONE entry point `directories.on_directories_changed(dir_ids, console)`
+  — it marks each touched directory's whole ancestor chain `needs_refresh`, then fires a single
+  background BOTTOM-UP `refresh_scope` per affected scope (deepest first, so a parent sees the latest
+  child results). It is wired at `ingest_blob`'s four terminals (done + parse/embed/summarize
+  failures) and at SOF-253's Files-browser mutations in `projects/materials.py` — `upload`
+  (destination directory), `delete` (the member's directory), `move_file` (old + new), and
+  `set_scope` (old + destination, since a cross-scope move re-homes the blob under a destination
+  directory) — REPLACING SOF-253's directory-only `touch_directory` so there is exactly one
+  ancestor-aware invalidation mechanism. A directory that is `ready` with a `summary_source_hash`
+  matching its current subtree is skipped (no model call); an empty directory is `ready` with no
+  prose. `ready` is written only with the current hash, so a failed refresh (hash never advanced)
+  stays non-ready and is retried.
 - `blob_uses` (`blob_id`, `project_id`) — one row per project that imported an org knowledge-base doc;
   the doc's "used by N projects" count is `COUNT(DISTINCT project_id)`.
 - **Project Memory (SOF-26):** `doc_summary` (PK `blob_id`→`blobs.id` cascade) — the per-document

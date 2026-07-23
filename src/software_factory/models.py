@@ -294,6 +294,10 @@ directories = Table(
     Column("summary_status", Text, nullable=False, server_default="needs_refresh"),
     Column("summary_source_hash", Text),
     Column("last_successful_summary_at", DateTime(timezone=True)),
+    # SOF-254: the real failure reason of the LATEST refresh, retained alongside the last
+    # successful summary/hash/time when summary_status='failed'. NULL whenever the summary is
+    # current (cleared on a successful refresh) — honest failure detail, never a fabricated blank.
+    Column("summary_error", Text),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     CheckConstraint("scope in ('project', 'org')", name="directories_scope_check"),
@@ -554,6 +558,6 @@ PROJECTDB = (projectstate, phases, artifacts, blockers, gates, verifications, de
 FLAT_TABLES = PROJECTDB + (tickets, runtime_agents, checkpoint)
 GLOBAL_TABLES = (roles, role_permissions, organizations, users, blobs, blob_uses,
                  system_agents, tools, recipes,
-                 doc_summary, chunk, conversation, org_secrets,
+                 directories, doc_summary, chunk, conversation, org_secrets,
                  autopsy_processed_runs, autopsy_signatures, eval_scores, recovery_actions)
 ALL_TABLES = FLAT_TABLES + GLOBAL_TABLES
