@@ -39,6 +39,16 @@ export function normalizeEvent(e: ProjectEvent): {
       artifact: { title: p.title, path: p.path, url: p.url } };
     case "blocker": return { severity: "attention", label: "Blocked", detail: p.what };
     case "done": return { severity: "routine", label: "Verified live", detail: p.url };
+    case "lifecycle": {
+      // SOF-188: operator/host run-control actions (stop/pause/resume/auto-resume/archive/restore),
+      // recorded on the ProjectState lifecycle trail. Routine severity — a normal lifecycle action,
+      // not a failure — with the same verb-tensed label the Concierge feed uses.
+      const verb: Record<string, string> = { stop: "stopped", pause: "paused", resume: "resumed",
+        "auto-resume": "auto-resumed", archive: "archived", restore: "restored" };
+      const action = verb[p.action] || p.action || "updated";
+      const who = p.actor && p.actor !== "operator" ? ` by ${p.actor}` : "";
+      return { severity: "routine", label: `Run ${action}${who}`, detail: p.reason || undefined };
+    }
     default:
       // Unknown types default to routine; anything that reads as a failure is surfaced as one with
       // the raw payload as truthful expandable detail (never a plausible guess).
