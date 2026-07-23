@@ -30,7 +30,35 @@ const RAIL_TABS: { id: Rail; label: string }[] = [
   { id: "latest", label: "Latest" },
 ];
 
-const SUGGESTIONS = ["Summarize progress", "What's blocking the build?", "Reprioritize a ticket"];
+// SOF-246: one shared Concierge, one identity — a single `context` value drives the copy and the
+// display grounding on every Project Console peer (design §2.4b). Only the subtitle, suggestion
+// chips, and the build-only Steer helper change; the transcript/composer are identical everywhere.
+type Ctx = "overview" | "brief" | "outputs" | "build" | "files" | "maintenance" | "ingesting";
+const CTX: Record<Ctx, { subtitle: string; chips: string[]; steer?: boolean }> = {
+  overview: { subtitle: "Watching this project", chips: ["How's the build going?", "What's left to do?", "Any blockers?"] },
+  brief: { subtitle: "Working from your brief", chips: ["Explain this section", "Revise the brief in my words", "What changed in the latest version?"] },
+  outputs: { subtitle: "Across the factory's work", chips: ["Explain this output", "How does this relate to the brief?", "What should I look at next?"] },
+  build: { subtitle: "Relaying the build", chips: ["Summarize progress", "What's blocking the build?", "Reprioritize a ticket"], steer: true },
+  files: { subtitle: "Across your source material", chips: ["What's in this material?", "Which file covers approvals?", "Where should an agent look first?"] },
+  maintenance: { subtitle: "Watching the delivered project", chips: ["What changed since delivery?", "Anything to watch?", "How do I request a change?"] },
+  ingesting: { subtitle: "Processing in background", chips: ["What are you reading?", "What happens next?", "How long will this take?"] },
+};
+
+// The EPHEMERAL display grounding string sent as ChatIn.display_context (#446): a plain "Viewing …"
+// note injected into that one turn's prompt, NEVER persisted and NEVER a retrieval boundary. Files
+// deliberately does not claim scoped retrieval (SOF-237 operator decision) — it only names what the
+// user is looking at.
+function displayContextStr(context: Ctx, selectedLabel?: string): string {
+  switch (context) {
+    case "brief": return `Viewing the Product brief${selectedLabel ? ` — section: ${selectedLabel}` : ""}`;
+    case "outputs": return `Viewing factory outputs${selectedLabel ? `: ${selectedLabel}` : ""}`;
+    case "build": return "Viewing the Factory console (the live build)";
+    case "files": return `Viewing source material${selectedLabel ? `: ${selectedLabel}` : ""}`;
+    case "maintenance": return "Viewing post-delivery maintenance";
+    case "ingesting": return "On the project home while uploads process";
+    default: return "Viewing the project overview";
+  }
+}
 
 const EVENT_ICON: Record<string, string> = { phase: "layers", artifact: "file", blocker: "x", done: "check" };
 function eventText(e: ProjectEvent): string {
@@ -66,10 +94,17 @@ function synthBubbles(args: { buildDone?: boolean; deployed?: boolean; ticketsDo
 }
 
 export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, isBuilding,
-  ticketsDone, ticketsTotal, buildDone, deployed, phase }:
+  ticketsDone, ticketsTotal, buildDone, deployed, phase,
+  context = "build", selectedLabel, docChips }:
   { projectId: string; projectName?: string; artifacts: ArtifactRef[];
     onOpenArtifact: (a: ArtifactRef) => void; isBuilding?: boolean;
-    ticketsDone?: number; ticketsTotal?: number; buildDone?: boolean; deployed?: boolean; phase?: string }) {
+    ticketsDone?: number; ticketsTotal?: number; buildDone?: boolean; deployed?: boolean; phase?: string;
+    // SOF-246: the active Project Console peer drives copy + display grounding. `selectedLabel` is the
+    // selected heading/artifact/file when a peer has one; `docChips` overrides the Files chips.
+    context?: Ctx; selectedLabel?: string; docChips?: string[] }) {
+  const ctx = CTX[context];
+  const subtitle = context === "build" && buildDone ? "Build complete" : ctx.subtitle;
+  const chips = context === "files" && docChips && docChips.length ? docChips : ctx.chips;
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [events, setEvents] = useState<ProjectEvent[]>([]);
   const [draft, setDraft] = useState("");
@@ -112,8 +147,12 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
     const timer = setTimeout(() => ctrl.abort(), 90_000);
     try {
       const resp = await api.chatStream(
+        // display_context is ephemeral per-turn grounding — injected into THIS turn's prompt only,
+        // never persisted, never a retrieval boundary. Most-specific-wins: the actively-viewed
+        // artifact's summary (#446's useDisplayContext store) when one is open, else the shared
+        // dock's per-peer string (#446 SOF-246: context + selectedLabel). One always resolves.
         { project_id: projectId, project_name: projectName || "", message: msg,
-          ...(displayCtx ? { display_context: displayCtx.summary } : {}) },
+          display_context: displayCtx ? displayCtx.summary : displayContextStr(context, selectedLabel) },
         ctrl.signal,
       );
       const reader = resp.body!.getReader();
@@ -161,7 +200,9 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <span style={{ display: "block", font: `600 13px/1.2 ${T.sans}`, color: T.fg }}>Concierge</span>
-          <CategoryLabel style={{ fontSize: 10 }}>{buildDone ? "Build complete" : "Relaying the build"}</CategoryLabel>
+          <CategoryLabel style={{ fontSize: 10 }}>{subtitle}</CategoryLabel>
+          {/* SOF-246: the selected heading/artifact/file this turn is grounded on (display only). */}
+          {selectedLabel && <span style={{ display: "block", marginTop: 2, font: `500 10px/1.2 ${T.mono}`, color: T.brandDeep, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>◆ {selectedLabel}</span>}
         </div>
         {sending ? <WorkingPill label="Thinking" /> : isBuilding ? <WorkingPill /> : <StatusPill tone="success">online</StatusPill>}
       </div>
@@ -219,18 +260,20 @@ export function Concierge({ projectId, projectName, artifacts, onOpenArtifact, i
           {!sending && (
             <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
               <CategoryLabel>Try asking</CategoryLabel>
-              <QuickReplies options={SUGGESTIONS} onPick={(o) => steer(o)} />
+              <QuickReplies options={chips} onPick={(o) => steer(o)} />
             </div>
           )}
-          {/* Steer-the-build promo card (design: concierge.jsx ProjectConcierge) */}
-          <div style={{ padding: 11, borderRadius: T.rLg, border: `1px solid ${T.brand}33`, background: T.brandSoft + "66" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-              <Sparkle size={11} color={T.brandDeep} /><CategoryLabel tone="brand">Steer the build</CategoryLabel>
+          {/* Steer-the-build promo card — build context only (design §2.4b) */}
+          {ctx.steer && (
+            <div style={{ padding: 11, borderRadius: T.rLg, border: `1px solid ${T.brand}33`, background: T.brandSoft + "66" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                <Sparkle size={11} color={T.brandDeep} /><CategoryLabel tone="brand">Steer the build</CategoryLabel>
+              </div>
+              <p style={{ font: `400 12px/1.5 ${T.sans}`, color: T.secondary, margin: 0 }}>
+                Ask me to reprioritize a ticket, change scope, or pause an agent — I'll pass it straight to the build team.
+              </p>
             </div>
-            <p style={{ font: `400 12px/1.5 ${T.sans}`, color: T.secondary, margin: 0 }}>
-              Ask me to reprioritize a ticket, change scope, or pause an agent — I'll pass it straight to the build team.
-            </p>
-          </div>
+          )}
         </div>
       )}
 
