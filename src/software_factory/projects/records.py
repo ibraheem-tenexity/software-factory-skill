@@ -1,11 +1,16 @@
 """Read-only projections over one project's durable factory records."""
 from __future__ import annotations
 
+import json
+import logging
+
 from ..db import ProjectStore
 from ..projectstate import ProjectState
 from ..runtime_agents import AgentRegistry
 from ..tickets import TicketStore
 from .intake import project_paths
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectRecords:
@@ -78,6 +83,11 @@ class ProjectRecords:
     def project_owner(self, project_id: str) -> str:
         return (self._state(project_id).owner or "").lower()
 
+    def project_name(self, project_id: str) -> str:
+        """Operator-chosen display label (falls back to the project_id key). Used to name the
+        source-directory root when a scope's tree is created lazily (SOF-253)."""
+        return (self._state(project_id).name or "").strip() or project_id
+
     def project_links(self, project_id: str) -> dict:
         repo = live = None
         for artifact in self.artifacts(project_id):
@@ -104,6 +114,18 @@ class ProjectRecords:
             items.append({"ts": phase["ts"], "type": "phase",
                           "payload": {"name": phase["name"], "status": phase["status"]}})
         for artifact in db.artifacts():
+            # SOF-252: a design-review DECISION (approve/reopen/iterate) is a customer-visible
+            # process event, not a produced output — project it as a dedicated "design_review"
+            # event carrying the decoded decision payload, not a generic "Produced …" artifact row.
+            if (artifact.get("kind") or "").lower() == "design_review":
+                payload = {"title": artifact["title"], "path": artifact["path"]}
+                try:
+                    payload.update(json.loads(artifact.get("content") or "{}"))
+                except (ValueError, TypeError):
+                    logger.exception("[records] undecodable design_review content on artifact %s",
+                                     artifact.get("id"))
+                items.append({"ts": artifact["ts"], "type": "design_review", "payload": payload})
+                continue
             items.append({"ts": artifact["ts"], "type": "artifact",
                           "payload": {"title": artifact["title"], "path": artifact["path"]}})
         for blocker in db.blockers():
@@ -112,5 +134,14 @@ class ProjectRecords:
         for verification in db.verifications():
             if verification["passed"]:
                 items.append({"ts": verification["ts"], "type": "done", "payload": {"url": verification["url"]}})
+        # SOF-188: lifecycle actions (stop/pause/resume/auto-resume/archive/restore) live on the
+        # ProjectState JSON blob (NOT the pipeline-only phases table), so /events is a complete
+        # account of the run's history — not silent about an operator kill or a host relaunch.
+        state = db.read(project_id) or {}
+        for entry in state.get("lifecycle") or []:
+            payload = {"action": entry.get("action"), "actor": entry.get("actor")}
+            if entry.get("reason"):
+                payload["reason"] = entry["reason"]
+            items.append({"ts": entry.get("ts", 0), "type": "lifecycle", "payload": payload})
         items.sort(key=lambda event: event["ts"])
         return items

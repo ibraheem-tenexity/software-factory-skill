@@ -21,7 +21,7 @@ from typing import Callable
 from .. import docx_extract, pdf_extract, storage
 from ..blobs import BlobStore
 from ..log import get_logger
-from . import chunker, embed, pricing
+from . import chunker, directories, embed, pricing
 from .cost import record_ingestion_cost
 from .store import MemoryStore
 
@@ -259,6 +259,12 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
             and existing.get("content_sha256") == blob.get("sha256")):
         logger.info("[ingest] blob %s (%s): SKIPPED — content unchanged (sha256 dedup), already ready",
                     blob_id, doc_name)
+        # SOF-254: the document body is unchanged, but this blob may have just been filed into a
+        # NEW directory (e.g. an invalidate-only upload of an identical file, or an org-doc reused
+        # into a project). The normal completion trigger below is short-circuited by this early
+        # return, so mark+refresh the directory's chain here — otherwise that directory would sit at
+        # needs_refresh forever with nothing to fire its rollup.
+        directories.on_directories_changed([blob.get("directory_id")], console)
         return {"blob_id": blob_id, "status": "ready", "skipped": "unchanged (content_sha256 dedup)"}
 
     push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "parsing", "pct": 5, "status": "running"})
@@ -275,6 +281,7 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
     except Exception as exc:
         logger.exception("[ingest] blob %s (%s): PARSE FAILED — marking doc failed", blob_id, doc_name)
         memory_store.upsert_doc_summary(blob_id, scope, scope_id, status="failed")
+        directories.on_directories_changed([blob.get("directory_id")], console)
         push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "parsing", "pct": 100, "status": "failed"})
         return {"blob_id": blob_id, "status": "failed", "error": str(exc)}
 
@@ -301,6 +308,7 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
     except Exception as exc:
         logger.exception("[ingest] blob %s (%s): EMBEDDING FAILED — marking doc failed", blob_id, doc_name)
         memory_store.upsert_doc_summary(blob_id, scope, scope_id, status="failed")
+        directories.on_directories_changed([blob.get("directory_id")], console)
         push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "embedding", "pct": 100, "status": "failed"})
         return {"blob_id": blob_id, "status": "failed", "error": str(exc)}
     if blobs_store.get_blob(blob_id) is None:
@@ -326,6 +334,7 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
     except Exception as exc:
         logger.exception("[ingest] blob %s (%s): SUMMARIZATION FAILED — marking doc failed", blob_id, doc_name)
         memory_store.upsert_doc_summary(blob_id, scope, scope_id, status="failed")
+        directories.on_directories_changed([blob.get("directory_id")], console)
         push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "summarizing", "pct": 100, "status": "failed"})
         return {"blob_id": blob_id, "status": "failed", "error": str(exc)}
 
@@ -356,6 +365,11 @@ def ingest_blob(blob_id: int, *, console, push_progress: Callable[[str | None, d
 
     if scope == "project":
         _recompute_project_rollup(console, scope_id, memory_store)
+
+    # SOF-254: this document's summary just changed — mark its directory ancestors needs_refresh
+    # and kick off a bottom-up rebuild of the scope's directory summaries. No-op when the blob is
+    # unfiled (directory_id NULL — nothing rolls up from it); the sweep skips unchanged directories.
+    directories.on_directories_changed([blob.get("directory_id")], console)
 
     push_progress(project_id, {"blob_id": blob_id, "doc_name": doc_name, "stage": "done", "pct": 100, "status": "ready"})
     logger.info("[ingest] blob %s (%s): DONE in %.1fs — status=ready chunks=%s assumptions=%s",

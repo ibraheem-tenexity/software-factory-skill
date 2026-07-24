@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { T, Icon, CategoryLabel, ArtifactChip, kindBadgeFor } from "../onboarding/design";
 import { api, Graph, GraphNode } from "../../api";
-import { MarkdownBody } from "../../markdown";
+import { ArtifactBody } from "../../viewer/ArtifactBody";
 
 export type ArtifactRef = {
   label: string; path: string; url: string | null; status?: string; id?: number;
@@ -30,6 +30,13 @@ export function openArtifact(id: number | string) {
 // viewer can title/render it without a second round trip.
 export function openOrgDoc(id: number | string, name: string) {
   window.open(`/ArtifactViewer.html?blob=${id}&name=${encodeURIComponent(name)}`, "_blank");
+}
+
+// Open a Files-browser source blob (SOF-255) in the shared viewer. Threads the project id so the
+// viewer reads content through the project-relative Files route (#448) — which serves BOTH project-
+// and owner-org-scope blobs — rather than the org-only KB route above.
+export function openProjectFile(projectId: string, id: number | string, name: string) {
+  window.open(`/ArtifactViewer.html?blob=${id}&name=${encodeURIComponent(name)}&pid=${encodeURIComponent(projectId)}`, "_blank");
 }
 
 // Badge kind from the artifact's path/url (design KIND_BADGE keys; unknown ⇒ the raw extension).
@@ -136,10 +143,11 @@ export function DocViewer({ projectId, doc, onClose, preview = false }:
   }, [doc, projectId]);
 
   if (!doc) return null;
-  const lowerPath = (doc.path || "").toLowerCase();
-  const isSvg = lowerPath.endsWith(".svg");
-  const isMd = lowerPath.endsWith(".md") || lowerPath.endsWith(".mdx");
   const k = kindBadgeFor(doc.kind || (doc.path ? artifactKind(doc.path) : "doc"));
+  // Render the body through the ONE shared renderer (SOF-245): a URL-backed doc with no inline
+  // content routes to the shared external-link/unavailable framing; otherwise Markdown/SVG/code
+  // dispatch off the real path — no second parser lives here anymore.
+  const bodyPath = content == null && doc.url ? doc.url : (doc.path || "");
   const openFull = () => {
     if (doc.id != null) openArtifact(doc.id);
     else if (doc.url) window.open(doc.url, "_blank");
@@ -168,22 +176,10 @@ export function DocViewer({ projectId, doc, onClose, preview = false }:
           <button onClick={onClose} style={{ width: 28, height: 28, display: "grid", placeItems: "center", borderRadius: T.rMd,
             border: "none", background: "transparent", cursor: "pointer", color: T.secondary }}><Icon name="x" size={16} /></button>
         </header>
-        <div style={{ padding: 18, overflow: "auto" }}>
-          {loading ? <span style={{ font: `400 13px/1 ${T.sans}`, color: T.tertiary }}>Loading…</span>
-            : isSvg && content ? <div style={{ display: "grid", placeItems: "center" }} dangerouslySetInnerHTML={{ __html: content }} />
-            : isMd && content ? <MarkdownBody content={content} />
-            : content ? <pre style={{ margin: 0, font: `400 12.5px/1.6 ${T.mono}`, color: T.fg, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{content}</pre>
-            : doc.url ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "20px 0" }}>
-                <span style={{ font: `400 13px/1.5 ${T.sans}`, color: T.tertiary, textAlign: "center" }}>This artifact is an external link.</span>
-                <a href={doc.url} target="_blank" rel="noreferrer"
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: T.rMd,
-                    border: `1px solid ${T.borderDefault}`, background: T.raised, font: `500 13px/1 ${T.sans}`, color: T.fg, textDecoration: "none" }}>
-                  <Icon name="external" size={14} color={T.secondary} /> Open link
-                </a>
-              </div>
-            )
-            : <span style={{ font: `400 13px/1.5 ${T.sans}`, color: T.tertiary }}>No inline preview is available for this artifact.</span>}
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          {loading
+            ? <div style={{ padding: 18 }}><span style={{ font: `400 13px/1 ${T.sans}`, color: T.tertiary }}>Loading…</span></div>
+            : <ArtifactBody data={{ kind: doc.kind || (doc.path ? artifactKind(doc.path) : "doc"), path: bodyPath, content: content ?? null, project_id: projectId, title: doc.label }} />}
         </div>
       </div>
     </div>

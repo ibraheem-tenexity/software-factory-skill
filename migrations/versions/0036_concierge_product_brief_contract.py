@@ -1,7 +1,7 @@
 """Make the Concierge Product Brief contract authoritative (SOF-240).
 
-Revision ID: 0035_concierge_product_brief_contract
-Revises: 0034_source_directories
+Revision ID: 0036_concierge_product_brief_contract
+Revises: 0035_directory_summary_error
 Create Date: 2026-07-22
 
 The live Concierge instructions come solely from ``system_agents.CONCIERGE.prompt``.  Append the
@@ -15,8 +15,8 @@ import logging
 from alembic import op
 from sqlalchemy import text
 
-revision = "0035_concierge_product_brief_contract"
-down_revision = "0034_source_directories"
+revision = "0036_concierge_product_brief_contract"
+down_revision = "0035_directory_summary_error"
 branch_labels = None
 depends_on = None
 

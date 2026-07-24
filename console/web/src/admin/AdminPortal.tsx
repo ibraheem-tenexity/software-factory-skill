@@ -6,7 +6,7 @@ import type { AdminAgent, AdminClient, AdminTool } from "../api";
 import { useAdminFetch } from "./hooks";
 import { UsersManagement } from "./users";
 import { AccountMenu } from "./AccountMenu";
-import { AdminProjectDashboard } from "./AdminProjectDashboard";
+import { ProjectConsole } from "../components/project/ProjectConsole";
 import { AdminClients, AdminProjectsView, AdminAgents, AdminTools, AdminOverview, AdminFactories, AdminSettings, AdminSymphony, AdminBtn } from "./views";
 import { RecipesManagement } from "./recipes";
 import { AdminConversations } from "./conversations";
@@ -129,6 +129,14 @@ export function AdminPortal() {
       setDeleteTarget(null);
     }).catch(() => setDeleteTarget(null));
   };
+
+  // SOF-239: an operator opening a project gets the SAME unified Project Console shell as the
+  // customer (full-screen — its own header, peer nav, and one persistent Concierge), not a separate
+  // admin project shell. Back returns to the admin section the operator came from.
+  if (selectedProject) {
+    return <ProjectConsole projectId={selectedProject}
+      onBack={() => { setSelectedProject(null); setView(returnView); }} />;
+  }
 
   return (
     <>
@@ -300,13 +308,9 @@ export function AdminPortal() {
             </div>
           </div>
           {/* content */}
-          <div style={{ flex: 1, overflow: "auto", ...(selectedProject ? {} : { padding: "20px 26px 36px" }) }}>
-            {selectedProject ? (
-              <AdminProjectDashboard
-                projectId={selectedProject}
-                onBack={() => { setSelectedProject(null); setView(returnView); }}
-              />
-            ) : (
+          <div style={{ flex: 1, overflow: "auto", padding: "20px 26px 36px" }}>
+            {/* selectedProject is handled by the full-screen early return above (SOF-239). */}
+            {(
               <>
                 {view === "overview" && <AdminOverview onNav={setView} query={query} onOpenProject={(id) => { setReturnView("overview"); setSelectedProject(id); }} />}
                 {view === "organizations" && (

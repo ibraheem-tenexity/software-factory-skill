@@ -118,7 +118,7 @@ granularity instead.
 | `projects/materials.py` | **Projects bounded context:** owns project-material upload, draft-original persistence, document projection, asynchronous ingestion, summary regeneration, and deletion across object storage, blob metadata, project input, memory records, and context artifacts. The projects router only decodes requests and maps HTTP errors. |
 | `projects/records.py` | **Projects bounded context:** owns read-only durable projections for deployments, tickets, agents, artifacts, creation time, ownership, repository sharing, outward links, and project activity. Production callers use `ExecutionService.records`; execution compatibility methods remain while stage control stays in `execution/service.py`. |
 | `console/app.py` | FastAPI/uvicorn HTTP shell: local-env bootstrap, singleton reset, lifespan, access logging, static mounts, routers (`open_routes`, `auth`, `org`, `admin_os`, `projects`, `chat`, `research`), and the `/mcp/memory` ASGI mount. |
-| `console/web/` | The mandatory Vite + React + TypeScript console. The Dockerfile builds `console/web/dist`; `console/state.py` serves it unconditionally, with no `SF_CONSOLE` switch or legacy-console fallback. It includes the graph, five-column Kanban projection, chat, structured brief form, project view, and the staff-gated `admin.html` operator portal. Admin aggregates, clients, projects, agents, conversations, recipes, tools, and access use real stores/services; unavailable metrics are returned honestly. |
+| `console/web/` | The mandatory Vite + React + TypeScript console. The Dockerfile builds `console/web/dist`; `console/state.py` serves it unconditionally, with no `SF_CONSOLE` switch or legacy-console fallback. It centers on the unified **Project Console** shell (`components/project/ProjectConsole.tsx`, SOF-238) — one project workspace with five peer views (Overview · Product brief · Factory outputs · Factory console · Files, plus conditional Maintenance for completed projects), a single persistent context-aware **Concierge** dock (minimizable, one shared conversation across peers), and the Factory console peer (`components/factory/FactoryBoard.tsx`) with its **Activity · Kanban · Tree · Map** modes over the real graph/tickets; the Activity mode and Concierge share one normalized event timeline (`components/factory/eventTimeline.ts`). Onboarding, the graph, and the staff-gated `admin.html` operator portal round it out. Admin aggregates, clients, projects, agents, conversations, recipes, tools, and access use real stores/services; unavailable metrics are returned honestly. |
 | `services/` | Framework-free application logic between routers and data access: `OrgService`, `Secrets`, `DbConversation`, and `AdminService` are wired in `console/state.py::reset()`. `DbConversation` owns durable onboarding history; `conversation/dock.py` separately creates project/context agents for the persistent dock. They share the same identity, DB prompt, agent class, and tools—not the same Python object. `services/errors.py` maps domain errors to HTTP responses; repositories hold parameterized SQLAlchemy Core CRUD. |
 | `projectstate.py` | `ProjectState` dataclass (project metadata, incl. the plain `goal`, `phase="draft"` for pre-run interviews; the structured brief is the Concierge-authored `product_brief` artifact, not state) + the `Store` protocol; persisted in the `projectstate` table — most fields as JSON in `data`, with `name` + `summary` promoted to their own authoritative columns (the store pops them out of the blob on write, merges them back on read). |
 | `db.py` | `ProjectStore` — the per-project datastore (projectstate + canvas tables incl. `deployments`) + the `python3 -m software_factory.db` CLI (incl. `record-deployment`) the stage agents call to record state. |
@@ -222,6 +222,24 @@ parity review because those two schema construction paths can drift.
   one persisted per-scope root (extracted-child assets stay provenance-linked via `source_blob_id`,
   not directory membership) without changing any blob ID, storage key, hash, summary, chunk, use, or
   scope. Directory read projections/APIs are SOF-253.
+- **Generated directory summaries (SOF-254):** `memory/directories.py` owns the read-only rollup
+  written into `directories.summary_*` (the only writer — there is no manual-edit path anywhere).
+  Each directory's `summary_md` rolls up its DIRECT child-file `doc_summary` text + its DIRECT
+  child-directory summaries, plus a code-computed incomplete-coverage note (a failed/pending child
+  is never silently dropped). A `summary_error` column (migration 0035) retains the real failure
+  reason alongside the last successful summary when a refresh fails. Lifecycle: every descendant
+  mutation funnels through the ONE entry point `directories.on_directories_changed(dir_ids, console)`
+  — it marks each touched directory's whole ancestor chain `needs_refresh`, then fires a single
+  background BOTTOM-UP `refresh_scope` per affected scope (deepest first, so a parent sees the latest
+  child results). It is wired at `ingest_blob`'s four terminals (done + parse/embed/summarize
+  failures) and at SOF-253's Files-browser mutations in `projects/materials.py` — `upload`
+  (destination directory), `delete` (the member's directory), `move_file` (old + new), and
+  `set_scope` (old + destination, since a cross-scope move re-homes the blob under a destination
+  directory) — REPLACING SOF-253's directory-only `touch_directory` so there is exactly one
+  ancestor-aware invalidation mechanism. A directory that is `ready` with a `summary_source_hash`
+  matching its current subtree is skipped (no model call); an empty directory is `ready` with no
+  prose. `ready` is written only with the current hash, so a failed refresh (hash never advanced)
+  stays non-ready and is retried.
 - `blob_uses` (`blob_id`, `project_id`) — one row per project that imported an org knowledge-base doc;
   the doc's "used by N projects" count is `COUNT(DISTINCT project_id)`.
 - **Project Memory (SOF-26):** `doc_summary` (PK `blob_id`→`blobs.id` cascade) — the per-document

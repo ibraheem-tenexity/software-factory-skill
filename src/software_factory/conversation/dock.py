@@ -55,15 +55,22 @@ class ChatDock:
         runtime: str = "", planning_model: str = "",
         impl_model: str = "", project_name: str = "",
         owner: str = "", role: str = "member",
+        display_context: str = "",
     ):
         """Async generator yielding NDJSON lines. `ChatAgent.run()` is a single call (no real
         token-by-token stream), so this yields exactly one `done` event with the full reply —
-        an honest simplification, not a pretense of streaming that isn't happening."""
+        an honest simplification, not a pretense of streaming that isn't happening.
+
+        `display_context` (SOF-245) is what the customer is currently reading in the Factory Outputs
+        peer. It is appended to THIS turn's content the agent sees, so "explain this" is grounded —
+        but it is NOT part of the persisted `user_msg` below and never touches memory retrieval."""
         content = user_msg or ""
         if files:
             content += "\n" + "\n".join(f"[Attached file: {f.get('name', 'file')}]" for f in files)
         if images:
             content += "\n" + "\n".join(f"[Attached image: {i.get('name', 'image')}]" for i in images)
+        if display_context:
+            content += f"\n\n[Display context — what the customer is currently viewing: {display_context}]"
 
         # Durable history: the project's dock conversation from the conversation table.
         history: list[dict] = []
