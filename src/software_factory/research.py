@@ -372,6 +372,11 @@ def _fusion_research(
     field_sources = data.get("field_sources")
     if not isinstance(field_sources, dict):
         field_sources = None  # never fabricate a mapping the model didn't actually emit
+    else:
+        # SOF-210: each value is meant to be a single source-URL string. Drop any non-string value
+        # so a future deep-mode UI can't render "[object Object]" (the model occasionally emits a
+        # nested object/list). Empty after filtering → None, consistent with "don't fabricate".
+        field_sources = {k: v for k, v in field_sources.items() if isinstance(v, str)} or None
 
     return CompanyProfile(
         name=data.get("name") or name,
