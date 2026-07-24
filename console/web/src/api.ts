@@ -426,8 +426,15 @@ export type AdminConversationsFilter = {
 };
 
 
-function checkAuth(r: Response): void {
-  if (r.status === 401) window.dispatchEvent(new CustomEvent("sf:auth-expired"));
+// SOF-260: `/api/me` is the auth CHECK itself — a 401 there means "not authenticated", which the
+// Gate handles directly by showing the login screen, NOT a mid-session expiry to recover from.
+// Dispatching sf:auth-expired for it makes the Gate's own probe re-trigger resolve()→me()→401→…,
+// a tight ~2/s loop on the (unauthenticated) login page that floods the console with 401s. Every
+// OTHER endpoint's 401 legitimately means the session expired mid-use → fire the re-check.
+function checkAuth(r: Response, path: string): void {
+  if (r.status === 401 && !path.startsWith("/api/me")) {
+    window.dispatchEvent(new CustomEvent("sf:auth-expired"));
+  }
 }
 
 // An Error that also carries the HTTP status and the server's parsed `detail` payload, so callers
@@ -447,7 +454,7 @@ async function httpError(path: string, r: Response): Promise<ApiError> {
 
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(path, { credentials: "include" });
-  if (!r.ok) { checkAuth(r); throw await httpError(path, r); }
+  if (!r.ok) { checkAuth(r, path); throw await httpError(path, r); }
   return r.json() as Promise<T>;
 }
 
@@ -459,7 +466,7 @@ async function send<T>(path: string, method: string, body?: unknown, signal?: Ab
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   });
-  if (!r.ok) { checkAuth(r); throw await httpError(path, r); }
+  if (!r.ok) { checkAuth(r, path); throw await httpError(path, r); }
   return r.json() as Promise<T>;
 }
 
@@ -519,7 +526,7 @@ export const api = {
       body: JSON.stringify({ message }),
       signal,
     });
-    if (!r.ok) { checkAuth(r); throw new Error(`${path} → ${r.status}`); }
+    if (!r.ok) { checkAuth(r, path); throw new Error(`${path} → ${r.status}`); }
     return r;
   },
   chatStream: async (body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> => {
@@ -530,7 +537,7 @@ export const api = {
       body: JSON.stringify(body),
       signal,
     });
-    if (!r.ok) { checkAuth(r); throw new Error(`/api/chat → ${r.status}`); }
+    if (!r.ok) { checkAuth(r, "/api/chat"); throw new Error(`/api/chat → ${r.status}`); }
     return r;
   },
   chatHistory: (id: string) => get<{ messages: any[] }>(`/api/chat/${id}/history`),
