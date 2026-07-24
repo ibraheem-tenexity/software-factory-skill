@@ -85,6 +85,13 @@ export function FactoryOutputsPeer({ projectId }: { projectId: string }) {
   }, [projectId]);
 
   const groups = useMemo(() => groupByStage(produced || []), [produced]);
+  // True once ≥1 output carries a real producing stage (post-#441 runs). On a pre-#441 project every
+  // output is stage=null and falls in the single "Other factory outputs" bucket — so the subheader
+  // must NOT claim "grouped by stage" when nothing is actually grouped (matches stageLabelFor's check).
+  const anyStaged = useMemo(
+    () => (produced || []).some((a) => a.stage != null && STAGE_TITLE[a.stage] != null),
+    [produced],
+  );
   const selected = useMemo(
     () => (produced || []).find((a) => a.id != null && a.id === selectedId) || null,
     [produced, selectedId],
@@ -144,7 +151,9 @@ export function FactoryOutputsPeer({ projectId }: { projectId: string }) {
         <div style={{ padding: "16px 16px 10px", borderBottom: `1px solid ${T.borderSubtle}` }}>
           <CategoryLabel>Factory outputs{produced ? ` · ${total}` : ""}</CategoryLabel>
           <p style={{ margin: "6px 0 0", font: `400 11.5px/1.5 ${T.sans}`, color: T.tertiary }}>
-            What the factory produced, grouped by the pipeline stage that made it.
+            {anyStaged
+              ? "What the factory produced, grouped by the pipeline stage that made it."
+              : "Everything the factory produced. Outputs group by stage once the factory records it."}
           </p>
         </div>
 
