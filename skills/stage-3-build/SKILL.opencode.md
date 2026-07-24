@@ -249,6 +249,21 @@ and two duplicate artifact rows). Pass the same `<slug>` you'd have picked for a
 
 ## Phase 3: test — the GATE (mandatory; the only path to done)  (`set-phase test`)
 
+**Playwright context economy — a correctness requirement here, not a nicety (SOF-229).** In this
+runtime the whole build, deploy, review, and QA run in ONE session, so every Playwright snapshot you
+keep in context ACCUMULATES. A real run reached a 227k-token prompt and was killed by the provider's
+prompt ceiling — the run crash-parked at `test` with the app already built and deployed. The datastore
+(recorded verifications, screenshots persisted via `storage.put`, bug reports) is the source of truth
+— NOT your in-context history — so keep the QA prompt lean:
+- After you judge a flow, extract the specific pass/fail finding into the `record-verification` result
+  and MOVE ON; don't re-read full-page DOM snapshots you've already assessed.
+- Prefer a TARGETED read (the one element/text that proves the acceptance criterion) over a full-page
+  `browser_snapshot` whenever the targeted read answers the question; one capture per state is enough.
+- Don't re-snapshot an unchanged view. Persist bug screenshots to storage (they live as blobs, not
+  context) and reference them by URL.
+- Treat each deliverable's/ticket's QA as continuing from the RECORDED state (already in the
+  datastore), not by re-walking prior captures.
+
 Drive the LIVE deployed URL through the primary journey with the **Playwright MCP**, **for EACH
 deliverable** (`sf-<project_id>-<app>`). Build a structured result and pass it to
 `gate.happy_flow_passed(result)`. RECORD it: `record-verification <url> <0|1> <result-json>` (include
