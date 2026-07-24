@@ -88,6 +88,24 @@ having watched it work; report outcomes faithfully, including what you did not v
 **UI review:** Every UI change MUST be reviewed with Playwright through the available MCP/plugin.
 In Codex, use the in-app browser's Playwright interface when it is available.
 
+**Testing the app (for agents):** the console has no agent password — machine callers authenticate
+with a **service token**. Send the header `X-SF-Service-Token: <SF_SERVICE_TOKEN>` and the backend
+treats you as admin (`auth.service_token_ok`, `console/deps.py`). `SF_SERVICE_TOKEN` is a Railway
+env var (staging service `factory-console`, env `software-factory-console-staging`; prod env
+`software-factory-as-skill`); read it via the Railway MCP or `railway run` (the `railway variables`
+CLI is flaky headless) and NEVER print, paste, or commit the value — it is admin-equivalent.
+- **Staging, authed browser:** Playwright `page.route('**/api/**', …)` injecting that header →
+  `/api/me` returns 200 → the SPA login gate passes → all authed screens load (no OAuth, no cookie).
+  For a specific user/org instead, mint an HMAC `sf_session` cookie via `auth.sign_session` using
+  `SF_SESSION_SECRET` and set it as a Playwright cookie.
+- **Local, no gate:** run the console with `SF_GOOGLE_CLIENT_ID` / `SF_SESSION_SECRET` /
+  `SF_SERVICE_TOKEN` UNSET → `auth.enabled()` is false → every request is admin. Scratch DB: a local
+  Postgres with `CREATE EXTENSION vector` + `models.metadata.create_all` (NOT alembic — the fresh-DB
+  migration chain is broken); point the app via `DATABASE_URL`. Mirrors `conftest.py`.
+- **A project in a specific state:** never insert a row directly (SOF-23); `Console.create_draft()`
+  then drive it via the real API/code (e.g. `record_artifact(kind="product_brief")` for a Concierge
+  brief version, `briefs.save()` for a direct edit).
+
 **No time estimates** (operator directive, 2026-07-08): AI development-time estimates are
 systematically wrong — days of "estimate" are minutes of agent work. Never defer or descope for
 time reasons; report by what is DONE, not by ETA.
