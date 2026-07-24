@@ -101,6 +101,10 @@ delivery reports pass/fail against each — that's what the integrator judges.
   — never the main working dir.
 - **PR loop:** integrator leaves concrete review comments on every PR (even when merging); the
   author polls its PR until merged/closed and addresses feedback. Merge at branch HEAD.
+- **PR state:** open a ready-for-review PR once its scoped implementation and author verification
+  are complete. Use draft only while work is incomplete, required verification is missing, or
+  early feedback is requested; review, checks, dependencies, and merge order are blockers, not
+  reasons to keep completed work in draft.
 - **Linear is the source of truth** for task status: project "Software Factory" (team SOF,
   https://linear.app/tenexity/project/software-factory-f19bffa5f61f). Every ticket assigned to
   Ibraheem, classified `existing` vs `new`. Reflect starts/landings/new findings promptly.
